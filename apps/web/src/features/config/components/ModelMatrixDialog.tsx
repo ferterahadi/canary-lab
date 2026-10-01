@@ -1,3 +1,4 @@
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { AgentModelsConfig, AgentProbeSnapshot, AgentStagePlans, ModelAgentKind, ModelStageKey, StageModelChoice } from '@/shared/api/client'
@@ -242,6 +243,7 @@ export function StageChoiceGrid({ agent, stages, plans, modelOptions, onChange }
 }
 
 export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Props) {
+  const mounted = useMountedIdentity(agent)
   const [plans, setPlans] = useState<AgentStagePlans>(() => ({ ...agentModels[agent] }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -272,12 +274,13 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
     setError(null)
     try {
       const next = await api.putProjectConfig({ agentModels: { ...agentModels, [agent]: plans } })
+      if (!mounted()) return
       onSaved(next)
       onClose()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed')
+      if (mounted()) setError(e instanceof Error ? e.message : 'Save failed')
     } finally {
-      setSaving(false)
+      if (mounted()) setSaving(false)
     }
   }
 

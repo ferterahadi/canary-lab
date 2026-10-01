@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type {
   GettingStartedSessionState,
@@ -9,7 +9,8 @@ import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
-import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useProjectConfig } from '@/shared/state/use-project-config'
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
@@ -275,19 +276,12 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
   const { value: samples } = useLiveResource('onboarding', 'workspace',
     () => api.getOnboardingSamples(), { reconcileMs: 5000 })
   const [seen, setSeen] = useState<boolean>(() => readDemoSeen())
-  const [showDemo, setShowDemoState] = useState<boolean | null>(null)
-  // Bumped by the `project-config-changed` WorkspaceEvent, so a `showDemo` flip
-  // made anywhere — this tab's chooser, another browser, an edit to the file —
-  // reaches the pill without a reload.
-  const configKey = useInvalidationKey('project-config')
-
-  useEffect(() => {
-    let alive = true
-    api.getProjectConfig()
-      .then((c) => { if (alive) setShowDemoState(c.showDemo !== false) })
-      .catch(() => { /* no config, no pill */ })
-    return () => { alive = false }
-  }, [configKey])
+  const config = useProjectConfig()
+  const acceptConfig = config.accept
+  const mounted = useMountedIdentity('demo-visibility')
+  const [optimistic, setOptimistic] = useState<boolean | null>(null)
+  const writes = useRef<{ running: boolean; pending: { value: boolean } | null }>({ running: false, pending: null })
+  const showDemo = optimistic ?? (config.value ? config.value.showDemo !== false : null)
 
   const availability = useMemo(
     () => deriveDemoAvailability({ samples, runs, flights, seen, showDemo }),
@@ -308,10 +302,32 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
   }, [])
 
   const setShowDemo = useCallback((next: boolean) => {
-    const previous = showDemo
-    setShowDemoState(next)
-    void api.putProjectConfig({ showDemo: next }).catch(() => setShowDemoState(previous))
-  }, [showDemo])
+    if (!mounted()) return
+    writes.current.pending = { value: next }
+    setOptimistic(next)
+    if (writes.current.running) return
+    const drain = async () => {
+      writes.current.running = true
+      try {
+        while (mounted() && writes.current.pending) {
+          const submitted = writes.current.pending
+          try {
+            const saved = await api.putProjectConfig({ showDemo: submitted.value })
+            if (!acceptConfig(saved)) return
+          } catch {
+            // A failed toggle exposes the newest confirmed settings, not an
+            // old value captured before intervening reads or clicks.
+          }
+          if (!mounted()) return
+          if (writes.current.pending === submitted) {
+            writes.current.pending = null
+            setOptimistic(null)
+          }
+        }
+      } finally { writes.current.running = false }
+    }
+    void drain().catch(() => { /* Mutation failures are handled inside the queue. */ })
+  }, [mounted, acceptConfig])
 
   return {
     ...availability,

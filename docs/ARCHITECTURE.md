@@ -267,9 +267,11 @@ through `apps/web/src/shared/state/record-stream.ts`, which owns connection labe
 backoff, frame observation, and teardown. Their reducers and HTTP actions remain
 feature-owned. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
-Portify detail demand belongs to the provider's `portify-hydration` controller.
-Ports and Flight use `usePortifyDetail`, sharing manifests, read tokens and a
-2.5-second failed/hung-read recovery timer per demanded workflow. Stream updates
+Portify and Benchmark detail demand belongs to the provider-owned
+`apps/web/src/shared/state/detail-hydration.ts` controller, through thin domain
+adapters. Ports and Flight use `usePortifyDetail`; Benchmark uses
+`useBenchmarkDetail`. Mounted consumers share manifests, read tokens and a
+2.5-second failed/hung-read recovery timer per demanded record. Stream updates
 settle demand; removals stop recovery; reconnect snapshots rehydrate demanded
 terminal records whose details were omitted. An authoritative 404 stops retries
 until explicit retry or a new stream observation; releasing the last consumer
@@ -406,6 +408,19 @@ mechanisms, with a local cache per mounted editor. Field changes queue as
 transforms against the latest accepted document; writes serialize per document.
 A failed write retains its draft and pauses further writes until Retry. Server
 responses supersede older reads. Advanced setup retains explicit Save/Discard.
+The internal `useEditableDraft` helper owns draft/baseline comparison for both
+configuration editors and project Settings. Settings opts into field-level
+rebasing: untouched fields follow remote changes, edited fields retain their
+values and report conflicts, and Save sends only changed fields. Edits entered
+during a save remain unsaved; the dialog closes only when no newer edits remain.
+Settings, Getting Started, and the Flight launcher use `useProjectConfig` on
+`project-config`, with five-second mounted reconciliation and no global cache.
+Save and model-matrix responses supersede pending reads. Getting Started
+serializes optimistic visibility writes and reveals the latest accepted value
+on failure. Flight refreshes saved models and follows the default agent until
+an explicit selection. GitHub status uses the shared reader without a topic or
+polling: mount and manual Refresh are its only probes. Failed probes retain
+accepted status and show Retry rather than diagnosing a missing CLI.
 Verification settings use separate five-second list and envset-target readers,
 without module-global configuration caching. Initial values seed the form once;
 refreshes preserve edits, and a removed saved selection becomes an unsaved draft.

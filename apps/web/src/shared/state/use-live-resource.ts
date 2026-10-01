@@ -73,6 +73,8 @@ export function useLiveResource<T>(
   key: string | null,
   fetcher: (key: string, opts?: { readRevision: string }) => Promise<T | null>,
   opts: {
+    /** Keep accepted data across manual refreshes and failures without polling. */
+    retainOnError?: boolean
     scope?: string
     /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
      *  fetched (e.g. `'ledger'`). Explicit because the topic alone cannot key
@@ -104,7 +106,7 @@ export function useLiveResource<T>(
   const resourceSeed = opts.seed
   const initialValue = (): T | null => {
     if (key === null) return null
-    if ((opts.reconcileMs || resourceSeed) && retained.current?.key === key) return retained.current.value
+    if ((opts.reconcileMs || opts.retainOnError || resourceSeed) && retained.current?.key === key) return retained.current.value
     if (cacheKey !== null && lastResolved.has(cacheKey)) return lastResolved.get(cacheKey) as T | null
     return resourceSeed?.key === key && !acceptedKeys.current.has(key) ? resourceSeed.value : null
   }
@@ -121,7 +123,7 @@ export function useLiveResource<T>(
   const pollWhileRef = useRef(opts.pollWhile)
   pollWhileRef.current = opts.pollWhile
   const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
-  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden, pollIntervalMs } = opts
+  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden, pollIntervalMs, retainOnError } = opts
   const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
   const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
   const [valueKey, setValueKey] = useState(key)
@@ -190,7 +192,7 @@ export function useLiveResource<T>(
         .catch((error: unknown) => {
           // A failed task read is not evidence that the task disappeared.
           if (!alive || request !== requested) return
-          if (!polling) setValue(null)
+          if (!polling && !retainOnError) setValue(null)
           setConfirmed(false)
           setError(error instanceof Error ? error.message : String(error))
         })
@@ -222,7 +224,7 @@ export function useLiveResource<T>(
     }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs, lifetime])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs, retainOnError, lifetime])
 
   // Withdraw trust during the render receiving an invalidation/key change,
   // not one paint later when its replacement request starts.

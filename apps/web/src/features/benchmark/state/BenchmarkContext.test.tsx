@@ -4,8 +4,10 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
+import { BenchmarkDetail } from '../components/BenchmarkDetail'
 import type { BenchmarkIndexEntry, BenchmarkManifest } from '../api/benchmark-types'
-import { BenchmarkProvider, useBenchmark, useBenchmarks } from './BenchmarkContext'
+import { BenchmarkProvider, useBenchmark, useBenchmarkDetail, useBenchmarks } from './BenchmarkContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -369,4 +371,92 @@ describe('BenchmarkProvider — read hooks', () => {
     expect(() => act(() => { root.render(<Outside />) }))
       .toThrow(/useBenchmarks must be used inside <BenchmarkProvider>/)
   })
+})
+
+let hydrated: ReturnType<typeof useBenchmarkDetail>
+function Demand({ id = 'bm-1' }: { id?: string }) { hydrated = useBenchmarkDetail(id); return null }
+const demand = (id = 'bm-1', count = 1) => act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+  {Array.from({ length: count }, (_, key) => <Demand key={key} id={id} />)}
+</BenchmarkProvider>) })
+function delayed() { let resolve!: (value: BenchmarkManifest) => void; const promise = new Promise<BenchmarkManifest>((yes) => { resolve = yes }); return { promise, resolve } }
+
+it('recovers a failed detail read shared by two consumers and rehydrates terminal reconnect snapshots', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.getBenchmark).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(manifest({ status: 'done' }))
+  await demand('bm-1', 2)
+  expect(hydrated.error).toBe('offline')
+  expect(api.getBenchmark).toHaveBeenCalledTimes(1)
+  await demand('bm-1', 1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+  expect(hydrated.manifest?.status).toBe('done')
+  expect(api.getBenchmark).toHaveBeenCalledTimes(2)
+  await act(async () => { socket().onclose?.(); await vi.advanceTimersByTimeAsync(500) })
+  await act(async () => { socket().fire({ type: 'snapshot', benchmarks: [entry({ status: 'done' })], details: {} }) })
+  expect(hydrated.manifest?.status).toBe('done')
+  expect(api.getBenchmark).toHaveBeenCalledTimes(3)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(api.getBenchmark).toHaveBeenCalledTimes(3)
+})
+
+it('supersedes hung detail reads and cancels demand on identity replacement and teardown', async () => {
+  vi.useFakeTimers()
+  const old = delayed()
+  const current = delayed()
+  const replacement = delayed()
+  vi.mocked(api.getBenchmark).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise).mockReturnValueOnce(replacement.promise)
+  await demand()
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+  await act(async () => { current.resolve(manifest({ status: 'done' })); old.resolve(manifest()) })
+  expect(hydrated.manifest?.status).toBe('done')
+  await demand('bm-next')
+  expect(hydrated.manifest).toBeUndefined()
+  await act(async () => { root.render(null) })
+  await act(async () => { replacement.resolve(manifest({ benchmarkId: 'bm-next' })); await vi.advanceTimersByTimeAsync(10000) })
+  expect(hydrated.manifest).toBeUndefined()
+  expect(api.getBenchmark).toHaveBeenCalledTimes(3)
+})
+
+it.each(['update', 'removed', 'snapshot'] as const)('rejects HTTP after a newer %s observation', async (type) => {
+  vi.useFakeTimers()
+  const old = delayed(); vi.mocked(api.getBenchmark).mockReturnValue(old.promise)
+  await demand()
+  await act(async () => {
+    if (type === 'update') socket().fire({ type, benchmarkId: 'bm-1', manifest: manifest({ status: 'done' }) })
+    else if (type === 'removed') socket().fire({ type, benchmarkId: 'bm-1' })
+    else socket().fire({ type, benchmarks: [], details: {} })
+    old.resolve(manifest()); await vi.advanceTimersByTimeAsync(10000)
+  })
+  expect(hydrated.manifest?.status).toBe(type === 'update' ? 'done' : undefined)
+  expect(hydrated.missing).toBe(type !== 'update')
+  expect(api.getBenchmark).toHaveBeenCalledTimes(1)
+})
+
+it('stops at 404, supports Retry, and accepts stream reappearance', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.getBenchmark).mockRejectedValue(new ApiError(404, {}))
+  await demand()
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(hydrated.missing).toBe(true)
+  expect(api.getBenchmark).toHaveBeenCalledTimes(1)
+  vi.mocked(api.getBenchmark).mockResolvedValue(manifest({ status: 'done' }))
+  await act(async () => { hydrated.retry() })
+  expect(hydrated.manifest?.status).toBe('done')
+  await act(async () => { socket().fire({ type: 'removed', benchmarkId: 'bm-1' }) })
+  expect(hydrated.missing).toBe(true)
+  await act(async () => { socket().fire({ type: 'update', benchmarkId: 'bm-1', manifest: manifest() }) })
+  expect(hydrated.missing).toBe(false)
+  expect(hydrated.manifest?.status).toBe('running')
+})
+
+it('the actual detail view replaces indefinite loading with failure, missing, and Retry', async () => {
+  vi.mocked(api.getBenchmark).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new ApiError(404, {}))
+  await act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+    <BenchmarkDetail id="bm-1" onClose={vi.fn()} onNew={vi.fn()} />
+  </BenchmarkProvider>) })
+  expect(container.textContent).toContain('offline')
+  await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
+  expect(container.textContent).toContain('no longer available')
+  vi.mocked(api.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Synthetic outcome', startedAt: '2026-01-01', arms: [], results: [] }))
+  await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
+  expect(container.textContent).toContain('Synthetic outcome')
 })

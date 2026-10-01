@@ -64,7 +64,7 @@ beforeEach(() => {
   keys['project-config'] = 0
   api.getOnboardingSamples.mockReset().mockResolvedValue(samples())
   api.getProjectConfig.mockReset().mockResolvedValue({ showDemo: true } as ProjectConfig)
-  api.putProjectConfig.mockReset().mockResolvedValue(undefined)
+  api.putProjectConfig.mockReset().mockImplementation(async (patch) => ({ showDemo: true, ...patch }))
 })
 
 afterEach(() => {
@@ -204,4 +204,33 @@ describe('useDemoLauncher', () => {
     // A box left ticked would lie about what is on disk.
     expect(launcher.showDemo).toBe(true)
   })
+})
+
+it('serializes visibility writes and preserves the newest optimistic choice', async () => {
+  let finish!: (value: ProjectConfig) => void
+  api.putProjectConfig.mockReturnValueOnce(new Promise((yes) => { finish = yes }))
+  await mount()
+  await act(async () => { launcher.setShowDemo(false); launcher.setShowDemo(true) })
+  expect(api.putProjectConfig).toHaveBeenCalledTimes(1)
+  expect(launcher.showDemo).toBe(true)
+  await act(async () => { finish({ showDemo: false } as ProjectConfig) })
+  expect(api.putProjectConfig.mock.calls).toEqual([[{ showDemo: false }], [{ showDemo: true }]])
+  expect(launcher.showDemo).toBe(true)
+})
+
+it('failed visibility writes reveal the latest accepted configuration and teardown cancels queued writes', async () => {
+  vi.useFakeTimers()
+  let fail!: (error: Error) => void
+  api.putProjectConfig.mockReturnValueOnce(new Promise((_, no) => { fail = no }))
+  await mount()
+  await act(async () => { launcher.setShowDemo(false) })
+  api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfig)
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); fail(new Error('offline')) })
+  expect(launcher.showDemo).toBe(false)
+  let finish!: (value: ProjectConfig) => void
+  api.putProjectConfig.mockReturnValueOnce(new Promise((yes) => { finish = yes }))
+  await act(async () => { launcher.setShowDemo(true); launcher.setShowDemo(false) })
+  await act(async () => { root.render(null) })
+  await act(async () => { finish({ showDemo: true } as ProjectConfig); await vi.advanceTimersByTimeAsync(10000) })
+  expect(api.putProjectConfig).toHaveBeenCalledTimes(2)
 })

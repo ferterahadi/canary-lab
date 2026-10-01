@@ -16,6 +16,7 @@ export type BenchmarkStreamFrame =
     }
   | { type: 'update'; benchmarkId: string; manifest: BenchmarkManifest }
   | { type: 'removed'; benchmarkId: string }
+  | { type: 'detail-missing'; benchmarkId: string }
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 
@@ -39,6 +40,7 @@ export type BenchmarkAction =
     }
   | { type: 'update'; benchmarkId: string; manifest: BenchmarkManifest }
   | { type: 'removed'; benchmarkId: string }
+  | { type: 'detail-missing'; benchmarkId: string }
   | { type: 'connection'; status: ConnectionState }
 
 function byStartedDesc(a: BenchmarkIndexEntry, b: BenchmarkIndexEntry): number {
@@ -60,6 +62,11 @@ export function benchmarkReducer(
         benchmarks: [entry, ...others].sort(byStartedDesc),
         details: { ...state.details, [action.benchmarkId]: action.manifest },
       }
+    }
+    case 'detail-missing': {
+      const details = { ...state.details }
+      delete details[action.benchmarkId]
+      return { ...state, details }
     }
     case 'removed': {
       const { [action.benchmarkId]: _dropped, ...details } = state.details

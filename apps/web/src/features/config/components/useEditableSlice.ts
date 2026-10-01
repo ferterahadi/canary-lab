@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CHANGED_ELSEWHERE, useEditableDraft } from '@/shared/state/use-editable-draft'
 import { useCachedDoc } from './config-doc-cache'
 
 /** Generic editor state hook: load → draft → diff → save.
@@ -61,32 +62,11 @@ export function useEditableSlice<Doc, Slice>({
   }, [lifetime])
   const current = () => lifetime.active && rendered.current === lifetime
 
-  // Baseline + draft are derived from whichever document the cache is holding.
-  // Deriving during render rather than in an effect is what makes a cached
-  // document paint filled-in on its first frame instead of flashing "Loading…"
-  // for one commit — `edit.from` is the document identity the pair was cut from.
   const doc = cached.doc
-  const [edit, setEdit] = useState<{ key: string; from: Doc | null; baseline: Slice | null; draft: Slice | null }>(
-    { key: cacheKey, from: null, baseline: null, draft: null },
-  )
-  const dirty = JSON.stringify(edit.draft) !== JSON.stringify(edit.baseline)
-  if (edit.key !== cacheKey || edit.from !== doc) {
-    const slice = doc == null ? null : extract(doc)
-    const retain = edit.key === cacheKey && dirty
-    setEdit({ key: cacheKey, from: doc, baseline: retain ? edit.baseline : slice, draft: retain ? edit.draft : slice })
-  }
-  const baseline = immediate && doc !== null ? extract(doc) : edit.baseline
-  const draft = immediate && baseline !== null ? lifetime.pending.reduce<Slice>((value, update) => update(value), baseline) : edit.draft
-  const changedElsewhere = dirty && doc !== null && JSON.stringify(extract(doc)) !== JSON.stringify(baseline)
-
-  const setDraft: (next: Slice | ((prev: Slice) => Slice)) => void = (next) => {
-    setEdit((prev) => ({
-      ...prev,
-      draft: typeof next === 'function'
-        ? (next as (p: Slice) => Slice)(prev.draft as Slice)
-        : next,
-    }))
-  }
+  const editable = useEditableDraft({ key: cacheKey, doc, extract })
+  const { dirty, changedElsewhere, setDraft } = editable
+  const baseline = immediate && doc !== null ? extract(doc) : editable.baseline
+  const draft = immediate && baseline !== null ? lifetime.pending.reduce<Slice>((value, update) => update(value), baseline) : editable.draft
 
   // Both editing modes publish only server-confirmed documents. Pending edits
   // stay outside the cache so reconciliation cannot certify an unsaved value.
@@ -130,15 +110,12 @@ export function useEditableSlice<Doc, Slice>({
     if (immediate) return pump(true)
     if (!current() || !doc || draft == null) return
     await persist(merge(doc, draft), (saved) => {
-      const slice = extract(saved)
-      setEdit((previous) => ({ key: cacheKey, from: saved, baseline: slice,
-        draft: JSON.stringify(previous.draft) === JSON.stringify(draft) ? slice : previous.draft }))
+      editable.acceptSaved(saved, draft)
     })
   }
 
   const discard = (): void => {
-    const latest = doc == null ? null : extract(doc)
-    setEdit({ key: cacheKey, from: doc, baseline: latest, draft: latest })
+    editable.discard()
     lifetime.pending = []
     lifetime.failed = false
     setSaveError(null)
@@ -150,7 +127,7 @@ export function useEditableSlice<Doc, Slice>({
     setDraft,
     loading: cached.loading,
     saving,
-    error: saveError ?? cached.error ?? (!immediate && changedElsewhere ? 'Changed elsewhere. Your draft is preserved; Save applies your edits, Discard loads the latest values.' : null),
+    error: saveError ?? cached.error ?? (!immediate && changedElsewhere ? CHANGED_ELSEWHERE : null),
     savedAt,
     dirty: immediate ? lifetime.pending.length > 0 : dirty,
     baseline,

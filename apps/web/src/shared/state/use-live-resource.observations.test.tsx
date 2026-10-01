@@ -60,3 +60,19 @@ it('rejects old callbacks after A to B to A replacement, null identity, and tear
   expect(current(['wrong'])).toBe(false)
   await act(async () => replies.forEach((reply) => reply(['late'])))
 })
+
+it('opt-in manual retention keeps accepted values through refresh/failure without periodic reads or identity leaks', async () => {
+  const reader = vi.fn<(id: string) => Promise<string[]>>().mockResolvedValue(['accepted'])
+  function Manual({ id }: { id: string }) { live = useLiveResource(null, id, reader, { retainOnError: true }); return null }
+  await act(async () => root.render(<Manual id="one" />))
+  reader.mockRejectedValueOnce(new Error('offline'))
+  await act(async () => live.refresh())
+  expect(live.value).toEqual(['accepted'])
+  expect(live.error).toBe('offline')
+  await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+  expect(reader).toHaveBeenCalledTimes(2)
+  reader.mockReturnValue(new Promise(() => {}))
+  await act(async () => root.render(<Manual id="two" />))
+  expect(live.value).toBeNull()
+  expect(live.error).toBeNull()
+})

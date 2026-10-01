@@ -4,6 +4,7 @@
 // hook hands each binding back under its original name.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
+import { useProjectConfig } from '@/shared/state/use-project-config'
 import type {
   AgentStagePlans,
   FlightEntryOptions,
@@ -66,20 +67,18 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   // R79: which CLI conducts the flight's stage agents. Preselected from the
   // workspace's default-agent setting; claude is the wire default, so only a
   // codex pick rides the body. Sticky server-side once the flight exists.
-  const [agent, setAgent] = useState<'claude' | 'codex'>('claude')
+  const [agent, updateAgent] = useState<'claude' | 'codex'>('claude')
+  const agentPicked = useRef(false)
+  const setAgent = (value: 'claude' | 'codex') => { agentPicked.current = true; updateAgent(value) }
   const agentBody = agent === 'codex' ? { agent: 'codex' as const } : {}
   // The whole config is kept (not just the default-agent bit): the models gate
   // below needs askModelsOnLaunch + agentModels. Unreachable → null, and the
   // gate never arms (launching beats blocking on a settings probe).
-  const [projectConfig, setProjectConfig] = useState<api.ProjectConfig | null>(null)
+  const { value: projectConfig } = useProjectConfig()
+  const configuredAgent = projectConfig ? (projectConfig.healAgent === 'codex' ? 'codex' : 'claude') : null
   useEffect(() => {
-    api.getProjectConfig()
-      .then((c) => {
-        setProjectConfig(c)
-        if (c.healAgent === 'codex') setAgent('codex')
-      })
-      .catch(() => {})
-  }, [])
+    if (configuredAgent && !agentPicked.current) updateAgent(configuredAgent)
+  }, [configuredAgent])
 
   // The models gate (2.2.0): when the workspace armed askModelsOnLaunch, the
   // three explicit launch actions park on "use defaults or customize?" first.
@@ -261,6 +260,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       && (!inputsRequired || (description.trim() !== '' && repoPaths.length > 0))
 
   const openFlightFail = (err: unknown): void => {
+    if (!mounted.current) return
     const body = err instanceof api.ApiError
       ? (err.body as { error?: string; type?: string; flightId?: string } | null)
       : null
@@ -304,7 +304,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...agentBody,
       ...(models ? { models } : {}),
     })
-      .then((manifest) => onOpenFlight(manifest.flightId))
+      .then((manifest) => { if (mounted.current) onOpenFlight(manifest.flightId) })
       .catch(openFlightFail)
   }
   const startSingleFlight = (): void => {
@@ -359,10 +359,12 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     setStartError(null)
     api.abortFlight(entry.flight.flightId)
       .then(() => {
+        if (!mounted.current) return
         setBusy(false)
         setEntryNonce((n) => n + 1)
       })
       .catch((err: unknown) => {
+        if (!mounted.current) return
         setStartError(err instanceof Error ? err.message : String(err))
         setBusy(false)
       })
@@ -391,7 +393,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...(models ? { models } : {}),
     }
     api.startFlight(body)
-      .then((manifest) => onOpenFlight(manifest.flightId))
+      .then((manifest) => { if (mounted.current) onOpenFlight(manifest.flightId) })
       .catch(openFlightFail)
   }
   const start = (): void => {
@@ -412,5 +414,5 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     else if (kind === 'proposal') beginLaunchProposal(models)
   }
 
-  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError: startError ?? planReadError, taskUnavailable: planTaskId !== null && planTask === null, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, cancelPlanning, launchProposal, stopAndStartFresh, start }
+  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError: startError ?? planReadError, taskUnavailable: planTaskId !== null && planTask === null, showSteps, setShowSteps, autopilot, setAutopilot, agent, setAgent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, cancelPlanning, launchProposal, stopAndStartFresh, start }
 }

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { GhStatus } from '@/shared/api/client'
+import { useLiveResource } from '@/shared/state/use-live-resource'
 import { RefreshIcon } from '@/shared/ui/atoms'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 
@@ -19,13 +18,7 @@ export function GitHubSection({ divider }: {
   /** Hairline above the row, when it follows another row in the same section. */
   divider?: boolean
 }) {
-  const [status, setStatus] = useState<GhStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const load = (): void => {
-    setLoading(true)
-    api.getGhStatus().then(setStatus).catch(() => setStatus({ installed: false, authenticated: false })).finally(() => setLoading(false))
-  }
-  useEffect(load, [])
+  const { value: status, loading, error, refresh: load } = useLiveResource(null, 'github-status', () => api.getGhStatus(), { retainOnError: true })
 
   const remediation = !status
     ? null
@@ -54,8 +47,9 @@ export function GitHubSection({ divider }: {
           {/* The option-row label voice this modal's other rows use, not 14px —
               that's the dialog TITLE's size. */}
           <span className="min-w-0 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>
-            {loading
+            {loading && !status
               ? 'Checking…'
+              : !status ? 'GitHub status unavailable'
               : status?.authenticated
                 ? `Connected${status.account ? ` as ${status.account}` : ''}${status.host && status.host !== 'github.com' ? ` (${status.host})` : ''}`
                 : status?.installed ? 'Not signed in' : 'GitHub CLI not installed'}
@@ -75,6 +69,7 @@ export function GitHubSection({ divider }: {
             <RefreshIcon />
           </button>
         </span>
+        {error && <span role="alert" className="mt-1 block text-xs text-danger">{error}<button type="button" className="cl-button ml-2 px-2 py-1" onClick={load}>Retry</button></span>}
         {remediation && (
           <span className="mt-1 block text-xs" style={{ color: 'var(--text-muted)' }}>
             {remediation.line}

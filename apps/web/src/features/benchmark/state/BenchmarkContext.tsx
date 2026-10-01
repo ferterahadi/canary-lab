@@ -6,8 +6,10 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { createBenchmarkHydration } from './benchmark-hydration'
 import * as api from '@/shared/api/client'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
@@ -26,6 +28,7 @@ import {
 // Per-arm run detail flows through RunsContext (arms are real runs).
 
 interface BenchmarkContextValue {
+  hydration: ReturnType<typeof createBenchmarkHydration>
   state: BenchmarkState
   startBenchmark: (input: {
     feature: string
@@ -57,18 +60,26 @@ export function BenchmarkProvider({
   dispatchRef.current = dispatch
   const readsRef = useRef(createObservedReads())
 
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const hydration = useMemo(() => createBenchmarkHydration({
+    reads: readsRef.current, read: api.getBenchmark,
+    apply: (action) => dispatchRef.current(action),
+    hasDetail: (id) => Boolean(stateRef.current.details[id]),
+  }), [])
   useEffect(() => {
+    hydration.start()
     const connection = connectRecordStream({
       url: wsUrl ?? defaultWsUrl(),
       WebSocketImpl,
       reads: readsRef.current,
       decode: (frame) => frameToAction(frame as BenchmarkStreamFrame),
       recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.benchmarkId : null,
-      dispatch: (action) => dispatchRef.current(action),
+      dispatch: (action) => { dispatchRef.current(action); hydration.observe(action) },
       onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
     })
-    return () => connection.close()
-  }, [wsUrl, WebSocketImpl])
+    return () => { connection.close(); hydration.stop() }
+  }, [wsUrl, WebSocketImpl, hydration])
 
   const startBenchmark = useCallback(
     async (input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' }) => {
@@ -82,23 +93,11 @@ export function BenchmarkProvider({
     await api.abortBenchmark(id)
   }, [])
 
-  const loadBenchmark = useCallback(async (id: string) => {
-    const reads = readsRef.current
-    const token = reads.begin(id)
-    if (!token) return
-    try {
-      const manifest = await api.getBenchmark(id)
-      if (manifest && reads.current(id, token)) dispatchRef.current({ type: 'update', benchmarkId: id, manifest })
-    } catch {
-      /* leave it unhydrated — the caller shows a loading/empty state */
-    } finally {
-      reads.finish(id, token)
-    }
-  }, [])
+  const loadBenchmark = hydration.load
 
   const value = useMemo<BenchmarkContextValue>(
-    () => ({ state, startBenchmark, abortBenchmark, loadBenchmark }),
-    [state, startBenchmark, abortBenchmark, loadBenchmark],
+    () => ({ state, hydration, startBenchmark, abortBenchmark, loadBenchmark }),
+    [state, hydration, startBenchmark, abortBenchmark, loadBenchmark],
   )
   return <BenchmarkContext.Provider value={value}>{children}</BenchmarkContext.Provider>
 }
@@ -123,6 +122,21 @@ export function useBenchmarks() {
 export function useBenchmark(id: string | null | undefined): BenchmarkManifest | undefined {
   const ctx = useBenchmarkContext()
   return id ? ctx.state.details[id] : undefined
+}
+
+/** Mounted consumers share detail demand and recovery with the provider. */
+export function useBenchmarkDetail(id: string | null | undefined) {
+  const { state, hydration } = useBenchmarkContext()
+  const status = useSyncExternalStore(hydration.subscribe, () => hydration.snapshot(id))
+  useEffect(() => id ? hydration.watch(id) : undefined, [id, hydration])
+  const manifest = id ? state.details[id] : undefined
+  return {
+    manifest,
+    loading: Boolean(id && !manifest && (status.status === 'idle' || status.status === 'loading')),
+    error: status.error,
+    missing: status.status === 'missing',
+    retry: () => { if (id) hydration.retry(id) },
+  }
 }
 
 function defaultWsUrl(): string {

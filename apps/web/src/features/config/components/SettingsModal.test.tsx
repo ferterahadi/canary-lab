@@ -221,7 +221,6 @@ describe('SettingsModal', () => {
 
     expect(api.putProjectConfig).toHaveBeenCalledWith({
       healAgent: 'claude',
-      editor: 'auto',
       personalWikiPath: '/tmp/wiki',
     })
     expect(onClose).toHaveBeenCalled()
