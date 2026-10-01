@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import * as api from '@/shared/api/client'
-import type { GettingStartedTarget, OnboardingWorkflowAction, OnboardingWorkflowId } from '@/shared/api/client'
-import type { RunIndexEntry } from '@/shared/api/types'
+import * as runsApi from '@/shared/api/runs'
+import * as flightsApi from '@/shared/api/flights'
+import * as coverageApi from '@/shared/api/coverage'
+import * as internalApi from '@/shared/api/internal'
+import type {
+  GettingStartedTarget,
+  OnboardingWorkflowAction,
+  OnboardingWorkflowId,
+} from '@/shared/api/config'
+import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isAuxiliaryExecution } from '@shared/verification'
 import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './demo-launcher'
@@ -52,7 +59,7 @@ export function useGettingStarted({
 
   const launchDemo = useCallback(async (action: OnboardingWorkflowAction): Promise<void> => {
     if (action.kind === 'run' || action.kind === 'heal') {
-      const { runId } = await api.startRun(action.feature, {
+      const { runId } = await runsApi.startRun(action.feature, {
         gettingStartedSource: 'internal',
         gettingStartedWorkflow: action.kind,
       })
@@ -63,7 +70,7 @@ export function useGettingStarted({
     }
     if (action.kind === 'flight') {
       const feature = action.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'flight-app'
-      const manifest = await api.startFlight({
+      const manifest = await flightsApi.startFlight({
         feature,
         repoPaths: [action.repoPath],
         description: action.description,
@@ -80,11 +87,11 @@ export function useGettingStarted({
       // leaving the Author demo nothing to do). The standalone mapping job reads
       // the shipped PRD summary and only reports.
       try {
-        await api.startCoverageJob(action.feature, 'coverage', { gettingStartedSource: 'internal' })
+        await coverageApi.startCoverageJob(action.feature, 'coverage', { gettingStartedSource: 'internal' })
       } catch (error) {
         // Already mapping (started from another tab/agent) — the ledger page
         // attaches to the running job on mount, so just go look at it.
-        if (!(error instanceof api.ApiError && error.status === 409)) throw error
+        if (!(error instanceof internalApi.ApiError && error.status === 409)) throw error
       }
       setSelectedFeature(action.feature)
       setDemoOpen(false)
@@ -93,10 +100,10 @@ export function useGettingStarted({
     }
     // The remaining action kinds all enter their corresponding Flight stage.
     const stage = DEMO_FLIGHT_STAGE[action.kind]
-    const entry = await api.getFlightEntryOptions(action.feature)
+    const entry = await flightsApi.getFlightEntryOptions(action.feature)
     const launch = demoFlightLaunch(action.kind, action.feature, entry)
     const flightId = launch.kind === 'start'
-      ? (await api.startFlight(launch.body)).flightId
+      ? (await flightsApi.startFlight(launch.body)).flightId
       : launch.flightId
     setSelectedFeature(action.feature)
     setDemoOpen(false)

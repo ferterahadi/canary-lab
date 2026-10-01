@@ -3,16 +3,18 @@ import path from 'path'
 import { plural } from '../../../../../../../shared/lib/plural'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
 import { removeEnvironment } from '../../../config/logic/envset-removal'
-import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import type { RunBootFailure } from '../../../../../../../shared/run-state'
 import { diagnosticExcerpt } from '../../../runs/logic/runtime/diagnostic-redaction'
-import type { FlightStageErrorDetail } from '../types'
-import type { EnvCaptureStageProgress } from '../../../../../../../shared/flights/types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type {
+  EnvCaptureStageProgress,
+  FlightStageErrorDetail,
+} from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { runJob } from './stage-jobs'
 import type { ScoutDraft } from './scout'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Capture the scout's detected env files into the flight's envset, then prove
 // config + env together with a single dry-run boot (mode:'boot' run via the

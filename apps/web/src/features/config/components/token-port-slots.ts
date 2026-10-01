@@ -1,4 +1,4 @@
-import type { ParsedConfigDoc } from '@/shared/api/client'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 
 /** Unique port-slot names declared across every start command in the feature
  *  config (duck-typed walk of the parsed doc — same shape PortsTab edits). */

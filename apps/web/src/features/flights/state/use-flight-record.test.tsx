@@ -1,12 +1,16 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiError, type FlightManifest } from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
+import type { FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useFlightRecord } from './use-flight-record'
 
 const api = vi.hoisted(() => ({ getFlight: vi.fn() }))
-vi.mock('@/shared/api/client', async (original) => ({ ...await original<object>(), ...api }))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  getFlight: api.getFlight,
+}))
 let root: Root
 let host: HTMLDivElement
 let record: ReturnType<typeof useFlightRecord>

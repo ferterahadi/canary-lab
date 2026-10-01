@@ -3,18 +3,20 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getFeatureConfigDoc, getPlaywrightConfig, putFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/client'
+import {
+  getFeatureConfigDoc,
+  getPlaywrightConfig,
+  putFeatureConfigDoc,
+  type ParsedConfigDoc,
+} from '@/shared/api/config'
 import { FeatureSetupPanel } from './FeatureSetupPanel'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getFeatureConfigDoc: vi.fn(),
-    getPlaywrightConfig: vi.fn(),
-    putFeatureConfigDoc: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+  getPlaywrightConfig: vi.fn(),
+  putFeatureConfigDoc: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root

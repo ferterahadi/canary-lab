@@ -1,4 +1,4 @@
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
 import { ApiError } from '@/shared/api/internal'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
@@ -22,13 +22,13 @@ export function useTokenPickerOptions({ feature, wantEnvset, wantPort, slot }: {
   const globalRevision = useInvalidationKey('configuration')
   const opts = { scope: feature, refreshKey: globalRevision, reconcileMs: 5000 }
   const index = useLiveResource('configuration', wantEnvset ? JSON.stringify(['index', feature]) : null,
-    () => missingAs(() => api.getEnvsetsIndex(feature), { envs: [], slotDescriptions: {} }), opts)
+    () => missingAs(() => configApi.getEnvsetsIndex(feature), { envs: [], slotDescriptions: {} }), opts)
   const ports = useLiveResource('configuration', wantPort ? JSON.stringify(['ports', feature]) : null,
-    () => missingAs(async () => extractPortSlots(await api.getFeatureConfigDoc(feature)), []), opts)
+    () => missingAs(async () => extractPortSlots(await configApi.getFeatureConfigDoc(feature)), []), opts)
   const env = index.value?.envs[0]
   const slotExists = Boolean(slot && env?.slots.includes(slot))
   const keys = useLiveResource('configuration', wantEnvset && slotExists ? JSON.stringify([feature, env!.name, slot]) : null,
-    () => missingAs(async () => ({ keys: (await api.getEnvsetSlot(feature, env!.name, slot!)).entries.map((entry) => entry.key), missing: false }), { keys: [], missing: true }), opts)
+    () => missingAs(async () => ({ keys: (await configApi.getEnvsetSlot(feature, env!.name, slot!)).entries.map((entry) => entry.key), missing: false }), { keys: [], missing: true }), opts)
   return {
     slots: env?.slots ?? [],
     keys: keys.value?.keys ?? null,

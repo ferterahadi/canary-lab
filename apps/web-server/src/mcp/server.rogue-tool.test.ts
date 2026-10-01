@@ -3,12 +3,9 @@ import path from 'path'
 import { McpServer } from '@modelcontextprotocol/server'
 import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
-import {
-  DEFAULT_CANARY_LAB_MCP_PROFILE,
-  TOOLS_BY_PROFILE,
-  registerCanaryLabTools,
-  type CanaryLabMcpDeps,
-} from './tools'
+import { registerCanaryLabTools } from './tools'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE, TOOLS_BY_PROFILE } from './tool-profiles'
+import type { CanaryLabMcpDeps } from './tool-schemas'
 
 // What happens when a tool group registers a tool no profile array lists.
 //

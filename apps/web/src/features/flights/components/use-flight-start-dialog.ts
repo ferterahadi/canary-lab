@@ -3,17 +3,19 @@
 // Lifted out of the component verbatim so the dialog file is its markup; the
 // hook hands each binding back under its original name.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as flightsApi from '@/shared/api/flights'
+import * as internalApi from '@/shared/api/internal'
+import * as typesApi from '@shared/flights/types'
 import { useProjectConfig } from '@/shared/state/use-project-config'
+import type { AgentStagePlans } from '@shared/agent-models'
 import type {
-  AgentStagePlans,
   FlightEntryOptions,
   FlightStageEntryOption,
   FlightStageKey,
   FlightStageStatus,
   PlanFeaturesTask,
   PlannedFeature,
-} from '@/shared/api/client'
+} from '@shared/flights/types'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { usePlanFeaturesTask } from './use-plan-features-task'
 
@@ -150,7 +152,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   useEffect(() => {
     if (newFlight) return
     let alive = true
-    api.getFlightEntryOptions(resolvedFeature)
+    flightsApi.getFlightEntryOptions(resolvedFeature)
       .then((options) => {
         if (!alive) return
         setEntry(options)
@@ -207,7 +209,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     // is the fallback for a server without auto-launch, guarded to fire once.
     if (autoLaunched.current === planTask.taskId) return
     autoLaunched.current = planTask.taskId
-    api.launchPlannedFeatures(planTask.taskId, { features })
+    flightsApi.launchPlannedFeatures(planTask.taskId, { features })
       .then(({ flightIds }) => openTaskFlight(planTask.taskId, flightIds[0]))
       .catch((err: unknown) => {
         if (!taskIsCurrent(planTask.taskId)) return
@@ -222,7 +224,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   }, [planTask, openTaskFlight, closeTask, taskIsCurrent])
 
   const applyLaunchFailure = (err: unknown): void => {
-    const body = err instanceof api.ApiError
+    const body = err instanceof internalApi.ApiError
       ? (err.body as { error?: string; type?: string; conflicts?: string[] } | null)
       : null
     if (body?.type === 'feature_name_conflicts') setConflicts(body.conflicts ?? [])
@@ -241,7 +243,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     return map
   }, [entry])
 
-  const derivedFeature = newFlight && repoPaths.length > 0 ? api.deriveFeatureSlug(repoPaths[0]) : null
+  const derivedFeature = newFlight && repoPaths.length > 0 ? typesApi.deriveFeatureSlug(repoPaths[0]) : null
   // R75: repos + intent are frozen against PARTIAL re-entry only — a full
   // restart ("Start fresh — from the beginning", mode redo) discards every
   // stage's evidence, so the inputs unlock exactly there and nowhere else.
@@ -261,7 +263,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
 
   const openFlightFail = (err: unknown): void => {
     if (!mounted.current) return
-    const body = err instanceof api.ApiError
+    const body = err instanceof internalApi.ApiError
       ? (err.body as { error?: string; type?: string; flightId?: string } | null)
       : null
     // The derived feature already has a flight record → flip the dialog into
@@ -282,7 +284,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (busy) return
     setBusy(true)
     setStartError(null)
-    api.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody, ...agentBody })
+    flightsApi.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody, ...agentBody })
       .then((task) => {
         if (!mounted.current) return
         setCreatedTask(task)
@@ -296,7 +298,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   const beginSingleFlight = (models: AgentStagePlans | null): void => {
     setBusy(true)
     setStartError(null)
-    api.startFlight({
+    flightsApi.startFlight({
       feature: derivedFeature ?? 'feature',
       repoPaths,
       description: description.trim(),
@@ -320,7 +322,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (busy || !planTask || planTask.taskId !== taskId) return
     setBusy(true)
     setStartError(null)
-    api.cancelPlanFeatures(taskId)
+    flightsApi.cancelPlanFeatures(taskId)
       .then(() => closeTask(taskId))
       .catch((err: unknown) => {
         if (!taskIsCurrent(taskId)) return
@@ -339,7 +341,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...f,
       ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
     }))
-    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody, ...(models ? { models } : {}) })
+    flightsApi.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody, ...(models ? { models } : {}) })
       .then(({ flightIds }) => openTaskFlight(planTask.taskId, flightIds[0]))
       .catch((error: unknown) => { if (taskIsCurrent(planTask.taskId)) applyLaunchFailure(error) })
   }
@@ -357,7 +359,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (busy || !entry?.flight) return
     setBusy(true)
     setStartError(null)
-    api.abortFlight(entry.flight.flightId)
+    flightsApi.abortFlight(entry.flight.flightId)
       .then(() => {
         if (!mounted.current) return
         setBusy(false)
@@ -374,7 +376,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (!entry || picked === null) return
     setBusy(true)
     setStartError(null)
-    const body: api.StartFlightBody = {
+    const body: flightsApi.StartFlightBody = {
       feature: resolvedFeature!,
       // Frozen args (R57/R75): with a record, repos + intent ride the body
       // ONLY on a full restart (mode redo accepts new values); mid-pipeline
@@ -392,7 +394,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...agentBody,
       ...(models ? { models } : {}),
     }
-    api.startFlight(body)
+    flightsApi.startFlight(body)
       .then((manifest) => { if (mounted.current) onOpenFlight(manifest.flightId) })
       .catch(openFlightFail)
   }

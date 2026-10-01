@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../../shared/run-detail'
 import { toolResultText } from '../__fixtures__/tool-result'
 import type { CanaryLabMcpDeps } from '../tool-schemas'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'

@@ -22,7 +22,7 @@
 // BASELINES: three rules have pre-existing violations, listed explicitly rather
 // than softened, so a NEW violation fails while existing debt stays visible. A
 // baseline entry that no longer violates is ALSO a failure — that is what stops
-// the list outliving its reason (same trick as ALLOWED_DEEP in
+// the list outliving its reason (same trick as the stale PUBLIC check in
 // check-feature-boundaries.mjs).
 
 import { readFileSync, readdirSync, statSync, lstatSync, existsSync } from 'node:fs'
@@ -97,6 +97,12 @@ const BASELINE = {
   'no-console': new Map([
     ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'its `main` IS the `canary-lab env` CLI body — console output is the command\'s output, not server logging'],
     ['apps/web-server/src/shared/feature-loader.ts', 'warns on a broken feature.config at load time'],
+  ]),
+  // A published `package.json` export is the consumer contract, so its entry
+  // file may forward a symbol whose real home is elsewhere. Nothing inside the
+  // repo imports through it.
+  'no-re-export': new Map([
+    ['shared/e2e-runner/log-marker-fixture.ts', 'entry for `canary-lab/feature-support/log-marker-fixture`; installed suites import resolveRunRepoPath and the Playwright expect/Page types from it'],
   ]),
 }
 
@@ -208,6 +214,35 @@ for (const rel of sources) {
   if (!isTest && rel.startsWith('apps/web-server/')) {
     for (const m of code.matchAll(/\.(save|remove)\([^\n]*\)\n(?:[^\n]*\n){0,2}?[^\n]*publishWorkspaceEvent/g)) {
       check('store-emits', `${rel}:${lineOf(m.index)}`, 'publishes a workspace event right after a store write', 'the store is the emitter — bridge it once with bridgeStoreEvents (shared/store-event-bridge.ts) and delete the publish. A store whose event needs a payload the record does not carry is the one case to baseline, with the reason')
+    }
+  }
+
+  // ── every symbol has one home ────────────────────────────────────────────
+  // No barrels and no forwarding modules: a caller imports the file that
+  // declares the symbol. A re-export is a second path to the same thing, and
+  // the two drift — mocks of one miss the other, and the import graph hides the
+  // real dependency. Both spellings count: `export … from '…'`, and importing a
+  // binding only to list it in a bare `export { … }`.
+  // Keyed by file, not file:line, so a published entry file can be baselined;
+  // the line goes in the message. `code` keeps every line, so offsets in it map
+  // to the same line numbers as `text`.
+  if (!isTest) {
+    const codeLine = (index) => code.slice(0, index).split('\n').length
+    for (const m of code.matchAll(/^export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*['"]/gm)) {
+      check('no-re-export', rel, `line ${codeLine(m.index)} re-exports from another module`, 'delete the re-export and point each caller at the file that declares the symbol')
+    }
+    const imported = new Set()
+    for (const m of code.matchAll(/^import\s+(?:type\s+)?([^'"]*?)\s+from\s*['"]/gm)) {
+      for (const n of m[1].replace(/[{}]/g, ',').split(',')) {
+        const local = n.trim().replace(/^type\s+/, '').split(/\s+as\s+/).pop().replace(/^\*\s*/, '').trim()
+        if (local) imported.add(local)
+      }
+    }
+    for (const m of code.matchAll(/^export\s+(?:type\s+)?\{([^}]*)\}\s*(?!\s*from)(?:;|\n|$)/gm)) {
+      const forwarded = m[1].split(',').map((n) => n.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim()).filter((n) => imported.has(n))
+      if (forwarded.length > 0) {
+        check('no-re-export', rel, `line ${codeLine(m.index)} re-exports imported ${forwarded.join(', ')}`, 'delete the re-export and point each caller at the file that declares the symbol')
+      }
     }
   }
 

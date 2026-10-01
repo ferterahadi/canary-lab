@@ -2,7 +2,20 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { resolveRepoIdentity } from '../../../shared/repo-identity'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, flightStagesResetByEntry, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  FLIGHT_STAGE_KEYS,
+  flightStagesResetByEntry,
+  type AgentActivity,
+  type FlightCheckpoint,
+  type FlightCheckpointResponse,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageAgentSession,
+  type FlightStageErrorDetail,
+  type FlightStageKey,
+  type FlightStageTimingKey,
+} from '../../../../../../shared/flights/types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'

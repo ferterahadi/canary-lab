@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
-import type { FlightManifest } from './features/flights/logic/types'
+import type { FlightManifest } from '../../../shared/flights/types'
 
 let root: string
 let suite: string

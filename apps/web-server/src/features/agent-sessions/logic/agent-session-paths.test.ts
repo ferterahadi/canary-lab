@@ -3,6 +3,17 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  locateMostRecentAgentSessionRef,
+  loadAgentSessionLog,
+  loadAgentSession,
+  loadAgentSessionMeta,
+  parseAgentSessionRefFile,
+  selectAgentSessionRef,
+  resolveManifestSessionRef,
+  writeWorkflowAgentRef,
+  resolveWorkflowAgentRef,
+} from './agent-session-log'
+import {
   encodeClaudeProjectDir,
   claudeProjectDirCandidates,
   claudeConfigDir,
@@ -14,24 +25,19 @@ import {
   locateCodexSessionLog,
   locateLatestCodexSessionLog,
   locateLatestSessionLogForAgent,
-  locateMostRecentAgentSessionRef,
-  loadAgentSessionLog,
-  loadAgentSession,
-  loadAgentSessionMeta,
-  parseAgentSessionRefFile,
+} from './agent-session-paths'
+import {
   renderAgentSessionContext,
   buildFullSessionTranscript,
   writeFullSessionTranscript,
-  selectAgentSessionRef,
-  resolveManifestSessionRef,
-  writeWorkflowAgentRef,
-  resolveWorkflowAgentRef,
+} from './agent-session-render'
+import {
   buildAgentSessionResponse,
-  parseAgentSessionLine,
   loadSubagentThread,
   loadSubagentThreads,
   subagentDirFor,
-} from './agent-session-log'
+} from './agent-session-subagents'
+import { parseAgentSessionLine } from './agent-session-parse'
 
 let homeDir: string
 

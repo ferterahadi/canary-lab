@@ -8,20 +8,17 @@ import {
   listVerificationConfigs,
   createVerificationConfig,
   updateVerificationConfig,
-} from '@/shared/api/client'
+} from '@/shared/api/verification'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { VerificationDialog, reseedTargetUrls } from './VerificationDialog'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getVerificationTargets: vi.fn(),
-    listVerificationConfigs: vi.fn(),
-    createVerificationConfig: vi.fn(),
-    updateVerificationConfig: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/verification', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/verification')>()),
+  getVerificationTargets: vi.fn(),
+  listVerificationConfigs: vi.fn(),
+  createVerificationConfig: vi.fn(),
+  updateVerificationConfig: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root

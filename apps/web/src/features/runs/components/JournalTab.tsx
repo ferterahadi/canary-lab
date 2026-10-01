@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useRunJournal } from '../state/use-run-journal'
-import type { JournalEntry } from '@/shared/api/types'
+import type { JournalSection } from '@shared/run-detail'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
@@ -57,7 +57,7 @@ export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: P
  * same mono-caps rubric the service cards use, and the raw markdown is a
  * disclosure that no longer pushes the card sideways when a field runs long.
  */
-function EntryCard({ entry }: { entry: JournalEntry }) {
+function EntryCard({ entry }: { entry: JournalSection }) {
   const [expanded, setExpanded] = useState(false)
   const fields = presentJournalFields(parseBodyFields(entry.body))
   const headline = fields.find((f) => f.key === 'hypothesis')

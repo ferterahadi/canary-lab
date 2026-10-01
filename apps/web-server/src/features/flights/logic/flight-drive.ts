@@ -1,6 +1,16 @@
-import { FLIGHT_EXECUTION_ORDER, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  type FlightCheckpoint,
+  type FlightCheckpointResponse,
+  type FlightManifest,
+  type FlightOptions,
+  type FlightStage,
+  type FlightStageKey,
+  type FlightStageTimingKey,
+} from '../../../../../../shared/flights/types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
+import { FlightConductorDeps, pauseFlight, resumeFlight } from './conductor'
+import { abortFlight, drainQueuedFlights } from './flight-queue'
 import { stampSystemLine } from './flight-errors'
 import { StageContext, StageOutcome, type BackgroundEnvJob, backgroundEnvJobs, bankAllStageTimings, bankStageActivity, bankStageTiming, buildStageContext, driveControllers, firstOpenStageIndex, startStageTiming } from './flight-stages'
 

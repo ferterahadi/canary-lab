@@ -6,9 +6,11 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import * as api from '@/shared/api/client'
+import * as runsClient from '@/shared/api/runs'
+import * as verificationApi from '@/shared/api/verification'
 
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { RunOverviewTab } from '../components/RunOverviewTabs'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import type { RunDependencyProvenance } from '@shared/dependency-provenance'
@@ -31,20 +33,20 @@ import {
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listRuns: vi.fn(),
-    startRun: vi.fn(),
-    getRunDetail: vi.fn(),
-    stopRun: vi.fn(),
-    deleteRun: vi.fn(),
-    pauseHealRun: vi.fn(),
-    cancelHealRun: vi.fn(),
-    executeVerification: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  listRuns: vi.fn(),
+  startRun: vi.fn(),
+  getRunDetail: vi.fn(),
+  stopRun: vi.fn(),
+  deleteRun: vi.fn(),
+  pauseHealRun: vi.fn(),
+  cancelHealRun: vi.fn(),
+}))
+vi.mock('@/shared/api/verification', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/verification')>()),
+  executeVerification: vi.fn(),
+}))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -76,14 +78,14 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.listRuns).mockReset()
-  vi.mocked(api.startRun).mockReset()
-  vi.mocked(api.getRunDetail).mockReset()
-  vi.mocked(api.stopRun).mockReset()
-  vi.mocked(api.deleteRun).mockReset()
-  vi.mocked(api.pauseHealRun).mockReset()
-  vi.mocked(api.cancelHealRun).mockReset()
-  vi.mocked(api.executeVerification).mockReset()
+  vi.mocked(runsClient.listRuns).mockReset()
+  vi.mocked(runsClient.startRun).mockReset()
+  vi.mocked(runsClient.getRunDetail).mockReset()
+  vi.mocked(runsClient.stopRun).mockReset()
+  vi.mocked(runsClient.deleteRun).mockReset()
+  vi.mocked(runsClient.pauseHealRun).mockReset()
+  vi.mocked(runsClient.cancelHealRun).mockReset()
+  vi.mocked(verificationApi.executeVerification).mockReset()
 })
 
 afterEach(() => {
@@ -213,7 +215,7 @@ describe('RunsProvider', () => {
       if (refreshed.verdict === 'incompatible') expect(container.textContent).toContain('validation command failed')
       else expect(container.querySelector('[data-testid="service-dependency-blocker"]')).toBeNull()
     }
-    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
   })
 
   it('shows a confirmed service failure in an open Overview from a run stream update', () => {
@@ -243,7 +245,7 @@ describe('RunsProvider', () => {
       } },
     }) }))
     expect(container.querySelector('[data-testid="service-failure-evidence"]')?.textContent).toContain('Watch compiler reported a failed build.')
-    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
   })
 
   it('opens the run stream, applies frames, and exposes active run state', () => {
@@ -412,8 +414,8 @@ describe('RunsProvider', () => {
   })
 
   it('startRun forwards env + isolation, and omits opts when neither is given', async () => {
-    vi.mocked(api.listRuns).mockResolvedValue([])
-    vi.mocked(api.startRun).mockResolvedValue({ runId: 'r-x' })
+    vi.mocked(runsClient.listRuns).mockResolvedValue([])
+    vi.mocked(runsClient.startRun).mockResolvedValue({ runId: 'r-x' })
     let runsApi: UseRunsResult | null = null
     function P(): null { runsApi = useRuns(); return null }
     act(() => {
@@ -424,22 +426,22 @@ describe('RunsProvider', () => {
       )
     })
     await act(async () => { await runsApi!.startRun('feat', 'local', 'worktree') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { env: 'local', isolation: 'worktree' })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { env: 'local', isolation: 'worktree' })
     await act(async () => { await runsApi!.startRun('feat', 'local') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { env: 'local' })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { env: 'local' })
     await act(async () => { await runsApi!.startRun('feat', undefined, 'queue') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { isolation: 'queue' })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { isolation: 'queue' })
     await act(async () => { await runsApi!.startRun('feat') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', undefined)
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', undefined)
     // A models-gate answer rides the body on its own — no env/isolation needed.
     const models = { heal: { model: 'opus', effort: 'high' } }
     await act(async () => { await runsApi!.startRun('feat', undefined, undefined, undefined, models) })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { models })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { models })
   })
 
   it('startRun forwards boot mode (and combines with env)', async () => {
-    vi.mocked(api.listRuns).mockResolvedValue([])
-    vi.mocked(api.startRun).mockResolvedValue({ runId: 'r-boot' })
+    vi.mocked(runsClient.listRuns).mockResolvedValue([])
+    vi.mocked(runsClient.startRun).mockResolvedValue({ runId: 'r-boot' })
     let runsApi: UseRunsResult | null = null
     function P(): null { runsApi = useRuns(); return null }
     act(() => {
@@ -450,10 +452,10 @@ describe('RunsProvider', () => {
       )
     })
     await act(async () => { await runsApi!.startRun('feat', 'local', undefined, 'boot') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { env: 'local', mode: 'boot' })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { env: 'local', mode: 'boot' })
     // boot with no env still sends mode so the server boots in boot mode
     await act(async () => { await runsApi!.startRun('feat', undefined, undefined, 'boot') })
-    expect(api.startRun).toHaveBeenLastCalledWith('feat', { mode: 'boot' })
+    expect(runsClient.startRun).toHaveBeenLastCalledWith('feat', { mode: 'boot' })
   })
 
   it('uses injected websocket URLs and the global websocket constructor fallback', () => {
@@ -502,8 +504,8 @@ describe('RunsProvider', () => {
 
   it('refreshes and starts runs through HTTP fallbacks', async () => {
     const captured = renderProbe()
-    vi.mocked(api.listRuns).mockResolvedValue([entry({ runId: 'http-r1', status: 'failed' })])
-    vi.mocked(api.startRun).mockResolvedValue({ runId: 'new-run' })
+    vi.mocked(runsClient.listRuns).mockResolvedValue([entry({ runId: 'http-r1', status: 'failed' })])
+    vi.mocked(runsClient.startRun).mockResolvedValue({ runId: 'new-run' })
 
     await act(async () => {
       await captured.runs?.refresh()
@@ -511,15 +513,15 @@ describe('RunsProvider', () => {
     expect(captured.runs?.runs.map((run) => run.runId)).toEqual(['http-r1'])
 
     await expect(captured.runs?.startRun('checkout', 'local')).resolves.toBe('new-run')
-    expect(api.startRun).toHaveBeenCalledWith('checkout', { env: 'local' })
-    expect(api.listRuns).toHaveBeenCalledTimes(2)
+    expect(runsClient.startRun).toHaveBeenCalledWith('checkout', { env: 'local' })
+    expect(runsClient.listRuns).toHaveBeenCalledTimes(2)
   })
 
   it('uses live websocket state to skip HTTP fallbacks for successful mutations', async () => {
     const captured = renderProbe()
-    vi.mocked(api.startRun).mockResolvedValue({ runId: 'live-run' })
-    vi.mocked(api.stopRun).mockResolvedValue(undefined)
-    vi.mocked(api.listRuns).mockResolvedValue([])
+    vi.mocked(runsClient.startRun).mockResolvedValue({ runId: 'live-run' })
+    vi.mocked(runsClient.stopRun).mockResolvedValue(undefined)
+    vi.mocked(runsClient.listRuns).mockResolvedValue([])
 
     act(() => {
       FakeWebSocket.instances[0].onopen?.()
@@ -530,17 +532,17 @@ describe('RunsProvider', () => {
       await captured.runs?.abort('live-run')
     })
 
-    expect(api.startRun).toHaveBeenCalledWith('checkout', undefined)
-    expect(api.stopRun).toHaveBeenCalledWith('live-run')
-    expect(api.listRuns).not.toHaveBeenCalled()
+    expect(runsClient.startRun).toHaveBeenCalledWith('checkout', undefined)
+    expect(runsClient.stopRun).toHaveBeenCalledWith('live-run')
+    expect(runsClient.listRuns).not.toHaveBeenCalled()
   })
 
   it('starts verification runs and refreshes only when websocket state is not live', async () => {
     const captured = renderProbe()
-    vi.mocked(api.executeVerification)
+    vi.mocked(verificationApi.executeVerification)
       .mockResolvedValueOnce({ runId: 'verify-http', executionType: 'verify' })
       .mockResolvedValueOnce({ runId: 'verify-live', executionType: 'verify' })
-    vi.mocked(api.listRuns).mockResolvedValue([])
+    vi.mocked(runsClient.listRuns).mockResolvedValue([])
 
     await act(async () => {
       await expect(captured.runs?.startVerification('checkout', {
@@ -548,11 +550,11 @@ describe('RunsProvider', () => {
         targetUrls: { api: 'https://api.example.com' },
       })).resolves.toBe('verify-http')
     })
-    expect(api.executeVerification).toHaveBeenCalledWith('checkout', {
+    expect(verificationApi.executeVerification).toHaveBeenCalledWith('checkout', {
       playwrightEnvsetId: 'production',
       targetUrls: { api: 'https://api.example.com' },
     })
-    expect(api.listRuns).toHaveBeenCalledTimes(1)
+    expect(runsClient.listRuns).toHaveBeenCalledTimes(1)
 
     act(() => {
       FakeWebSocket.instances[0].onopen?.()
@@ -563,14 +565,14 @@ describe('RunsProvider', () => {
       })).resolves.toBe('verify-live')
     })
 
-    expect(api.executeVerification).toHaveBeenLastCalledWith('checkout', { configId: 'config-1' })
-    expect(api.listRuns).toHaveBeenCalledTimes(1)
+    expect(verificationApi.executeVerification).toHaveBeenLastCalledWith('checkout', { configId: 'config-1' })
+    expect(runsClient.listRuns).toHaveBeenCalledTimes(1)
   })
 
   it('swallows refresh and detail-load failures', async () => {
     const captured = renderProbe('missing-detail')
-    vi.mocked(api.listRuns).mockRejectedValue(new Error('offline'))
-    vi.mocked(api.getRunDetail).mockRejectedValue(new Error('not found'))
+    vi.mocked(runsClient.listRuns).mockRejectedValue(new Error('offline'))
+    vi.mocked(runsClient.getRunDetail).mockRejectedValue(new Error('not found'))
 
     await act(async () => {
       await captured.runs?.refresh()

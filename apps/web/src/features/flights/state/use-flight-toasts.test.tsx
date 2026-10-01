@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { FlightIndexEntry } from '@/shared/api/client'
-import type { ToastItem } from '@/shared/ui/atoms'
+import type { FlightIndexEntry } from '@shared/flights/types'
+import type { ToastItem } from '@/shared/ui/Toasts'
 import { AGGREGATE_TOAST_ID } from './flight-toasts'
 import { useFlightToasts } from './use-flight-toasts'
 

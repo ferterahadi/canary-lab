@@ -6,7 +6,7 @@ import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { runGh as realRunGh, type GhResult } from '../../../../shared/gh-cli'
 import type { RunFixCapture, RunProposedPr } from '../../../../../../../shared/run-state'
 import type { PrPreflight } from './pr-preflight'
-import type { RunSummaryFailedEntry } from '../run-detail'
+import type { RunSummaryFailedEntry } from '../../../../../../../shared/run-detail'
 import { writeFixCommitMessage, type FixCommitMessage, type FixCommitMessageInput } from './commit-message-agent'
 import { prProvenanceFooter, type VerdictProvenance } from './pr-provenance'
 

@@ -1,4 +1,4 @@
-import { listJournal } from '@/shared/api/client'
+import { listJournal } from '@/shared/api/runs'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { classifyOutcome, newestFirst } from '../utils/journal-utils'
 

@@ -1,4 +1,6 @@
-import type { ExtractedTest, FeatureTests, TestCoverage } from '@/shared/api/types'
+import type { FeatureTests } from '@/shared/api/types'
+import type { ExtractedTest } from '@shared/extracted-test'
+import type { TestCoverage } from '@shared/coverage/types'
 
 export interface CoverageTestSource {
   test: ExtractedTest

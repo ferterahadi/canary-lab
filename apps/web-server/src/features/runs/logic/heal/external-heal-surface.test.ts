@@ -6,11 +6,18 @@ import os from 'os'
 
 import path from 'path'
 
-import type { RunDetail } from '../run-store'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
-import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, buildExternalRunSnapshotSlim, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
-import { compactCounts } from './external-heal-counts'
+import {
+  buildExternalFailureDetail,
+  buildExternalHealContext,
+  buildExternalRunSnapshot,
+  buildExternalRunSnapshotSlim,
+  slimRepeatHealContext,
+  writeHealSignal,
+} from './external-heal-surface'
+import { compactCounts, normalizeRunCounts } from './external-heal-counts'
 
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 

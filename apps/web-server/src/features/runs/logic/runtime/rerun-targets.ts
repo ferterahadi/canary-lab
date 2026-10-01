@@ -9,8 +9,8 @@
 
 import fs from 'fs'
 import path from 'path'
-import { type RunLifecycleTargetedRerun } from './manifest'
-import { slugify } from './summary-reporter'
+import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
+import { slugify } from './summary-types'
 import { listSpecFiles } from '../../../../shared/feature-loader'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { SummaryShape, VerificationPlan, computedTotal, countPassed, extractFailedSlugs } from './run-verdict'

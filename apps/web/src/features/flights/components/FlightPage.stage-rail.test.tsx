@@ -3,9 +3,8 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
-import type { EvaluationExportTask } from '@/shared/api/types'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStageKey } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
@@ -46,18 +45,16 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
-  evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
+  evaluationTasks: vi.fn((): EvaluationExportTaskView[] => []),
   evaluationLogs: vi.fn((): Record<string, string> => ({})),
   watchEvaluationTask: vi.fn(),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/flights', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
   getFlightRemedy: mocks.getFlightRemedy,
   applyFlightRemedy: mocks.applyFlightRemedy,
-  getRunDetail: mocks.getRunDetail,
-  listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
@@ -65,25 +62,37 @@ vi.mock('@/shared/api/client', () => ({
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
-  listRuns: mocks.listRuns,
-  getEnvsetSlot: mocks.getEnvsetSlot,
-  getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getFeatureCoverage: mocks.getFeatureCoverage,
-  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
-  getPlaywrightConfig: mocks.getPlaywrightConfig,
-  getRepoGitStatus: mocks.getRepoGitStatus,
-  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
-  putPlaywrightConfig: mocks.putPlaywrightConfig,
-  listFeatureDocs: mocks.listFeatureDocs,
   getFlightEntryOptions: mocks.getFlightEntryOptions,
-  importFeatureDoc: mocks.importFeatureDoc,
-  deleteFeatureDoc: mocks.deleteFeatureDoc,
-  deleteFeature: mocks.deleteFeature,
   linkFeatureDocPath: mocks.linkFeatureDocPath,
-  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/runs', () => ({
+  getRunDetail: mocks.getRunDetail,
+  listJournal: mocks.listJournal,
+  listRuns: mocks.listRuns,
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+}))
+vi.mock('@/shared/api/config', () => ({
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
+  getPlaywrightConfig: mocks.getPlaywrightConfig,
+  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
+  putPlaywrightConfig: mocks.putPlaywrightConfig,
+  deleteFeature: mocks.deleteFeature,
+}))
+vi.mock('@/shared/api/coverage', () => ({
+  getFeatureCoverage: mocks.getFeatureCoverage,
+  listFeatureDocs: mocks.listFeatureDocs,
+  importFeatureDoc: mocks.importFeatureDoc,
+  deleteFeatureDoc: mocks.deleteFeatureDoc,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  getRepoGitStatus: mocks.getRepoGitStatus,
+  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/internal', () => ({
   ApiError: class ApiError extends Error {
     constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
   },
@@ -721,6 +730,7 @@ describe('trailer model (R14–R18)', () => {
       runId: 'run-9',
       feature: 'checkout',
       mode: 'localized' as const,
+      producer: 'internal' as const,
       status: 'running' as const,
       downloadReady: false,
       createdAt: '2026-01-01T00:00:00Z',
@@ -752,6 +762,7 @@ describe('trailer model (R14–R18)', () => {
       runId: 'run-9',
       feature: 'checkout',
       mode: 'raw' as const,
+      producer: 'internal' as const,
       status: 'completed' as const,
       downloadReady: true,
       createdAt: '2026-01-01T00:00:00Z',
@@ -762,6 +773,7 @@ describe('trailer model (R14–R18)', () => {
       runId: 'run-9',
       feature: 'checkout',
       mode: 'localized' as const,
+      producer: 'internal' as const,
       status: 'running' as const,
       downloadReady: false,
       createdAt: '2026-01-01T00:02:00Z',

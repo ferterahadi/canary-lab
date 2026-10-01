@@ -18,11 +18,11 @@ import {
   evaluationExportTaskView,
   writeEvaluationExportFilesZip,
   evalTaskStatusOf,
-  type EvaluationExportTaskRecord,
   renameEvaluationExportFeature,
   readEvaluationExportCertificate,
   writeEvaluationExportBuild,
 } from './evaluation-export-store'
+import type { EvaluationExportTaskRecord } from '../../../../../../shared/evaluation-export-types'
 import type { BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
 
 let tmpDir: string

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { PortifyManifest } from '@/shared/api/client'
+import { useEscapeToClose } from '@/shared/ui/Overlays'
+import * as cleanupApi from '@/shared/api/cleanup'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { DiffView } from '@/shared/ui/DiffView'
 import { NoChangesNeeded, VerificationBadge } from './SavedOverlayPanel'
 const ghostBtn: React.CSSProperties = {
@@ -20,7 +21,7 @@ export function ReviewScreen({ m, busy, canRequestChanges = true, onSave, onRequ
   const openProject = async () => {
     setOpenError(null)
     try {
-      const res = await api.openPortifyProject(m.workflowId)
+      const res = await cleanupApi.openPortifyProject(m.workflowId)
       if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
@@ -128,11 +129,9 @@ export function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const trimmed = text.trim()
   useEffect(() => { taRef.current?.focus() }, [])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !busy) onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [busy, onClose])
+  // The layer stays registered while a send is in flight, so Escape is still
+  // swallowed here rather than falling through to the screen beneath.
+  useEscapeToClose(() => { if (!busy) onClose() })
   const send = (): void => { if (trimmed && !busy) onSend(trimmed) }
   return (
     <div

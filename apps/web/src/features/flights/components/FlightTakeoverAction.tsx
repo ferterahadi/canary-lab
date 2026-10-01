@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
-import { ConfirmModal } from '@/shared/ui/atoms'
+import * as flightsApi from '@/shared/api/flights'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 
 /** The one web-owned action while an external agent holds a Flight step.
@@ -23,7 +23,7 @@ export function FlightTakeoverAction({
   const mutate = (): void => {
     setBusy(true)
     onError(null)
-    const call = requested ? api.forceFlightTakeover(flightId) : api.requestFlightTakeover(flightId)
+    const call = requested ? flightsApi.forceFlightTakeover(flightId) : flightsApi.requestFlightTakeover(flightId)
     call
       .then(() => onResponded())
       .catch((err: unknown) => onError(err instanceof Error ? err.message : String(err)))

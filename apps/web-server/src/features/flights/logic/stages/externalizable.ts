@@ -1,9 +1,9 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import type { FlightCheckpointResponse, FlightStageKey } from '../types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { CHECKPOINT_OPTIONS } from '../types'
+import type { FlightCheckpointResponse, FlightStageKey } from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Lets ONE stage adapter serve both executors without a second implementation.
 //

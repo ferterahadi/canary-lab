@@ -2,17 +2,27 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { PortifyManifest } from '@/shared/api/client'
-import type { RunDetail } from '@/shared/api/types'
+import * as portifyApi from '@/shared/api/portify'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import * as runsApi from '@/shared/api/runs'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { RunDetail } from '@shared/run-detail'
 import type { BenchmarkManifest } from '@/features/benchmark/api/benchmark-types'
 import { PortifyProvider, usePortify } from '@/features/portify/state/PortifyContext'
 import { BenchmarkProvider, useBenchmarks } from '@/features/benchmark/state/BenchmarkContext'
 import { RunsProvider, useRuns, useRun } from '@/features/runs/state/RunsContext'
 
-vi.mock('@/shared/api/client', async () => ({
-  ...await vi.importActual<typeof import('@/shared/api/client')>('@/shared/api/client'),
-  getPortify: vi.fn(), getBenchmark: vi.fn(), getRunDetail: vi.fn(),
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  getPortify: vi.fn(),
+}))
+vi.mock('@/shared/api/benchmark', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/benchmark')>()),
+  getBenchmark: vi.fn(),
+}))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  getRunDetail: vi.fn(),
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 class Socket {
@@ -46,7 +56,7 @@ const cases = [
   {
     name: 'Portify', socket: 'portify', key: 'workflowId', id: 'workflow',
     value: (fresh: boolean) => ({ ...base, workflowId: 'workflow', status: fresh ? 'editing' : 'ready-to-save' }) as PortifyManifest,
-    mock: vi.mocked(api.getPortify), load: () => portify.loadPortify('workflow'),
+    mock: vi.mocked(portifyApi.getPortify), load: () => portify.loadPortify('workflow'),
     rows: () => portify.workflows, snapshot: { workflows: [], details: {} },
     update: (manifest: unknown) => ({ type: 'update', workflowId: 'workflow', manifest }),
     status: 'editing',
@@ -54,7 +64,7 @@ const cases = [
   {
     name: 'Benchmark', socket: 'benchmark', key: 'benchmarkId', id: 'benchmark',
     value: (fresh: boolean) => ({ ...base, benchmarkId: 'benchmark', status: fresh ? 'done' : 'running' }) as BenchmarkManifest,
-    mock: vi.mocked(api.getBenchmark), load: () => benchmark.loadBenchmark('benchmark'),
+    mock: vi.mocked(benchmarkApi.getBenchmark), load: () => benchmark.loadBenchmark('benchmark'),
     rows: () => benchmark.benchmarks, snapshot: { benchmarks: [], details: {} },
     update: (manifest: unknown) => ({ type: 'update', benchmarkId: 'benchmark', manifest }),
     status: 'done',
@@ -63,7 +73,7 @@ const cases = [
 ]
 beforeEach(() => {
   for (const c of cases) c.mock.mockReset()
-  vi.mocked(api.getRunDetail).mockReset()
+  vi.mocked(runsApi.getRunDetail).mockReset()
   Socket.instances = []
   host = document.createElement('div')
   root = createRoot(host)
@@ -124,14 +134,14 @@ for (const c of cases) describe(c.name, () => {
 // useRun hydration path as a control alongside the newly protected providers.
 it.each(['update', 'removed', 'snapshot'])('Runs rejects late detail after %s', async event => {
   const old = deferred<RunDetail>()
-  vi.mocked(api.getRunDetail).mockReturnValueOnce(old.promise)
+  vi.mocked(runsApi.getRunDetail).mockReturnValueOnce(old.promise)
   const manifest = { ...base, runId: 'run', status: 'running' as const, healCycles: 0, services: [] }
   let selected: ReturnType<typeof useRun>
   function RunProbe() { runs = useRuns(); selected = useRun('run'); return null }
   act(() => root.render(<RunsProvider WebSocketImpl={Socket as unknown as typeof WebSocket}><RunProbe /></RunsProvider>))
   const socket = Socket.instances.find(s => s.url.endsWith('/ws/runs'))!
   act(() => socket.fire({ type: 'snapshot', runs: [manifest], details: {} }))
-  expect(api.getRunDetail).toHaveBeenCalledTimes(1)
+  expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
   act(() => socket.fire(event === 'update'
     ? { type: 'update', runId: 'run', detail: { runId: 'run', manifest: { ...manifest, status: 'passed' } } }
     : event === 'snapshot' ? { type: 'snapshot', runs: [], details: {} } : { type: 'removed', runId: 'run' }))

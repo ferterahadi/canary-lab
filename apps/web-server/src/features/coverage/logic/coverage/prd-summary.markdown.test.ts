@@ -3,20 +3,21 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { computeDocsHash, type DocsCollection } from './docs-collection'
+import { buildPrdSummaryPrompt, summarizePrd } from './prd-summary'
 import {
   assembleSummary,
-  buildPrdSummaryPrompt,
   parsePrdSummaryOutput,
   parseVariantDimension,
   reconcileRequirementIds,
+  type ParsedRequirement,
+} from './prd-summary-parse'
+import {
   renderPrdSummaryMarkdown,
   readPrdSummary,
-  summarizePrd,
   writePrdSummary,
   PRD_SUMMARY_JSON,
   PRD_SUMMARY_MD,
-  type ParsedRequirement,
-} from './prd-summary'
+} from './prd-summary-render'
 
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 

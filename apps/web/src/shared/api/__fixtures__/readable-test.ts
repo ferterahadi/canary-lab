@@ -1,4 +1,4 @@
-import type { ReadableNode, ReadableTest } from '../types'
+import type { ReadableNode, ReadableTest } from '@shared/readable-tests/types'
 
 export function readableTest(title: string, nodes: ReadableNode[] = []): ReadableTest {
   return {

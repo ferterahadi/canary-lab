@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
 import { readOverlayOriginalConfig, removeOverlay } from './overlay'
-import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../config/logic/config-file'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../../shared/config-file'
 import { syncEnvsInConfig } from '../../../config/logic/envset-config'
 
 // Shared "un-portify" core, called by both the REST route

@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { readRunsIndex } from './manifest'
 import { runDirFor } from './run-paths'
-import { slugify } from './summary-reporter'
+import { slugify } from './summary-types'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
 // Per-test outcomes of a feature's LATEST recorded run — the join source for

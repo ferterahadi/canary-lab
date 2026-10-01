@@ -7,7 +7,8 @@
 // NOT a fallback the app ever uses.
 
 import type { DocsCollection } from '../docs-collection'
-import { reconcileRequirementIds, type ParsedRequirement, type SummarizePrdArgs, type SummarizePrdDeps } from '../prd-summary'
+import { type SummarizePrdArgs, type SummarizePrdDeps } from '../prd-summary'
+import { reconcileRequirementIds, type ParsedRequirement } from '../prd-summary-parse'
 import type { AnnotateTestInput, ProposeMappingsArgs, ProposeMappingsDeps } from '../annotate-engine'
 import { withFingerprints } from '../fingerprints'
 import type { PrdSummary, ProposedMapping, Requirement } from '../../../../../../../../shared/coverage/types'

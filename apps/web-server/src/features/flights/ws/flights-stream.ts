@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import type { FlightStore } from '../logic/store'
-import type { FlightIndexEntry, FlightManifest } from '../logic/types'
+import type { FlightStore, FlightStoreEvent } from '../logic/store'
+import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
+import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
 
 // `/ws/flights` — push channel for the flights list and the open flight detail,
 // mirroring ws/portify-stream.ts. On connect: one `snapshot` frame (the index,
@@ -14,9 +15,8 @@ import type { FlightIndexEntry, FlightManifest } from '../logic/types'
 // the list ALSO polled every 5s to cover a dropped nudge. Pushing the manifest
 // itself removes both: the round trip and the poll.
 //
-// Coverage is excluded for this module (like the other ws/** wire-ups) — too
-// thin to test deterministically without a real WebSocket round-trip. The store
-// underneath and the client reducer are fully covered.
+// The socket lifecycle is `registerRecordStream`'s (shared/ws/record-stream.ts,
+// tested there); this module only maps store events to frames.
 
 export interface FlightsStreamDeps {
   store: FlightStore
@@ -37,44 +37,21 @@ export async function flightsStreamRoutes(
   app: FastifyInstance,
   deps: FlightsStreamDeps,
 ): Promise<void> {
-  app.get('/ws/flights', { websocket: true }, (socket) => {
-    const send = (frame: FlightsStreamFrame): void => {
-      try {
-        socket.send(JSON.stringify(frame))
-      } catch {
-        /* socket closed */
-      }
-    }
-
-    const snapshot = (): FlightsStreamFrame => {
+  registerRecordStream<FlightsStreamFrame, FlightStoreEvent>(app, {
+    path: '/ws/flights',
+    store: deps.store,
+    snapshot: () => {
       const flights = deps.store.list()
-      const details: Record<string, FlightManifest> = {}
-      for (const entry of flights) {
-        if (!isActive(entry.status)) continue
-        const manifest = deps.store.get(entry.flightId)
-        if (manifest) details[entry.flightId] = manifest
-      }
+      const details = activeDetails(flights, (entry) => isActive(entry.status), (entry) => entry.flightId, (id) => deps.store.get(id))
       return { type: 'snapshot', flights, details }
-    }
-
-    send(snapshot())
-
-    const onEvent = (event: { kind: 'changed' | 'removed'; flightId?: string }): void => {
-      if (!event.flightId) return
-      if (event.kind === 'removed') {
-        send({ type: 'removed', flightId: event.flightId })
-        return
-      }
+    },
+    frameFor: (event) => {
+      if (!event.flightId) return undefined
+      if (event.kind === 'removed') return { type: 'removed', flightId: event.flightId }
       const manifest = deps.store.get(event.flightId)
       // A `changed` whose record is already gone is a delete that raced us; the
       // `removed` frame for it is either in flight or already sent.
-      if (!manifest) return
-      send({ type: 'update', flightId: event.flightId, manifest })
-    }
-
-    deps.store.onEvent(onEvent)
-    socket.on('close', () => {
-      deps.store.offEvent(onEvent)
-    })
+      return manifest ? { type: 'update', flightId: event.flightId, manifest } : undefined
+    },
   })
 }

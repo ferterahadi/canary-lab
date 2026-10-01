@@ -4,7 +4,7 @@
 // `register`; the server context now arrives as an argument.
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
-import { type OrchestratorLike } from './logic/run-store'
+import type { OrchestratorLike } from './logic/run-registry'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import { PaneBroker } from './logic/pane-broker'
@@ -175,7 +175,7 @@ export function makeRestartExternalRun(
   }
 
   const nowIso = new Date().toISOString()
-  const externalHealSession: import('./logic/runtime/manifest').ExternalHealSession | undefined = canClaim
+  const externalHealSession: import('../../../../../shared/run-manifest').ExternalHealSession | undefined = canClaim
     ? {
         sessionId: healAgentReq.sessionId,
         clientKind: healAgentReq.clientKind,

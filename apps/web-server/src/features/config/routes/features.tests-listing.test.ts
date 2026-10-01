@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -15,10 +14,7 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
+import { git } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -470,8 +466,8 @@ test('configured client', async () => {
     ].join('\n'))
     // A real repo, so the markers are genuinely attempted: `getGitRoot` runs
     // for real and only the `git show` that reads the committed side fails.
-    git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
-    git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+    git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
+    git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
     const previous = vi.mocked(runGit).getMockImplementation()!
     vi.mocked(runGit).mockRejectedValue(new Error('git: command not found'))
     try {
@@ -493,8 +489,8 @@ test('configured client', async () => {
 it('ships matching source and markers for each expanded Playwright test', async () => {
   const source = 'for (const channel of ["line", "whatsapp"]) {\n  test(`reads ${channel}`, () => {\n    expect(1).toBe(1)\n  })\n}'
   const dir = writeFeature('markers', { spec: source })
-  git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
-  git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+  git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
+  git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
   fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), source.replace('    expect(1)', '    console.log("this")\n    expect(1)'))
   const app = await build({ spawner: jsonSpawner((featureDir) => ({
     config: { rootDir: featureDir },

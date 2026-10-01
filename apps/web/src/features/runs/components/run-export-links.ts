@@ -1,4 +1,4 @@
-import type { PlaywrightArtifactGroup } from '@/shared/api/types'
+import type { PlaywrightArtifactGroup } from '@shared/run-detail'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { isTerminalRunStatus as isSharedTerminalRunStatus } from '@shared/run-state'
 
@@ -64,5 +64,3 @@ export async function downloadEvaluationReport(
 export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined): boolean {
   return groups?.some((group) => group.artifacts.some((artifact) => artifact.kind === 'video')) ?? false
 }
-
-export { safeFilename } from '@/shared/lib/format'

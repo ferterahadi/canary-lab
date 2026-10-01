@@ -1,10 +1,11 @@
 import { useApplyPreflight } from '../state/use-apply-preflight'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { ApplyTarget } from '@/shared/api/client'
-import type { RunFixCaptureRepo, RunProposedPr } from '@/shared/api/types'
-import { ConfirmModal, StatusDot } from '@/shared/ui/atoms'
-import { editorLabel } from '@/features/config'
+import * as runsApi from '@/shared/api/runs'
+import type { ApplyTarget } from '@/shared/api/runs'
+import type { RunFixCaptureRepo, RunProposedPr } from '@shared/run-state'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import { editorLabel } from '@/features/config/components/settings-options'
 import { fileCountLabel, groupByDirectory, isTestPath } from '../utils/repair-files'
 import { prBlockedLine } from '../utils/pr-blocked-copy'
 import { CopyIconButton } from './RunServicePanels'
@@ -66,13 +67,13 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
     update({ kind: 'working' })
     try {
       if (provisional) {
-        const opened = await api.openRunRepo(runId, repoName)
+        const opened = await runsApi.openRunRepo(runId, repoName)
         update(opened.opened
           ? { kind: 'done', provisional: true, ...(opened.editor ? { editor: opened.editor } : {}) }
           : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })
         return
       }
-      const applied = await api.applyRunFixes(runId, repoName)
+      const applied = await runsApi.applyRunFixes(runId, repoName)
       if (!alive()) return
       const failure = applied.results.find((r) => !r.ok)
       if (failure) {
@@ -81,7 +82,7 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
       }
       // Only open once the edits are actually in the tree — opening first would
       // show the user an unchanged repo and read as "it did nothing".
-      const opened = await api.openRunRepo(runId, repoName)
+      const opened = await runsApi.openRunRepo(runId, repoName)
       update(opened.opened
         ? { kind: 'done', ...(opened.editor ? { editor: opened.editor } : {}) }
         : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })

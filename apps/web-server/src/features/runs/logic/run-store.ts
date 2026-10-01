@@ -1,24 +1,39 @@
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunLifecycleEvent, type RunIndexEntry, type RunManifest, type ServiceStatus } from './runtime/manifest'
+import {
+  readManifest,
+  readRunsIndex,
+  updateManifest,
+  upsertRunsIndexEntry,
+  writeRunsIndex,
+} from './runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
+import type { RunIndexEntry } from '../../../../../../shared/run-index'
 import { runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
-import { isActiveRunStatus, isStaleHeartbeat, isUnsettledRunStatus } from '../../../../../../shared/run-state'
+import {
+  isActiveRunStatus,
+  isStaleHeartbeat,
+  isUnsettledRunStatus,
+  type RunLifecycleEvent,
+  type ServiceStatus,
+} from '../../../../../../shared/run-state'
 import { trimRunArtifacts } from './run-artifacts'
-import { AbortAllResult, AbortResult, CleanupListing, DeleteResult, TrimResult, listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
-import { RunDetail, getRunDetail } from './run-detail'
+import {
+  AbortAllResult,
+  AbortResult,
+  DeleteResult,
+  TrimResult,
+  listCleanupEntries,
+  reapStaleRuns,
+  removeRunFromHistory,
+} from './run-cleanup'
+import { CleanupListing } from '../../../../../../shared/cleanup-listing'
+import { getRunDetail } from './run-detail'
+import { RunDetail } from '../../../../../../shared/run-detail'
 import type { OrchestratorRegistry } from './run-registry'
 import { cleanupSuiteRuntimeInputsForRun } from './runtime/suite-runtime-inputs'
-
-export { dirSizeBytes, indexPlaywrightArtifacts, runArtifactBytes, trimRunArtifacts } from './run-artifacts'
-export type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightArtifactKind } from './run-artifacts'
-export { listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
-export type { AbortAllResult, AbortResult, CleanupListing, CleanupOrphan, CleanupRunEntry, DeleteResult, TrimResult } from './run-cleanup'
-export { getRunDetail, readPlaywrightPlaybackEvents, readRunLifecycleEvents, readRunSummary } from './run-detail'
-export type { PlaywrightPlaybackEvent, RunDetail, RunSummary, RunSummaryFailedEntry, RunSummaryRunningStep } from './run-detail'
-export { createRegistry } from './run-registry'
-export type { OrchestratorAdoptSpecEditsResult, OrchestratorCancelHealResult, OrchestratorInterjectResult, OrchestratorLike, OrchestratorPauseResult, OrchestratorRegistry, RestartHealResult, RestartRunResult, StartRunOutcome } from './run-registry'
 
 export interface ListRunsOptions {
   feature?: string
@@ -390,7 +405,3 @@ export class RunStore extends EventEmitter implements RunStateSink {
     return true
   }
 }
-
-// Re-export the manifest types most callers will want alongside RunStore so
-// they don't need a second import.
-export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from './runtime/manifest'

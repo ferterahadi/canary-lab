@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { ProposedMapping, VariantDimension } from '../../../../../../../shared/coverage/types'
-import type { ParsedRequirement } from './prd-summary'
+import type { ParsedRequirement } from './prd-summary-parse'
 
 // What an EXTERNAL producer is allowed to hand back — the zod shapes for the
 // PRD-summary and coverage-mapping submissions. Shared by the MCP submit_*

@@ -65,8 +65,10 @@ vi.mock('./run-verdict', () => ({
   extractFailedSlugs: h.extractFailedSlugs,
   decideRunStatus: h.decideRunStatus,
   summarizeFailures: h.summarizeFailures,
-  summaryHasPassingEvidence: h.summaryHasPassingEvidence,
   computeVerificationPlan: h.computeVerificationPlan,
+}))
+vi.mock('./rerun-targets', () => ({
+  summaryHasPassingEvidence: h.summaryHasPassingEvidence,
   nonPassedSignatureFromPlan: h.nonPassedSignatureFromPlan,
   selectionForPlan: h.selectionForPlan,
 }))

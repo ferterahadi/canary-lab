@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDotenv, writeDotenv } from './dotenv-edit'
+import { parseDotenv, writeDotenv } from '../../../../../../shared/lib/dotenv-edit'
 
 describe('parseDotenv', () => {
   it('parses simple KEY=VALUE pairs', () => {

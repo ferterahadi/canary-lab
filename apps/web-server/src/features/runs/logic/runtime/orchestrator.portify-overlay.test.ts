@@ -11,6 +11,7 @@ import { readManifest } from './manifest'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { addWorktree, type WorktreeHandle } from './repo-worktree'
 import { writeOverlay, captureTouchedFiles, overlayDir } from '../../../portify/logic/runtime/overlay'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 // Phase C: the run-time apply-before-boot / reverse-at-teardown hook. These
 // drive a REAL git repo + worktree + saved overlay through the orchestrator's
@@ -64,11 +65,7 @@ beforeEach(async () => {
   repoRoot = path.join(tmpDir, 'repo')
   fs.mkdirSync(repoRoot, { recursive: true })
   fs.writeFileSync(path.join(repoRoot, 'app.js'), BASE)
-  await runGit(repoRoot, ['init', '-q'])
-  await runGit(repoRoot, ['config', 'user.email', 't@t'])
-  await runGit(repoRoot, ['config', 'user.name', 'test'])
-  await runGit(repoRoot, ['add', '-A'])
-  await runGit(repoRoot, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(repoRoot)
 })
 
 afterEach(() => {
@@ -410,11 +407,7 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
     const repoRootB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-port-b-')))
     cleanup.push(repoRootB)
     fs.writeFileSync(path.join(repoRootB, 'app.js'), BASE)
-    await runGit(repoRootB, ['init', '-q'])
-    await runGit(repoRootB, ['config', 'user.email', 't@t'])
-    await runGit(repoRootB, ['config', 'user.name', 'test'])
-    await runGit(repoRootB, ['add', '-A'])
-    await runGit(repoRootB, ['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(repoRootB)
 
     const patchA = await capturePortPatch()
     const baseA = (await runGit(repoRoot, ['rev-parse', 'HEAD'])).stdout.trim()

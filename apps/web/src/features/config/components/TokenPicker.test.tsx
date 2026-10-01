@@ -8,7 +8,11 @@ import { TokenPicker } from './TokenPicker'
 import type { TokenNamespace } from './TemplatedInput'
 
 const api = vi.hoisted(() => ({ getEnvsetsIndex: vi.fn(), getFeatureConfigDoc: vi.fn(), getEnvsetSlot: vi.fn() }))
-vi.mock('@/shared/api/client', () => api)
+vi.mock('@/shared/api/config', () => ({
+  getEnvsetsIndex: api.getEnvsetsIndex,
+  getFeatureConfigDoc: api.getFeatureConfigDoc,
+  getEnvsetSlot: api.getEnvsetSlot,
+}))
 let root: Root
 let element: HTMLDivElement
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']

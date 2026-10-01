@@ -1,42 +1,44 @@
 import type { RunsFeature } from '../runs/index'
 import type { FastifyInstance } from 'fastify'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared/run-state'
-import { runsRoutes, type ExternalHealAgentRequest } from '../runs/routes/runs'
+import { runsRoutes } from '../runs/routes/runs'
+import type { ExternalHealAgentRequest } from '../runs/routes/runs-route-support'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from '../wizard/routes/tests-draft'
 import { externalHealRoutes, makeExternalHealAuditLogger } from '../runs/routes/external-heal'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from '../runs/logic/run-store'
+import { RunStore } from '../runs/logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorRegistry,
+  type OrchestratorLike,
+  type StartRunOutcome,
+} from '../runs/logic/run-registry'
 import { benchmarkRoutes } from './routes/benchmarks'
 import { benchmarkStreamRoutes } from './ws/benchmark-stream'
 import { createBenchmarkRunner } from './logic/runtime/runner'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './logic/runtime/skills'
 import { benchmarkDir } from './logic/runtime/paths'
-import {
-  buildAgentSessionResponse,
-  resolveWorkflowAgentRef,
-} from '../agent-sessions/logic/agent-session-log'
+import { resolveWorkflowAgentRef } from '../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../agent-sessions/logic/agent-session-subagents'
 import { allocateRunPorts, applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
 import { loadFeatures } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../runs/logic/runtime/orchestrator'
+import { RunOrchestrator } from '../runs/logic/runtime/orchestrator'
+import {
+  collectPortSlots,
+  buildServiceSpecs,
+  buildQueuedServiceEntries,
+} from '../runs/logic/runtime/service-specs'
 import { RunScheduler, type SchedulerActiveRun } from '../runs/logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from '../runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from '../runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from '../runs/logic/runtime/repo-worktree'
-import {
-  pickAvailableHealAgent,
-} from '../runs/logic/runtime/auto-heal'
+import { pickAvailableHealAgent } from '../runs/logic/runtime/heal-agent-spawn'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { realPtyFactory, type PtyFactory } from '../runs/logic/runtime/pty-spawner'
-import {
-  applySet,
-  backup,
-  getEnvSetsDir,
-  loadConfig,
-  resolveVars,
-  restore,
-} from '../runs/logic/runtime/env-switcher/switch'
+import { applySet, backup, restore } from '../runs/logic/runtime/env-switcher/switch'
+import { getEnvSetsDir, loadConfig, resolveVars } from '../config/logic/envset-runtime'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDismissOnOutsideMousedown, useEscapeToClose } from '@/shared/ui/Overlays'
 import { createPortal } from 'react-dom'
 import { useTokenPickerOptions } from './use-token-picker-options'
-export { extractPortSlots } from './token-port-slots'
 import type { TokenNamespace } from './TemplatedInput'
 
 /** Reserved first segment of the per-run port namespace (`${port.api}`). */
@@ -44,21 +44,8 @@ export function TokenPicker({
     if (slot && options.slotRemoved) setSlot(null)
   }, [slot, options.slotRemoved])
 
-  useEffect(() => {
-    const onDoc = (e: MouseEvent): void => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
-    }
-    const onEsc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onEsc)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onEsc)
-    }
-  }, [onClose])
-
+  useDismissOnOutsideMousedown(onClose, true, [popRef])
+  useEscapeToClose(onClose)
 
   return createPortal(
     <div

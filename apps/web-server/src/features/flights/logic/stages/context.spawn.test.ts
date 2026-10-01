@@ -9,8 +9,10 @@ vi.mock('../../../agent-sessions/logic/agent-process', () => ({
   runAgentProcess,
   buildClaudeAgenticArgs: () => [],
 }))
-vi.mock('../../../agent-sessions/logic/agent-session-log', () => ({
+vi.mock('../../../agent-sessions/logic/agent-session-paths', () => ({
   claudeSessionLogPath: () => '/tmp/claude.jsonl',
+}))
+vi.mock('../../../agent-sessions/logic/agent-session-log', () => ({
   resolveWorkflowAgentRef: () => undefined,
   writeWorkflowAgentRef,
 }))

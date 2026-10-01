@@ -2,10 +2,11 @@ import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { PaneBroker, PaneId, PaneSubscriber } from '../logic/pane-broker'
-import type { OrchestratorRegistry } from '../logic/run-store'
+import type { OrchestratorRegistry } from '../logic/run-registry'
 import { readManifest } from '../logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { sendFrame } from '../../../shared/ws/record-stream'
 
 // Wires Fastify's WebSocket plugin to the per-run PaneBroker. Coverage is
 // excluded for this module — the wire-up is too thin to test deterministically
@@ -45,9 +46,7 @@ export async function paneStreamRoutes(
         }
 
         const sub: PaneSubscriber = {
-          send: (msg) => {
-            try { socket.send(JSON.stringify(msg)) } catch { /* socket closed */ }
-          },
+          send: (msg) => sendFrame(socket, msg),
           close: () => {
             try { socket.close() } catch { /* already closed */ }
           },

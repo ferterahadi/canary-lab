@@ -34,12 +34,18 @@ import { portifyStage } from './portify'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -585,11 +591,7 @@ describe('portify stage', () => {
     const worktree = path.join(tmpDir, 'scratch-wt')
     fs.mkdirSync(worktree, { recursive: true })
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
-    await runGit(worktree, ['init', '-q'])
-    await runGit(worktree, ['config', 'user.email', 't@t'])
-    await runGit(worktree, ['config', 'user.name', 'test'])
-    await runGit(worktree, ['add', '-A'])
-    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(worktree)
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = process.env.PORT\n')
 
     let reads = 0
@@ -622,11 +624,7 @@ describe('portify stage', () => {
     const worktree = path.join(tmpDir, 'scratch-wt2')
     fs.mkdirSync(worktree, { recursive: true })
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
-    await runGit(worktree, ['init', '-q'])
-    await runGit(worktree, ['config', 'user.email', 't@t'])
-    await runGit(worktree, ['config', 'user.name', 'test'])
-    await runGit(worktree, ['add', '-A'])
-    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(worktree)
 
     let reads = 0
     const inject = makeInject((call) => {

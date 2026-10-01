@@ -19,14 +19,20 @@ vi.mock('../logic/coverage/service', async (importOriginal) => {
   return {
     ...original,
     computeFeatureCoverage: vi.fn(original.computeFeatureCoverage),
+  }
+})
+vi.mock('../logic/coverage/feature-docs', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../logic/coverage/feature-docs')>()
+  return {
+    ...original,
     listFeatureDocs: vi.fn(original.listFeatureDocs),
     clearPrdSummary: vi.fn(original.clearPrdSummary),
     regeneratePrdSummary: vi.fn(original.regeneratePrdSummary),
   }
 })
 
-vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../config/logic/feature-authoring')>()
+vi.mock('../../config/logic/feature-docs-authoring', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../config/logic/feature-docs-authoring')>()
   return {
     ...original,
     writeFeatureDoc: vi.fn(original.writeFeatureDoc),
@@ -35,10 +41,11 @@ vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
 
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
-import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../logic/coverage/service'
+import { computeFeatureCoverage } from '../logic/coverage/service'
+import { listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../logic/coverage/feature-docs'
 import { computeDocsHash } from '../logic/coverage/docs-collection'
 import { writeCoverageRunState } from '../logic/coverage/run-state'
-import { writeFeatureDoc } from '../../config/logic/feature-authoring'
+import { writeFeatureDoc } from '../../config/logic/feature-docs-authoring'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
 
 let tmpDir: string

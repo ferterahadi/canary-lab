@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { CANARY_LAB_MCP_WORKFLOWS, WORKFLOW_GUIDES } from '../instructions'
 import { createCanaryLabToolRegistry } from '../tool-registry'
-import { CLIENT_KIND, type CanaryLabMcpDeps } from '../tool-support'
+import { CLIENT_KIND } from '../tool-support'
+import type { CanaryLabMcpDeps } from '../tool-schemas'
 
 const inertDeps = {} as CanaryLabMcpDeps
 

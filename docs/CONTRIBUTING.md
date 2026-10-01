@@ -36,7 +36,7 @@ layer. They share eight feature names: `runs`, `coverage`, `flights`, `wizard`,
 | `apps/web-server/src/features/runs/logic/runtime/orchestrator.ts` | Service boot, Playwright execution, repair cycles, and teardown |
 | `apps/web-server/src/features/runs/logic/run-store.ts` | Run manifests, summaries, events, and artifacts |
 | `apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts` | Envset apply and restore |
-| `apps/web/src/features/` | React feature modules and their public barrels |
+| `apps/web/src/features/` | React feature modules; cross-feature imports go through the files `check:boundaries` declares public |
 | `shared/` | Code shared by the CLI, server, generated projects, or web app |
 | `templates/project/` | Files copied into newly initialized workspaces |
 
@@ -50,8 +50,9 @@ runtime flow.
 
 - Server features register routes and return only the handles another feature
   genuinely needs. They are not re-export barrels.
-- Web features expose their cross-feature API through `index.ts`. Do not deep
-  import another feature's implementation.
+- Web features have no barrels. Import the file that declares a symbol; a
+  file another feature imports must be listed in `PUBLIC` in
+  `tools/check-feature-boundaries.mjs`. No file re-exports another's symbols.
 - Put LLM prompts in `apps/web-server/prompts/` and load them through the shared
   prompt loader. Do not inline prompts in TypeScript.
 - Change generated workspace behavior in `templates/project/`, then verify the
@@ -76,9 +77,9 @@ a prerequisite for every unit-test iteration.
 | `npm run test:watch` | Local test-driven development |
 | `npm run test:coverage` | Coverage report |
 | `npm run check:conventions` | Repository rules that lint and TypeScript do not express |
-| `npm run check:boundaries` | Web feature barrels and cross-feature imports |
+| `npm run check:boundaries` | Cross-feature imports go only through declared public files; no barrels |
 | `npm run check:docs` | Backticked paths, relative links, and Markdown anchors |
-| `npm run check:wire` | Server responses and their hand-written web mirrors |
+| `npm run check:wire` | No app re-declares a shared wire type; shared converters are used; the event union matches |
 | `npm run check:cycles` | Import-cycle ceilings |
 | `npm run smoke:pack` | Packed install, scaffold, exports, templates, or prompts |
 | `npm run smoke:demo` | LLM-free storefront repair cascade |

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { RepoBranchSnapshot, RunFixCapture, RunPrAttempt, RunProposedPr } from '@/shared/api/types'
+import type { RepoBranchSnapshot } from '@shared/run-manifest'
+import type { RunFixCapture, RunPrAttempt, RunProposedPr } from '@shared/run-state'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'

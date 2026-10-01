@@ -1,10 +1,6 @@
 import type { SabotageLevel, BenchmarkStatus } from '../../../../../../../shared/benchmark-index'
 import type { ArmIterationResult, BenchmarkReport } from './report'
-import type { LocalHealAgent } from '../../../runs/logic/runtime/manifest'
-
-export type { SabotageLevel } from '../../../../../../../shared/benchmark-index'
-export type { BenchmarkStatus } from '../../../../../../../shared/benchmark-index'
-export type { BenchmarkIndexEntry } from '../../../../../../../shared/benchmark-index'
+import type { LocalHealAgent } from '../../../../../../../shared/run-manifest'
 
 /** Arm 'A' = Canary harness, arm 'B' = baseline (Playwright MCP only). */
 export type BenchmarkArm = 'A' | 'B'

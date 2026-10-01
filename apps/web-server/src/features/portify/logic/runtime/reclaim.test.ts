@@ -8,6 +8,7 @@ import { buildPortifyPaths, portifyDir } from './paths'
 import { createBranchAndWorktree } from './git-ops'
 import { reclaimOrphanedPortify } from './reclaim'
 import type { PortifyManifest } from './types'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 const roots: string[] = []
 afterEach(() => {
@@ -24,11 +25,7 @@ async function fixture(): Promise<{ logsDir: string; featureDir: string; appRepo
   fs.mkdirSync(featureDir, { recursive: true })
   fs.mkdirSync(appRepo, { recursive: true })
   fs.writeFileSync(path.join(appRepo, 'app.js'), 'const PORT = 3007\n')
-  await runGit(appRepo, ['init', '-q'])
-  await runGit(appRepo, ['config', 'user.email', 't@t'])
-  await runGit(appRepo, ['config', 'user.name', 'test'])
-  await runGit(appRepo, ['add', '-A'])
-  await runGit(appRepo, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(appRepo)
   // Feature config left in an "agent-edited" state on disk.
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'EDITED BY AGENT\n')
   return { logsDir, featureDir, appRepo }

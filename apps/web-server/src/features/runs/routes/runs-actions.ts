@@ -22,9 +22,7 @@ import { commitReviewedFiles } from '../logic/test-review-acceptance'
 import type { TestReviewDecision, TestReviewReceipt, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { withRunReviewLock } from '../logic/test-review-lock'
-
-export { compareActiveRuns } from './runs-route-support'
-export type { ExternalHealAgentRequest } from './runs-route-support'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.post<{
@@ -62,10 +60,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     }
     const features = loadFeatures(deps.featuresDir)
     const featureCfg = features.find((f) => f.name === feature)
-    if (!featureCfg) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!featureCfg) return notFound(reply, 'feature')
     // env is optional only when the feature didn't declare any. Otherwise it
     // must be one of feature.envs (default: first entry).
     const declared = featureCfg.envs ?? []
@@ -335,7 +330,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // observing a clean tree can never create the persisted approval receipt.
   app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/accept-test-review', async (req, reply) => withRunReviewLock(deps.store, req.params.runId, async () => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) return reply.code(404).send({ error: 'run not found' })
+    if (!detail) return notFound(reply, 'run')
     const revision = req.body?.expectedRevision
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
     const existing = detail.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)
@@ -548,10 +543,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const result = deps.store.delete(req.params.runId)
     if (!result.ok) {
-      if (result.reason === 'not-found') {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (result.reason === 'not-found') return notFound(reply, 'run')
       reply.code(409)
       return {
         error: result.reason === 'active'

@@ -6,9 +6,6 @@ import type { ClientKind, RunProducer } from '@shared/run-mode'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
-export type { PortifyStatus } from '@shared/portify-index'
-export type { PortifyIndexEntry } from '@shared/portify-index'
-
 export interface PortifyBootInstance {
   ports: Record<string, number>
   ok: boolean

@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 
 // Stub `claude`/`codex` on PATH with no-op executables so the test never spawns

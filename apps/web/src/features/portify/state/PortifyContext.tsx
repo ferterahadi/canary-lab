@@ -1,37 +1,20 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react'
-import { createPortifyHydration } from './portify-hydration'
-import * as api from '@/shared/api/client'
-import { createObservedReads } from '@/shared/state/observed-reads'
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react'
+import * as portifyApi from '@/shared/api/portify'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
-import { connectRecordStream } from '@/shared/state/record-stream'
-import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
-import {
-  portifyReducer,
-  initialPortifyState,
-  frameToAction,
-  isActivePortify,
-  type PortifyState,
-  type PortifyStreamFrame,
-} from './portify-state'
+import { useRecordDetail, useRecordIndexStore } from '@/shared/state/record-index-store'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import { portifyIndex } from './portify-state'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 
 // Port-ification store, mirroring BenchmarkContext: a `/ws/portify`-fed reducer
 // for the index + per-workflow manifests, plus one-shot start/save/cancel
 // actions. The GlobalStatusBar button reads the active workflow from here; the
 // detail consumers share hydration through usePortifyDetail.
 
-interface PortifyContextValue {
-  state: PortifyState
-  hydration: ReturnType<typeof createPortifyHydration>
+type PortifyStore = ReturnType<typeof useRecordIndexStore<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>>
+
+interface PortifyContextValue extends PortifyStore {
   startPortify: (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => Promise<string>
   savePortify: (id: string) => Promise<void>
   cancelPortify: (id: string) => Promise<void>
@@ -51,46 +34,28 @@ export function PortifyProvider({
   wsUrl?: string
   WebSocketImpl?: typeof WebSocket
 }) {
-  const [state, dispatch] = useReducer(portifyReducer, initialPortifyState)
-  const dispatchRef = useRef(dispatch)
-  dispatchRef.current = dispatch
-  const readsRef = useRef(createObservedReads())
-
-  const stateRef = useRef(state)
-  stateRef.current = state
-  const hydration = useMemo(() => createPortifyHydration({
-    reads: readsRef.current, read: api.getPortify,
-    apply: (action) => dispatchRef.current(action),
-    hasDetail: (id) => Boolean(stateRef.current.details[id]),
-  }), [])
-  useEffect(() => {
-    hydration.start()
-    const connection = connectRecordStream({
-      url: wsUrl ?? defaultWsUrl(),
-      WebSocketImpl,
-      reads: readsRef.current,
-      decode: (frame) => frameToAction(frame as PortifyStreamFrame),
-      recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.workflowId : null,
-      dispatch: (action) => { dispatchRef.current(action); hydration.observe(action) },
-      onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
-    })
-    return () => { connection.close(); hydration.stop() }
-  }, [wsUrl, WebSocketImpl, hydration])
+  const { state, hydration } = useRecordIndexStore({
+    index: portifyIndex,
+    url: wsUrl ?? defaultWsUrl(),
+    WebSocketImpl,
+    read: portifyApi.getPortify,
+    errorMessage: 'Could not load port work',
+  })
 
   const startPortify = useCallback(
     async (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => {
-      const { workflowId } = await api.startPortify(input)
+      const { workflowId } = await portifyApi.startPortify(input)
       return workflowId
     },
     [],
   )
 
   const savePortify = useCallback(async (id: string) => {
-    await api.savePortify(id)
+    await portifyApi.savePortify(id)
   }, [])
 
   const cancelPortify = useCallback(async (id: string) => {
-    await api.cancelPortify(id)
+    await portifyApi.cancelPortify(id)
   }, [])
 
   const loadPortify = hydration.load
@@ -129,16 +94,7 @@ export function usePortifyWorkflow(id: string | null | undefined): PortifyManife
 /** A canonical manifest with mounted recovery demand, never a private copy. */
 export function usePortifyDetail(id: string | null | undefined) {
   const { state, hydration } = usePortifyContext()
-  const status = useSyncExternalStore(hydration.subscribe, () => hydration.snapshot(id))
-  useEffect(() => id ? hydration.watch(id) : undefined, [id, hydration])
-  const manifest = id ? state.details[id] : undefined
-  return {
-    manifest,
-    loading: Boolean(id && !manifest && (status.status === 'idle' || status.status === 'loading')),
-    error: status.error,
-    missing: status.status === 'missing',
-    retry: () => { if (id) hydration.retry(id) },
-  }
+  return useRecordDetail(state.details, hydration, id)
 }
 
 /** The single active workflow, if any (portify is one-at-a-time). */

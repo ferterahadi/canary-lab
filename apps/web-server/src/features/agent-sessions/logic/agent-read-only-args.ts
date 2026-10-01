@@ -1,4 +1,5 @@
-import { agentModelArgs, type StageModelChoice } from './agent-models'
+import { agentModelArgs } from './agent-models'
+import type { StageModelChoice } from '../../../../../../shared/agent-models'
 
 interface ReadOnlyCodexOptions {
   prompt: string

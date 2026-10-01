@@ -1,7 +1,7 @@
 import type { RepositoryConsumer } from '../../../../shared/repository-observation'
 import { EventEmitter } from 'events'
-import type { DraftRecord } from '../features/wizard/logic/draft-types'
-import type { EvaluationExportTaskView } from '../features/evaluation/logic/evaluation-export-types'
+import type { DraftRecord } from '../../../../shared/draft-types'
+import type { EvaluationExportTaskView } from '../../../../shared/evaluation-export-types'
 
 export type WorkspaceEvent =
   | { type: 'feature-created'; feature: string }

@@ -1,10 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { collectPortSlots } from './orchestrator'
+import { collectPortSlots } from './service-specs'
 import { allocatePorts } from './port-allocator'
 import { resolvePortTokens } from './launcher/interpolate'
-import { getEnvSetsDir, backup, applySet, restore, resolveSetTargets } from './env-switcher/switch'
+import { backup, applySet, restore } from './env-switcher/switch'
+import { getEnvSetsDir, resolveSetTargets } from '../../../config/logic/envset-runtime'
 import type { BackupRecord } from './env-switcher/types'
 
 // Run primitives shared by every feature that starts a run: the run loop itself,

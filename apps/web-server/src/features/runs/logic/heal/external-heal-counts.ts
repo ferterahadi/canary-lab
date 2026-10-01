@@ -1,4 +1,4 @@
-import type { RunDetail } from '../run-store'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
 import { environmentExclusions } from '../../../../../../../shared/run-applicability'
 
 export interface CompactRunCounts {

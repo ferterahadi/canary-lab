@@ -1,19 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { hydrateEnvsetIntoWorktrees } from './worktree-hydrate'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wh-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const mkTmp = trackTempDirs('cl-wh-')
 
 /** A featureDir with an envsets config whose slots point into `repoRoot`. */
 function scaffold(opts: {

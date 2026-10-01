@@ -13,12 +13,12 @@ const mocks = vi.hoisted(() => ({
   connectAgentSessionStream: vi.fn(() => ({ close: vi.fn() })),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  // Keep the real `isAgentSessionAbsence` — the view discriminates fetch
-  // results with it, and a stubbed guard would decouple these tests from the
-  // actual absence contract.
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/agent-sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/agent-sessions')>()),
   getAgentSession: mocks.getAgentSession,
+}))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightAgentSession: mocks.getFlightAgentSession,
 }))
 

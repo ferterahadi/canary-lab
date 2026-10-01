@@ -4,13 +4,21 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
-import { compareActiveRuns } from './runs-route-support'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../logic/run-store'
-import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import { runsRoutes } from './runs'
+import { compareActiveRuns, type ExternalHealAgentRequest } from './runs-route-support'
+import { RunStore } from '../logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorLike,
+  type RestartHealResult,
+  type RestartRunResult,
+} from '../logic/run-registry'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -69,14 +77,6 @@ function writeFeatureWithRepos(name: string, repos: Array<{ name: string; localP
   )
 }
 
-function gitInit(dir: string): void {
-  const opts = { cwd: dir, stdio: 'ignore' as const }
-  execFileSync('git', ['init', '-q'], opts)
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], opts)
-  execFileSync('git', ['config', 'user.name', 'Test'], opts)
-  execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'init'], opts)
-}
-
 function addGitWorktree(sourceRepo: string, worktreePath: string): void {
   fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
   execFileSync('git', ['worktree', 'add', '-q', '--detach', worktreePath], { cwd: sourceRepo, stdio: 'ignore' })
@@ -91,7 +91,7 @@ function addGitWorktree(sourceRepo: string, worktreePath: string): void {
 function setupWorktreeFixtures(): { sourceRepo: string; runWorktree: string; miscWorktree: string } {
   const sourceRepo = path.join(tmpDir, 'source-repo')
   fs.mkdirSync(sourceRepo, { recursive: true })
-  gitInit(sourceRepo)
+  initGitRepo(sourceRepo, { commit: 'empty' })
   writeFeatureWithRepos('foo', [{ name: 'app', localPath: sourceRepo }])
   writeFeature('bare')
   writeFeatureWithRepos('ghostrepo', [{ name: 'x', localPath: path.join(tmpDir, 'does-not-exist') }])
@@ -327,9 +327,7 @@ describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
     const repo = path.join(tmpDir, 'prod-repo')
     fs.mkdirSync(repo, { recursive: true })
     fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
-    const g = (args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
-    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't'])
-    g(['add', '-A']); g(['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(repo)
     const scratch = path.join(tmpDir, 'scratch')
     execFileSync('git', ['clone', '-q', repo, scratch], { stdio: 'ignore' })
     fs.writeFileSync(path.join(scratch, 'app.js'), 'const x = 2\n')

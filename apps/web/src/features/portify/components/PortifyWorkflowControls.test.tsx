@@ -3,8 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/client'
-import * as api from '@/shared/api/client'
+import type { PortifyManifest } from '@/shared/api/portify'
+import * as portifyApi from '@/shared/api/portify'
+import * as cleanupApi from '@/shared/api/cleanup'
 import { PortifyWorkflowControls } from './PortifyWorkflowControls'
 
 const mocks = vi.hoisted(() => ({
@@ -16,10 +17,12 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/portify', () => ({
   savePortify: mocks.savePortify,
   revisePortify: mocks.revisePortify,
   cancelPortify: mocks.cancelPortify,
+}))
+vi.mock('@/shared/api/cleanup', () => ({
   openPortifyProject: mocks.openPortifyProject,
 }))
 vi.mock('../state/PortifyContext', () => ({
@@ -85,7 +88,7 @@ describe('PortifyWorkflowControls', () => {
     })
     await act(async () => click('Save overlay'))
 
-    expect(api.savePortify).toHaveBeenCalledWith('wf-1')
+    expect(portifyApi.savePortify).toHaveBeenCalledWith('wf-1')
     expect(mocks.loadPortify).toHaveBeenCalledWith('wf-1')
     expect(mocks.invalidate.mock.calls).toEqual([
       ['ports'],
@@ -113,11 +116,11 @@ describe('PortifyWorkflowControls', () => {
       root.render(<PortifyWorkflowControls manifest={manifest('editing')} onChanged={vi.fn()} />)
     })
     await act(async () => click('Cancel port work'))
-    expect(api.cancelPortify).not.toHaveBeenCalled()
+    expect(portifyApi.cancelPortify).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Discard this port work?')
 
     await act(async () => click('Discard'))
-    expect(api.cancelPortify).toHaveBeenCalledWith('wf-1')
+    expect(portifyApi.cancelPortify).toHaveBeenCalledWith('wf-1')
   })
 })
 
@@ -126,7 +129,7 @@ it('preserves local review, editor errors, and verified empty-diff presentation'
   await act(async () => root.render(<PortifyWorkflowControls manifest={manifest('ready-to-save')} onChanged={vi.fn()} />))
   expect(container.textContent).toContain('/worktree')
   await act(async () => container.querySelector<HTMLButtonElement>('[title="Open project in editor"]')!.click())
-  expect(api.openPortifyProject).toHaveBeenCalledWith('wf-1')
+  expect(cleanupApi.openPortifyProject).toHaveBeenCalledWith('wf-1')
   expect(container.textContent).toContain('no editor')
   await act(async () => root.render(<PortifyWorkflowControls manifest={manifest('ready-to-save', { diff: '' })} onChanged={vi.fn()} />))
   expect(container.textContent).toContain('No changes needed')
@@ -141,7 +144,7 @@ it('submits trimmed feedback and rehydrates the current workflow', async () => {
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
   await act(async () => click('Send & re-verify'))
-  expect(api.revisePortify).toHaveBeenCalledWith('wf-1', 'use PORT')
+  expect(portifyApi.revisePortify).toHaveBeenCalledWith('wf-1', 'use PORT')
   expect(mocks.loadPortify).toHaveBeenCalledWith('wf-1')
   expect(container.querySelector('textarea')).toBeNull()
 })
@@ -154,7 +157,7 @@ it('keeps save unavailable when revision verification failed', async () => {
   const save = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Save overlay')!
   expect(save.disabled).toBe(true)
   await act(async () => save.click())
-  expect(api.savePortify).not.toHaveBeenCalled()
+  expect(portifyApi.savePortify).not.toHaveBeenCalled()
 })
 it('preserves action errors without reporting success', async () => {
   mocks.savePortify.mockRejectedValueOnce(new Error('save failed'))

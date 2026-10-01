@@ -2,8 +2,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildAppRoots, getEnvSetsDir, getSlotFilesInSet, loadConfig, resolveSetTargets, resolveVars, selectedEnvsetSources, selectedEnvsetTargets, type EnvSetsConfig } from './envset-runtime'
-import { buildAppRoots as routeRoots } from '../routes/feature-config-support'
+import {
+  buildAppRoots,
+  getEnvSetsDir,
+  getSlotFilesInSet,
+  loadConfig,
+  resolveSetTargets,
+  resolveVars,
+  selectedEnvsetSources,
+  selectedEnvsetTargets,
+  type EnvSetsConfig,
+} from './envset-runtime'
 import * as compatibility from '../../runs/logic/runtime/env-switcher/switch'
 import { applyFeatureEnvset } from '../../runs/logic/runtime/run-primitives'
 import { hydrateEnvsetIntoWorktrees } from '../../runs/logic/runtime/env-switcher/worktree-hydrate'
@@ -30,12 +39,6 @@ function seed(target = '$CANARY_LAB/features/example/.env'): EnvSetsConfig {
 function save(config: unknown): void { fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), JSON.stringify(config)) }
 
 describe('envset runtime resolution', () => {
-  it('keeps compatibility exports connected to the shared owner', () => {
-    expect(routeRoots).toBe(buildAppRoots)
-    for (const [name, helper] of Object.entries({ getEnvSetsDir, getSlotFilesInSet, loadConfig, resolveSetTargets, resolveVars })) {
-      expect(compatibility[name as keyof typeof compatibility]).toBe(helper)
-    }
-  })
   it('seeds both aliases and lets explicit overrides replace them independently', () => {
     expect(buildAppRoots({})).toEqual({ CANARY_LAB: root, CANARY_LAB_PROJECT_ROOT: root })
     expect(buildAppRoots({ appRoots: { CANARY_LAB: '/alias', OTHER: '/other' } })).toEqual({ CANARY_LAB: '/alias', CANARY_LAB_PROJECT_ROOT: root, OTHER: '/other' })

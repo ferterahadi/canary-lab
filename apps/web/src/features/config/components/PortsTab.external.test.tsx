@@ -1,20 +1,40 @@
 import { act, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as featuresApi from '@/shared/api/features'
+import * as configApi from '@/shared/api/config'
+import * as flightsApi from '@/shared/api/flights'
+import * as workspaceApi from '@/shared/api/workspace'
 import { connectWorkspaceEvents, type WorkspaceEvent } from '@/shared/api/workspace-socket'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useWorkspaceData } from '@/shared/state/use-workspace-data'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { PortsTab } from './PortsTab'
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...await importOriginal<typeof api>(),
-  getFeatureConfigDoc: vi.fn(), listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(), getVersionStatus: vi.fn(),
-  checkPathExists: vi.fn(), getGitRemote: vi.fn(), getRepoGitStatus: vi.fn(),
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+}))
+vi.mock('@/shared/api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/features')>()),
+  listFeatures: vi.fn(),
+}))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  listFlights: vi.fn(),
+  listPlanFeatures: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  getVersionStatus: vi.fn(),
+  checkPathExists: vi.fn(),
+  getGitRemote: vi.fn(),
+  getRepoGitStatus: vi.fn(),
 }))
 vi.mock('@/shared/api/workspace-socket', () => ({ connectWorkspaceEvents: vi.fn() }))
-vi.mock('@/features/flights', () => ({ useFlightsStream: () => ({ hydrated: false, flights: [], details: {} }) }))
+vi.mock('@/features/flights/state/use-flights-stream', () => ({
+  useFlightsStream: () => ({ hydrated: false, flights: [], details: {} }),
+}))
 vi.mock('@/features/runs/state/RunsContext', () => ({ useRuns: () => ({ runs: [] }) }))
 vi.mock('@/features/portify/state/PortifyContext', async () => {
   const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
@@ -25,8 +45,8 @@ let container: HTMLDivElement
 let root: Root
 const close = vi.fn()
 function remote(portified: boolean) {
-  vi.mocked(api.listFeatures).mockResolvedValue([{ name: 'checkout', envs: ['local'], repos: [], portified }])
-  vi.mocked(api.getFeatureConfigDoc).mockResolvedValue({
+  vi.mocked(featuresApi.listFeatures).mockResolvedValue([{ name: 'checkout', envs: ['local'], repos: [], portified }])
+  vi.mocked(configApi.getFeatureConfigDoc).mockResolvedValue({
     path: '/workspace/checkout/feature.config.cjs', format: 'cjs', content: '',
     parsed: { source: '', complexFields: [], value: { name: 'checkout', repos: [{ name: 'app', localPath: '/workspace/app', startCommands: [{ command: 'node app.js', ...(portified ? { ports: [{ name: 'http', env: 'PORT' }] } : {}) }] }] } },
   })
@@ -48,12 +68,12 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   remote(true)
-  vi.mocked(api.listFlights).mockResolvedValue([])
-  vi.mocked(api.listPlanFeatures).mockResolvedValue({ tasks: [] })
-  vi.mocked(api.getVersionStatus).mockResolvedValue({ current: '1.0.0', latest: null, updateAvailable: false, packageName: null, update: null })
-  vi.mocked(api.checkPathExists).mockResolvedValue({ exists: true })
-  vi.mocked(api.getGitRemote).mockResolvedValue({ cloneUrl: null })
-  vi.mocked(api.getRepoGitStatus).mockResolvedValue({ path: '/workspace/app', expectedBranch: null, isGitRepo: false, currentBranch: null, detached: false, dirty: false, dirtyFiles: [], localBranches: [], remoteBranches: [] })
+  vi.mocked(flightsApi.listFlights).mockResolvedValue([])
+  vi.mocked(flightsApi.listPlanFeatures).mockResolvedValue({ tasks: [] })
+  vi.mocked(workspaceApi.getVersionStatus).mockResolvedValue({ current: '1.0.0', latest: null, updateAvailable: false, packageName: null, update: null })
+  vi.mocked(workspaceApi.checkPathExists).mockResolvedValue({ exists: true })
+  vi.mocked(workspaceApi.getGitRemote).mockResolvedValue({ cloneUrl: null })
+  vi.mocked(workspaceApi.getRepoGitStatus).mockResolvedValue({ path: '/workspace/app', expectedBranch: null, isGitRepo: false, currentBranch: null, detached: false, dirty: false, dirtyFiles: [], localBranches: [], remoteBranches: [] })
   vi.mocked(connectWorkspaceEvents).mockReturnValue({ close })
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -79,9 +99,9 @@ it('recovers a missed removal through existing cache and feature-list intervals,
   removed()
   expect(connectWorkspaceEvents).toHaveBeenCalledTimes(1)
   await act(async () => { root.render(null) })
-  const reads = vi.mocked(api.getFeatureConfigDoc).mock.calls.length
+  const reads = vi.mocked(configApi.getFeatureConfigDoc).mock.calls.length
   await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
-  expect(api.getFeatureConfigDoc).toHaveBeenCalledTimes(reads)
+  expect(configApi.getFeatureConfigDoc).toHaveBeenCalledTimes(reads)
   expect(close).toHaveBeenCalledOnce()
   expect(vi.getTimerCount()).toBe(0)
 })

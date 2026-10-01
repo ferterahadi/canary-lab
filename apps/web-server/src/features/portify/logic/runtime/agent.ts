@@ -1,10 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
-import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
-import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import { agentModelArgs } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity

@@ -10,9 +10,7 @@ import { listWorktrees, isUnder } from '../logic/runtime/worktree-inventory'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { ExternalHealAgentRequest, featureRepoRoots } from './runs-route-support'
-
-export { compareActiveRuns } from './runs-route-support'
-export type { ExternalHealAgentRequest } from './runs-route-support'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get('/api/cleanup/runs', async () => {
@@ -49,10 +47,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
       reply.code(400)
       return { error: 'path must be inside the logs directory' }
     }
-    if (!fs.existsSync(target)) {
-      reply.code(404)
-      return { error: 'worktree directory not found' }
-    }
+    if (!fs.existsSync(target)) return notFound(reply, 'worktree directory')
     const editor = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
     try {
       const usedEditor = launchEditorDir(editor, target)
@@ -78,10 +73,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
     const sourceRoots = await featureRepoRoots(deps.featuresDir)
     const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
     const entry = entries.find((e) => e.path === target)
-    if (!entry) {
-      reply.code(404)
-      return { error: 'worktree not found' }
-    }
+    if (!entry) return notFound(reply, 'worktree')
     const active =
       (entry.ownerKind === 'run' || entry.ownerKind === 'benchmark') && entry.ownerId
         ? !!deps.isWorktreeOwnerActive?.(entry.ownerKind, entry.ownerId)
@@ -101,10 +93,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/trim', async (req, reply) => {
     const result = deps.store.trimArtifacts(req.params.runId)
     if (!result.ok) {
-      if (result.reason === 'not-found') {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (result.reason === 'not-found') return notFound(reply, 'run')
       reply.code(409)
       return {
         error: result.reason === 'active'

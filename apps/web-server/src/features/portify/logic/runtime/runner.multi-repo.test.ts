@@ -4,13 +4,14 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { runGit } from '../../../../shared/git-repo'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { PortifyRunStore } from './store'
-import { createPortifyRunner, portifyConcurrencyCap, safeKey } from './runner'
+import { createPortifyRunner } from './runner'
+import { portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
 import { runPortifyAgent } from './agent'
 import { readOverlay } from './overlay'
 import type { PortifyManifest } from './types'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -68,14 +69,6 @@ afterEach(() => {
   for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
   roots.length = 0
 })
-
-async function gitInit(dir: string): Promise<void> {
-  await runGit(dir, ['init', '-q'])
-  await runGit(dir, ['config', 'user.email', 't@t'])
-  await runGit(dir, ['config', 'user.name', 'test'])
-  await runGit(dir, ['add', '-A'])
-  await runGit(dir, ['commit', '-q', '-m', 'init', '--no-verify'])
-}
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
   const ports = withPorts ? `      ports: [{ name: ${JSON.stringify(slot)}, env: ${JSON.stringify(env)} }],\n` : ''
@@ -162,7 +155,7 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
   fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
   fs.mkdirSync(featureDir, { recursive: true })
   fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
-  await gitInit(appRepo)
+  initGitRepo(appRepo)
   writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
   return { featuresDir, logsDir, appRepo }
 }
@@ -187,7 +180,7 @@ describe('createPortifyRunner (integration)', () => {
       for (const r of [appA, appB]) {
         fs.mkdirSync(path.join(r, 'src'), { recursive: true })
         fs.writeFileSync(path.join(r, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
-        await gitInit(r)
+        initGitRepo(r)
       }
       fs.mkdirSync(featureDir, { recursive: true })
       writeConfig(featureDir, [
@@ -222,7 +215,7 @@ describe('createPortifyRunner (integration)', () => {
         fs.mkdirSync(path.join(mono, svc, 'src'), { recursive: true })
         fs.writeFileSync(path.join(mono, svc, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
       }
-      await gitInit(mono)
+      initGitRepo(mono)
       // A dirty sibling is outside both declared services and must not block setup.
       fs.writeFileSync(path.join(mono, 'unrelated.txt'), 'leave untouched')
       fs.mkdirSync(featureDir, { recursive: true })
@@ -277,7 +270,7 @@ describe('createPortifyRunner (integration)', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-'))
       roots.push(dir)
       fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
-      await gitInit(dir)
+      initGitRepo(dir)
       fs.writeFileSync(path.join(dir, 'f.txt'), 'changed') // now dirty
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
@@ -286,7 +279,7 @@ describe('createPortifyRunner (integration)', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-corrupt-'))
       roots.push(dir)
       fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
-      await gitInit(dir)
+      initGitRepo(dir)
       fs.writeFileSync(path.join(dir, '.git', 'index'), 'corrupt index')
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       vi.mocked(runPortifyAgent).mockClear()
@@ -301,7 +294,7 @@ describe('createPortifyRunner (integration)', () => {
       roots.push(a, b)
       for (const dir of [a, b]) {
         fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
-        await gitInit(dir)
+        initGitRepo(dir)
         fs.writeFileSync(path.join(dir, 'f.txt'), 'changed') // now dirty
       }
       const runner = await runnerWith([feat({ repos: [{ name: 'ra', localPath: a }, { name: 'rb', localPath: b }] })])

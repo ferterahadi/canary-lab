@@ -5,25 +5,18 @@ import path from 'path'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { FlightManifest } from '../../../../../../shared/flights/types'
 import { applyFlightStageRemedy, flightStageRemedy } from './stage-remedy'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 const roots: string[] = []
 afterAll(() => {
   for (const r of roots) fs.rmSync(r, { recursive: true, force: true })
 })
 
-function git(cwd: string, ...args: string[]) {
-  execFileSync('git', args, { cwd, stdio: 'ignore' })
-}
-
 function makeRepo(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   roots.push(dir)
   fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
-  git(dir, 'init')
-  git(dir, 'config', 'user.email', 't@t')
-  git(dir, 'config', 'user.name', 't')
-  git(dir, 'add', '-A')
-  git(dir, 'commit', '-m', 'init')
+  initGitRepo(dir)
   return dir
 }
 

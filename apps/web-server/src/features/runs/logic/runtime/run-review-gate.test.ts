@@ -4,8 +4,9 @@ import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assertNoPendingRunReview, pendingRunReview } from './run-review-gate'
 import { suiteReviewRevision } from './suite-review'
-import type { RunDetail, RunStore } from '../run-store'
-import type { RunManifest } from './manifest'
+import type { RunStore } from '../run-store'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })

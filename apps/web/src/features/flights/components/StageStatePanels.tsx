@@ -1,11 +1,14 @@
 import { useFlightRemedy } from '../state/use-flight-remedy'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { FlightManifest, FlightStage, FlightStageErrorDetail } from '@/shared/api/client'
+import * as flightsApi from '@/shared/api/flights'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { FlightManifest, FlightStage, FlightStageErrorDetail } from '@shared/flights/types'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
-import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
+import { STAGE_COLUMN } from './stage-meta'
+import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
+import { stageStateLine } from './StageStatusLines'
 import { CheckpointControls } from './CheckpointControls'
-import { truncate } from './StageDetail'
+import { truncate } from './StageActivity'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { BootEvidenceRows } from '@/shared/ui/BootEvidence'
 import { StatusDot } from '@/shared/ui/atoms'
@@ -50,7 +53,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
   const runRemedy = (action: 'stash' | 'commit') => {
     setRemedyBusy(action)
     setRemedyError(null)
-    api.applyFlightRemedy(flightId, action)
+    flightsApi.applyFlightRemedy(flightId, action)
       .catch((err) => {
         if (current.current === target) setRemedyError(err instanceof Error ? err.message : String(err))
       })
@@ -107,7 +110,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           <button
             type="button"
             data-testid="stage-error-open-log"
-            onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
+            onClick={() => { workspaceApi.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
             className="cl-button min-h-6 shrink-0 px-2 py-0.5"
           >
             Open full service log

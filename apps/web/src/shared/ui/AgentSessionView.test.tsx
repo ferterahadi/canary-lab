@@ -3,9 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionEvent } from '@/shared/api/client'
-import { AgentSessionView, Markdown, SubagentThreadRow, SystemRow, groupSystemLines, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
-
+import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+import { AgentSessionView, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
+import { Markdown, SubagentThreadRow, SystemRow, groupSystemLines } from './AgentSessionRows'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('Markdown (agent session prose)', () => {

@@ -1,14 +1,26 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import * as api from '../api/client'
-import type { ExecutionType, Feature, RunIndexEntry, RunStatus, VersionStatus } from '../api/types'
+import type { Feature } from '../api/types'
+import type { VersionStatus } from '@shared/version-status'
+import type { ExecutionType } from '@shared/verification'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunStatus } from '@shared/run-state'
 import { useMcpPromo } from './McpPromoContext'
-import { SettingsModal } from '@/features/config'
-import { FeatureChipBadge, FlightStatusChip, presentActivityRunStatus, readGroupOpen, writeGroupOpen, type FeatureActivity, type FeatureFlightAction } from '@/features/flights'
-import { SPEC_TONE, featureTone, presentRunStatus, type RunWaitingState } from '@/features/runs'
+import { SettingsModal } from '@/features/config/components/SettingsModal'
+import {
+  FeatureChipBadge,
+  FlightStatusChip,
+  type FeatureFlightAction,
+} from '@/features/flights/components/FlightChipState'
+import { presentActivityRunStatus, type FeatureActivity } from '@/features/flights/state/feature-activity'
+import { readGroupOpen, writeGroupOpen } from '@/features/flights/lib/group-open-state'
+import { SPEC_TONE, featureTone } from '@/features/runs/utils/spec-integrity'
+import { presentRunStatus } from '@/features/runs/utils/run-presentation'
+import type { RunWaitingState } from '@/features/runs/utils/run-waiting-state'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
-import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 import { shortDateTime } from '../lib/format'
 import { Tooltip } from '../ui/Tooltip'
 import { useLiveCoverageStates } from '../state/use-live-coverage'
@@ -458,13 +470,28 @@ function FeatureRow({
   )
 }
 
-/** The suite's last finished run as one dot, in a slot every row reserves so
- *  names line up whether or not a suite has run. A live run keeps showing the
- *  previous result; the chip on the right says what is happening now. A pass
- *  that needed repair cycles wears a ring: it is a different story from a
- *  clean pass. */
+/** The suite's last finished run as one dot, so names line up whether or not a
+ *  suite has run. A live run keeps showing the previous result; the chip on the
+ *  right says what is happening now. A pass that needed repair cycles wears a
+ *  ring: it is a different story from a clean pass. No run on record — never
+ *  run, or its runs were cleaned up — is an unfilled hairline circle, so the
+ *  slot reads as "no result" rather than a missing mark. */
 function LastRunDot({ feature, run }: { feature: string; run?: RunIndexEntry }) {
-  if (!run) return <span aria-hidden="true" className="ml-2 w-[0.55rem] shrink-0" />
+  if (!run) {
+    return (
+      <Tooltip label="No runs on record">
+        <span
+          role="img"
+          aria-label="No runs on record"
+          data-testid={`last-run-${feature}`}
+          data-status="none"
+          className="ml-2 flex shrink-0 self-center"
+        >
+          <span aria-hidden="true" className="cl-status-dot border border-line" />
+        </span>
+      </Tooltip>
+    )
+  }
   const cycles = run.status === 'passed' ? run.healCycles ?? 0 : 0
   const outcome = cycles > 0 ? `passed after ${cycles} repair cycle${cycles === 1 ? '' : 's'}` : run.status
   const label = [`Last run ${outcome}`, shortDateTime(run.endedAt ?? run.startedAt), run.env].filter(Boolean).join(' · ')

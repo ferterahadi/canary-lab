@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { presentedIndexStages } from '../lib/external-work'
-import { flightIndexEntry } from '../state/flights-stream-state'
+import { flightIndexEntry } from '@shared/flights/index-entry'
 import { presentedFlightRows } from './presented-flight-rows'
 
 const startedAt = '2026-09-23T00:00:00Z'

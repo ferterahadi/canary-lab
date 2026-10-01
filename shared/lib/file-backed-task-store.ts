@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { atomicWrite } from './atomic-write'
+import { atomicWriteJson } from './atomic-write'
 
 // Generic file-backed, event-emitting store for a feature's background-task /
 // workflow records. One home for the layout every Canary Lab feature store had
@@ -69,6 +69,64 @@ export interface TaskStoreConfig<T> {
   }
 }
 
+/** `idOfEntry` for a store whose older index rows predate `id` and carry only
+ *  the feature's own key (`workflowId`, `jobId`, …). Without it such a row is
+ *  unaddressable: remove() cannot drop it and it resurrects on refresh. */
+export function legacyEntryId(key: string): (entry: TaskIndexEntry) => string | undefined {
+  return (entry) => {
+    if (typeof entry.id === 'string') return entry.id
+    const legacy = entry[key]
+    return typeof legacy === 'string' ? legacy : undefined
+  }
+}
+
+export const INTERRUPTED_BY_RESTART = 'Interrupted by server restart'
+
+interface AbortableRecord {
+  status: string
+  endedAt?: string
+  error?: string
+}
+
+/** The reconcile policy for a job whose in-memory driver died with the process:
+ *  it can never finish, so it becomes `aborted`, keeping any end time or error
+ *  it had already recorded. The parameter type is `never` for a record whose
+ *  status union has no `aborted`, so a store that cannot represent the outcome
+ *  fails to compile instead of writing a status its readers reject. */
+export function abortOnRestart<T extends AbortableRecord>(
+  isInterrupted: 'aborted' extends T['status'] ? (rec: T) => boolean : never,
+): NonNullable<TaskStoreConfig<T>['reconcile']> {
+  return {
+    isInterrupted,
+    mark: (rec, now) => ({ ...rec, status: 'aborted', endedAt: rec.endedAt ?? now, error: rec.error ?? INTERRUPTED_BY_RESTART }),
+  }
+}
+
+/** A listener set whose emit survives a throwing listener: a bad subscriber
+ *  must not break the persistence that fired the event. The feature stores
+ *  wrapping this one re-key its events (`id` → `workflowId`, …) through one. */
+export class TaskListeners<E> {
+  private readonly listeners = new Set<(event: E) => void>()
+
+  add(fn: (event: E) => void): void {
+    this.listeners.add(fn)
+  }
+
+  delete(fn: (event: E) => void): void {
+    this.listeners.delete(fn)
+  }
+
+  emit(event: E): void {
+    for (const fn of this.listeners) {
+      try {
+        fn(event)
+      } catch {
+        /* a bad listener must not break persistence */
+      }
+    }
+  }
+}
+
 export class IllegalTaskTransitionError extends Error {
   constructor(public readonly from: string, public readonly to: string) {
     super(`Illegal task transition: ${from} → ${to}`)
@@ -76,7 +134,7 @@ export class IllegalTaskTransitionError extends Error {
 }
 
 export class FileBackedTaskStore<T> {
-  private readonly listeners = new Set<(event: TaskStoreEvent) => void>()
+  private readonly listeners = new TaskListeners<TaskStoreEvent>()
 
   constructor(private readonly config: TaskStoreConfig<T>) {}
 
@@ -122,6 +180,13 @@ export class FileBackedTaskStore<T> {
     return entries.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
   }
 
+  /** The index rows in a feature's own shape: `id` and `createdAt` are this
+   *  store's bookkeeping, mirrored from the feature's key and start time, so
+   *  they are dropped rather than leaked into the public row. */
+  rows<Row>(): Row[] {
+    return this.list().map(({ id: _id, createdAt: _createdAt, ...rest }) => rest as unknown as Row)
+  }
+
   private readIndex(): TaskIndexEntry[] {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.indexPath, 'utf8'))
@@ -132,12 +197,12 @@ export class FileBackedTaskStore<T> {
   }
 
   private writeIndex(entries: TaskIndexEntry[]): void {
-    atomicWrite(this.indexPath, JSON.stringify(entries, null, 2) + '\n')
+    atomicWriteJson(this.indexPath, entries)
   }
 
   save(rec: T): void {
     const id = this.config.idOf(rec)
-    atomicWrite(this.recordPath(id), JSON.stringify(rec, null, 2) + '\n')
+    atomicWriteJson(this.recordPath(id), rec)
     const entries = this.readIndex()
     const entry = this.config.indexEntryOf(rec)
     const idx = entries.findIndex((e) => this.entryId(e) === id)
@@ -268,13 +333,7 @@ export class FileBackedTaskStore<T> {
   }
 
   private emit(event: TaskStoreEvent): void {
-    for (const fn of this.listeners) {
-      try {
-        fn(event)
-      } catch {
-        /* a bad listener must not break persistence */
-      }
-    }
+    this.listeners.emit(event)
   }
 }
 

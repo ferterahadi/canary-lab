@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
 import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -13,14 +14,9 @@ vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
 const { detectAgents, main, parseArgs, setup } = await import('./setup')
 
-const tmpDirs: string[] = []
 const originalCodeHome = process.env.CODEX_HOME
 
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-setup-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
+const mkTmp = trackTempDirs('cl-setup-')
 
 function mkWorkspace(parent = mkTmp()): string {
   const workspace = path.join(parent, 'my-workspace')
@@ -60,7 +56,6 @@ beforeEach(async () => {
 afterEach(async () => {
   if (originalCodeHome === undefined) delete process.env.CODEX_HOME
   else process.env.CODEX_HOME = originalCodeHome
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 

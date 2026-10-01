@@ -1,6 +1,8 @@
 import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
-import { ACTIVITY_STAGE, derivedFlightToken, stageRowKey, type FeatureActivity } from '@/features/flights'
-import type { FlightIndexEntry, FlightStageKey } from '../api/client'
+import { ACTIVITY_STAGE, type FeatureActivity } from '@/features/flights/state/feature-activity'
+import { derivedFlightToken } from '@/features/flights/lib/derived-stages'
+import { stageRowKey } from '@/features/flights/components/StageRail'
+import type { FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
 // The workspace's navigation state — what view is open, which feature / run /

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, healDisplayValue, healEnabled } from './heal-threshold'
+import { healDisplayValue, healEnabled } from './heal-threshold'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@shared/launcher/types'
 
 describe('heal-threshold', () => {
   it('reads an absent threshold as enabled at the default', () => {

@@ -1,10 +1,12 @@
 import { repositoryConsumerKey } from '@shared/repository-observation'
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import * as api from '../api/client'
-import type { Feature, VersionStatus } from '../api/types'
-import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
+import * as flightsApi from '../api/flights'
+import * as workspaceApi from '../api/workspace'
+import type { Feature } from '../api/types'
+import type { VersionStatus } from '@shared/version-status'
+import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '@shared/flights/types'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
-import { useFlightsStream } from '@/features/flights'
+import { useFlightsStream } from '@/features/flights/state/use-flights-stream'
 import type { InvalidationTopic } from './invalidation-bus'
 import { useWorkspaceFeatures } from './use-workspace-features'
 import { useLiveResource } from './use-live-resource'
@@ -74,7 +76,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   }, [forgetStreamFlight])
   const flights = flightsStream.hydrated ? flightsStream.flights : restFlights
   const { value: planningTasks, refresh: refreshPreFlights } = useLiveResource<PlanFeaturesTask[]>(
-    'pre-flights', 'workspace', async () => (await api.listPlanFeatures()).tasks,
+    'pre-flights', 'workspace', async () => (await flightsApi.listPlanFeatures()).tasks,
     {
       cache: 'pre-flight-plans',
       // Unknown initial reads must recover too, including a hung first request.
@@ -88,10 +90,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   useEffect(() => { flightsRef.current = flights }, [flights])
 
   const refreshVersion = useCallback((): void => {
-    api.getVersionStatus().then(setVersionStatus).catch(() => {})
+    workspaceApi.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
   const refreshFlights = useCallback((): void => {
-    api.listFlights().then(setRestFlights).catch(() => {})
+    flightsApi.listFlights().then(setRestFlights).catch(() => {})
   }, [])
   // Initial flights / version loads; useLiveResource owns the planning list.
   useEffect(() => { refreshFlights() }, [refreshFlights])

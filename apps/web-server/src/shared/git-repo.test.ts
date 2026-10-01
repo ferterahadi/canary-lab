@@ -18,18 +18,13 @@ import {
   validateConfiguredRepoBranches,
 } from './git-repo'
 import { resolveRepoPath } from './repo-identity'
+import { git, initGitRepo } from '../../../../tools/test-helpers/git-repo'
 
 function tmpRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-')))
-  const git = (args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
-  git(['init', '-b', 'main'])
-  git(['config', 'user.email', 'test@example.com'])
-  git(['config', 'user.name', 'Test User'])
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
-  git(['add', 'README.md'])
-  git(['commit', '-m', 'init'])
-  git(['checkout', '-b', 'feature/demo'])
-  git(['checkout', 'main'])
+  initGitRepo(dir, { branch: 'main' })
+  git(dir, 'branch', 'feature/demo')
   return dir
 }
 

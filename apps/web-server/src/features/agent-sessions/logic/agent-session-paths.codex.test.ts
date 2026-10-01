@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { listCodexSessionLogs } from './agent-session-paths'
 import {
+  listCodexSessionLogs,
   encodeClaudeProjectDir,
   claudeConfigDir,
   codexConfigDir,
@@ -14,24 +14,30 @@ import {
   locateCodexSessionLog,
   locateLatestCodexSessionLog,
   locateLatestSessionLogForAgent,
+} from './agent-session-paths'
+import {
   locateMostRecentAgentSessionRef,
   loadAgentSessionLog,
   loadAgentSession,
   loadAgentSessionMeta,
   parseAgentSessionRefFile,
-  renderAgentSessionContext,
-  buildFullSessionTranscript,
-  writeFullSessionTranscript,
   selectAgentSessionRef,
   resolveManifestSessionRef,
   writeWorkflowAgentRef,
   resolveWorkflowAgentRef,
+} from './agent-session-log'
+import {
+  renderAgentSessionContext,
+  buildFullSessionTranscript,
+  writeFullSessionTranscript,
+} from './agent-session-render'
+import {
   buildAgentSessionResponse,
-  parseAgentSessionLine,
   loadSubagentThread,
   loadSubagentThreads,
   subagentDirFor,
-} from './agent-session-log'
+} from './agent-session-subagents'
+import { parseAgentSessionLine } from './agent-session-parse'
 
 let homeDir: string
 

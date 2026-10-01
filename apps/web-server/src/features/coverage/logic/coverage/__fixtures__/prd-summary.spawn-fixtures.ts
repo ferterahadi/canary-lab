@@ -1,7 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 import path from 'path'
-import { summarizePrd, renderPrdSummaryMarkdown, buildPrdSummaryPrompt, readPrdSummary, PRD_SUMMARY_JSON } from '../prd-summary'
+import { summarizePrd, buildPrdSummaryPrompt } from '../prd-summary'
+import { renderPrdSummaryMarkdown, readPrdSummary, PRD_SUMMARY_JSON } from '../prd-summary-render'
 import { computeDocsHash } from '../docs-collection'
 import type { DocsCollection } from '../docs-collection'
 

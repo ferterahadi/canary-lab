@@ -2,7 +2,7 @@ import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createCompactExecHandler } from './exec-tool'
-import type { CanaryLabMcpExecCallEvent, CanaryLabMcpToolName } from './tool-support'
+import type { CanaryLabMcpExecCallEvent, CanaryLabMcpToolName } from './tool-profiles'
 import type { CanaryLabToolDefinition } from './tool-registry'
 
 const ctx = {} as ServerContext

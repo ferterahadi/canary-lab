@@ -1,8 +1,12 @@
 import path from 'path'
 import { bridgeStoreEvents } from '../../../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
-import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from './types'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../../shared/lib/file-backed-task-store'
+import type {
+  CoverageJobManifest,
+  CoverageJobIndexEntry,
+  CoverageJobKind,
+} from '../../../../../../../../shared/coverage/types'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, legacyEntryId, abortOnRestart } from '../../../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for coverage background jobs. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the coverage-specific
@@ -46,7 +50,7 @@ function indexEntryFromManifest(m: CoverageJobManifest) {
 }
 
 export class CoverageJobRunStore implements CoverageJobStore {
-  private readonly listeners = new Set<(event: CoverageJobStoreEvent) => void>()
+  private readonly events = new TaskListeners<CoverageJobStoreEvent>()
   private readonly store: FileBackedTaskStore<CoverageJobManifest>
 
   constructor(logsDir: string) {
@@ -59,28 +63,16 @@ export class CoverageJobRunStore implements CoverageJobStore {
       indexEntryOf: indexEntryFromManifest,
       // Legacy rows (pre-`id` index shape) carry only `jobId`; fall back to it so
       // remove/prune/reconcile can address them (else they resurrect on refresh).
-      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { jobId?: string }).jobId),
+      idOfEntry: legacyEntryId('jobId'),
       featureOf: (m) => m.feature,
       withFeature: (m, feature) => ({ ...m, feature }),
-      reconcile: {
-        isInterrupted: (m) => m.status === 'running',
-        mark: (m, now) => ({
-          ...m,
-          status: 'aborted',
-          endedAt: m.endedAt ?? now,
-          error: m.error ?? 'Interrupted by server restart',
-        }),
-      },
+      reconcile: abortOnRestart((m) => m.status === 'running'),
     })
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, jobId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, jobId: e.id }))
   }
 
   list(): CoverageJobIndexEntry[] {
-    // Drop the generic store's bookkeeping fields (id/createdAt mirror
-    // jobId/startedAt) so the public index shape stays exactly CoverageJobIndexEntry.
-    return this.store.list().map(({ id: _id, createdAt: _createdAt, ...rest }) =>
-      rest as unknown as CoverageJobIndexEntry,
-    )
+    return this.store.rows<CoverageJobIndexEntry>()
   }
 
   get(jobId: string): CoverageJobManifest | null {
@@ -113,17 +105,11 @@ export class CoverageJobRunStore implements CoverageJobStore {
   }
 
   onEvent(fn: (event: CoverageJobStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: CoverageJobStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: CoverageJobStoreEvent): void {
-    for (const fn of this.listeners) {
-      try { fn(event) } catch { /* a bad listener must not break persistence */ }
-    }
+    this.events.delete(fn)
   }
 }
 

@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { versionRoutes, type VersionRouteDeps } from './version'
 import { UpdateJobConflictError, type InstallRunner, type UpdateJobStore } from '../logic/update-job'
-import type { VersionState, VersionStatus } from '../logic/version-state'
+import type { VersionState } from '../logic/version-state'
+import type { VersionStatus } from '../../../../../../shared/version-status'
 
 async function makeApp(deps: VersionRouteDeps): Promise<FastifyInstance> {
   const app = Fastify()

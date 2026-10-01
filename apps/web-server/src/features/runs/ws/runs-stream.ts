@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify'
-import type { RunStore, RunStoreEvent, RunDetail } from '../logic/run-store'
-import type { RunIndexEntry } from '../logic/runtime/manifest'
+import type { RunStore, RunStoreEvent } from '../logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
+import type { RunIndexEntry } from '../../../../../../shared/run-index'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
+import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
 
 // `/ws/runs` — the browser's primary live-update channel. On connect, it sends
 // a single `snapshot` frame with the runs index. Subsequent mutations from
@@ -10,9 +12,8 @@ import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../lo
 // `list-changed`). Active run detail also keeps a low-rate HTTP refresh as a
 // recovery path for best-effort filesystem and WebSocket delivery.
 //
-// Coverage is excluded for this module — the wire-up is too thin to test
-// deterministically without a real WebSocket round-trip. The RunStore event
-// emission underneath is fully covered.
+// The socket lifecycle is `registerRecordStream`'s (shared/ws/record-stream.ts,
+// tested there); this module only maps store events to frames.
 
 export interface RunsStreamDeps {
   store: RunStore
@@ -43,49 +44,33 @@ export async function runsStreamRoutes(
   app: FastifyInstance,
   deps: RunsStreamDeps,
 ): Promise<void> {
-  app.get('/ws/runs', { websocket: true }, (socket) => {
-    const send = (frame: RunsStreamFrame): void => {
-      try { socket.send(JSON.stringify(frame)) } catch { /* socket closed */ }
-    }
+  const detailOf = (runId: string): RunDetail | null => {
+    const detail = deps.store.get(runId)
+    return detail ? withSingleAttemptDetailState(detail, deps.store.logsDir) : null
+  }
+  const index = (): RunIndexEntry[] => withSingleAttemptIndexState(deps.store.list(), deps.store.logsDir, deps.featuresDir)
 
-    // Initial snapshot. Detail is only included for currently-active runs
-    // (where the client is most likely to render extended info immediately);
-    // terminal runs' details are loaded lazily via the first `update` frame
-    // for them. This keeps the snapshot small for users with long history.
-    const runs = withSingleAttemptIndexState(deps.store.list(), deps.store.logsDir, deps.featuresDir)
-    const details: Record<string, RunDetail> = {}
-    for (const entry of runs) {
-      if (isActiveRunStatus(entry.status)) {
-        const detail = deps.store.get(entry.runId)
-        if (detail) details[entry.runId] = withSingleAttemptDetailState(detail, deps.store.logsDir)
-      }
-    }
-    send({ type: 'snapshot', runs, details })
-
-    const onEvent = (event: RunStoreEvent): void => {
-      if (event.kind === 'removed' && event.runId) {
-        send({ type: 'removed', runId: event.runId })
-        return
-      }
-      if (event.kind === 'index-changed') {
-        send({ type: 'list-changed', runs: withSingleAttemptIndexState(deps.store.list(), deps.store.logsDir, deps.featuresDir) })
-        return
-      }
-      if (event.kind === 'journal-changed') {
-        return
-      }
+  registerRecordStream<RunsStreamFrame, RunStoreEvent>(app, {
+    path: '/ws/runs',
+    store: deps.store,
+    // Detail is only included for currently-active runs (where the client is
+    // most likely to render extended info immediately); terminal runs' details
+    // are loaded lazily via the first `update` frame for them. This keeps the
+    // snapshot small for users with long history.
+    snapshot: () => {
+      const runs = index()
+      return { type: 'snapshot', runs, details: activeDetails(runs, (entry) => isActiveRunStatus(entry.status), (entry) => entry.runId, detailOf) }
+    },
+    frameFor: (event) => {
+      if (event.kind === 'removed' && event.runId) return { type: 'removed', runId: event.runId }
+      if (event.kind === 'index-changed') return { type: 'list-changed', runs: index() }
+      if (event.kind === 'journal-changed') return undefined
       // bootstrap / changed / finalized — read the detail back through the
       // store so the frame carries the full latest manifest snapshot, not
       // just a partial diff. Cheap (single file read).
-      if (!event.runId) return
-      const detail = deps.store.get(event.runId)
-      if (!detail) return
-      send({ type: 'update', runId: event.runId, detail: withSingleAttemptDetailState(detail, deps.store.logsDir) })
-    }
-
-    deps.store.onEvent(onEvent)
-    socket.on('close', () => {
-      deps.store.offEvent(onEvent)
-    })
+      if (!event.runId) return undefined
+      const detail = detailOf(event.runId)
+      return detail ? { type: 'update', runId: event.runId, detail } : undefined
+    },
   })
 }

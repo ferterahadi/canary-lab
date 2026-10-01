@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { CleanupListing } from '@/shared/api/types'
+import * as cleanupApi from '@/shared/api/cleanup'
+import * as runsApi from '@/shared/api/runs'
+import type { CleanupListing } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { ConfirmModal, useEscapeToClose } from '@/shared/ui/atoms'
+import { ConfirmModal, useEscapeToClose } from '@/shared/ui/Overlays'
 import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
@@ -33,7 +34,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
     setLoading(true)
     setError(null)
     try {
-      setListing(await api.cleanupRuns())
+      setListing(await cleanupApi.cleanupRuns())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load cleanup data')
     } finally {
@@ -111,7 +112,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
     setBusy(true)
     setActionError(null)
     const results = await Promise.allSettled(
-      ids.map((id) => (action === 'trim' ? api.trimRun(id) : api.deleteRun(id))),
+      ids.map((id) => (action === 'trim' ? cleanupApi.trimRun(id) : runsApi.deleteRun(id))),
     )
     const failures = results.filter((r) => r.status === 'rejected').length
     if (failures > 0) {

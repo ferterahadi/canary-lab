@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => ({
   connectAgentSessionStream: vi.fn(() => ({ close: vi.fn() })),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightAgentSession: mocks.getFlightAgentSession,
 }))
 

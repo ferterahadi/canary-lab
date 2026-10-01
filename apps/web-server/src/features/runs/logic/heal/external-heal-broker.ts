@@ -2,7 +2,7 @@ import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunManifest,
-} from '../runtime/manifest'
+} from '../../../../../../../shared/run-manifest'
 import type { RunStoreEvent } from '../run-store'
 import { HEARTBEAT_STALE_MS } from '../../../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../../../shared/run-mode'

@@ -4,24 +4,34 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type SpawnOptions } from 'node:child_process'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-process'
 import { agentModelArgs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-models'
-import { claudeSessionLogPath, locateClaudeSessionLog, resolveWorkflowAgentRef, loadAgentSession, loadSubagentThreads, type AgentSessionRef } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-log'
-import { listCodexSessionLogs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-paths'
+import {
+  resolveWorkflowAgentRef,
+  loadAgentSession,
+  type AgentSessionRef,
+} from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-log'
+import {
+  loadSubagentThreads,
+} from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-subagents'
+import {
+  listCodexSessionLogs,
+  claudeSessionLogPath,
+  locateClaudeSessionLog,
+} from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-paths'
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
-import { services, testEnvironment, ports } from './evaluator'
+import { testEnvironment, ports } from './evaluator'
 import { releasePorts } from '../../apps/web-server/src/features/runs/logic/runtime/port-allocator'
 import { canaryRunDir, json, quote, readJson, sha, write } from './files'
 import { prepareIsolation, prepareNativeIsolation, isolatedShell } from './isolation'
 import type { Attempt, ExecutionResult, StudyManifest, Usage, UsageAttribution } from './types'
 import type { AgentSpawnArgs } from '../../apps/web-server/src/features/runs/logic/runtime/heal-agent-spawn'
 import { loadPromptTemplate, promptPath } from '../../apps/web-server/src/shared/prompts'
-import { runtimeEnvironment, serviceCommand, writeRunbook } from './runtime'
+import { runtimeEnvironment, serviceCommand, writeRunbook, services } from './runtime'
 import { stopAttemptServices } from './cleanup'
 import { stageIntervals, type StageBoundary } from './telemetry'
 import { parseUsage, sessionRole } from './usage'
 import { attributeUsage, assessPolicy, type SessionInput } from './attribution'
 import { claudePermissionArgs, claudeStudyCommand, REPAIR_ALLOWED_TOOLS } from './claude-permissions'
 import { DEFAULT_DIAGNOSIS_POLICY } from '../../shared/diagnosis-policy'
-export { parseUsage, sessionRole, groupUsage } from './usage'
 
 export function freezeToolConfig(command: string, agent: 'claude' | 'codex', args: AgentSpawnArgs, codexToolArgs: string[] = []): string {
   const suffix = args.promptFile ? ` -- ${JSON.stringify(`@${args.promptFile}`)}` : ''
@@ -128,10 +138,11 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
   scriptedAgent?: (args: AgentSpawnArgs) => string,
 ): Promise<ExecutionResult> {
   // Imported only after the worker removes the demo's global model override.
-  const [{ RunOrchestrator }, { realPtyFactory }, { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder }, { RunnerLog }] = await Promise.all([
+  const [{ RunOrchestrator }, { realPtyFactory }, { buildOrchestratorHealPrompt }, { makeAgentSpawnCommandBuilder }, { RunnerLog }] = await Promise.all([
     import('../../apps/web-server/src/features/runs/logic/runtime/orchestrator'),
     import('../../apps/web-server/src/features/runs/logic/runtime/pty-spawner'),
     import('../../apps/web-server/src/features/runs/logic/runtime/auto-heal'),
+    import('../../apps/web-server/src/features/runs/logic/runtime/heal-agent-spawn'),
     import('../../apps/web-server/src/features/runs/logic/runtime/runner-log'),
   ])
   const { defaultPlaywrightSpawner } = await import('../../apps/web-server/src/features/runs/logic/runtime/run-spawn')

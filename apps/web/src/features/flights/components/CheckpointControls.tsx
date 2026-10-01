@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { isElicitationReview, checkpointInputToken } from '@/shared/lib/workspace-view-state'
-import * as api from '@/shared/api/client'
-import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
+import * as flightsApi from '@/shared/api/flights'
+import type { FlightCheckpoint, FlightManifest, FlightStage } from '@shared/flights/types'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
 import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
-import { useEvaluationExports } from '@/features/evaluation'
-import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { checkpointOptionLabel, STAGE_COLUMN } from './stage-meta'
+import { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
+import { evaluationTaskId } from './StageFacts'
 import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
@@ -105,7 +107,7 @@ export function CheckpointControls({
   }
   const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
     const elicitationToken = checkpointInputToken(flightId, checkpoint.kind)
-    mutate(() => api.respondFlightCheckpoint(flightId, { ...response, ...(elicitationToken ? { elicitationToken } : {}) }))
+    mutate(() => flightsApi.respondFlightCheckpoint(flightId, { ...response, ...(elicitationToken ? { elicitationToken } : {}) }))
   }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>

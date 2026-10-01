@@ -1,10 +1,6 @@
 import os from 'os'
 import path from 'path'
 
-export { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
-export { FEATURE_CONFIG_NAMES, findExistingConfig, type ResolvedConfigPath } from '../logic/config-file'
-export { listEnvFolders, syncEnvsInConfig, readEnvsetsConfig, writeEnvsetsConfig, type EnvsetsConfigJson } from '../logic/envset-config'
-
 export const SLOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/
 
 /** A slot is one file name inside `envsets/<env>/`, so it must be a single path
@@ -18,8 +14,6 @@ export const SLOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/
 export function isValidSlotName(name: string): boolean {
   return SLOT_NAME_PATTERN.test(name) && name !== '.' && name !== '..'
 }
-
-export { buildAppRoots } from '../logic/envset-runtime'
 
 export function shortenHome(p: string): string {
   const home = os.homedir()

@@ -27,7 +27,9 @@ vi.mock('./trace-enrichment', () => ({
   extractTraceSummary: traceMocks.extractTraceSummary,
 }))
 
-const { slugify, testIdFor, default: SummaryReporter } = await import('./summary-reporter')
+const { slugify } = await import('./summary-types')
+const { testIdFor } = await import('./summary-known-tests')
+const { default: SummaryReporter } = await import('./summary-reporter')
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })

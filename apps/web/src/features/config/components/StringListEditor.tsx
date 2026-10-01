@@ -1,4 +1,6 @@
-import { TextInput, IconButton, PlusIcon, TrashIcon } from '@/shared/ui/atoms'
+import { IconButton } from '@/shared/ui/atoms'
+import { TextInput } from '@/shared/ui/FormFields'
+import { PlusIcon, TrashIcon } from '@/shared/ui/Icons'
 
 interface Props {
   values: string[]

@@ -1,7 +1,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Feature, RunDetail, RunIndexEntry } from '../api/types'
+import type { Feature } from '../api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import type { DurableView, PersistedView } from '../lib/workspace-view-state'
 import type { WorkspaceEvent, ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
 import type { RunsStreamFrame } from '@/features/runs/state/runs-state'
@@ -12,10 +14,28 @@ import type { useWorkspaceSelection } from './use-workspace-selection'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const api = vi.hoisted(() => ({ listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(),
   getVersionStatus: vi.fn(), listRuns: vi.fn(), getRunDetail: vi.fn() }))
-vi.mock('../api/client', async (importOriginal) => ({ ...await importOriginal<typeof import('../api/client')>(), ...api }))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  listFeatures: api.listFeatures,
+}))
+vi.mock('../api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/flights')>()),
+  listFlights: api.listFlights,
+  listPlanFeatures: api.listPlanFeatures,
+}))
+vi.mock('../api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/workspace')>()),
+  getVersionStatus: api.getVersionStatus,
+}))
+vi.mock('../api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/runs')>()),
+  listRuns: api.listRuns,
+  getRunDetail: api.getRunDetail,
+}))
 const viewState = vi.hoisted(() => ({ readPersistedView: vi.fn(), persistView: vi.fn(), onViewChangedInOtherTab: vi.fn() }))
 vi.mock('../lib/workspace-view-state', () => viewState)
-vi.mock('@/features/flights', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/flights')>(),
+vi.mock('@/features/flights/state/use-flights-stream', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/flights/state/use-flights-stream')>()),
   useFlightsStream: () => ({ hydrated: false, flights: [], details: {} }),
 }))
 const workspace = vi.hoisted(() => ({ connect: vi.fn(), close: vi.fn(), options: null as ConnectWorkspaceEventsOptions | null }))

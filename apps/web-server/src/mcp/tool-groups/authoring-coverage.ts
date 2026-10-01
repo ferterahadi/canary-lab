@@ -1,7 +1,8 @@
 // MCP tools — the externally-driven PRD-summary and coverage-mapping passes.
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { resolveDocuments, documentResolutionInput } from '../document-resolution'
+import { resolveDocuments } from '../document-resolution'
+import { documentResolutionInput } from '../../features/coverage/logic/coverage/document-resolution'
 import { FeatureNotFoundError } from '../../features/coverage/logic/coverage/service'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
 import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/runner'
@@ -11,9 +12,20 @@ import {
   startExternalSummary,
   submitExternalSummary,
 } from '../../features/coverage/logic/coverage/jobs/external'
-import type { ParsedRequirement } from '../../features/coverage/logic/coverage/prd-summary'
+import type { ParsedRequirement } from '../../features/coverage/logic/coverage/prd-summary-parse'
 import type { ProposedMapping } from '../../../../../shared/coverage/types'
-import { type ToolGroupContext, asJsonResult, coverageMappingInput, errorResult, failureResult, gettingStartedBusyResult, summaryRequirementInput, variantDimensionInput } from '../tool-support'
+import {
+  type ToolGroupContext,
+  asJsonResult,
+  errorResult,
+  failureResult,
+  gettingStartedBusyResult,
+} from '../tool-support'
+import {
+  coverageMappingInput,
+  summaryRequirementInput,
+  variantDimensionInput,
+} from '../../features/coverage/logic/coverage/external-submissions'
 
 export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx

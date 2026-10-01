@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { FlightStage, FlightStageKey } from './types'
+import type { FlightStage, FlightStageKey } from '../../../../../../shared/flights/types'
 import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
 import { readPrdSummary } from '../../coverage/logic/coverage/prd-summary-render'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
@@ -8,7 +8,7 @@ import { listEvaluationExportTasks } from '../../evaluation/logic/evaluation-exp
 import { readOverlay } from '../../portify/logic/runtime/overlay'
 import { PortifyRunStore } from '../../portify/logic/runtime/store'
 import { readRunSummary, runCounts } from '../../runs/logic/run-detail'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { startCommandPortSlotCounts } from '../../../../../../shared/launcher/port-injectability'
 import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
@@ -262,7 +262,7 @@ export function workspaceStageEvidence(
   if (wanted.length === 0) return {}
   let config: FeatureConfig | undefined
   try {
-    config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+    config = findFeature(deps.featuresDir, feature)
   } catch {
     return {}
   }

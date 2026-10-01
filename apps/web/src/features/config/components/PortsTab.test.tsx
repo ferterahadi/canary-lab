@@ -3,17 +3,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  checkPathExists,
-  getFeatureConfigDoc,
-  getGitRemote,
-  getPortify,
-  getRepoGitStatus,
-  openPortifyProject,
-  removePortifyOverlay,
-  type ParsedConfigDoc,
-  type PortifyManifest,
-} from '@/shared/api/client'
+import { checkPathExists, getGitRemote, getRepoGitStatus } from '@/shared/api/workspace'
+import { getFeatureConfigDoc, removePortifyOverlay, type ParsedConfigDoc } from '@/shared/api/config'
+import { getPortify, type PortifyManifest } from '@/shared/api/portify'
+import { openPortifyProject } from '@/shared/api/cleanup'
 import { PortsTab } from './PortsTab'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
@@ -25,19 +18,25 @@ function CaptureInvalidate() {
   return null
 }
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    checkPathExists: vi.fn(),
-    getFeatureConfigDoc: vi.fn(),
-    getGitRemote: vi.fn(),
-    getPortify: vi.fn(),
-    getRepoGitStatus: vi.fn(),
-    openPortifyProject: vi.fn(),
-    removePortifyOverlay: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  checkPathExists: vi.fn(),
+  getGitRemote: vi.fn(),
+  getRepoGitStatus: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+  removePortifyOverlay: vi.fn(),
+}))
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  getPortify: vi.fn(),
+}))
+vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/cleanup')>()),
+  openPortifyProject: vi.fn(),
+}))
 
 // PortsTab imports parsers/components from ReposTab, which imports RunsContext.
 vi.mock('@/features/runs/state/RunsContext', () => ({

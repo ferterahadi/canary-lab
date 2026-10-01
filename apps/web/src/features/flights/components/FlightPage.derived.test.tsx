@@ -3,8 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
@@ -53,13 +52,11 @@ const mocks = vi.hoisted(() => ({
   evaluationTasks: vi.fn(() => []),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/flights', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
   getFlightRemedy: mocks.getFlightRemedy,
   applyFlightRemedy: mocks.applyFlightRemedy,
-  getRunDetail: mocks.getRunDetail,
-  listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
@@ -68,27 +65,39 @@ vi.mock('@/shared/api/client', () => ({
   redoFlight: mocks.redoFlight,
   startFlight: mocks.startFlight,
   deleteFlight: mocks.deleteFlight,
-  listRuns: mocks.listRuns,
-  getEnvsetSlot: mocks.getEnvsetSlot,
-  getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getFeatureCoverage: mocks.getFeatureCoverage,
-  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
-  getPlaywrightConfig: mocks.getPlaywrightConfig,
-  getRepoGitStatus: mocks.getRepoGitStatus,
-  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
-  putPlaywrightConfig: mocks.putPlaywrightConfig,
-  listFeatureDocs: mocks.listFeatureDocs,
   getFlightEntryOptions: mocks.getFlightEntryOptions,
-  getProjectConfig: mocks.getProjectConfig,
-  putProjectConfig: mocks.putProjectConfig,
-  importFeatureDoc: mocks.importFeatureDoc,
-  deleteFeatureDoc: mocks.deleteFeatureDoc,
-  deleteFeature: mocks.deleteFeature,
   linkFeatureDocPath: mocks.linkFeatureDocPath,
-  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/runs', () => ({
+  getRunDetail: mocks.getRunDetail,
+  listJournal: mocks.listJournal,
+  listRuns: mocks.listRuns,
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+}))
+vi.mock('@/shared/api/config', () => ({
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
+  getPlaywrightConfig: mocks.getPlaywrightConfig,
+  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
+  putPlaywrightConfig: mocks.putPlaywrightConfig,
+  getProjectConfig: mocks.getProjectConfig,
+  putProjectConfig: mocks.putProjectConfig,
+  deleteFeature: mocks.deleteFeature,
+}))
+vi.mock('@/shared/api/coverage', () => ({
+  getFeatureCoverage: mocks.getFeatureCoverage,
+  listFeatureDocs: mocks.listFeatureDocs,
+  importFeatureDoc: mocks.importFeatureDoc,
+  deleteFeatureDoc: mocks.deleteFeatureDoc,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  getRepoGitStatus: mocks.getRepoGitStatus,
+  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/internal', () => ({
   ApiError: class ApiError extends Error {
     constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
   },

@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts, shortLocation } from './RunDetailColumn'
+import {
+  downloadEvaluationReport,
+  evaluationFilename,
+  evaluationHref,
+  isEvaluationExportable,
+} from './run-export-links'
+import {
+  canRestartHeal,
+  repoServiceCount,
+  servicePrimaryLabel,
+  serviceTabLabelParts,
+} from './RunOverviewTabs'
+import { shortLocation } from './RunPlaybackPanels'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {

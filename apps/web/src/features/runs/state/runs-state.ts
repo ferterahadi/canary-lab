@@ -1,7 +1,8 @@
-import { runIndexEntry } from '@shared/run-index'
-import { ApiError } from '@/shared/api/client'
-import type { RunDetail, RunIndexEntry, TransientAction } from '@/shared/api/types'
-import { isTerminalRunStatus } from '@shared/run-state'
+import { runIndexEntry, type RunIndexEntry } from '@shared/run-index'
+import { ApiError } from '@/shared/api/internal'
+import type { RunDetail } from '@shared/run-detail'
+import { isTerminalRunStatus, type TransientAction } from '@shared/run-state'
+import type { ConnectionState } from '@/shared/state/record-stream'
 
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives
 // outside the .tsx file so it can be unit-tested in the existing
@@ -16,12 +17,6 @@ export type RunsStreamFrame =
   | { type: 'list-changed'; runs: RunIndexEntry[] }
 
 // ─── State + actions ─────────────────────────────────────────────────────
-
-export type ConnectionState =
-  | 'connecting'      // initial, before the first WS open
-  | 'live'            // WS open, push frames flowing
-  | 'reconnecting'    // WS dropped after being live; fixed-delay recovery is in progress
-  | 'disconnected'    // gave up — surfaced to the user as a banner
 
 export interface RunsState {
   runs: RunIndexEntry[]

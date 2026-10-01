@@ -3,12 +3,12 @@
 // side too so the in-place "show all runs" toggle and the optimistic-after-
 // delete refresh don't always need a round trip.
 
-import type { JournalEntry } from '@/shared/api/types'
+import type { JournalSection } from '@shared/run-detail'
 
 // Newest first by iteration. Entries with a null iteration sink to the
 // bottom (this is also what the server returns, but we re-sort to be safe
 // after a client-side mutation).
-export function newestFirst(entries: readonly JournalEntry[]): JournalEntry[] {
+export function newestFirst(entries: readonly JournalSection[]): JournalSection[] {
   return [...entries].sort((a, b) => {
     const ai = a.iteration ?? -Infinity
     const bi = b.iteration ?? -Infinity
@@ -23,9 +23,9 @@ export interface JournalFilter {
 }
 
 export function filterEntries(
-  entries: readonly JournalEntry[],
+  entries: readonly JournalSection[],
   filter: JournalFilter,
-): JournalEntry[] {
+): JournalSection[] {
   return entries.filter((e) => {
     if (filter.feature && e.feature !== filter.feature) return false
     if (filter.run && e.run !== filter.run) return false

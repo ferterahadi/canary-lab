@@ -21,8 +21,8 @@ import { register } from './index'
  */
 const probe = vi.hoisted(() => ({ asked: [] as (string | undefined)[], answer: 'codex' as string | null }))
 
-vi.mock('../runs/logic/runtime/auto-heal', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../runs/logic/runtime/auto-heal')>()),
+vi.mock('../runs/logic/runtime/heal-agent-spawn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../runs/logic/runtime/heal-agent-spawn')>()),
   pickAvailableHealAgent: (requested?: string) => {
     probe.asked.push(requested)
     return probe.answer

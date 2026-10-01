@@ -2,8 +2,16 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { RunDetail } from '../run-store'
-import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, buildExternalRunSnapshotSlim, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
+import {
+  buildExternalFailureDetail,
+  buildExternalHealContext,
+  buildExternalRunSnapshot,
+  buildExternalRunSnapshotSlim,
+  slimRepeatHealContext,
+  writeHealSignal,
+} from './external-heal-surface'
+import { normalizeRunCounts } from './external-heal-counts'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 
 let tmpDir: string

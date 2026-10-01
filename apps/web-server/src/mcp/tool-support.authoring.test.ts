@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DraftRecord, ExternalDraftStage } from '../features/wizard/logic/draft-store'
+import type { DraftRecord, ExternalDraftStage } from '../../../../shared/draft-types'
 import { isTransientGenerationStatus } from '../features/wizard/routes/tests-draft-support'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import {

@@ -6,22 +6,24 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests } from '../api/client'
+import { ApiError } from '../api/internal'
+import { getTestFileReview, getTestSourceComparison } from '../api/features'
+import { getFeatureTests } from '../api/config'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
 
 import { TestCasesColumn } from './TestCasesColumn'
 
-vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return {
-    ...actual,
-    getFeatureTests: vi.fn(),
-    getTestFileReview: vi.fn(),
-    getTestSourceComparison: vi.fn(),
-  }
-})
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  getTestFileReview: vi.fn(),
+  getTestSourceComparison: vi.fn(),
+}))
 
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({

@@ -13,14 +13,6 @@ import {
 import { splitAnnotations } from './text'
 import type { FlowNode, TestReviewCase } from './types'
 
-export {
-  actionFromIdentifier,
-  assignedNameFromStatement,
-  readableActionName,
-  readableCreatedObject,
-  readableObject,
-} from '../../../../shared/readable-tests/language'
-
 export function audienceTitle(title: string): string {
   const cleaned = title
     .replace(/^[A-Z]\.\s+/, '')

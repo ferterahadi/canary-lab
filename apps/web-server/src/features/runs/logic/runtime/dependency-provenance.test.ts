@@ -1,4 +1,3 @@
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -6,13 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, removeWorktree } from './repo-worktree'
 import { prepareWorktreeDependencies } from './dependency-provenance'
 import * as gitRepo from '../../../../shared/git-repo'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
 
 let root: string
 let source: string
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
-}
 
 function initRepo(dir: string, schema = 'model User { id Int @id }'): void {
   fs.mkdirSync(dir, { recursive: true })

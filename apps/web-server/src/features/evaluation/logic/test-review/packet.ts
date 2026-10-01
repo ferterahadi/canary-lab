@@ -1,4 +1,4 @@
-import type { RunDetail, PlaywrightPlaybackEvent } from '../../../runs/logic/run-store'
+import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
 import { missingAssertionReason, unknownAssertion } from './assertions'
 import { sourceKey, specFileOf } from './ast'

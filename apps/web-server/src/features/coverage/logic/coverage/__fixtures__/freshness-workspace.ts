@@ -1,7 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { regeneratePrdSummary, runCoverageEngine } from '../service'
+import { regeneratePrdSummary } from '../feature-docs'
+import { runCoverageEngine } from '../coverage-engine'
 import { fakePropose, fakeSummarize } from './fake-coverage-agents'
 
 export async function freshnessWorkspace() {

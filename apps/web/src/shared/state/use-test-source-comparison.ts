@@ -1,4 +1,4 @@
-import * as api from '../api/client'
+import * as featuresApi from '../api/features'
 import { ApiError } from '../api/internal'
 import type { TestSourceComparison } from '@shared/test-review'
 import { useLiveResource } from './use-live-resource'
@@ -19,7 +19,7 @@ export function useTestSourceComparison({ feature, runId, featureDir, snapshotDi
   const key = feature && runId && snapshotDir ? JSON.stringify([feature, runId, featureDir, snapshotDir]) : null
   const resource = useLiveResource<ComparisonResult>('tests', key, async () => {
     try {
-      return { kind: 'comparison', comparison: await api.getTestSourceComparison(feature!, runId!) }
+      return { kind: 'comparison', comparison: await featuresApi.getTestSourceComparison(feature!, runId!) }
     } catch (error) {
       if (error instanceof ApiError && error.status === 404 && error.message === 'Suite not found') return { kind: 'missing-suite' }
       if (error instanceof ApiError && error.status === 409 && /snapshot/i.test(error.message)) return { kind: 'missing-snapshot' }

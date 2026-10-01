@@ -1,5 +1,5 @@
 import { recoverClaudeFinalText } from './agent-stream'
-import { claudeSessionLogPath } from './agent-session-log'
+import { claudeSessionLogPath } from './agent-session-paths'
 
 // Two formulas every internal agent producer (wizard plan/spec, coverage PRD +
 // annotate, eval rewrite, portify) had copy-pasted around its `runAgentProcess`

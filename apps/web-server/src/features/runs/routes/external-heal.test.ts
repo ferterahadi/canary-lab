@@ -16,11 +16,13 @@ import {
   type ExternalHealBrokerDeps,
 } from '../logic/heal/external-heal-broker'
 
-import { createRegistry, RunStore } from '../logic/run-store'
+import { RunStore } from '../logic/run-store'
+import { createRegistry } from '../logic/run-registry'
 
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 
-import { writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import { writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 
 import type { RunStoreEvent } from '../logic/run-store'
 

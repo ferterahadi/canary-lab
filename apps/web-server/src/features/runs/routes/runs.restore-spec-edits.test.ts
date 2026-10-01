@@ -7,7 +7,8 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike } from '../logic/run-store'
+import { RunStore } from '../logic/run-store'
+import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 

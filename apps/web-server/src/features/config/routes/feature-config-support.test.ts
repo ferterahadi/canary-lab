@@ -2,18 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { isValidSlotName, shortenHome } from './feature-config-support'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
+import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
+import { buildAppRoots } from '../logic/envset-runtime'
 import {
-  FEATURE_CONFIG_NAMES,
-  PLAYWRIGHT_CONFIG_NAMES,
-  buildAppRoots,
-  findExistingConfig,
-  isValidSlotName,
   listEnvFolders,
   readEnvsetsConfig,
-  shortenHome,
   syncEnvsInConfig,
   writeEnvsetsConfig,
-} from './feature-config-support'
+} from '../logic/envset-config'
 
 let tmpDir: string
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
 import { ComparisonLegend, ComparisonTable } from '@/shared/ui/ComparisonTable'
-import { FieldRow, Modal, TextInput } from '@/shared/ui/atoms'
+import { FieldRow, TextInput } from '@/shared/ui/FormFields'
+import { Modal } from '@/shared/ui/Overlays'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
@@ -44,7 +45,7 @@ function CopyFromSession({
   const resource = useLiveResource(null, selected ? JSON.stringify([feature, slot, selected.mode, selected.source]) : null,
     async () => {
       if (!selected) return null
-      const result = selected.mode === 'env' ? await api.getEnvsetSlot(feature, selected.source, slot) : await api.readDotenvFile(selected.source)
+      const result = selected.mode === 'env' ? await configApi.getEnvsetSlot(feature, selected.source, slot) : await configApi.readDotenvFile(selected.source)
       return { entries: result.entries, label: selected.source }
     }, { refreshKey: selected?.revision })
   const busy = selected !== null && !resource.confirmed && !resource.error

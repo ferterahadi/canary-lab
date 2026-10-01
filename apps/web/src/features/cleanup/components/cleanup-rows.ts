@@ -1,4 +1,7 @@
-import type { CleanupListing, CleanupWorktree, ExecutionType, PortifyCleanupEntry, RunStatus } from '@/shared/api/types'
+import type { CleanupWorktree } from '@/shared/api/types-cleanup'
+import type { CleanupListing, PortifyCleanupEntry } from '@shared/cleanup-listing'
+import type { ExecutionType } from '@shared/verification'
+import type { RunStatus } from '@shared/run-state'
 
 // A unified table row covering both indexed runs and orphan directories.
 export interface Row {

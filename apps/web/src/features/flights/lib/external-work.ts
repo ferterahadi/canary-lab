@@ -1,4 +1,10 @@
-import type { FlightCheckpointKind, FlightIndexEntry, FlightStageKey, FlightStageStatus, FlightStatus } from '@/shared/api/client'
+import type {
+  FlightCheckpointKind,
+  FlightIndexEntry,
+  FlightStageKey,
+  FlightStageStatus,
+  FlightStatus,
+} from '@shared/flights/types'
 
 // An `external-work` park is the one checkpoint kind that is NOT a question.
 //

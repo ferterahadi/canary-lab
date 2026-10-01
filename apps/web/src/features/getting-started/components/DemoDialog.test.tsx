@@ -9,7 +9,7 @@ import type {
   OnboardingWorkflow,
   OnboardingWorkflowAction,
   OnboardingWorkflowId,
-} from '@/shared/api/client'
+} from '@/shared/api/config'
 import { DemoDialog } from './DemoDialog'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

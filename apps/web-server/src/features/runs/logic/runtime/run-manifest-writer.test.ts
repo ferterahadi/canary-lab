@@ -8,8 +8,8 @@ import path from 'path'
 import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
-import type { RunManifest } from './manifest'
-import type { ServiceSpec } from './orchestrator'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { ServiceSpec } from './run-orchestrator-types'
 import { detectRepoCollision } from './repo-collision'
 
 let tmpDir: string

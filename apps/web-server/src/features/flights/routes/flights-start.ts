@@ -4,8 +4,19 @@ import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
+import { startFlight } from '../logic/conductor'
+import {
+  FlightConflictError,
+  FlightExistsError,
+  FlightFrozenError,
+  FlightStageEntryError,
+} from '../logic/flight-errors'
+import type { FlightEntryMode } from '../logic/flight-stages'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
 

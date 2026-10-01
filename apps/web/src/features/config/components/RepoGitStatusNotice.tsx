@@ -1,4 +1,4 @@
-import type { GitRepoStatus } from '@/shared/api/client'
+import type { GitRepoStatus } from '@/shared/api/workspace'
 
 export function RepoGitStatusNotice({ status, confirmed, error }: {
   status: GitRepoStatus | null

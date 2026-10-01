@@ -2,12 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { docsDirFor } from '../../coverage/logic/coverage/docs-collection'
 import { readPersistedCoverageState } from '../../coverage/logic/coverage/service'
-import { portInjectability, type PortInjectability } from '../../../../../../shared/launcher/port-injectability'
+import { portInjectability } from '../../../../../../shared/launcher/port-injectability'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
 import { listRuns } from '../../runs/logic/run-store'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-
+import type { FeatureStageEvidence } from '../../../../../../shared/flights/stage-evidence'
 // On-disk stage evidence — the artifacts each pipeline stage leaves behind.
 // One home for the probes so the two consumers can't drift:
 //   - the stage-entry validator (routes/flights.ts) gating a `fromStage` jump,
@@ -108,31 +108,6 @@ export function hasAuthoredSpecs(featureDir: string): boolean {
   } catch {
     return false
   }
-}
-
-/** Per-feature evidence block shipped on each /api/features row. Scaffold is
- *  implied (the row only exists because feature.config loaded); portify ships
- *  as the existing top-level `portified` flag; run/heal/export state is the
- *  client's — its live runs + export stores already carry it. */
-export interface FeatureStageEvidence {
-  /** A captured envset exists (env-capture stage artifact). */
-  envCapture: boolean
-  /** This feature's services have been proven to boot — the other half of Suite
-   *  setup, and the only half an app with no env files can ever satisfy. */
-  booted: boolean
-  /** docs/_prd-summary.json exists (prd-summary stage artifact). */
-  prdSummary: boolean
-  /** At least one spec under e2e/ (specs-coverage stage artifact). */
-  specs: boolean
-  /** Durable requirement-mapping evidence. A spec alone leaves this absent;
-   *  annotations preserve manual/legacy work and `_coverage-state.json`
-   *  records a mapper that completed with zero links. */
-  coverageMapping: 'absent' | 'fresh' | 'stale'
-  /** How far the config gets this feature toward booting concurrently.
-   *  Parallel readiness is a property of the config, not of Portify: a service
-   *  that natively reads `PORT` declares its slot outright and needs no
-   *  overlay. See shared/launcher/port-injectability.ts. */
-  portInjectability: PortInjectability
 }
 
 /** `logsDir`/`feature` are optional so callers with no run history to consult

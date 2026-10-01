@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import type { FlightIndexEntry } from '@/shared/api/client'
+import type { FlightIndexEntry } from '@shared/flights/types'
 import type { Feature } from '@/shared/api/types'
 import { resolveFeatureFlightAction } from '../components/FlightChipState'
 import { useDerivedFeatureStages } from '../lib/derived-stages'

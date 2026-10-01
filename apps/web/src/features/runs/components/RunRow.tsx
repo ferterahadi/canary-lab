@@ -1,4 +1,7 @@
-import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import type { ExecutionType } from '@shared/verification'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunStatus } from '@shared/run-state'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-state'

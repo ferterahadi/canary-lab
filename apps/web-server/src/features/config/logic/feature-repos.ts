@@ -1,6 +1,6 @@
 import type { RepositoryObserver } from '../../../shared/repository-observer'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, type GitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { describeFastForward, describeRepoCheckout, fastForwardToUpstream, type RepoCheckoutStatus } from '../../../shared/git-upstream'
@@ -17,7 +17,7 @@ type RepoResult<T> = { ok: true; value: T } | { ok: false; statusCode: number; e
 type RepoTarget = { feature: string; repo: string }
 
 function resolveRepo(deps: FeatureRepoDeps, target: RepoTarget, mutation: boolean): RepoResult<RepoPrerequisite> {
-  const feature = loadFeatures(deps.featuresDir).find((entry) => entry.name === target.feature)
+  const feature = findFeature(deps.featuresDir, target.feature)
   if (!feature) return { ok: false, statusCode: 404, error: 'feature not found' }
   const repo = findRepo(feature, target.repo)
   if (!repo) return { ok: false, statusCode: 404, error: 'repo not found' }

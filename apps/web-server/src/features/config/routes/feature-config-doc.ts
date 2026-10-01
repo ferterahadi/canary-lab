@@ -12,8 +12,10 @@ import { resolveRepoPath } from '../../../shared/repo-identity'
 import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo } from '../logic/feature-repos'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { removeFeaturePortification } from '../../portify/logic/remove-portification'
-import { FEATURE_CONFIG_NAMES, findExistingConfig, listEnvFolders } from './feature-config-support'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
+import { listEnvFolders } from '../logic/envset-config'
 import { deleteSuite } from '../logic/feature-deletion'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── feature.config.{cjs,js,ts} ───────────────────────────────────────
@@ -21,15 +23,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.get<{ Params: { name: string } }>('/api/features/:name/config-doc', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-    if (!cfg) {
-      reply.code(404)
-      return { error: 'config file not found' }
-    }
+    if (!cfg) return notFound(reply, 'config file')
     const content = fs.readFileSync(cfg.path, 'utf-8')
     const parsed = readFeatureConfig(content)
     return { path: cfg.path, format: cfg.format, content, parsed }
@@ -40,15 +36,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (!cfg) {
-        reply.code(404)
-        return { error: 'config file not found' }
-      }
+      if (!cfg) return notFound(reply, 'config file')
       const source = fs.readFileSync(cfg.path, 'utf-8')
       // Always sync `envs:` to match the actual envset folders on disk —
       // the General tab no longer edits this list (Envsets tab is the
@@ -180,15 +170,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (!cfg) {
-        reply.code(404)
-        return { error: 'config file not found' }
-      }
+      if (!cfg) return notFound(reply, 'config file')
       const pins: Array<{ name: string; branch: string }> = []
       for (const repo of feature.repos ?? []) {
         if (typeof repo.localPath !== 'string') continue

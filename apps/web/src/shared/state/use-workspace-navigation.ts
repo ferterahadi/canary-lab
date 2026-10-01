@@ -17,7 +17,7 @@ import {
   type FlightLauncherIntent,
   type NavState,
 } from './nav-state'
-import type { FlightStageKey } from '../api/client'
+import type { FlightStageKey } from '@shared/flights/types'
 
 // Owns the workspace navigation: the routed state, the URL/localStorage
 // persistence, the cross-tab sync, and the selection-mirror refs the WS handler

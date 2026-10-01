@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { atomicWrite } from '../../shared/lib/atomic-write'
+import { atomicWriteJson } from '../../shared/lib/atomic-write'
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -37,6 +37,6 @@ export function writeMcpConfig(file: string, config: Record<string, unknown>): v
     }
   }
   const mode = fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : 0o600
-  atomicWrite(file, `${JSON.stringify(config, null, 2)}\n`, mode)
+  atomicWriteJson(file, config, mode)
   fs.chmodSync(file, mode)
 }

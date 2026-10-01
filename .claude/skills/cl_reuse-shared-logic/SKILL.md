@@ -29,11 +29,20 @@ slightly different" is how five slightly-different copies are born.
 | Colour / spacing / radius / type | CSS tokens + layout precedents → `cl_ui-design-philosophy` | hardcode hex, add a UI kit |
 | Long-running background task | file-backed store pattern → `cl_async-task-ux` | bespoke job tracking |
 | **Spawn an agent CLI** (claude/codex) | `runAgentProcess` + `buildClaudeAgenticArgs` (`agent-sessions/logic/agent-process.ts`) | re-implement spawn + tee + idle |
+| Read-only agent pass that answers with JSON | `runReadOnlyAnswerAgent` (`agent-sessions/logic/agent-completion.ts`) | rebuild the claude/codex read-only argv + session pin per caller |
 | Idle / liveness timeout | `startIdleTimer` (`agent-sessions/logic/agent-idle-timer.ts`) | inline `setInterval` + `lastOutputAt` |
 | Recover claude's answer from stream-json stdout | `recoverClaudeFinalText` (`agent-sessions/logic/agent-stream.ts`) | re-parse envelopes inline |
 | Path of claude's session JSONL | `claudeSessionLogPath` (`agent-sessions/logic/agent-session-log.ts`) | recompute `~/.claude/projects/...` |
 | Show an agent's progress/output | `AgentSessionView` + `tailAgentSession` → `cl_surfacing-agent-work` | a new viewer |
+| Feature store wrapper over `FileBackedTaskStore` | `TaskListeners`, `rows()`, `legacyEntryId`, `abortOnRestart` (`shared/lib/file-backed-task-store.ts`) | a private listener `Set` + `emit`, a hand-rolled bookkeeping strip or restart reconcile |
+| Record push channel (`/ws/<records>`) | `registerRecordStream` + `activeDetails`; any JSON frame via `sendFrame` (`apps/web-server/src/shared/ws/record-stream.ts`) | a per-stream try/`socket.send` closure |
+| Look up one suite by name | `findFeature` (`apps/web-server/src/shared/feature-loader.ts`) | `loadFeatures(dir).find(...)` |
+| Route 404 | `return notFound(reply, 'run')` (`apps/web-server/src/shared/http-error.ts`) | `reply.code(404)` + a literal body |
+| JSON file write | `atomicWriteJson` (`shared/lib/atomic-write.ts`) | tmp-then-rename by hand |
 | MCP tool surface | `mcp/tool-groups/` + `tool-support.ts` registry → `cl_add-mcp-tool` | a parallel tool path |
+| Web store fed by a full-manifest `/ws` stream | `createRecordIndex` + `useRecordIndexStore` + `useRecordDetail` (`apps/web/src/shared/state/record-index-store.ts`); `ConnectionState` lives in `record-stream.ts` | a per-feature reducer, hydration adapter and provider wiring |
+| Test temp dir / real git repo | `trackTempDirs` (`tools/test-helpers/temp-dir.ts`); `initGitRepo` + `git` (`tools/test-helpers/git-repo.ts`) | a per-file `mkTmp` + cleanup loop, or a five-line `git init`/identity/commit block |
+| Popover dismissal + placement | `useDismissOnOutsideMousedown` / `useEscapeToClose` (`apps/web/src/shared/ui/Overlays.tsx`), `useAnchoredPosition` (`shared/ui/use-anchored-position.ts`) | a raw `document` keydown/mousedown listener — it bypasses the Escape layer stack |
 
 ## The agent-process runner (consolidated — keep it that way)
 
@@ -45,7 +54,7 @@ List the current call sites when you need them — an enumeration in this file w
 rot between edits:
 
 ```bash
-grep -rln runAgentProcess apps/web-server/src --include='*.ts' | grep -v '\.test\.'
+grep -rlnE 'runAgentProcess|runReadOnlyAnswerAgent' apps/web-server/src --include='*.ts' | grep -v '\.test\.'
 ```
 
 The primitive owns the shared core: spawn; pipe + tee stdout/stderr; bump the idle

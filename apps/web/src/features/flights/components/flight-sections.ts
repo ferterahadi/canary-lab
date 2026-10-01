@@ -1,4 +1,4 @@
-import type { FlightStageKey } from '@/shared/api/client'
+import type { FlightStageKey } from '@shared/flights/types'
 
 /** User-facing rows. The conductor's execution order and persisted stage order
  *  stay separate from this grouping. */

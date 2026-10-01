@@ -3,7 +3,11 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import ts from 'typescript'
-import { __testReviewExportInternals, buildEvaluationLlmPrompt, buildTestReviewPacket, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
+import { __testReviewExportInternals, createEvaluationHtml } from './test-review-export'
+import { buildEvaluationLlmPrompt } from './test-review/rewrite'
+import { buildTestReviewPacket } from './test-review/packet'
+import { buildReadOnlyCodexArgs } from '../../agent-sessions/logic/agent-read-only-args'
+import { AGENT_DEFAULT_CHOICE } from '../../../../../../shared/agent-models'
 import { detail, testEndEvent } from './__fixtures__/test-review-fixtures'
 
 let tmpDir: string
@@ -15,6 +19,11 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
+
+// The rewrite agent's codex argv, as runReadOnlyAnswerAgent builds it for the
+// default model choice.
+const evaluationCodexArgs = (prompt: string, outputPath?: string, outputSchemaPath?: string) =>
+  buildReadOnlyCodexArgs({ prompt, models: AGENT_DEFAULT_CHOICE, outputPath, outputSchemaPath })
 
 describe('test review export', () => {
   it('builds Codex rewrite args with supported read-only flags', () => {

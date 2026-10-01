@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import { useDismissOnOutsideMousedown, useEscapeToClose } from '@/shared/ui/Overlays'
 import type { SortKey } from './cleanup-rows'
 
 // "Quick select" presets collapsed into a single dropdown so the toolbar stays
@@ -10,14 +11,8 @@ export function QuickSelectMenu<T>({ presets, onSelect }: {
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent): void => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
-  }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
+  useEscapeToClose(() => setOpen(false), open)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button

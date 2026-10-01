@@ -1,6 +1,6 @@
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useState } from 'react'
-import type { CoverageJobManifest } from '@/shared/api/types'
+import type { CoverageJobManifest } from '@shared/coverage/types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'

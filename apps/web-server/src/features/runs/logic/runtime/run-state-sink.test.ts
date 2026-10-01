@@ -4,7 +4,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { FileRunStateSink } from './run-state-sink'
-import { readManifest, readRunsIndex, writeRunsIndex, type RunManifest } from './manifest'
+import { readManifest, readRunsIndex, writeRunsIndex } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
 
 let logsDir: string

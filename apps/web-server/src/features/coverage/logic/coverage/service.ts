@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
+import { findFeature, listSpecFiles, loadFeatures } from '../../../../shared/feature-loader'
 import { extractCoverageTestsFromSource, extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
 import type { CoverageLedger, PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
@@ -20,16 +20,11 @@ import {
 import { readCoverageRunState } from './run-state'
 import { coverageJobStore } from './jobs/store'
 import { GENERATED_DOC_PREFIX, readDocsCollection } from './docs-collection'
-import { readPrdSummary } from './prd-summary'
+import { readPrdSummary } from './prd-summary-render'
 import { mappingInputs } from './coverage-engine'
 import { mappingInferenceSnapshot } from './mapping-cache'
 import { deriveCoverageFreshness, unreadableSourceDocs } from './freshness'
 import type { CoverageInputReads } from './input-reads'
-
-export { LEGACY_MAPPINGS_JSON, applyExternalCoverageMappings, buildCoverageMappingContext, flagMappingIssues, hasPrdSummary, runCoverageEngine } from './coverage-engine'
-export type { ApplyExternalCoverageArgs, ApplyExternalCoverageResult, CoverageMappingContext, CoverageMappingTest, MappingTestSource, RunCoverageEngineArgs, RunCoverageEngineDeps, RunCoverageEngineResult } from './coverage-engine'
-export { applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from './feature-docs'
-export type { ApplyExternalSummaryArgs, ApplyExternalSummaryResult, BuildSummaryAuthoringResult, FeatureDoc, FeatureDocsListing, RegeneratePrdSummaryArgs, RegeneratePrdSummaryDeps, RegeneratePrdSummaryResult, SummaryAuthoringContext, SummaryAuthoringDoc } from './feature-docs'
 
 // The single computation layer for the Requirement Coverage Ledger. Both the REST
 // route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so
@@ -43,7 +38,7 @@ export class FeatureNotFoundError extends Error {
 }
 
 export function resolveFeatureDir(featuresDir: string, feature: string): string {
-  const found = loadFeatures(featuresDir).find((f) => f.name === feature)
+  const found = findFeature(featuresDir, feature)
   if (!found || !found.featureDir) throw new FeatureNotFoundError(feature)
   return found.featureDir
 }
@@ -51,7 +46,7 @@ export function resolveFeatureDir(featuresDir: string, feature: string): string 
 /** True when a feature with this name is discoverable (cheap existence guard for
  *  the async job start path, which would otherwise fail deep in the driver). */
 export function featureExists(featuresDir: string, feature: string): boolean {
-  const found = loadFeatures(featuresDir).find((f) => f.name === feature)
+  const found = findFeature(featuresDir, feature)
   return Boolean(found && found.featureDir)
 }
 
@@ -258,5 +253,3 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   }
   return ledger
 }
-
-export { GENERATED_DOC_PREFIX }

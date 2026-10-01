@@ -1,6 +1,6 @@
 import { REPOSITORY_FRESHNESS_MS, REPOSITORY_RECONCILE_MS, repositoryConsumerKey } from '@shared/repository-observation'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import { getRepoGitStatus } from '@/shared/api/client'
+import { getRepoGitStatus } from '@/shared/api/workspace'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
 export function useRepoGitStatus(

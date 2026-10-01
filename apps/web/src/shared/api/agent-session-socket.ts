@@ -1,6 +1,6 @@
 import type { AgentSessionIdentity } from './agent-session-source'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
+import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/agent-sessions'
 
 // WebSocket wrapper for live structured agent-session events. Each source kind
 // names one per-subsystem server stream (/ws/runs/:runId/agent-session and

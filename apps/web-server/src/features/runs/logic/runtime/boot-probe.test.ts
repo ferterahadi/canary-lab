@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 import { bootAndProbe, fileTee, diagnoseBootOutput, writeCleanBootLog } from './boot-probe'
 
 // Teardown calls process.kill(-pid). Block the REAL process.kill so a fake pty

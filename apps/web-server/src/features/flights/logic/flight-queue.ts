@@ -1,5 +1,9 @@
 import type { FlightStore } from './store'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightManifest } from './types'
+import {
+  FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
+  type FlightManifest,
+} from '../../../../../../shared/flights/types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightExistsError } from './flight-errors'

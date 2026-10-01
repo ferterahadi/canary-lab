@@ -1,6 +1,11 @@
 import { useMemo, type CSSProperties, type Ref } from 'react'
 import type { TestFileReview } from '@shared/test-review'
-import { englishLines, englishSourceRange, storyEndLine, type ContextRow } from '../lib/test-review-model'
+import {
+  englishLines,
+  englishSourceRange,
+  storyEndLine,
+} from '@shared/readable-tests/source-lines'
+import type { ContextRow } from '@shared/test-source-diff'
 import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText } from './ReadableTestView'
 import { ShikiSourceLine } from './TestCodeBlock'

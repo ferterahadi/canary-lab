@@ -1,9 +1,15 @@
 import fs from 'fs'
 import path from 'path'
-import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunManifest } from './runtime/manifest'
+import {
+  readManifest,
+  readRunsIndex,
+  updateManifest,
+  upsertRunsIndexEntry,
+  writeRunsIndex,
+} from './runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor, runsRoot } from './runtime/run-paths'
 import { FileRunStateSink } from './runtime/run-state-sink'
-import type { ExecutionType } from '../../../../../../shared/verification'
 import {
   HEARTBEAT_STALE_MS,
   isActiveRunStatus,
@@ -13,7 +19,7 @@ import {
 import { dirSizeBytes, runArtifactBytes } from './run-artifacts'
 import type { OrchestratorRegistry } from './run-registry'
 import { cleanupSuiteRuntimeInputsForRun } from './runtime/suite-runtime-inputs'
-
+import type { CleanupRunEntry, CleanupOrphan, CleanupListing } from '../../../../../../shared/cleanup-listing'
 /**
  * One-shot cleanup for runs left unsettled — `queued`, `running` or `healing` —
  * by a previous server process that crashed without writing a final status.
@@ -106,43 +112,6 @@ export interface TrimResult {
   reason?: 'active' | 'not-found' | 'stale'
   /** Bytes reclaimed by removing the artifact dirs. Present when `ok`. */
   freedBytes?: number
-}
-
-/** One indexed run, annotated with disk usage for the cleanup view. */
-export interface CleanupRunEntry {
-  runId: string
-  feature: string
-  executionType: ExecutionType
-  status: RunManifest['status']
-  startedAt: string
-  endedAt?: string
-  /** Total bytes of the whole run directory. */
-  folderBytes: number
-  /** Bytes held by the trimmable Playwright artifact dirs (subset of folder). */
-  artifactBytes: number
-  /** True when the run is still live (registered orchestrator or active status).
-   *  Active runs cannot be trimmed or deleted. */
-  active: boolean
-}
-
-/** A directory under `logs/runs/` with no entry in `index.json` — an
- *  interrupted/never-finalized run. Delete-only; it has no manifest. */
-export interface CleanupOrphan {
-  runId: string
-  folderBytes: number
-}
-
-export interface CleanupListing {
-  runs: CleanupRunEntry[]
-  orphans: CleanupOrphan[]
-  totals: {
-    /** Every run folder + every orphan folder. */
-    totalBytes: number
-    /** Artifact bytes reclaimable by trimming non-active runs. */
-    reclaimableTrimBytes: number
-    /** Folder bytes reclaimable by deleting non-active runs + all orphans. */
-    reclaimableDeleteBytes: number
-  }
 }
 
 /** Build the cleanup view: every indexed run annotated with disk usage and an

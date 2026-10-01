@@ -1,5 +1,5 @@
-import { useWizardDrafts } from '@/features/wizard'
-import { useEvaluationExports } from '@/features/evaluation'
+import { useWizardDrafts } from '@/features/wizard/state/WizardDraftContext'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 import { Chip } from '@/shared/ui/StatusChip'
 
 /** The Flight activity list includes both collections, so freshness belongs

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useDismissOnOutsideMousedown, useEscapeToClose } from '../ui/Overlays'
+import { useAnchoredPosition } from '../ui/use-anchored-position'
 import { createPortal } from 'react-dom'
-import * as api from '../api/client'
-import type { VersionStatus } from '../api/types'
+import * as workspaceApi from '../api/workspace'
+import type { VersionStatus } from '@shared/version-status'
 
 // Footer version indicator. The trigger is a single 28px icon whose colour/glyph
 // reads the version state; ALL copy + actions live in a portaled popover opened
@@ -77,26 +79,10 @@ export function VersionUpdateButton({ status }: { status: VersionStatus | null }
     setPos({ left, bottom: window.innerHeight - r.top + 8, width })
   }, [])
 
-  useEffect(() => {
-    if (!open) return
-    reposition()
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null
-      if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    window.addEventListener('resize', reposition)
-    window.addEventListener('scroll', reposition, true)
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('resize', reposition)
-      window.removeEventListener('scroll', reposition, true)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open, reposition])
+  useAnchoredPosition(open, reposition)
+  // The popover is portaled, so it is not inside the trigger: both count as in.
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [btnRef, popRef])
+  useEscapeToClose(() => setOpen(false), open)
 
   if (!status) return null
   const view = deriveView(status)
@@ -107,7 +93,7 @@ export function VersionUpdateButton({ status }: { status: VersionStatus | null }
     setError(null)
     setStarting(true)
     try {
-      await api.startVersionUpdate()
+      await workspaceApi.startVersionUpdate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'update failed to start')
     } finally {

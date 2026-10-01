@@ -11,7 +11,7 @@ import {
   statusPillClassForStatus,
 } from './test-step-status'
 
-import type { RunSummary } from '@/shared/api/types'
+import type { RunSummary } from '@shared/run-detail'
 
 const completeWithFailure = (msg: string): RunSummary => ({
   complete: true,

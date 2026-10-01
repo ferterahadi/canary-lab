@@ -4,7 +4,8 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import * as sessionLog from '../../../agent-sessions/logic/agent-session-log'
+import * as sessionLogAgentSessionPaths from '../../../agent-sessions/logic/agent-session-paths'
+import * as sessionLogAgentSessionRender from '../../../agent-sessions/logic/agent-session-render'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
@@ -325,7 +326,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
   it('claude restart: recovers a missing pointer from the native Claude session log', async () => {
     const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
     const paths = buildRunPaths(runDir)
-    const locateSpy = vi.spyOn(sessionLog, 'locateLatestSessionLogForAgent').mockReturnValue({
+    const locateSpy = vi.spyOn(sessionLogAgentSessionPaths, 'locateLatestSessionLogForAgent').mockReturnValue({
       agent: 'claude',
       sessionId: PRIOR_SID,
       logPath: '/tmp/claude-session.jsonl',
@@ -390,7 +391,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
       logPath: '/tmp/codex-session.jsonl',
     }))
     fs.writeFileSync(paths.agentSessionIdPath, '019e1779-6b55-73b1-8ab7-e8e345bd889a')
-    const renderSpy = vi.spyOn(sessionLog, 'renderAgentSessionContext')
+    const renderSpy = vi.spyOn(sessionLogAgentSessionRender, 'renderAgentSessionContext')
       .mockReturnValue('Previous codex session 019e...\nASSISTANT: inspect fallback SMS call')
 
     try {

@@ -3,7 +3,8 @@ import type { RepositoryObserver } from '../../../shared/repository-observer'
 import type { RunQueueDiagnostics } from '../../../../../../shared/run-queue'
 import fs from 'fs'
 import path from 'path'
-import type { RunStore, RestartHealResult, RestartRunResult, StartRunOutcome } from '../logic/run-store'
+import type { RunStore } from '../logic/run-store'
+import type { RestartHealResult, RestartRunResult, StartRunOutcome } from '../logic/run-registry'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import type { ExternalHealBroker } from '../logic/heal/external-heal-broker'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -11,9 +12,6 @@ import { ExternalHealAgentRequest } from './runs-route-support'
 import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import type { DirtySpecStore } from '../logic/dirty-specs/store'
 import type { RunStartRequests } from '../logic/run-start-requests'
-
-export { compareActiveRuns } from './runs-route-support'
-export type { ExternalHealAgentRequest } from './runs-route-support'
 
 /** Per-start switches that are neither a heal nor an isolation choice. */
 export interface StartRunOptions {

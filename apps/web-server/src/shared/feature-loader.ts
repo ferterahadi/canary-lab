@@ -58,6 +58,10 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
   return out
 }
 
+export function findFeature(featuresDir: string, name: string): FeatureConfig | undefined {
+  return loadFeatures(featuresDir).find((feature) => feature.name === name)
+}
+
 export type SuiteAvailability =
   | { kind: 'ready'; feature: FeatureConfig; configPath: string }
   | { kind: 'removed' }
@@ -68,7 +72,7 @@ export type SuiteAvailability =
  * test directory. A suite omitted by loadFeatures is not necessarily deleted. */
 export function suiteAvailability(featuresDir: string, name: string): SuiteAvailability {
   if (!name || name === '.' || name === '..' || path.basename(name) !== name || !fs.existsSync(featuresDir)) return { kind: 'removed' }
-  const feature = loadFeatures(featuresDir).find((item) => item.name === name)
+  const feature = findFeature(featuresDir, name)
   const entry = fs.readdirSync(featuresDir, { withFileTypes: true }).find((item) => item.name === name && item.isDirectory())
   if (!entry && !feature) return { kind: 'removed' }
   const discoveryDir = entry ? path.join(featuresDir, name) : feature!.featureDir

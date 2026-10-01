@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { classifyWaitForHealTask, type CanaryLabMcpDeps } from './tools'
-import type { RunStore, RunDetail } from '../features/runs/logic/run-store'
+import { classifyWaitForHealTask } from './heal-task-wait'
+import type { CanaryLabMcpDeps } from './tool-schemas'
+import type { RunStore } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { DirtySpecStore, DirtySpecRecord } from '../features/runs/logic/dirty-specs/store'
 

@@ -3,7 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RepoBranchSnapshot, RunFixCapture, RunPrAttempt } from '@/shared/api/types'
+import type { RepoBranchSnapshot } from '@shared/run-manifest'
+import type { RunFixCapture, RunPrAttempt } from '@shared/run-state'
 import { ChangesTab, rosterFor } from './ChangesTab'
 
 const mocks = vi.hoisted(() => ({
@@ -15,7 +16,17 @@ const mocks = vi.hoisted(() => ({
   getRunFixPatch: vi.fn(),
   openEditor: vi.fn(),
 }))
-vi.mock('@/shared/api/client', () => mocks)
+vi.mock('@/shared/api/runs', () => ({
+  getRunApplyPreflight: mocks.getRunApplyPreflight,
+  applyRunFixes: mocks.applyRunFixes,
+  openRunRepo: mocks.openRunRepo,
+  getRunPrPreflight: mocks.getRunPrPreflight,
+  proposeRunPr: mocks.proposeRunPr,
+  getRunFixPatch: mocks.getRunFixPatch,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  openEditor: mocks.openEditor,
+}))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { AgentModelsConfig, AgentStagePlans, ModelAgentKind, RepoCollisionChoice } from '@/shared/api/client'
-import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
+import * as runsApi from '@/shared/api/runs'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import * as configApi from '@/shared/api/config'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { RepoCollisionChoice } from '@/shared/api/runs'
+import {
+  EMPTY_AGENT_MODELS,
+  type AgentModelsConfig,
+  type AgentStagePlans,
+  type ModelAgentKind,
+} from '@shared/agent-models'
 import type { RunStartModels } from './RunsContext'
 import { readPendingRunStarts, savePendingRunStarts, type PendingRunStart } from './pending-run-starts'
 
@@ -101,10 +109,10 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   useEffect(() => { savePendingRunStarts(pendingStarts) }, [pendingStarts])
   const dismissPendingStart = useCallback((requestId: string): void => {
     setPendingStarts((items) => items.filter((item) => item.requestId !== requestId))
-    setStartError((current) => current && api.asTestReviewRequired(current.error)?.request?.requestId === requestId ? null : current)
+    setStartError((current) => current && runsApi.asTestReviewRequired(current.error)?.request?.requestId === requestId ? null : current)
   }, [])
   const rememberReviewRequest = useCallback((error: unknown, mode: 'test' | 'boot'): void => {
-    const request = api.asTestReviewRequired(error)?.request
+    const request = runsApi.asTestReviewRequired(error)?.request
     if (!request) return
     setPendingStarts((items) => items.some((item) => item.requestId === request.requestId) ? items
       : [...items, { requestId: request.requestId, feature: request.feature, mode }])
@@ -129,12 +137,12 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
       if (mode !== 'boot') onRunStarted(runId)
     } catch (err) {
       rememberReviewRequest(err, mode)
-      const collision = api.asRepoCollision(err)
+      const collision = runsApi.asRepoCollision(err)
       if (collision) {
         // The one case where hardcoded ports actually clash — check whether ports
         // are injectable so the dialog can offer the durable fix. Best-effort.
         let portsConfigured: boolean | undefined
-        try { portsConfigured = (await api.benchmarkPreflight(feature, env)).portsConfigured } catch { /* ignore */ }
+        try { portsConfigured = (await benchmarkApi.benchmarkPreflight(feature, env)).portsConfigured } catch { /* ignore */ }
         setCollisionPrompt({ feature, env, mode, info: collision, portsConfigured, models })
         return
       }
@@ -154,8 +162,8 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
     // skip it — they spawn no heal/commit agents. Config unreachable → start
     // with defaults rather than dead-ending the Run button on a probe.
     if (mode !== 'boot') {
-      let config: api.ProjectConfig | null = null
-      try { config = await api.getProjectConfig() } catch { /* gate is best-effort */ }
+      let config: configApi.ProjectConfig | null = null
+      try { config = await configApi.getProjectConfig() } catch { /* gate is best-effort */ }
       if (config?.askModelsOnLaunch === true) {
         setModelsPrompt({
           feature,
@@ -210,10 +218,10 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   // catch re-populates startError if the replay hits a fresh failure.
   const switchBranchesAndRun = useCallback(async (): Promise<void> => {
     const se = startError
-    const mismatch = se && api.asBranchMismatch(se.error)
+    const mismatch = se && runsApi.asBranchMismatch(se.error)
     if (!se || !mismatch) return
     for (const repo of mismatch.repos) {
-      await api.checkoutRepoBranch(se.feature, repo.name, repo.expected)
+      await workspaceApi.checkoutRepoBranch(se.feature, repo.name, repo.expected)
     }
     setStartError(null)
     await begin(se.feature, se.env, undefined, se.mode, se.models)
@@ -222,7 +230,7 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   const pinCurrentAndRun = useCallback(async (): Promise<void> => {
     const se = startError
     if (!se) return
-    await api.pinFeatureBranchesToCurrent(se.feature)
+    await runsApi.pinFeatureBranchesToCurrent(se.feature)
     setStartError(null)
     await begin(se.feature, se.env, undefined, se.mode, se.models)
   }, [startError, begin])

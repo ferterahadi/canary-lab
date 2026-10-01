@@ -3,8 +3,9 @@
 import { act, useCallback, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Feature, RunIndexEntry } from '../api/types'
-import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
+import type { Feature } from '../api/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '@shared/flights/types'
 import type { ConnectWorkspaceEventsOptions, WorkspaceEvent } from '../api/workspace-socket'
 import type { InvalidationTopic } from './invalidation-bus'
 import type { WorkspaceData, WorkspaceDataDeps } from './use-workspace-data'
@@ -22,7 +23,16 @@ const api = {
   listPlanFeatures: vi.fn<() => Promise<{ tasks: PlanFeaturesTask[] }>>(),
   getVersionStatus: vi.fn(),
 }
-vi.mock('../api/client', () => api)
+vi.mock('../api/features', () => ({
+  listFeatures: api.listFeatures,
+}))
+vi.mock('../api/flights', () => ({
+  listFlights: api.listFlights,
+  listPlanFeatures: api.listPlanFeatures,
+}))
+vi.mock('../api/workspace', () => ({
+  getVersionStatus: api.getVersionStatus,
+}))
 
 // Captures the options the hook connects with, so a test can drive `onEvent` /
 // `onReconnect` synchronously instead of racing a real socket. `connectThrows`
@@ -41,9 +51,13 @@ vi.mock('../api/workspace-socket', () => ({
 }))
 
 const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false }
-vi.mock('@/features/flights', () => ({ useFlightsStream: () => stream }))
+vi.mock('@/features/flights/state/use-flights-stream', () => ({
+  useFlightsStream: () => stream,
+}))
 
-vi.mock('@/features/runs', () => ({ useRun: () => ({ detail: undefined }) }))
+vi.mock('@/features/runs/state/RunsContext', () => ({
+  useRun: () => ({ detail: undefined }),
+}))
 let { useWorkspaceData } = await import('./use-workspace-data')
 let { InvalidationProvider, useInvalidation } = await import('./invalidation')
 const { useWorkspaceSelection } = await import('./use-workspace-selection')

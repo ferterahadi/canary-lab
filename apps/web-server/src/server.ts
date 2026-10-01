@@ -5,14 +5,16 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../shared/run-state'
-import { runsRoutes, type ExternalHealAgentRequest } from './features/runs/routes/runs'
+import { runsRoutes } from './features/runs/routes/runs'
+import type { ExternalHealAgentRequest } from './features/runs/routes/runs-route-support'
 import { makeExternalHealAuditLogger } from './features/runs/routes/external-heal'
 import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
 import { createMcpRestAdapters } from './mcp/rest-adapters'
 import { register as registerAgentSessions } from './features/agent-sessions/index'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry } from './features/runs/logic/run-store'
+import { RunStore } from './features/runs/logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from './features/runs/logic/run-registry'
 import { bridgeDirtySpecsToActiveRuns } from './features/runs/logic/runtime/run-spec-edits-bridge'
 import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
@@ -28,15 +30,13 @@ import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
-import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
+import { removeFlightRecordsForFeature } from './features/flights/logic/flight-queue'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
 import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
 import { startDirtySpecWatcher } from './features/runs/logic/dirty-specs/watcher'
 import { reclaimOrphanedPortify } from './features/portify/logic/runtime/reclaim'
-import {
-  buildAgentSessionResponse,
-  resolveWorkflowAgentRef,
-} from './features/agent-sessions/logic/agent-session-log'
+import { resolveWorkflowAgentRef } from './features/agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from './features/agent-sessions/logic/agent-session-subagents'
 import { WorkspaceEventBus } from './shared/workspace-events'
 import { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import { GettingStartedBusyError } from './features/config/logic/getting-started-session'
@@ -54,20 +54,26 @@ import { agentJobStore as sharedAgentJobStore, bridgeAgentJobEvents } from './fe
 import { bridgeEvaluationExportEvents, readEvaluationExportTask } from './features/evaluation/logic/evaluation-export-store'
 import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
+import { RunOrchestrator } from './features/runs/logic/runtime/orchestrator'
+import {
+  collectPortSlots,
+  buildServiceSpecs,
+  buildQueuedServiceEntries,
+} from './features/runs/logic/runtime/service-specs'
 import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
 import { removeFeaturePortification } from './features/portify/logic/remove-portification'
 import {
-  buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
-  pickAvailableHealAgent,
-  resolveAgentBinary,
   type BuildHealCyclePrompt,
-  type HealAgent,
 } from './features/runs/logic/runtime/auto-heal'
+import {
+  buildAgentSpawnCommand,
+  pickAvailableHealAgent,
+} from './features/runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentBinary, type HealAgent } from './features/agent-sessions/logic/agent-binary'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './shared/git-repo'
 import { realPtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import {
@@ -90,8 +96,6 @@ import {
 // registrars have to import from. Re-exported to keep the published surface of
 // `createServer` where callers already expect it.
 import type { CreateServerOptions } from './server-context'
-export type { CreateServerOptions }
-
 export interface CreateServerResult {
   app: FastifyInstance
   registry: OrchestratorRegistry

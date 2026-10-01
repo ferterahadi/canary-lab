@@ -1,8 +1,15 @@
 import { act, useCallback, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CoverageJobIndexEntry, Feature, RunDetail, RunIndexEntry, DraftRecord, EvaluationExportTask } from '@/shared/api/types'
-import type { FlightIndexEntry, PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
+import type { Feature } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { DraftRecord } from '@shared/draft-types'
+import type { FlightIndexEntry } from '@shared/flights/types'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useWorkspaceFlights } from './use-workspace-flights'
 
@@ -11,22 +18,35 @@ import { useWorkspaceFlights } from './use-workspace-flights'
 const stores = vi.hoisted(() => ({
   runs: [] as RunIndexEntry[], activeRuns: [] as RunIndexEntry[], runDetails: {} as Record<string, RunDetail>,
   workflows: [] as PortifyIndexEntry[], portifyDetails: {} as Record<string, PortifyManifest>,
-  drafts: [] as DraftRecord[], tasks: [] as EvaluationExportTask[],
+  drafts: [] as DraftRecord[], tasks: [] as EvaluationExportTaskView[],
 }))
-vi.mock('@/features/runs', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/runs')>(),
-  useRuns: () => ({ runs: stores.runs }), useActiveRuns: () => ({ runs: stores.activeRuns }), useRunDetails: () => stores.runDetails,
+vi.mock('@/features/runs/state/RunsContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/runs/state/RunsContext')>()),
+  useRuns: () => ({ runs: stores.runs }),
+  useActiveRuns: () => ({ runs: stores.activeRuns }),
+  useRunDetails: () => stores.runDetails,
 }))
-vi.mock('@/features/portify', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/portify')>(),
+vi.mock('@/features/portify/state/PortifyContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/portify/state/PortifyContext')>()),
   usePortify: () => ({ workflows: stores.workflows, details: stores.portifyDetails }),
 }))
-vi.mock('@/features/evaluation', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/evaluation')>(),
+vi.mock('@/features/evaluation/state/EvaluationExportContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/evaluation/state/EvaluationExportContext')>()),
   useEvaluationExports: () => ({ tasks: stores.tasks }),
 }))
-vi.mock('@/features/wizard', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/wizard')>(),
+vi.mock('@/features/wizard/state/WizardDraftContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/wizard/state/WizardDraftContext')>()),
   useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.drafts }),
 }))
 const api = vi.hoisted(() => ({ listAllCoverageJobs: vi.fn(), listFeatures: vi.fn() }))
-vi.mock('@/shared/api/client', async (importOriginal) => ({ ...await importOriginal<typeof import('@/shared/api/client')>(), ...api }))
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  listAllCoverageJobs: api.listAllCoverageJobs,
+}))
+vi.mock('@/shared/api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/features')>()),
+  listFeatures: api.listFeatures,
+}))
 
 const feature = (name = 'checkout'): Feature => ({ name, repos: [], envs: [],
   evidence: { envCapture: true, prdSummary: true, specs: true },

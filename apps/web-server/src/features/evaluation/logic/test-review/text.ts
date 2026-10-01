@@ -1,12 +1,4 @@
 import path from 'path'
-export {
-  displayWord,
-  humanizeIdentifier,
-  identifierWords,
-  looksLikeIdentifier,
-  readableHelperName,
-  sentenceCase,
-} from '../../../../shared/readable-tests/language'
 
 export const ANNOTATION_TAG = /@[A-Za-z][\w]*-[\w.-]+/g
 

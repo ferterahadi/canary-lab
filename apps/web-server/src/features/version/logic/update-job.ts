@@ -1,9 +1,9 @@
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, abortOnRestart } from '../../../../../../shared/lib/file-backed-task-store'
+import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import type { UpdateJobManifest } from '../../../../../../shared/version-status'
 // Background driver + single-flight gate for the self-update job: it runs
 // `npm install <pkg>@latest` in the workspace root, then invokes the newly
 // installed CLI's `upgrade --silent` itself. An explicit `npm install <pkg>`
@@ -18,25 +18,12 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 
 export const UPDATE_JOB_ID = 'current'
 
-export type UpdateJobStatus = 'running' | 'done' | 'failed' | 'aborted'
-
-export interface UpdateJobManifest {
-  jobId: string
-  status: UpdateJobStatus
-  /** The version we're installing toward (the registry `latest` at start). */
-  targetVersion: string
-  startedAt: string
-  endedAt?: string
-  log: string
-  error?: string
-}
-
 export interface UpdateJobStoreEvent {
   kind: 'changed' | 'removed'
 }
 
 export class UpdateJobStore {
-  private readonly listeners = new Set<(event: UpdateJobStoreEvent) => void>()
+  private readonly events = new TaskListeners<UpdateJobStoreEvent>()
   private readonly store: FileBackedTaskStore<UpdateJobManifest>
 
   constructor(logsDir: string) {
@@ -46,17 +33,9 @@ export class UpdateJobStore {
       recordFile: 'job.json',
       idOf: (m) => m.jobId,
       indexEntryOf: (m) => ({ id: m.jobId, createdAt: m.startedAt, status: m.status }),
-      reconcile: {
-        isInterrupted: (m) => m.status === 'running',
-        mark: (m, now) => ({
-          ...m,
-          status: 'aborted',
-          endedAt: m.endedAt ?? now,
-          error: m.error ?? 'Interrupted by server restart',
-        }),
-      },
+      reconcile: abortOnRestart((m) => m.status === 'running'),
     })
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind }))
   }
 
   current(): UpdateJobManifest | null {
@@ -72,17 +51,11 @@ export class UpdateJobStore {
   }
 
   onEvent(fn: (event: UpdateJobStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: UpdateJobStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: UpdateJobStoreEvent): void {
-    for (const fn of this.listeners) {
-      try { fn(event) } catch { /* a bad listener must not break persistence */ }
-    }
+    this.events.delete(fn)
   }
 }
 

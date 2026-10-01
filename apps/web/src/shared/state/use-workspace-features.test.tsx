@@ -6,7 +6,9 @@ import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useWorkspaceFeatures } from './use-workspace-features'
 
 const api = vi.hoisted(() => ({ listFeatures: vi.fn() }))
-vi.mock('../api/client', () => api)
+vi.mock('../api/features', () => ({
+  listFeatures: api.listFeatures,
+}))
 
 const feature = (name: string): Feature => ({ name, repos: [], envs: [] })
 const initial = vi.fn()

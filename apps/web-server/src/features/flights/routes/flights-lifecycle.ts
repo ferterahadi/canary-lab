@@ -6,12 +6,26 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, forceFlightTakeover, requestFlightTakeover, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
+import {
+  forceFlightTakeover,
+  requestFlightTakeover,
+  resumeFlight,
+  setFlightAutopilot,
+  respondToFlightCheckpoint,
+  pauseFlight,
+  redoFlight,
+} from '../logic/conductor'
+import {
+  FlightNotParkedError,
+  FlightStageEntryError,
+  FlightTakeoverRequestedError,
+} from '../logic/flight-errors'
+import { deleteFlight } from '../logic/flight-queue'
 import { rejectForeignFlightDecision } from './flight-decision-origin'
 import { allowsCheckpointInput } from '../logic/checkpoint-input'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
-import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
+import type { FlightCheckpointResponse, FlightStageKey } from '../../../../../../shared/flights/types'
 
 export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx

@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
+import * as workspaceApi from '@/shared/api/workspace'
 import { BrandMark, clientTint, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 
 // The shared shell for every "an external MCP client is driving this in its own
@@ -91,7 +91,7 @@ export function useOpenAgentApp() {
     setOpening(agent)
     setError(null)
     try {
-      await api.openAgentApp(agent)
+      await workspaceApi.openAgentApp(agent)
     } catch (err) {
       setError(err instanceof Error ? err.message : `Could not open ${agent}`)
     } finally {

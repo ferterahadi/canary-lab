@@ -3,28 +3,22 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { applyFixCapture, buildApplyPreflight, porcelainPath } from './apply-fixes'
+import { applyFixCapture, buildApplyPreflight } from './apply-fixes'
+import { porcelainPath } from '../../../shared/git-status-path'
 import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let root: string
 let repo: string
 let fixesDir: string
-
-function git(dir: string, args: string[]): void {
-  execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
-}
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-fix-'))
   repo = path.join(root, 'repo')
   fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
-  git(repo, ['init', '-q'])
-  git(repo, ['config', 'user.email', 't@t'])
-  git(repo, ['config', 'user.name', 'test'])
-  git(repo, ['add', '-A'])
-  git(repo, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(repo)
   fixesDir = path.join(root, 'fixes')
   fs.mkdirSync(fixesDir, { recursive: true })
 })
@@ -99,7 +93,7 @@ describe('applyFixCapture', () => {
     const patchPath = makePatch()
     // Move the repo out from under the patch so it cannot apply.
     fs.writeFileSync(path.join(repo, 'app.js'), 'completely different\n')
-    git(repo, ['commit', '-aqm', 'drift', '--no-verify'])
+    git(repo, 'commit', '-aqm', 'drift', '--no-verify')
     const out = await applyFixCapture(capture(patchPath))
     expect(out.allOk).toBe(false)
     expect(out.results[0].ok).toBe(false)
@@ -162,7 +156,7 @@ describe('buildApplyPreflight', () => {
   it('compares decoded dirty paths with recorded repair paths and leaves other files foreign', async () => {
     const names = ['café.txt', 'tab\tfile.txt', 'back\\slash.txt', 'quote"file.txt', 'left -> right.txt']
     const fix = capture(makePatch())
-    git(repo, ['config', 'core.quotePath', 'true'])
+    git(repo, 'config', 'core.quotePath', 'true')
     for (const name of names) fs.writeFileSync(path.join(repo, name), 'work in progress')
     fix.repos[0].fileNames = names.slice(1)
     expect((await buildApplyPreflight(fix))[0].foreignDirty).toEqual(['café.txt'])
@@ -171,7 +165,7 @@ describe('buildApplyPreflight', () => {
   it('matches new literal and legacy quoted capture names without mutating saved input', async () => {
     const name = 'back\\slash.txt'
     fs.writeFileSync(path.join(repo, name), 'original')
-    git(repo, ['add', '.']); git(repo, ['commit', '-qm', 'capture fixture'])
+    git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'capture fixture')
     fs.writeFileSync(path.join(repo, name), 'repair')
     const fileNames = await diffNamesSinceSnapshot(repo, 'HEAD')
     expect(fileNames).toEqual([name])

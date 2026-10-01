@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { ProposePrResult } from '@/shared/api/client'
-import { Modal } from '@/shared/ui/atoms'
+import * as runsApi from '@/shared/api/runs'
+import type { ProposePrResult } from '@/shared/api/runs'
+import { Modal } from '@/shared/ui/Overlays'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { BLOCKED_HELP } from '../utils/pr-blocked-copy'
@@ -26,7 +26,7 @@ export function ProposePrDialog({
 }) {
   const session = useMountedIdentity(JSON.stringify([open, runId]))
   const mounted = useMountedIdentity('propose-pr')
-  const preflightRead = useLiveResource(null, open ? runId : null, () => api.getRunPrPreflight(runId))
+  const preflightRead = useLiveResource(null, open ? runId : null, () => runsApi.getRunPrPreflight(runId))
   const { value: preflight, loading } = preflightRead
   // A closed dialog does not cancel a server write. Keep its lock until the
   // request settles, while its results belong only to the originating session.
@@ -45,7 +45,7 @@ export function ProposePrDialog({
     pending.current.add(runId)
     renderPending((version) => version + 1)
     setError(null)
-    api.proposeRunPr(runId)
+    runsApi.proposeRunPr(runId)
       .then((r) => { if (session()) { setResults(r.results); onProposed?.() } })
       .catch((e: unknown) => { if (session()) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => {

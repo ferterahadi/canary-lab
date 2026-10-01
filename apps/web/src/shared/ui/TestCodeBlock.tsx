@@ -1,18 +1,18 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
-import type { ExtractedStep } from '../api/types'
-import * as api from '../api/client'
+import type { ExtractedStep } from '@shared/extracted-test'
+import * as workspaceApi from '../api/workspace'
 import { useCodeHighlight } from './use-code-highlight'
 import type { StoryCodeLineNumber } from './readable-story-sequence'
 import {
   colorClassForStatus,
-  sourceLineForBodyLine,
   statusLabel,
   statusPillClassForStatus,
   type StepStatus,
   type TestExecutionHighlightKind,
-} from '@/features/runs'
+} from '@/features/runs/utils/test-step-status'
+import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
 
 interface SourceLocation {
   file: string
@@ -181,7 +181,7 @@ export function SourceOpenShell({
     if (!sourceLocation) return
     setOpenError(null)
     try {
-      await api.openEditor({ file: sourceLocation.file, line, column: 1 })
+      await workspaceApi.openEditor({ file: sourceLocation.file, line, column: 1 })
     } catch (e: unknown) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
     }

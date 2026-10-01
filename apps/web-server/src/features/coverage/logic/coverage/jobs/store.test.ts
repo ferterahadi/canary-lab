@@ -5,7 +5,7 @@ import path from 'path'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
-import type { CoverageJobManifest } from './types'
+import type { CoverageJobManifest } from '../../../../../../../../shared/coverage/types'
 
 let tmpDir: string
 let store: CoverageJobRunStore

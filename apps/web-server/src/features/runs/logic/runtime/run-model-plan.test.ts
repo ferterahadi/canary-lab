@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { commitModelPlans, resolveRunModelPlan, reuseRunModelPlan } from './run-model-plan'
-import { EMPTY_AGENT_MODELS, type AgentModelsConfig } from '../../../agent-sessions/logic/agent-models'
+import { EMPTY_AGENT_MODELS, type AgentModelsConfig } from '../../../../../../../shared/agent-models'
 
 const config: AgentModelsConfig = {
   claude: {

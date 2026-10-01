@@ -8,15 +8,13 @@ import {
   checkoutFeatureRepoBranch,
   createFeatureSkeleton,
   deleteFeature,
-  deleteFeatureDoc,
   envsetSchema,
   externalTestFileRules,
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
-  linkFeatureDoc,
   parseRedactedEntries,
-  writeFeatureDoc,
 } from './feature-authoring'
+import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 let tmpDir: string
 

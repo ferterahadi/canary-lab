@@ -5,7 +5,7 @@
 // two-stage wizard (plan agent → spec agent) was retired in favour of the flight
 // pipeline, so there is nothing here that starts or accepts a local agent's work.
 
-import type { DraftRecord } from './types'
+import type { DraftRecord } from '@shared/draft-types'
 import { defaultOpts, request, type ClientOptions } from './internal'
 
 export function listDrafts(opts?: ClientOptions): Promise<DraftRecord[]> {

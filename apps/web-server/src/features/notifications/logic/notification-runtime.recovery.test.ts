@@ -9,7 +9,7 @@ import { notificationRoutes, registerFeatureNotificationRoute } from '../routes/
 import { NotificationStore } from '../store'
 import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
-import type { RunManifest } from '../../runs/logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import type { RunStore } from '../../runs/logic/run-store'
 import type { WorkspaceNotification } from '../../../../../../shared/notifications/types'
 

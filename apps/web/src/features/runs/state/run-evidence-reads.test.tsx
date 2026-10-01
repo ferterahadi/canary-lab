@@ -2,13 +2,19 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AuditEntry, JournalEntry, RunStatus } from '@/shared/api/types'
+import type { AuditEntry } from '@/shared/api/types-wizard'
+import type { JournalSection } from '@shared/run-detail'
+import type { RunStatus } from '@shared/run-state'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { JournalTab } from '../components/JournalTab'
 import { useExternalAudit } from './use-external-audit'
 import { useRunJournal } from './use-run-journal'
 const api = vi.hoisted(() => ({ listJournal: vi.fn(), getRunAudit: vi.fn(), connection: 'live' }))
-vi.mock('@/shared/api/client', async (original) => ({ ...await original<typeof import('@/shared/api/client')>(), listJournal: api.listJournal, getRunAudit: api.getRunAudit }))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  listJournal: api.listJournal,
+  getRunAudit: api.getRunAudit,
+}))
 vi.mock('./RunsContext', () => ({ useRuns: () => ({ connection: api.connection }) }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
@@ -17,7 +23,7 @@ let sequence = 0
 let id: string
 let invalidate: () => void
 let journal: ReturnType<typeof useRunJournal>
-const entry = (text: string, outcome = 'pending'): JournalEntry => ({ iteration: 1, timestamp: '2026-01-01T00:00:00Z', feature: 'synthetic', run: id, outcome, hypothesis: text, body: `- hypothesis: ${text}` })
+const entry = (text: string, outcome = 'pending'): JournalSection => ({ iteration: 1, timestamp: '2026-01-01T00:00:00Z', feature: 'synthetic', run: id, outcome, hypothesis: text, body: `- hypothesis: ${text}` })
 const auditEntry = (action: string): AuditEntry => ({ ts: '2026-01-01T00:00:00Z', sessionId: null, clientKind: null, action })
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
 function Journal({ runId = id, feature = 'synthetic' }: { runId?: string; feature?: string }) {
@@ -38,7 +44,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
 
 it('does not let an older journal poll restore pending evidence after accepted completion', async () => {
-  const older = deferred<JournalEntry[]>()
+  const older = deferred<JournalSection[]>()
   api.listJournal.mockResolvedValueOnce([entry('Old pending')]).mockReturnValueOnce(older.promise).mockResolvedValue([entry('New completed', 'all_tests_passed')])
   await act(async () => root.render(<JournalTab feature="synthetic" runId={id} refreshKey={0} />))
   await act(async () => vi.advanceTimersByTimeAsync(2000))
@@ -71,7 +77,7 @@ it('retains the current journal on failure and isolates feature/run replacements
   await act(async () => invalidate())
   expect(journal.error).toBe('offline')
   expect(element.textContent).toContain('accepted')
-  const older = deferred<JournalEntry[]>()
+  const older = deferred<JournalSection[]>()
   api.listJournal.mockReturnValueOnce(older.promise)
   await act(async () => vi.advanceTimersByTimeAsync(2000))
   api.listJournal.mockResolvedValue([entry('replacement', 'all_tests_passed')])

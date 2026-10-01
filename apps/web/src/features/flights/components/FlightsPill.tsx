@@ -1,18 +1,18 @@
 import { useState } from 'react'
-import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
-import type { PortifyIndexEntry } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type {
+  FlightIndexEntry,
+  FlightStageKey,
+  FlightStageStatus,
+  PlanFeaturesTask,
+} from '@shared/flights/types'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState, summarizeFlightActivity } from './FlightChipState'
 import { FlightsPickerDialog } from './FlightPickerRows'
 import { flightAwaitsUser } from '../lib/external-work'
 import { FLIGHT_OVERVIEW } from './stage-meta'
-
-export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction, resolveFeatureFlightTarget, summarizeFlightActivity } from './FlightChipState'
-export type { FeatureActivityRow, FeatureChipState, FeatureFlightAction, FeatureRef, PickerGroup } from './FlightChipState'
-export { ActivityOnlyRow, NotFlownRow, PreFlightRow, StageMiniRail } from './FlightPickerRows'
-export { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from '../lib/external-work'
 
 export interface FlightsPillProps {
   flights: FlightIndexEntry[]

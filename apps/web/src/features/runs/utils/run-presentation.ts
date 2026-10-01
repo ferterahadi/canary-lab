@@ -1,4 +1,5 @@
-import type { DisplayStatus, ExecutionType } from '@/shared/api/types'
+import type { DisplayStatus } from '@shared/run-state'
+import type { ExecutionType } from '@shared/verification'
 import type { StatusDotState } from '@/shared/ui/atoms'
 import type { RunWaitingState } from './run-waiting-state'
 

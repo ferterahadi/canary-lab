@@ -3,10 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest } from '@shared/flights/types'
 import { useFlightsStream } from './use-flights-stream'
-import { flightIndexEntry } from './flights-stream-state'
-
+import { flightIndexEntry } from '@shared/flights/index-entry'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // Minimal socket stand-in: the test drives `onmessage` / `onclose` directly.

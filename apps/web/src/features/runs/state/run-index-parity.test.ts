@@ -3,10 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { FileRunStateSink } from '../../../../../web-server/src/features/runs/logic/runtime/run-state-sink'
-import { readManifest, readRunsIndex, type RunManifest } from '../../../../../web-server/src/features/runs/logic/runtime/manifest'
+import {
+  readManifest,
+  readRunsIndex,
+} from '../../../../../web-server/src/features/runs/logic/runtime/manifest'
+import type { RunManifest } from '@shared/run-manifest'
 import { runManifest } from '../../../../../web-server/src/features/runs/logic/__fixtures__/run-manifest'
 import { initialRunsState, runsReducer } from './runs-state'
-import type { RunDetail } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
 
 let logs: string
 beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'run-index-parity-')) })

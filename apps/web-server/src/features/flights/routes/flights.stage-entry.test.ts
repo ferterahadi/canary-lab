@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { writeRunsIndex, type RunIndexEntry } from '../../runs/logic/runtime/manifest'
+import { writeRunsIndex } from '../../runs/logic/runtime/manifest'
+import type { RunIndexEntry } from '../../../../../../shared/run-index'
 
 // `listRuns` is only faked for the one test that proves the validator survives
 // a broken run index; everything else drives the real reader over real files.
@@ -12,7 +13,7 @@ vi.mock('../../runs/logic/run-store', async (importOriginal) => {
   return { ...real, listRuns: (...args: unknown[]) => runMocks.listRuns(...args) }
 })
 
-const { buildStageEntryValidator } = await import('./flights')
+const { buildStageEntryValidator } = await import('./flight-route-support')
 // Not re-exported from the barrel — the conductor context is its only consumer.
 const { buildStageEntryLinkResolver, parseFlightExternalAgentSession } = await import('./flight-route-support')
 

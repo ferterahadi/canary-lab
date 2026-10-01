@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
-import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
 
 export interface EnvsetsConfigJson {
   appRoots?: Record<string, string>

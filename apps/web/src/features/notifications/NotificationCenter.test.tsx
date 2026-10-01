@@ -2,8 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { notificationTarget } from '@shared/notifications/types'
-import type { WorkspaceNotification } from '@/shared/api/notifications'
+import { notificationTarget, type WorkspaceNotification } from '@shared/notifications/types'
 
 const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn(), resolveNotificationAction: vi.fn() }))
 vi.mock('@/shared/api/notifications', () => api)

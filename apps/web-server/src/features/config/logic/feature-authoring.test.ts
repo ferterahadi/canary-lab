@@ -9,16 +9,14 @@ import {
   checkoutFeatureRepoBranch,
   createFeatureSkeleton,
   deleteFeature,
-  deleteFeatureDoc,
   envsetSchema,
   externalTestFileRules,
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
-  linkFeatureDoc,
   parseRedactedEntries,
   updateFeatureRepoBranch,
-  writeFeatureDoc,
 } from './feature-authoring'
+import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 it('shows a workspace-owned suite envset with a distinct materialized consumer target', () => {
   expect(envsetSchema('checkout')).toEqual({

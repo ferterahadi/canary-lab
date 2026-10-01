@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import type { RunIndexEntry } from './runtime/manifest'
-import type { RunDetail } from './run-detail'
+import type { RunIndexEntry } from '../../../../../../shared/run-index'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from './single-attempt-view'
 
 let root: string

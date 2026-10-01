@@ -1,5 +1,5 @@
 import { REPOSITORY_FRESHNESS_MS, REPOSITORY_RECONCILE_MS, repositoryConsumerKey } from '@shared/repository-observation'
-import { getRunApplyPreflight } from '@/shared/api/client'
+import { getRunApplyPreflight } from '@/shared/api/runs'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 

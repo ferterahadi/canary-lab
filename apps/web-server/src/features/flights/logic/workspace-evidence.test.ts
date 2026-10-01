@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { FlightStage } from './types'
+import type { FlightStage } from '../../../../../../shared/flights/types'
 import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
 import * as coverage from '../../coverage/logic/coverage/service'
 import * as featureLoader from '../../../shared/feature-loader'
@@ -189,7 +189,7 @@ describe('workspaceStageEvidence — shared evaluation inputs', () => {
   })
 
   it('does no discovery for unsupported keys or populated stages, and keeps expensive probes lazy', () => {
-    const load = vi.spyOn(featureLoader, 'loadFeatures')
+    const load = vi.spyOn(featureLoader, 'findFeature')
     const list = vi.spyOn(runStore, 'listRuns')
     const compute = vi.spyOn(coverage, 'computeFeatureCoverage')
     expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['similarity', 'scaffold'])).toEqual({})
@@ -222,7 +222,7 @@ describe('workspaceStageEvidence — shared evaluation inputs', () => {
   })
 
   it('returns no evidence when discovery throws or the configured directory is absent', () => {
-    vi.spyOn(featureLoader, 'loadFeatures').mockImplementationOnce(() => { throw new Error('discovery failed') })
+    vi.spyOn(featureLoader, 'findFeature').mockImplementationOnce(() => { throw new Error('discovery failed') })
     expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])).toEqual({})
     fs.appendFileSync(path.join(featureDir, 'feature.config.cjs'), '\ndelete module.exports.config.featureDir\n')
     expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])).toEqual({})

@@ -1,7 +1,14 @@
 import { useState } from 'react'
-import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, PlanFeaturesTask, PortifyIndexEntry } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
-import { ChevronRightIcon, Modal } from '@/shared/ui/atoms'
+import type {
+  FlightIndexEntry,
+  FlightStageKey,
+  FlightStageStatus,
+  PlanFeaturesTask,
+} from '@shared/flights/types'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 import { flightNeedsAttention } from '@shared/flights/attention'
 import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'

@@ -1,7 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { findFeature, type FeatureAuthoringContext } from './feature-authoring'
+import type { FeatureAuthoringContext } from './feature-authoring'
+import { findFeature } from '../../../shared/feature-loader'
 import { isWithin } from './path-containment'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 

@@ -1,14 +1,14 @@
 import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
 import { plural } from '../../../../../../../shared/lib/plural'
 import { runCounts } from '../../../runs/logic/run-detail'
-import type { RunSummary } from '../../../runs/logic/run-store'
-import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import type { RunSummary } from '../../../../../../../shared/run-detail'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { renderPrompt } from '../../../../shared/prompts'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { pollUntil, type FlightStageDeps } from './context'
 import { runJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
-import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
+import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../../../../../../../shared/flights/types'
 import { externalAgentSessionForFlight } from '../external-agent-session'
 
 // Start the real run through the runs route and wait for a terminal verdict.

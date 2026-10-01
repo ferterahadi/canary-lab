@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { FlightEntryOptions, OnboardingSamples } from '@/shared/api/client'
-import type { RunIndexEntry } from '@/shared/api/types'
-import type { FlightIndexEntry } from '@shared/flights/types'
+import type { OnboardingSamples } from '@/shared/api/config'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { FlightIndexEntry, FlightEntryOptions } from '@shared/flights/types'
 import {
   DEMO_FLIGHT_STAGE,
   demoFlightLaunch,

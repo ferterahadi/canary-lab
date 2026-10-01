@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { RunQueueDiagnostics } from '@shared/run-queue'
-import type { RunIndexEntry } from '@/shared/api/types'
-import { getRunQueue } from '@/shared/api/client'
+import type { RunIndexEntry } from '@shared/run-index'
+import { getRunQueue } from '@/shared/api/runs'
 import { useRuns } from '../state/RunsContext'
 import { runWaitingState } from '../utils/run-waiting-state'
 

@@ -1,9 +1,17 @@
 import fs from 'fs'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
-import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
-import { STAGE_DEPENDS_ON, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { type PlannedFeature } from '../../../../../../shared/flights/types'
+import { startFlight, type FlightConductorDeps } from '../logic/conductor'
+import { FlightConflictError } from '../logic/flight-errors'
+import { enqueueFlight } from '../logic/flight-queue'
+import {
+  type PlannedFeature,
+  STAGE_DEPENDS_ON,
+  type FlightExternalAgentSession,
+  type FlightManifest,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 import { isClientKind } from '../../../../../../shared/run-mode'
 import { flightStageLabel } from '../../../../../../shared/flights/stage-labels'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
@@ -12,7 +20,11 @@ import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
-import { normalizeStagePlans, type AgentStagePlans, type ModelAgentKind } from '../../agent-sessions/logic/agent-models'
+import {
+  normalizeStagePlans,
+  type AgentStagePlans,
+  type ModelAgentKind,
+} from '../../../../../../shared/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { isAuxiliaryExecution } from '../../../../../../shared/verification'

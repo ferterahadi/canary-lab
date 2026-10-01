@@ -6,7 +6,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createServer } from './server'
 import { writeOverlay, overlayExists } from './features/portify/logic/runtime/overlay'
 import { FlightRunStore } from './features/flights/logic/store'
-import { FLIGHT_STAGE_KEYS } from './features/flights/logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 
 const inertPty: PtyFactory = () => ({ pid: 0, onData: () => ({ dispose() {} }), onExit: () => ({ dispose() {} }), write() {}, resize() {}, kill() {} })

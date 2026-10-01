@@ -10,9 +10,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import type { OrchestratorOptions } from './run-orchestrator-types'
+import type { OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 import type { RunContext } from './run-context'
-import type { ServiceSpec } from './orchestrator'
 import { RunnerLog } from './runner-log'
 
 const h = vi.hoisted(() => ({

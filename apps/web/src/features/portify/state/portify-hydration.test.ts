@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiError, type PortifyManifest } from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { createObservedReads } from '@/shared/state/observed-reads'
-import { createPortifyHydration } from './portify-hydration'
-import { initialPortifyState, portifyReducer, type PortifyAction } from './portify-state'
+import { createRecordIndexHydration } from '@/shared/state/record-index-store'
+import { portifyIndex, type PortifyAction } from './portify-state'
+
+const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex
 
 const manifest = (status: PortifyManifest['status'] = 'saved'): PortifyManifest => ({ workflowId: 'wf', feature: 'checkout', status, repos: [], agent: 'codex', branch: 'ports', attempt: 1, maxAttempts: 3, startedAt: '2026-01-01' })
 function deferred() {
@@ -15,7 +18,7 @@ function harness() {
   const reads = createObservedReads()
   const read = vi.fn<() => Promise<PortifyManifest>>().mockResolvedValue(manifest())
   const apply = (action: PortifyAction) => { state = portifyReducer(state, action) }
-  const owner = createPortifyHydration({ reads, read, apply, hasDetail: (id) => Boolean(state.details[id]) })
+  const owner = createRecordIndexHydration({ index: portifyIndex, errorMessage: 'Could not load port work', reads, read, apply, hasDetail: (id) => Boolean(state.details[id]) })
   owner.start()
   const stream = (action: PortifyAction) => {
     if (action.type === 'update' || action.type === 'removed') reads.invalidate(action.workflowId)

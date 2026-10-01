@@ -3,19 +3,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
-import {
-  bridge,
-  doctor,
-  ensureMcpServerReachable,
-  inferClientKindFromProcessLines,
-  inferMcpClientKind,
-  isDefaultLocalMcpUrl,
-  main,
-  REINIT_ID,
-  resolveDefaultMcpUrl,
-  resolveUiProjectRootForMcpAutostart,
-  type BridgeTransport,
-} from './mcp'
+import { doctor, isDefaultLocalMcpUrl, main, resolveDefaultMcpUrl } from './mcp'
+import { bridge, REINIT_ID, type BridgeTransport } from './mcp-bridge'
+import { ensureMcpServerReachable, resolveUiProjectRootForMcpAutostart } from './mcp-reachability'
+import { inferClientKindFromProcessLines, inferMcpClientKind } from './mcp-client-kind'
 import type { JSONRPCMessage } from '@modelcontextprotocol/server'
 
 class BufferWritable extends Writable {

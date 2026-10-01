@@ -1,7 +1,5 @@
-import type { FlightIndexEntry, FlightManifest } from '@/shared/api/client'
+import type { FlightIndexEntry, FlightManifest } from '@shared/flights/types'
 import { flightIndexEntry } from '@shared/flights/index-entry'
-
-export { flightIndexEntry } from '@shared/flights/index-entry'
 
 // Pure reducer behind the `/ws/flights` push channel. Mirrors
 // portify-state.ts / runs-state.ts so it unit-tests in the node vitest config

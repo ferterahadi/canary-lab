@@ -1,7 +1,7 @@
 // MCP tools — the conducted flight pipeline (start / inspect / answer checkpoints).
 import { z } from 'zod'
 import { requestFlightCheckpoint } from '../flight-input'
-import { documentResolutionInput } from '../document-resolution'
+import { documentResolutionInput } from '../../features/coverage/logic/coverage/document-resolution'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import path from 'path'
 import { flightStageRemedy } from '../../features/flights/logic/stage-remedy'

@@ -1,16 +1,14 @@
-import type {
-  DisplayStatus,
-  ExecutionType,
-  RunDetail,
-  RunIndexEntry,
-  RunLifecycleEvent,
-  RunStatus,
-  TransientAction,
-} from '@/shared/api/types'
+import type { ExecutionType } from '@shared/verification'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import {
   deriveDisplayStatus,
   deriveRunActionAvailability,
   isTerminalRunStatus,
+  type DisplayStatus,
+  type RunLifecycleEvent,
+  type RunStatus,
+  type TransientAction,
 } from '@shared/run-state'
 import { runWaitingState, type RunWaitingState } from './run-waiting-state'
 import type { RunActionAvailability } from '@shared/run-state'

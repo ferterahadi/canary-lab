@@ -1,7 +1,7 @@
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useMemo, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { AgentModelsConfig, AgentProbeSnapshot, AgentStagePlans, ModelAgentKind, ModelStageKey, StageModelChoice } from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import type { AgentProbeSnapshot } from '@/shared/api/config'
 import {
   AGENT_DEFAULT_CHOICE,
   EFFORT_LEVELS,
@@ -12,8 +12,13 @@ import {
   STAGE_TIERS,
   type KnownModelOption,
   recommendedChoice,
+  type AgentModelsConfig,
+  type AgentStagePlans,
+  type ModelAgentKind,
+  type ModelStageKey,
+  type StageModelChoice,
 } from '@shared/agent-models'
-import { Modal } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 import { agentTitle } from './settings-options'
 import { useAgentModelOptions } from './use-agent-model-options'
 
@@ -31,7 +36,7 @@ interface Props {
   onClose: () => void
   /** Fired with the server's response after a successful save — the settings
    *  dialog behind updates its summary lines from it. */
-  onSaved: (config: api.ProjectConfig) => void
+  onSaved: (config: configApi.ProjectConfig) => void
 }
 
 /** The select sentinel for "a model id the curated list doesn't know" — picking
@@ -273,7 +278,7 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
     setSaving(true)
     setError(null)
     try {
-      const next = await api.putProjectConfig({ agentModels: { ...agentModels, [agent]: plans } })
+      const next = await configApi.putProjectConfig({ agentModels: { ...agentModels, [agent]: plans } })
       if (!mounted()) return
       onSaved(next)
       onClose()

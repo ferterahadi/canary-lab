@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@shared/coverage/types'
 import { EmptyGlyph } from '@/shared/ui/EmptyState'
 import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { GAP_META, STRENGTH_META, STRENGTH_ORDER, countFor } from './CoverageCards'

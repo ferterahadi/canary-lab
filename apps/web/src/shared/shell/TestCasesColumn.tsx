@@ -4,28 +4,32 @@ import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
 import { useEffect, useMemo, useState } from 'react'
 import { useFeatureTestRoster } from '../state/use-feature-test-roster'
 import { useInvalidationKey } from '../state/invalidation'
-import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
+import type { DirtySpecSummary, FeatureSpecFile } from '../api/types'
+import type { ExtractedTest } from '@shared/extracted-test'
+import type { RunStatus } from '@shared/run-state'
 import {
   colorClassForStatus,
   executionLineHighlightForTest,
   runningTestForTest,
   sameSourceFile,
-  sourceLineForBodyLine,
   statusForTest,
   type StepStatus,
   type TestExecutionLineHighlight,
   type TestStatusIdentity,
   summaryEntryName,
-} from '@/features/runs'
-import type { RunManifest, RunSummary, RunSummaryRunningStep } from '../api/types'
+} from '@/features/runs/utils/test-step-status'
+import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
+import type { RunManifest } from '@shared/run-manifest'
+import type { RunSummary, RunSummaryRunningStep } from '@shared/run-detail'
 import { StepStatusBadge } from '../ui/TestCodeBlock'
 import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
-import { sourceFileInRun } from '@/features/runs'
-import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
+import { sourceFileInRun } from '@/features/runs/utils/run-source-file'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 import { useTestVersions } from './use-test-versions'
-import type { TestChangeKind } from '../lib/test-versions'
+import type { TestChangeKind } from '@shared/test-review'
 import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { EmptyState } from '@/shared/ui/EmptyState'

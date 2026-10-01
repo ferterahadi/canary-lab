@@ -5,20 +5,14 @@ import path from 'path'
 import { Writable } from 'stream'
 import { createServer } from '../web-server/src/server'
 import type { PtyFactory } from '../web-server/src/features/runs/logic/runtime/pty-spawner'
+import { doctor, isDefaultLocalMcpUrl, main, resolveDefaultMcpUrl } from './mcp'
+import { bridge, REINIT_ID, type BridgeTransport } from './mcp-bridge'
+import { inferClientKindFromProcessLines, inferMcpClientKind } from './mcp-client-kind'
 import {
-  bridge,
-  doctor,
+  isUsableUiProjectRoot,
   ensureMcpServerReachable,
-  inferClientKindFromProcessLines,
-  inferMcpClientKind,
-  isDefaultLocalMcpUrl,
-  main,
-  REINIT_ID,
-  resolveDefaultMcpUrl,
   resolveUiProjectRootForMcpAutostart,
-  type BridgeTransport,
-} from './mcp'
-import { isUsableUiProjectRoot } from './mcp-reachability'
+} from './mcp-reachability'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../shared/mcp-protocol'
 
 const inertPtyFactory: PtyFactory = () => ({

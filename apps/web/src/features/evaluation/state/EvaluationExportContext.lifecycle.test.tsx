@@ -3,23 +3,20 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { EvaluationExportTask } from '@/shared/api/types'
+import * as evaluationApi from '@/shared/api/evaluation'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    startEvaluationExport: vi.fn(),
-    listEvaluationExportTasks: vi.fn(),
-    getEvaluationExportTask: vi.fn(),
-    downloadEvaluationExportTask: vi.fn(),
-    cancelEvaluationExportTask: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/evaluation')>()),
+  startEvaluationExport: vi.fn(),
+  listEvaluationExportTasks: vi.fn(),
+  getEvaluationExportTask: vi.fn(),
+  downloadEvaluationExportTask: vi.fn(),
+  cancelEvaluationExportTask: vi.fn(),
+}))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -54,11 +51,11 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.startEvaluationExport).mockReset()
-  vi.mocked(api.listEvaluationExportTasks).mockReset().mockResolvedValue([])
-  vi.mocked(api.getEvaluationExportTask).mockReset()
-  vi.mocked(api.downloadEvaluationExportTask).mockReset()
-  vi.mocked(api.cancelEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.startEvaluationExport).mockReset()
+  vi.mocked(evaluationApi.listEvaluationExportTasks).mockReset().mockResolvedValue([])
+  vi.mocked(evaluationApi.getEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.downloadEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.cancelEvaluationExportTask).mockReset()
 })
 
 afterEach(() => {
@@ -97,12 +94,13 @@ function Probe({ captured }: { captured: { value: ReturnType<typeof useEvaluatio
   return null
 }
 
-function task(overrides: Partial<EvaluationExportTask> = {}): EvaluationExportTask {
+function task(overrides: Partial<EvaluationExportTaskView> = {}): EvaluationExportTaskView {
   return {
     taskId: 'task-1',
     runId: 'run-1',
     feature: 'checkout',
     mode: 'raw',
+    producer: 'internal',
     status: 'running',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -114,10 +112,10 @@ function task(overrides: Partial<EvaluationExportTask> = {}): EvaluationExportTa
 describe('EvaluationExportProvider', () => {
   it('ignores periodic discovery results after unmount', async () => {
     vi.useFakeTimers()
-    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
-    vi.mocked(api.listEvaluationExportTasks)
+    let resolveTasks: (tasks: EvaluationExportTaskView[]) => void = () => {}
+    vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([])
-      .mockReturnValueOnce(new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }))
+      .mockReturnValueOnce(new Promise<EvaluationExportTaskView[]>((resolve) => { resolveTasks = resolve }))
 
     renderProbe()
     await act(async () => {
@@ -144,8 +142,8 @@ describe('EvaluationExportProvider', () => {
     const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
     const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })
     const t3 = task({ taskId: 't3', runId: 'r3', status: 'completed', createdAt: '2026-01-03T00:00:00.000Z' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([t1, t2, t3])
-    vi.mocked(api.cancelEvaluationExportTask).mockResolvedValue(undefined)
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([t1, t2, t3])
+    vi.mocked(evaluationApi.cancelEvaluationExportTask).mockResolvedValue(undefined)
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
@@ -164,8 +162,8 @@ describe('EvaluationExportProvider', () => {
     // 2. the chunk matches `[agent:xxx] starting localized rewrite|still running`
     const running = task({ taskId: 'ref-task', runId: 'run-ref', status: 'running' })
     const withRef = { ...running, sessionRef: { agent: 'claude' as const, sessionId: 'sid', logPath: '/tmp/x.jsonl' } }
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockResolvedValue(withRef)
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(evaluationApi.getEvaluationExportTask).mockResolvedValue(withRef)
 
     const captured = renderProbe()
     await act(async () => {
@@ -177,7 +175,7 @@ describe('EvaluationExportProvider', () => {
       taskSocket('ref-task').fire({ type: 'data', chunk: '[agent:claude] starting localized rewrite\n' })
       await Promise.resolve()
     })
-    expect(api.getEvaluationExportTask).toHaveBeenCalledWith('ref-task')
+    expect(evaluationApi.getEvaluationExportTask).toHaveBeenCalledWith('ref-task')
   })
 
   it('throws when the hook is used outside the provider', () => {

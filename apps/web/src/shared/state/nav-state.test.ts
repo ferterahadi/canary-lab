@@ -7,7 +7,7 @@ import {
   type NavState,
 } from './nav-state'
 import type { PersistedView } from '../lib/workspace-view-state'
-import type { FlightIndexEntry } from '../api/client'
+import type { FlightIndexEntry } from '@shared/flights/types'
 
 const base: NavState = {
   view: 'workspace',

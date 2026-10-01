@@ -3,10 +3,11 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createNotificationRuntime, NOTIFICATION_RECOVERY_MS } from './notification-runtime'
-import { RunStore, createRegistry } from '../../runs/logic/run-store'
+import { RunStore } from '../../runs/logic/run-store'
+import { createRegistry } from '../../runs/logic/run-registry'
 import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { FlightRunStore } from '../../flights/logic/store'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../flights/logic/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
 import { WorkspaceEventBus, type WorkspaceEvent } from '../../../shared/workspace-events'
 
 let dir: string

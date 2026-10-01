@@ -224,7 +224,7 @@ describe('computeNonPassedTargets', () => {
   }
 
   it('returns failed + pending tests, skipping the ones already passed', async () => {
-    const { computeNonPassedTargets } = await import('./run-verdict')
+    const { computeNonPassedTargets } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -252,7 +252,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns no-passed-yet on a fresh run with no passedNames', async () => {
-    const { computeNonPassedTargets } = await import('./run-verdict')
+    const { computeNonPassedTargets } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -264,7 +264,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns all-passed when every test is in passedNames', async () => {
-    const { computeNonPassedTargets } = await import('./run-verdict')
+    const { computeNonPassedTargets } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -278,7 +278,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns extraction-failed when no spec files exist', async () => {
-    const { computeNonPassedTargets } = await import('./run-verdict')
+    const { computeNonPassedTargets } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'empty')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeNonPassedTargets(featureDir, { passedNames: ['x'] })
@@ -296,7 +296,7 @@ describe('computeRerunTargetsOrdered', () => {
   }
 
   it('orders previously-failed tests first, then pending in source order', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-ordered')
     fs.mkdirSync(featureDir, { recursive: true })
     // Spec layout: pending at line 2, failed at line 3 (failure comes AFTER
@@ -327,7 +327,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('drops failed slugs that no longer exist in the AST and reports them', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-dropped')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -355,7 +355,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns pending-only when every prior-failed slug has since passed', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-recovered')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -379,7 +379,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('handles empty passedNames by listing failed-first then everything else', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-no-passed')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -401,7 +401,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns all-passed when every AST test is in passedNames', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-all-passed')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -415,7 +415,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns extraction-failed when there are no spec files', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'demo-empty')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeRerunTargetsOrdered(featureDir, { passedNames: ['x'] })

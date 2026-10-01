@@ -5,14 +5,14 @@ import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '
 import { createMcpHandler, isInitializeRequest, isLegacyRequest, McpServer } from '@modelcontextprotocol/server'
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
+import { registerCanaryLabTools } from './tools'
 import {
   CANARY_LAB_MCP_PROFILES,
   normalizeCanaryLabMcpProfile,
-  registerCanaryLabTools,
   toolsForCanaryLabMcpProfile,
-  type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
-} from './tools'
+} from './tool-profiles'
+import type { CanaryLabMcpDeps } from './tool-schemas'
 import { classifyMcpClient } from './client-surface'
 import { isClientKind, type ClientKind } from '../../../../shared/run-mode'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'

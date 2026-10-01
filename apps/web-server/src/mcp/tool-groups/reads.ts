@@ -6,7 +6,7 @@
 import { z } from 'zod'
 import { requestVerificationUrls } from '../verification-input'
 import { buildExternalRunSnapshotSlim, buildSpecEditsWarning } from '../../features/runs/logic/heal/external-heal-surface'
-import { loadFeatures } from '../../shared/feature-loader'
+import { findFeature, loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
 import {
   isActiveRunStatus,
@@ -113,7 +113,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       featureId: z.string().describe('Feature name.'),
     },
   }, async ({ featureId }) => {
-    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    const feature = findFeature(deps.featuresDir, featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     return asJsonResult(listVerificationConfigs(feature))
   })
@@ -125,7 +125,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       configId: z.string().describe('Verification config id.'),
     },
   }, async ({ featureId, configId }) => {
-    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    const feature = findFeature(deps.featuresDir, featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     const config = getVerificationConfig(feature, configId)
     if (!config) return errorResult(`verification config not found: ${configId}`)
@@ -142,7 +142,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     },
   }, async (args, request) => {
     const { featureId, name, targetUrls, playwrightEnvsetId } = args
-    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    const feature = findFeature(deps.featuresDir, featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     const save = async (urls: Record<string, string>) => {
       try {
@@ -166,7 +166,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     },
   }, async (args, request) => {
     const { featureId, configId, name, targetUrls, playwrightEnvsetId } = args
-    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    const feature = findFeature(deps.featuresDir, featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     const save = async (urls: Record<string, string>) => {
       try {

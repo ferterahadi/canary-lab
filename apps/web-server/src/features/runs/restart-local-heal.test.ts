@@ -3,9 +3,11 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { PaneBroker } from './logic/pane-broker'
-import { RunStore, createRegistry, type OrchestratorRegistry } from './logic/run-store'
+import { RunStore } from './logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from './logic/run-registry'
 import { buildRunPaths, runDirFor } from './logic/runtime/run-paths'
-import { writeManifest, type RunManifest } from './logic/runtime/manifest'
+import { writeManifest } from './logic/runtime/manifest'
+import type { RunManifest } from '../../../../../shared/run-manifest'
 import { MODE_COPY } from './logic/runtime/auto-heal'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
@@ -23,8 +25,8 @@ const probe = vi.hoisted(() => ({
   asked: [] as (string | undefined)[],
 }))
 
-vi.mock('./logic/runtime/auto-heal', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./logic/runtime/auto-heal')>()),
+vi.mock('./logic/runtime/heal-agent-spawn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./logic/runtime/heal-agent-spawn')>()),
   pickAvailableHealAgent: (requested?: string) => {
     probe.asked.push(requested)
     return probe.answer

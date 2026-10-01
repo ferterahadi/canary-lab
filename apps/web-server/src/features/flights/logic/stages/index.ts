@@ -1,4 +1,4 @@
-import type { StageAdapters } from '../conductor'
+import type { StageAdapters } from '../flight-stages'
 import type { FlightStageDeps } from './context'
 import { similarityStage } from './similarity'
 import { scoutStage } from './scout'
@@ -10,8 +10,6 @@ import { specsCoverageStage } from './specs-coverage'
 import { portifyStage } from './portify'
 import { runStage, healStage } from './run'
 import { evaluationExportStage } from './evaluation-export'
-
-export type { FlightStageDeps, FlightInject, FlightAgentSpawner } from './context'
 
 // The flight's stage adapters — each a thin conductor over an existing
 // subsystem (create_feature scaffolding, env capture, PRD/coverage engines,

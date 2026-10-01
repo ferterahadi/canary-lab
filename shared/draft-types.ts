@@ -1,4 +1,4 @@
-import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
+import type { ClientKind, RunProducer } from './run-mode'
 
 export type DraftStatus =
   | 'created'

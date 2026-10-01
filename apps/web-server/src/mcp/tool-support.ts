@@ -7,22 +7,15 @@
 
 import type { McpServer, CallToolResult } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import type { RunDetail } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { SummaryState } from '../../../../shared/coverage/types'
-import { type DraftRecord, type ExternalDraftStage } from '../features/wizard/logic/draft-store'
+import type { DraftRecord, ExternalDraftStage } from '../../../../shared/draft-types'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
-
-export { BOOT_SESSION_MESSAGE, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_WINDOW_MS, bootSessionValue, classifyWaitForHealTask, dirtyTestsWarning, healWaitNext, isActiveBootRun, stillWaitingValue, waitForHealTask } from './heal-task-wait'
-export type { DirtyTestsWarning, WaitForHealTaskResult, WaitForHealTaskValue } from './heal-task-wait'
-export { AUTHOR_TOOLS, CANARY_LAB_MCP_PROFILES, COMPACT_TOOLS, COVERAGE_TOOLS, DEFAULT_CANARY_LAB_MCP_PROFILE, EXEC_TOOL_NAME, EXPORT_TOOLS, FLIGHT_TOOLS, FULL_ONLY_TOOLS, FULL_TOOLS, LIFECYCLE_TOOLS, PORTIFY_TOOLS, REPAIR_TOOLS, TOOLS_BY_PROFILE, VERIFY_TOOLS, isCanaryLabMcpProfile, normalizeCanaryLabMcpProfile, toolsForCanaryLabMcpProfile } from './tool-profiles'
-export type { CanaryLabMcpExecCallEvent, CanaryLabMcpExecCommand, CanaryLabMcpExposedToolName, CanaryLabMcpProfile, CanaryLabMcpToolName, CanaryLabMcpToolOptions } from './tool-profiles'
-export { coverageMappingInput, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, summaryRequirementInput, variantDimensionInput } from './tool-schemas'
-export type { CanaryLabMcpDeps, McpStartRunOutcome } from './tool-schemas'
 
 /** The feature-authoring context an MCP tool passes to a shared writer. Built
  *  in one place because it carries `workspaceEvents` — the writers announce
@@ -222,10 +215,6 @@ export function externalDraftAuthoringNextSteps(feature: string): string[] {
 export function newDraftId(): string {
   return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
-
-// Task-id + filename helpers moved to the evaluation logic layer (the flight's
-// external export hand-off mints the same records); re-exported for the tools.
-export { newEvaluationTaskId, safeFilename } from '../features/evaluation/logic/external-evaluation-export'
 
 export function isToolErrorPayload(value: unknown): value is { error: string; statusCode?: number } {
   return !!value &&

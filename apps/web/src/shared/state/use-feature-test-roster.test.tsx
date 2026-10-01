@@ -7,7 +7,10 @@ import type { FeatureSpecFile } from '../api/types'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useFeatureTestRoster } from './use-feature-test-roster'
 const api = vi.hoisted(() => ({ getFeatureTests: vi.fn() }))
-vi.mock('../api/client', async () => ({ ...await vi.importActual('../api/client'), ...api }))
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: api.getFeatureTests,
+}))
 let root: Root
 let element: HTMLDivElement
 let value: ReturnType<typeof useFeatureTestRoster>

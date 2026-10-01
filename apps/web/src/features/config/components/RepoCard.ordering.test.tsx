@@ -6,7 +6,11 @@ import { RepoCard } from './RepoCard'
 import type { RepoSlice } from './repo-slice'
 const api = vi.hoisted(() => ({ getGitRemote: vi.fn(), checkPathExists: vi.fn(), cloneRepository: vi.fn() }))
 const folder = vi.hoisted(() => ({ choose: (_: string) => {}, clone: (_: string) => {} }))
-vi.mock('@/shared/api/client', () => api)
+vi.mock('@/shared/api/workspace', () => ({
+  getGitRemote: api.getGitRemote,
+  checkPathExists: api.checkPathExists,
+  cloneRepository: api.cloneRepository,
+}))
 vi.mock('./RepoBranchControl', () => ({ BranchControl: () => null }))
 vi.mock('./FolderPicker', () => ({
   FolderPicker: ({ onChange }: { onChange: (path: string) => void }) => { folder.choose = onChange; return null },

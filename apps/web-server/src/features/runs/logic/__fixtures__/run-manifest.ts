@@ -1,4 +1,4 @@
-import type { RunManifest } from '../runtime/manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 
 /** Structural defaults only; each test supplies the evidence it exercises. */
 export function runManifest(overrides: Partial<RunManifest> = {}): RunManifest {

@@ -3,8 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunSummary } from '@/shared/api/types'
-import { PlaywrightPlayback } from './RunDetailColumn'
+import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
+import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
+import { PlaywrightPlayback } from './RunPlaybackPanels'
 
 let container: HTMLDivElement
 let root: Root

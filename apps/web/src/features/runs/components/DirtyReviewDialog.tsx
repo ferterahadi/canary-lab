@@ -1,20 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { FeatureTestReview, RunTestReview, TestReviewReceipt } from '@shared/test-review'
-import * as api from '@/shared/api/client'
+import type { DirtySpecSummary, Feature } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type {
+  FeatureTestReview,
+  RunTestReview,
+  TestReviewReceipt,
+  TestChangeKind,
+  VersionTest,
+} from '@shared/test-review'
+import * as runsApi from '@/shared/api/runs'
+import * as featuresApi from '@/shared/api/features'
+import * as workspaceApi from '@/shared/api/workspace'
 import { useTestSourceComparison } from '@/shared/state/use-test-source-comparison'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { shortRunRef } from '@/shared/lib/format'
-import { TEST_CHANGE_KINDS, type TestChangeKind, type VersionTest } from '@/shared/lib/test-versions'
-import { ChevronLeftIcon, ChevronRightIcon, Modal, StatusDot } from '@/shared/ui/atoms'
+import { TEST_CHANGE_KINDS } from '@/shared/lib/test-versions'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronLeftIcon, ChevronRightIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '@/shared/ui/TestChangeMark'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { useRun } from '../state/RunsContext'
 import { featureTone, pendingFileScope, specTone } from '../utils/spec-integrity'
 import { SpecToneChip } from './SpecToneChip'
-import { FullTestReview, type ReviewFocus } from './FullTestReview'
+import { FullTestReview } from './FullTestReview'
+import type { ReviewFocus } from '../../../shared/lib/workspace-view-state'
 
 interface Props {
   features: Feature[]
@@ -133,7 +146,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     detail?.manifest.specEdits?.checkedAt,
     detail?.manifest.specEdits?.reviewDecisions,
   ])
-  const runReview = useLiveResource<RunTestReview>('tests', missingSnapshot ? null : run?.runId ?? null, api.getRunTestReview, {
+  const runReview = useLiveResource<RunTestReview>('tests', missingSnapshot ? null : run?.runId ?? null, runsApi.getRunTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
     refreshKey: reviewRefreshKey,
@@ -145,7 +158,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   // while Accept & commit targets a different run-scoped file set.
   const useRunBaseline = !!comparisonRunId && !missingSnapshot && (againstRun || !selected?.feature || pendingRunReview)
   const suiteReviewAvailable = !run || (focus?.baseline !== 'run' && (missingSnapshot || (runReview.confirmed && !pendingRunReview)))
-  const featureReview = useLiveResource<FeatureTestReview>('tests', suiteReviewAvailable && selected?.feature ? selected.name : null, api.getFeatureTestReview, {
+  const featureReview = useLiveResource<FeatureTestReview>('tests', suiteReviewAvailable && selected?.feature ? selected.name : null, featuresApi.getFeatureTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
   })
@@ -199,8 +212,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
 
   const acceptChanges = async (): Promise<void> => {
     if (!selected) return
-    const receipt = reviewRun && reviewRevision ? await api.acceptRunTestReview(reviewRun.runId, reviewRevision)
-      : featureReviewRevision ? await api.acceptFeatureTestReview(selected.name, featureReviewRevision) : undefined
+    const receipt = reviewRun && reviewRevision ? await runsApi.acceptRunTestReview(reviewRun.runId, reviewRevision)
+      : featureReviewRevision ? await featuresApi.acceptFeatureTestReview(selected.name, featureReviewRevision) : undefined
     if (!receipt) return
     onFeaturesChanged?.()
     onClose()
@@ -209,8 +222,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
 
   const restoreChanges = async (): Promise<void> => {
     if (!selected) return
-    if (reviewRun && reviewRevision) await api.restoreSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
-    else if (featureReviewRevision) await api.restoreFeatureTestReview(selected.name, featureReviewRevision)
+    if (reviewRun && reviewRevision) await runsApi.restoreSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
+    else if (featureReviewRevision) await featuresApi.restoreFeatureTestReview(selected.name, featureReviewRevision)
     else return
     onFeaturesChanged?.()
     onClose()
@@ -271,8 +284,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                   <span className="flex min-w-0 items-center gap-1.5"><span className="inline-flex shrink-0" title={changed ? `Changed compared with ${baselineLabel}` : undefined}><StatusDot state="warning" className={changed ? '' : 'invisible'} /></span><span className="block min-w-0 truncate font-mono text-[11px]">{file.file.replace(/^e2e\//, '')}</span></span>
                   {assessedFiles.some((item) => item.file === file.file) && <span className="mt-1 flex flex-wrap items-center gap-2"><SpecToneChip tone={specTone(file)} /><span className="text-[10px] text-secondary">{pendingFileScope(file)}</span></span>}
                 </button><button type="button" className="cl-icon-button cl-review-file-editor" disabled={busy} aria-label={`Edit ${file.file} in editor`} title="Open in editor" onClick={() => { void act(async () => {
-                  const review = await api.getTestFileReview(selected.name, file.file, useRunBaseline ? comparisonRunId : undefined)
-                  const result = await api.openEditor({ file: review.currentPath, line: file.file === spec?.file ? focus?.line ?? 1 : 1 })
+                  const review = await featuresApi.getTestFileReview(selected.name, file.file, useRunBaseline ? comparisonRunId : undefined)
+                  const result = await workspaceApi.openEditor({ file: review.currentPath, line: file.file === spec?.file ? focus?.line ?? 1 : 1 })
                   if (!result.opened) throw new Error('Could not open the editor. Open this file in your workspace.')
                 }) }}>↗</button></div>
                 }) : <p className="px-2 text-xs text-secondary">No test files available</p>}

@@ -5,8 +5,6 @@ import { spawn } from 'child_process';
 import type { BackupRecord } from './types';
 import { getEnvSetsDir, loadConfig, resolveVars, getSlotFilesInSet } from '../../../../config/logic/envset-runtime';
 
-export { getEnvSetsDir, loadConfig, resolveVars, getSlotFilesInSet, resolveSetTargets } from '../../../../config/logic/envset-runtime';
-
 export function listEnvSets(envSetsDir: string): string[] {
   return fs
     .readdirSync(envSetsDir, { withFileTypes: true })

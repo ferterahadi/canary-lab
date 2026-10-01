@@ -1,9 +1,13 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
+import { useDismissOnOutsideMousedown, useEscapeToClose } from '@/shared/ui/Overlays'
+import { useAnchoredPosition } from '@/shared/ui/use-anchored-position'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import * as api from '../api/client'
+import * as configApi from '../api/config'
 import { capitalizeFirst } from '@/shared/lib/format'
-import { CopyField, StatusDot, ChevronRightIcon, type StatusDotState } from '@/shared/ui/atoms'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { CopyField } from '@/shared/ui/CopyField'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 
 const MCP_PROFILE = 'compact'
 
@@ -28,7 +32,7 @@ export function McpHealthBadge() {
     }))
     setCheckMessage(null)
     try {
-      const result = await api.getMcpHealth()
+      const result = await configApi.getMcpHealth()
       const checkedAt = formatCheckedAt(new Date())
       setHealth({
         state: 'ready',
@@ -58,28 +62,10 @@ export function McpHealthBadge() {
     setMenuPosition({ top: rect.bottom + 8, left, width })
   }, [])
 
-  useEffect(() => {
-    if (!open) return
-    updateMenuPosition()
-    const handlePointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node | null
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
-      setOpen(false)
-    }
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('resize', updateMenuPosition)
-    window.addEventListener('scroll', updateMenuPosition, true)
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('resize', updateMenuPosition)
-      window.removeEventListener('scroll', updateMenuPosition, true)
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [open, updateMenuPosition])
+  useAnchoredPosition(open, updateMenuPosition)
+  // The menu is portaled, so it is not inside the button: both count as in.
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [buttonRef, menuRef])
+  useEscapeToClose(() => setOpen(false), open)
 
   const palette: Record<McpHealthState['state'], { dot: StatusDotState; label: string; pulse: boolean }> = {
     checking: { dot: 'warning', label: 'checking', pulse: true },

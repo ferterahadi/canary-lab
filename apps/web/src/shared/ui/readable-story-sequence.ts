@@ -1,4 +1,4 @@
-import type { ReadableStoryItem } from '../api/types'
+import type { ReadableStoryItem } from '@shared/readable-tests/types'
 
 export interface ReadableStorySequenceEntry {
   item: ReadableStoryItem

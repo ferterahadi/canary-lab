@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RequirementCoverage, RequirementEnforcement, TestCoverage } from '@/shared/api/types'
+import type { RequirementCoverage, RequirementEnforcement, TestCoverage } from '@shared/coverage/types'
 import { GAP_META, RequirementCard, TestCard } from './CoverageCards'
 
 // Both ledgers are one-line rows at rest. A requirement row is id · title · how

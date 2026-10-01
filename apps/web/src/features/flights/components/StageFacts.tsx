@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react'
-import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { FlightManifest, FlightStage, FlightStageKey } from '@shared/flights/types'
+import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/portify'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
+import type { CoverageLedger } from '@shared/coverage/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
@@ -44,8 +49,6 @@ export interface StageFact {
 }
 
 import { plural } from '@shared/lib/plural'
-export { plural }
-
 /** Everything a band needs that the flight record does NOT hold. Resolved once
  *  per visible stage by `useStageBandData` and passed in, so `stageFacts` stays
  *  a pure function of its inputs. Every field is optional: missing evidence
@@ -61,7 +64,7 @@ export interface StageBandData {
    *  hand (see `useStageBandData`). */
   pending?: boolean
   /** The resolved export task behind an Evaluation Report stage. */
-  evalTask?: EvaluationExportTask | null
+  evalTask?: EvaluationExportTaskView | null
   /** The feature's coverage ledger — the only source of proven coverage and
    *  per-test strength. */
   ledger?: CoverageLedger | null

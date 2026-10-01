@@ -1,8 +1,6 @@
 import type { TestFileReview, VersionTest, TestChangeKind } from '@shared/test-review'
 import type { ContextRow } from '@shared/test-source-diff'
 import { compareText } from './comparison-diff'
-export { sourceRows, rowsForTest, testSelections, type ContextRow } from '@shared/test-source-diff'
-
 const contains = (test: { line: number; endLine: number }, line?: number): boolean => line != null && line >= test.line && line <= test.endLine
 
 /** Diff the selected declarations independently. File-level alignment can pair a
@@ -63,8 +61,6 @@ export function comparedTestRows(review: TestFileReview, test: VersionTest, kind
     return { ...row, change: beforeChanged || afterChanged ? row.change ?? 1 : undefined, beforeChanged, afterChanged }
   })
 }
-
-export { storyEndLine, englishSourceRange, englishLines } from '@shared/readable-tests/source-lines'
 
 function predicateContains(source: string, predicate: { line: number; source: string }, line?: number): boolean {
   if (line == null || line < predicate.line) return false

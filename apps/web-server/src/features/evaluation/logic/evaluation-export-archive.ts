@@ -1,17 +1,17 @@
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact, RunDetail } from '../../runs/logic/run-store'
+import type { PlaywrightArtifact } from '../../../../../../shared/run-detail'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
+import { createEvaluationExport } from './test-review-export'
+import type { AssertionHtmlOptions } from './test-review/types'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
-import type { EvaluationArchiveContents } from './evaluation-export-types'
+import type { EvaluationArchiveContents } from '../../../../../../shared/evaluation-export-types'
 import { buildBehaviorCertificate } from './behavior-certificate'
 import {
   type BehaviorCertificate,
 } from '../../../../../../shared/verification-strength/certificate'
-
-export type { EvaluationArchiveContents } from './evaluation-export-types'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string

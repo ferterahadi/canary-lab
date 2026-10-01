@@ -2,13 +2,23 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { PlanFeaturesTask } from '@/shared/api/client'
-import { ApiError } from '@/shared/api/client'
+import type { PlanFeaturesTask } from '@shared/flights/types'
+import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useFlightStartDialog } from './use-flight-start-dialog'
 
 const api = vi.hoisted(() => ({ getPlanFeaturesTask: vi.fn(), getProjectConfig: vi.fn(), launchPlannedFeatures: vi.fn(), cancelPlanFeatures: vi.fn(), planFeatures: vi.fn() }))
-vi.mock('@/shared/api/client', async (original) => ({ ...(await original<typeof import('@/shared/api/client')>()), ...api }))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  getPlanFeaturesTask: api.getPlanFeaturesTask,
+  launchPlannedFeatures: api.launchPlannedFeatures,
+  cancelPlanFeatures: api.cancelPlanFeatures,
+  planFeatures: api.planFeatures,
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: api.getProjectConfig,
+}))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement

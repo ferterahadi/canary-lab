@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react'
-import { useRun } from '@/features/runs'
-import type { Feature, RunIndexEntry } from '../api/types'
+import { useRun } from '@/features/runs/state/RunsContext'
+import type { Feature } from '../api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 import {
   initialFeatureSelection, latestFeatureRunId, reconcileRunSelection,
   refreshedFeatureSelection, workspaceRunsForFeature,

@@ -1,11 +1,10 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ComponentProps, type DragEvent, type JSX } from 'react'
-import * as api from '@/shared/api/client'
-import type { FeatureDoc, FeatureDocsListing } from '@/shared/api/types'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { FeatureDoc, FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { DocPill, EmptyDropzone } from './DocPill'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
-
-export { DocPill, EmptyDropzone } from './DocPill'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -128,7 +127,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // `keepError` lets a refetch that follows a partially-failed batch import
   // preserve the combined error message instead of clearing it on success.
   const load = useCallback((keepError = false) => {
-    api.listFeatureDocs(feature)
+    coverageApi.listFeatureDocs(feature)
       .then((data) => { setListing(data); if (!keepError) setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature])
@@ -151,7 +150,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     for (const file of list) {
       try {
         const base64 = await readAsBase64(file)
-        await api.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
+        await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
         imported += 1
       } catch (e: unknown) {
         failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
@@ -169,7 +168,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
 
   const removeDoc = useCallback((relPath: string) => {
     setBusy(true)
-    api.deleteFeatureDoc(feature, relPath)
+    coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onDocsChanged() })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
@@ -178,7 +177,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // Open a doc in the user's configured editor (same launcher the run/test views
   // use). Best-effort — surface a failure in the docs error slot.
   const openDoc = useCallback((absPath: string) => {
-    api.openEditor({ file: absPath })
+    workspaceApi.openEditor({ file: absPath })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to open in editor'))
   }, [])
 
@@ -192,10 +191,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setError(null)
     const failures: string[] = []
     try {
-      try { await api.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
+      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
       for (const d of listing?.docs ?? []) {
         if (d.generated) continue // already removed by clearPrdSummary
-        try { await api.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
+        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
       }
     } finally {
       if (failures.length) setError(`Reset incomplete: ${failures.join(', ')}`)

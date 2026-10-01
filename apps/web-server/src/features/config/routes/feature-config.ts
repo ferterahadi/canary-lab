@@ -3,8 +3,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 
-export type { FeatureConfigRouteDeps } from './feature-config-deps'
-
 import { registerEnvsetRoutes } from './envset-routes'
 import { registerFeatureConfigDocRoutes } from './feature-config-doc'
 import { registerPlaywrightConfigRoutes } from './playwright-config-routes'

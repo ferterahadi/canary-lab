@@ -1,6 +1,6 @@
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import { linkFeatureDoc } from '../features/config/logic/feature-authoring'
+import { linkFeatureDoc } from '../features/config/logic/feature-docs-authoring'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
 import { readDocumentSelection } from '../features/coverage/logic/coverage/document-resolution'
 import { listFeatureDocs } from '../features/coverage/logic/coverage/feature-docs'

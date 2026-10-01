@@ -1,8 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
-import type { PlaywrightPlaybackEvent } from './run-detail'
-
+import type {
+  PlaywrightArtifactKind,
+  PlaywrightArtifactGroup,
+  PlaywrightPlaybackEvent,
+} from '../../../../../../shared/run-detail'
 /** Recursively sum the byte size of every regular file under `dir`. Returns 0
  *  when the directory is absent or unreadable — callers treat missing artifacts
  *  as "nothing to reclaim". Symlinks are not followed (lstat). */
@@ -47,24 +50,6 @@ export function trimRunArtifacts(logsDir: string, runId: string): number {
     fs.rmSync(dir, { recursive: true, force: true })
   }
   return freed
-}
-
-export type PlaywrightArtifactKind = 'screenshot' | 'trace' | 'video' | 'other'
-
-export interface PlaywrightArtifact {
-  name: string
-  kind: PlaywrightArtifactKind
-  path: string
-  url: string
-  contentType?: string
-  sizeBytes: number
-  mtimeMs: number
-}
-
-export interface PlaywrightArtifactGroup {
-  testName: string
-  testTitle?: string
-  artifacts: PlaywrightArtifact[]
 }
 
 export function indexPlaywrightArtifacts(

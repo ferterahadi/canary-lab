@@ -1,14 +1,15 @@
-import crypto from 'crypto'
 import path from 'path'
-import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import {
+  AGENT_DEFAULT_CHOICE,
+  type PerAgentStageChoices,
+  type StageModelChoice,
+} from '../../../../../../../shared/agent-models'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
-import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
 import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
-import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
@@ -18,8 +19,6 @@ export interface CoverageAgentSession {
   agent: 'claude' | 'codex'
   sessionId: string
 }
-
-export type { ProposedMapping }
 
 // Coverage annotate-pass (the engine's pass 1). Given the PRD requirements and
 // the feature's UNTAGGED tests, infer which requirement(s) each test verifies and
@@ -262,45 +261,18 @@ function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
-  return runAgentCompletion({
+  // The annotator returns the edits it wants as data for canary to apply, so it
+  // must not be able to reach into the spec files itself.
+  return runReadOnlyAnswerAgent({
+    ...opts,
     agent,
-    signal: opts.signal,
+    prompt,
     idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
     outputDirectoryPrefix: 'canary-coverage-annotate-',
+    outputSchemaPath: ANNOTATE_SCHEMA_PATH,
     errorLabel: 'coverage annotate agent',
     cancellationMessage: 'coverage annotate cancelled',
     cancellationMode: 'after-close',
-    start: ({ outputPath, onIdle }) => {
-      // Pin a session id for claude so the CLI's JSONL session log is locatable and
-      // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-      // Agentic spawn via the shared runner. claude: stream-json for liveness +
-      // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-      // from stdin (`-`) and writes the final message to --output-last-message.
-      const models = opts.models ?? AGENT_DEFAULT_CHOICE
-      const args = agent === 'claude'
-        // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
-        // returns the edits it wants as data for canary to apply, so it must not be
-        // able to reach into the spec files itself.
-        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: ANNOTATE_SCHEMA_PATH })
-      opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-      return runAgentProcess({
-        command: agent,
-        args,
-        cwd: opts.cwd,
-        stdin: agent === 'codex' ? prompt : undefined,
-        onChunk: (text) => opts.onOutput?.(text),
-        idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
-        activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
-        onIdle,
-        spawnScope: opts.spawnScope,
-        ...(opts.agentJob
-          ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
-          : {}),
-      })
-    },
   })
 }
 

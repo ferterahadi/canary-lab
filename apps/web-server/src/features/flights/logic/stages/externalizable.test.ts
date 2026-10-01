@@ -2,8 +2,13 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FLIGHT_STAGE_KEYS, type FlightCheckpointKind, type FlightManifest, type FlightStageKey } from '../types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightCheckpointKind,
+  type FlightManifest,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { EXTERNAL_WORK_OPTIONS, externalizable } from './externalizable'
 import { stageContextStub } from './__fixtures__/stage-context'
 

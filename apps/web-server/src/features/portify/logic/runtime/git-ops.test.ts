@@ -12,6 +12,7 @@ import {
   discardWorktree,
   editFingerprint,
 } from './git-ops'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
@@ -24,15 +25,11 @@ afterEach(() => {
   roots.length = 0
 })
 
-async function tmpRepo(): Promise<string> {
+function tmpRepo(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-git-'))
   roots.push(root)
   fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = 3007\n')
-  await runGit(root, ['init', '-q'])
-  await runGit(root, ['config', 'user.email', 't@t'])
-  await runGit(root, ['config', 'user.name', 'test'])
-  await runGit(root, ['add', '-A'])
-  await runGit(root, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(root)
   return root
 }
 

@@ -26,7 +26,7 @@ vi.mock('../../../agent-sessions/logic/agent-idle-timer', () => ({
 
 // Mock pickAvailableHealAgent so defaultResolveAgents is exercisable without
 // requiring real agent binaries on PATH.
-vi.mock('../../../runs/logic/runtime/auto-heal', () => ({
+vi.mock('../../../runs/logic/runtime/heal-agent-spawn', () => ({
   pickAvailableHealAgent: vi.fn(() => null),
 }))
 
@@ -36,7 +36,8 @@ vi.mock('../../../agent-sessions/logic/agent-binary', () => ({
   isAgentKind: (cmd: string) => cmd === 'claude' || cmd === 'codex',
 }))
 
-import { summarizePrd, renderPrdSummaryMarkdown, buildPrdSummaryPrompt, readPrdSummary, PRD_SUMMARY_JSON } from './prd-summary'
+import { summarizePrd, buildPrdSummaryPrompt } from './prd-summary'
+import { renderPrdSummaryMarkdown, readPrdSummary, PRD_SUMMARY_JSON } from './prd-summary-render'
 import { computeDocsHash } from './docs-collection'
 import type { DocsCollection } from './docs-collection'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'

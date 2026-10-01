@@ -1,8 +1,18 @@
 import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import { isAgentSessionAbsence } from '@/shared/api/client'
-import type { AgentSessionAbsence, AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
+import * as discoveryRepairApi from '@/shared/api/discovery-repair'
+import * as agentSessionsApi from '@/shared/api/agent-sessions'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import * as portifyApi from '@/shared/api/portify'
+import * as coverageApi from '@/shared/api/coverage'
+import * as flightsApi from '@/shared/api/flights'
+import { isAgentSessionAbsence } from '@/shared/api/agent-sessions'
+import type {
+  AgentSessionAbsence,
+  AgentSessionEvent,
+  AgentSessionResponse,
+  SubagentThread,
+} from '@/shared/api/agent-sessions'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { clientKindToDesktopAgent, clientLabel, type ExternalClientKind } from './external-client-branding'
@@ -11,9 +21,6 @@ import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSess
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
 import { TIMELINE_CSS } from './agent-session-css'
-
-export { Markdown, SubagentThreadRow, SystemRow, formatJson, groupSystemLines, summarizeInput, threadDuration } from './AgentSessionRows'
-export type { SystemGroup } from './AgentSessionRows'
 
 // Single agent viewer for the wizard (draft planning/generating) and the run
 // detail page. Renders the agent CLI's JSONL as a chat-style timeline:
@@ -298,14 +305,14 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
       switch (source.kind) {
-        case 'discovery-repair': return api.getDiscoveryRepairAgentSession(source.taskId)
-        case 'run': return api.getAgentSession(source.runId)
-        case 'benchmark': return api.getBenchmarkAgentSession(source.benchmarkId)
-        case 'portify': return api.getPortifyAgentSession(source.workflowId)
-        case 'coverage': return api.getCoverageAgentSession(source.jobId)
-        case 'evaluation': return api.getEvaluationAgentSession(source.taskId)
-        case 'flight': return api.getFlightAgentSession(source.flightId, source.stage)
-        case 'flight-plan': return api.getFlightPlanAgentSession(source.taskId)
+        case 'discovery-repair': return discoveryRepairApi.getDiscoveryRepairAgentSession(source.taskId)
+        case 'run': return agentSessionsApi.getAgentSession(source.runId)
+        case 'benchmark': return benchmarkApi.getBenchmarkAgentSession(source.benchmarkId)
+        case 'portify': return portifyApi.getPortifyAgentSession(source.workflowId)
+        case 'coverage': return coverageApi.getCoverageAgentSession(source.jobId)
+        case 'evaluation': return coverageApi.getEvaluationAgentSession(source.taskId)
+        case 'flight': return flightsApi.getFlightAgentSession(source.flightId, source.stage)
+        case 'flight-plan': return flightsApi.getFlightPlanAgentSession(source.taskId)
       }
     }
 

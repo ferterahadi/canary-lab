@@ -3,6 +3,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import * as service from './service'
+import * as serviceCoverageEngine from './coverage-engine'
 import { freshnessWorkspace } from './__fixtures__/freshness-workspace'
 import { fakePropose } from './__fixtures__/fake-coverage-agents'
 import { CoverageFreshnessMonitor } from './freshness-monitor'
@@ -93,13 +94,13 @@ describe('shared coverage snapshots', () => {
     const helper = path.join(fixture.root, 'util.ts')
     fs.writeFileSync(helper, 'export const value = 1')
     fs.writeFileSync(fixture.spec, `import { value } from '../../../util'\nimport { later } from '../../../later'\n${fs.readFileSync(fixture.spec, 'utf8')}`)
-    await service.runCoverageEngine(fixture.args, { propose: fakePropose })
+    await serviceCoverageEngine.runCoverageEngine(fixture.args, { propose: fakePropose })
     expect(monitor.read('shop').freshness.state).toBe('current')
     compute.mockClear()
     fs.writeFileSync(helper, 'export const value = 2')
     expect(monitor.read('shop').freshness.state).toBe('stale')
     expect(compute).toHaveBeenCalledTimes(1)
-    await service.runCoverageEngine(fixture.args, { propose: fakePropose })
+    await serviceCoverageEngine.runCoverageEngine(fixture.args, { propose: fakePropose })
     expect(monitor.read('shop').freshness.state).toBe('current')
     fs.writeFileSync(path.join(fixture.root, 'later.ts'), 'export const later = 1')
     expect(monitor.read('shop').freshness.state).toBe('stale')

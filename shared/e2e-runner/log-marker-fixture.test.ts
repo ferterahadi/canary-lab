@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -20,19 +19,11 @@ import {
   wrapWithCallSite,
   type CallSiteStep,
 } from './log-marker-fixture'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const THIS_FILE = fileURLToPath(import.meta.url)
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-lm-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const mkTmp = trackTempDirs('cl-lm-')
 
 describe('slugify (log-marker-fixture)', () => {
   it('lowercases and replaces non-alphanumeric runs with a single dash', () => {
@@ -89,7 +80,6 @@ describe('withLogMarkers', () => {
       'pre\n<test-case-my-case>\nduring\n</test-case-my-case>\n',
     )
   })
-
 
   it('skips close tag when run() throws (current behavior — no try/finally)', async () => {
     const dir = mkTmp()

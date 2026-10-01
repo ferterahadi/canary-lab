@@ -3,7 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 

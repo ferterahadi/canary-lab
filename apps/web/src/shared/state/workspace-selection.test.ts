@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunIndexEntry } from '../api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 import {
   initialFeatureSelection, latestFeatureRunId, reconcileRunSelection,
   refreshedFeatureSelection, workspaceRunsForFeature,

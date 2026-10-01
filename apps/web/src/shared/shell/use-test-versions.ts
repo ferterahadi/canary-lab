@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFeatureTestRoster } from '../state/use-feature-test-roster'
-import type { FeatureSpecFile, RunManifest } from '../api/types'
+import type { FeatureSpecFile } from '../api/types'
+import type { RunManifest } from '@shared/run-manifest'
 import { useTestSourceComparison } from '../state/use-test-source-comparison'
 
 type Baseline = Pick<RunManifest, 'runId' | 'featureDir' | 'suiteSnapshot'>

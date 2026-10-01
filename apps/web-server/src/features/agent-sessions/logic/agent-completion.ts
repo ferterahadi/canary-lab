@@ -1,8 +1,12 @@
+import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { AgentProcessHandle } from './agent-process'
-import { recoverAgentAnswer, type ProducerAgentKind } from './agent-producer'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../shared/agent-models'
+import type { AgentJobRecordRef } from './agent-jobs/types'
+import { buildClaudeAgenticArgs, runAgentProcess, type AgentProcessHandle } from './agent-process'
+import { agentActivityPath, recoverAgentAnswer, type ProducerAgentKind } from './agent-producer'
+import { buildReadOnlyCodexArgs } from './agent-read-only-args'
 
 interface AgentCompletionOptions {
   agent: ProducerAgentKind
@@ -86,5 +90,56 @@ export function runAgentCompletion(options: AgentCompletionOptions): Promise<str
     } catch (error) {
       finish({ ok: false, error })
     }
+  })
+}
+
+interface ReadOnlyAnswerAgentOptions extends Omit<AgentCompletionOptions, 'start'> {
+  prompt: string
+  /** JSON schema codex validates its final message against. */
+  outputSchemaPath: string
+  /** Resolved model+effort for this launch; absent → agent default. */
+  models?: StageModelChoice
+  cwd?: string
+  onOutput?: (chunk: string) => void
+  /** Fired once at spawn. Claude's id is pinned here so its JSONL session log is
+   *  locatable for AgentSessionView; codex has no `--session-id` and is found
+   *  later by cwd + start time, so its id is empty. */
+  onSession?: (session: { agent: ProducerAgentKind; sessionId: string }) => void
+  onTick?: (idleMs: number) => void
+  spawnScope?: string
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
+}
+
+/** One agent pass that reads and answers with JSON, read-only on both arms.
+ *  claude streams stream-json for liveness and answer recovery; codex `exec`
+ *  reads the prompt from stdin (`-`) and writes its final message to
+ *  `--output-last-message`. Every caller here only reads and returns data for
+ *  canary to apply, so neither arm is given a write tool. */
+export function runReadOnlyAnswerAgent(options: ReadOnlyAnswerAgentOptions): Promise<string> {
+  const { agent, prompt, cwd, models = AGENT_DEFAULT_CHOICE } = options
+  return runAgentCompletion({
+    ...options,
+    start: ({ outputPath, onIdle }) => {
+      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+      const args = agent === 'claude'
+        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: options.outputSchemaPath })
+      options.onSession?.({ agent, sessionId: claudeSessionId ?? '' })
+      return runAgentProcess({
+        command: agent,
+        args,
+        cwd,
+        stdin: agent === 'codex' ? prompt : undefined,
+        onChunk: (text) => options.onOutput?.(text),
+        idleMs: options.idleMs,
+        activityPath: agentActivityPath(agent, cwd, claudeSessionId),
+        onIdle,
+        onTick: options.onTick,
+        spawnScope: options.spawnScope,
+        ...(options.agentJob
+          ? { record: { ...options.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: options.agentJob.logsDir }
+          : {}),
+      })
+    },
   })
 }

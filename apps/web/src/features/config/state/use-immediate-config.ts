@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import * as api from '@/shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
 import { useEditableSlice } from '../components/useEditableSlice'
 
 /** Uses the same document owner as Advanced setup, with immediate field commits.
@@ -8,10 +8,10 @@ import { useEditableSlice } from '../components/useEditableSlice'
 export function useImmediateConfig(feature: string, kind: 'feature' | 'playwright', refreshKey?: number) {
   const editor = useEditableSlice<ParsedConfigDoc, ConfigValue>({
     cacheKey: `${kind === 'feature' ? 'config-doc' : 'playwright'}:${feature}`,
-    load: () => kind === 'feature' ? api.getFeatureConfigDoc(feature) : api.getPlaywrightConfig(feature),
+    load: () => kind === 'feature' ? configApi.getFeatureConfigDoc(feature) : configApi.getPlaywrightConfig(feature),
     extract: (doc) => doc.parsed.value,
     merge: (_doc, value) => value,
-    save: (value) => kind === 'feature' ? api.putFeatureConfigDoc(feature, value as ConfigValue) : api.putPlaywrightConfig(feature, value as ConfigValue),
+    save: (value) => kind === 'feature' ? configApi.putFeatureConfigDoc(feature, value as ConfigValue) : configApi.putPlaywrightConfig(feature, value as ConfigValue),
     immediate: true,
   })
   // The parent hint remains compatible; configuration events and bounded reads

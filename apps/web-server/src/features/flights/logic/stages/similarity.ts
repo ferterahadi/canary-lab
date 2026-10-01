@@ -1,8 +1,8 @@
 import { resolveRepoIdentity } from '../../../../shared/repo-identity'
 import { loadFeatures } from '../../../../shared/feature-loader'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import type { FlightStageDeps } from './context'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Pre-flight similarity check: never silently create a near-duplicate of a
 // feature that already covers the target repo(s). Deterministic scan — no

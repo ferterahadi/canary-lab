@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { SabotageLevel } from './types'
+import type { SabotageLevel } from '../../../../../../../shared/benchmark-index'
 
 // Loads the sabotage-skill folders (meta.json + skill.md). These ship WITH the
 // webserver under `apps/web-server/prompts/sabotage-skills/` (like the other

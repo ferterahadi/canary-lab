@@ -9,9 +9,9 @@ import {
   formatJournalFieldKey,
   presentJournalFields,
 } from './journal-utils'
-import type { JournalEntry } from '@/shared/api/types'
+import type { JournalSection } from '@shared/run-detail'
 
-const entry = (overrides: Partial<JournalEntry>): JournalEntry => ({
+const entry = (overrides: Partial<JournalSection>): JournalSection => ({
   iteration: 1,
   timestamp: 't',
   feature: null,
@@ -34,7 +34,7 @@ describe('newestFirst', () => {
   })
 
   it('treats missing iteration like null when sorting', () => {
-    const missingIteration = entry({}) as JournalEntry
+    const missingIteration = entry({}) as JournalSection
     delete (missingIteration as { iteration?: number | null }).iteration
 
     const out = newestFirst([missingIteration, entry({ iteration: 2 })])

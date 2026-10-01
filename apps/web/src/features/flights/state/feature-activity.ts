@@ -1,13 +1,21 @@
 import { useMemo } from 'react'
-import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { FlightStageKey, PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
-import * as api from '@/shared/api/client'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { DraftRecord } from '@shared/draft-types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { FlightStageKey } from '@shared/flights/types'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest } from '@/shared/api/portify'
+import * as coverageApi from '@/shared/api/coverage'
 import { useLiveResource } from '@/shared/state/use-live-resource'
-import { useEvaluationExports } from '@/features/evaluation'
-import { isActivePortify, usePortify } from '@/features/portify'
-import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
-import { presentRunStatus, runWaitingState, type RunPresentation, type RunWaitingState } from '@/features/runs'
-import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import { usePortify } from '@/features/portify/state/PortifyContext'
+import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs/state/RunsContext'
+import { presentRunStatus, type RunPresentation } from '@/features/runs/utils/run-presentation'
+import { runWaitingState, type RunWaitingState } from '@/features/runs/utils/run-waiting-state'
+import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard/state/WizardDraftContext'
 import { isAuxiliaryExecution } from '@shared/verification'
 
 // Per-feature "what is happening right now" — the live signal behind the
@@ -166,7 +174,7 @@ export function deriveFeatureActivity(input: {
   activeRuns: RunIndexEntry[]
   portifyWorkflows: PortifyIndexEntry[]
   drafts: DraftRecord[]
-  exportTasks?: EvaluationExportTask[]
+  exportTasks?: EvaluationExportTaskView[]
   coverageJobs?: CoverageJobIndexEntry[]
   /** Per-run manifests off the runs stream. They carry the external client
    *  details for active runs; the compact index mirrors `healMode` so terminal
@@ -234,7 +242,7 @@ export function deriveFeatureExternalHistory(input: {
   runs: RunIndexEntry[]
   portifyWorkflows: PortifyIndexEntry[]
   draftRecords: DraftRecord[]
-  exportTasks?: EvaluationExportTask[]
+  exportTasks?: EvaluationExportTaskView[]
   coverageJobs?: CoverageJobIndexEntry[]
   runDetails?: Record<string, RunDetail>
   portifyDetails?: Record<string, PortifyManifest>
@@ -422,7 +430,7 @@ export function useFeatureWorkState(): FeatureWorkState {
   const { value: coverageJobs } = useLiveResource<CoverageJobIndexEntry[]>(
     'coverage',
     'all-jobs',
-    () => api.listAllCoverageJobs(),
+    () => coverageApi.listAllCoverageJobs(),
     { cache: 'coverage-jobs', pollWhile: (jobs) => jobs === null || jobs.some((job) => job.status === 'running') },
   )
   return useMemo(() => ({

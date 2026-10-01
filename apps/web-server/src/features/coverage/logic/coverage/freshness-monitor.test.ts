@@ -10,7 +10,12 @@ import { loadFeatures } from '../../../../shared/feature-loader'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 
 vi.mock('./service', () => ({ computeFeatureCoverage: vi.fn() }))
-vi.mock('../../../../shared/feature-loader', () => ({ loadFeatures: vi.fn() }))
+vi.mock('../../../../shared/feature-loader', () => {
+  const loadFeatures = vi.fn<(dir: string) => { name: string }[]>()
+  // findFeature reads through the mocked list, so each test's loadFeatures
+  // return value still decides which feature a lookup finds.
+  return { loadFeatures, findFeature: (dir: string, name: string) => loadFeatures(dir)?.find((f) => f.name === name) }
+})
 let root: string
 let bus: WorkspaceEventBus
 let monitor: CoverageFreshnessMonitor

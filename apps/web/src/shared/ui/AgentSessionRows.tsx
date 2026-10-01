@@ -1,5 +1,5 @@
 import { Suspense, lazy, memo, useState } from 'react'
-import type { AgentSessionEvent, SubagentThread } from '@/shared/api/client'
+import type { AgentSessionEvent, SubagentThread } from '@/shared/api/agent-sessions'
 
 // The markdown stack (react-markdown + remark-gfm → micromark) is the heaviest
 // dependency in the bundle and only agent prose needs it — loaded lazily so a

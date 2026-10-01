@@ -1,4 +1,4 @@
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { overlayExists } from './runtime/overlay'
 import { revertPortification } from './runtime/unportify'
@@ -13,7 +13,7 @@ export function removeFeaturePortification(
   deps: { featuresDir: string; workspaceEvents?: WorkspaceEventPublisher },
   name: string,
 ): RemovalResult {
-  const feature = loadFeatures(deps.featuresDir).find((entry) => entry.name === name)
+  const feature = findFeature(deps.featuresDir, name)
   if (!feature?.featureDir) return { ok: false, statusCode: 404, error: 'feature not found' }
   const { reverted } = revertPortification(feature.featureDir)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })

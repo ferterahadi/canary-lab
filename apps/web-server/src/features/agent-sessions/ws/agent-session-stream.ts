@@ -3,15 +3,14 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
-  findClaudeLogBySessionId,
   loadAgentSessionMeta,
-  locateCodexSessionLog,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   resolveManifestSessionRef,
   resolveWorkflowAgentRef,
   selectAgentSessionRef,
 } from '../logic/agent-session-log'
+import { findClaudeLogBySessionId, locateCodexSessionLog } from '../logic/agent-session-paths'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import { tailAgentSession } from '../logic/agent-session-tailer'
 import { paths as draftPaths } from '../../wizard/logic/draft-store'
@@ -19,6 +18,7 @@ import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
 import { coverageJobStore, type CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
+import { sendFrame } from '../../../shared/ws/record-stream'
 import type { RunStore } from '../../runs/logic/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -63,10 +63,10 @@ export function attachTail(
 ): void {
   const handle = tailAgentSession({
     ref: opts.ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-    onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-    onEvent: (event) => sendJson(socket, { type: 'event', event }),
-    onSubagentEvent: (update) => sendJson(socket, { type: 'subagent', ...update }),
-    onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+    onReady: (readyRef) => sendFrame(socket, sessionMessage(readyRef)),
+    onEvent: (event) => sendFrame(socket, { type: 'event', event }),
+    onSubagentEvent: (update) => sendFrame(socket, { type: 'subagent', ...update }),
+    onError: (err) => sendFrame(socket, { type: 'error', error: err.message }),
     discoverRef: opts.discoverRef,
   })
   socket.on('close', () => handle.close())
@@ -82,7 +82,7 @@ export async function agentSessionStreamRoutes(
     (socket, req) => {
       const detail = deps.store.get(req.params.runId)
       if (!detail) {
-        sendJson(socket, { type: 'error', error: 'run-not-found' })
+        sendFrame(socket, { type: 'error', error: 'run-not-found' })
         try { socket.close() } catch { /* ignore */ }
         return
       }
@@ -139,7 +139,7 @@ export async function agentSessionStreamRoutes(
     (socket, req) => {
       const stage = req.query?.stage
       if (!stage || !/^[a-z0-9-]+$/.test(stage)) {
-        sendJson(socket, { type: 'error', error: 'stage-query-required' })
+        sendFrame(socket, { type: 'error', error: 'stage-query-required' })
         try { socket.close() } catch { /* ignore */ }
         return
       }
@@ -234,6 +234,3 @@ function sessionMessage(ref: AgentSessionRef): {
   return { type: 'session', agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort }
 }
 
-function sendJson(socket: { send(data: string): void }, payload: unknown): void {
-  try { socket.send(JSON.stringify(payload)) } catch { /* socket closed */ }
-}

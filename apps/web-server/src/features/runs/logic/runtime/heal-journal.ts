@@ -3,6 +3,7 @@ import path from 'path'
 import { DIAGNOSIS_JOURNAL_PATH, MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
 import { FailedEntry, truncateOneLine } from './log-enrichment'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
 
@@ -355,9 +356,7 @@ export function updateLatestPendingJournalOutcome(input: JournalOutcomeUpdateInp
     const outcomeOffset = section.findIndex((line) => /^\s*-\s+outcome:\s*(pending|null)?\s*$/.test(line))
     if (outcomeOffset === -1) continue
     lines[start + outcomeOffset] = `- outcome: ${input.outcome}`
-    const tmpPath = `${input.journalPath}.tmp`
-    fs.writeFileSync(tmpPath, lines.join('\n'))
-    fs.renameSync(tmpPath, input.journalPath)
+    atomicWrite(input.journalPath, lines.join('\n'))
     return true
   }
   return false

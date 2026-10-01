@@ -6,10 +6,11 @@ import type {
   OnboardingWorkflow,
   OnboardingWorkflowAction,
   OnboardingWorkflowId,
-} from '@/shared/api/client'
+} from '@/shared/api/config'
 import { CopyField } from '@/shared/ui/CopyField'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { Modal, Section, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { Section, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CENTERED_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 
 const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' | 'flight'>, string> = {

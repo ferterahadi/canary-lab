@@ -1,4 +1,5 @@
-import type { PortifyManifest, PortifyStatus } from '@/shared/api/client'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyStatus } from '@shared/portify-index'
 import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 

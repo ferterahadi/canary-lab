@@ -8,26 +8,32 @@ import {
   resumeFlight,
   setFlightAutopilot,
   respondToFlightCheckpoint,
-  abortFlight,
   pauseFlight,
   redoFlight,
+  reopenStages,
+  type FlightConductorDeps,
+} from './conductor'
+import {
+  abortFlight,
   deleteFlight,
   removeFlightRecordsForFeature,
   enqueueFlight,
   drainQueuedFlights,
-  reopenStages,
+} from './flight-queue'
+import {
   stampSystemLine,
   FlightConflictError,
   FlightExistsError,
   FlightFrozenError,
   FlightStageEntryError,
-  type FlightConductorDeps,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
-} from './conductor'
+} from './flight-errors'
+import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 
 let tmpDir: string
 
@@ -93,7 +99,7 @@ describe('external-work timing', () => {
 })
 
 describe('autopilot (R71/W4)', () => {
-  type Kind = import('./types').FlightCheckpointKind
+  type Kind = import('../../../../../../shared/flights/types').FlightCheckpointKind
 
   const AUTO: Array<[Kind, string]> = [
     ['config-approval', 'approve'],

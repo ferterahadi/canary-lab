@@ -9,7 +9,15 @@ import { FolderPickerModal } from './FolderPicker'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 
 const api = vi.hoisted(() => ({ browseDir: vi.fn(), listWorkspaceDirs: vi.fn(), readDotenvFile: vi.fn(), getEnvsetSlot: vi.fn(), addEnvsetSlot: vi.fn() }))
-vi.mock('@/shared/api/client', () => api)
+vi.mock('@/shared/api/config', () => ({
+  browseDir: api.browseDir,
+  readDotenvFile: api.readDotenvFile,
+  getEnvsetSlot: api.getEnvsetSlot,
+  addEnvsetSlot: api.addEnvsetSlot,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  listWorkspaceDirs: api.listWorkspaceDirs,
+}))
 let root: Root
 let container: HTMLDivElement
 function deferred<T>() {

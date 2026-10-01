@@ -4,7 +4,7 @@
 import path from 'path'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { runDirFor } from './logic/runtime/run-paths'
-import { buildQueuedServiceEntries } from './logic/runtime/orchestrator'
+import { buildQueuedServiceEntries } from './logic/runtime/service-specs'
 import { RunScheduler, type SchedulerActiveRun } from './logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './logic/runtime/admission'
 import { normalizeRepoPaths } from './logic/runtime/repo-collision'

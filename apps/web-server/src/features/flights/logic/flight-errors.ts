@@ -1,4 +1,4 @@
-import { type FlightManifest } from './types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 
 // The Flight conductor — a deterministic, server-owned stage machine
 // (NOT one giant agent prompt). It advances the stage array sequentially,

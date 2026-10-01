@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process'
 import path from 'path'
 import { claudeGlobalConfigFile } from '../web-server/src/features/agent-sessions/logic/agent-workspace-trust'
 import { isRecord, readMcpConfig } from './mcp-config'
-import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
+import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { isUnderTempDir } from '../../shared/runtime/temp-path'
 
 export type McpRegistrationTarget = 'codex' | 'claude'

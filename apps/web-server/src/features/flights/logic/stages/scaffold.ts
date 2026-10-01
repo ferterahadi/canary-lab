@@ -3,11 +3,11 @@ import path from 'path'
 import { createFeatureSkeleton, deleteFeature } from '../../../config/logic/feature-authoring'
 import { readFeatureConfig } from '../../../../shared/config-ast'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import type { FlightCheckpoint } from '../types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
+import type { FlightCheckpoint } from '../../../../../../../shared/flights/types'
 import { decodeSubmission, featureDirFor, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Scaffold the feature with the existing create_feature core, lay the scout's
 // draft config over the skeleton's placeholder, then park on config-approval

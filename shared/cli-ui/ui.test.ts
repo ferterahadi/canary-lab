@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as ui from './ui'
+import * as uiColors from './colors'
 
 // `colorEnabled()` is false under vitest (stdout is not a TTY), so `c`/`style`
 // pass text through and the assertions below can match plain strings. The
@@ -67,9 +68,9 @@ describe('cli-ui printers', () => {
   })
 
   it('re-exports the colour helpers so callers need one import', () => {
-    expect(typeof ui.colorEnabled).toBe('function')
-    expect(ui.c('green', 'x')).toBe('x')
-    expect(ui.style(['bold', 'cyan'], 'x')).toBe('x')
+    expect(typeof uiColors.colorEnabled).toBe('function')
+    expect(uiColors.c('green', 'x')).toBe('x')
+    expect(uiColors.style(['bold', 'cyan'], 'x')).toBe('x')
   })
 })
 

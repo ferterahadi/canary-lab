@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -10,6 +9,7 @@ import {
   getUpstreamStatus,
   type FastForwardOutcome,
 } from './git-upstream'
+import { git } from '../../../../tools/test-helpers/git-repo'
 
 // Real git against a bare "origin" and a clone of it: the fast-forward's whole
 // contract is what it refuses to do to a working tree, and only git itself can
@@ -25,10 +25,6 @@ function tmp(prefix: string): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
   made.push(dir)
   return dir
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
 function commit(cwd: string, file: string, contents: string, message = `add ${file}`): string {

@@ -7,8 +7,16 @@ import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
-import { type RunLifecycleTargetedRerun, type RunManifest } from './manifest'
-import { SummaryShape, VerificationPlan, computeVerificationPlan, decideRunStatus, normalizeRerunSelection, readLatestHealOnFailureThreshold, type PlaywrightRerunSelection } from './run-verdict'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
+import {
+  SummaryShape,
+  VerificationPlan,
+  computeVerificationPlan,
+  decideRunStatus,
+  readLatestHealOnFailureThreshold,
+} from './run-verdict'
+import { normalizeRerunSelection, type PlaywrightRerunSelection } from './rerun-targets'
 import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
 import { repoPathOverrideEnv } from './repo-path-env'

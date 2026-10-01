@@ -1,7 +1,9 @@
-import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
+import type { ClientKind, RunProducer } from './run-mode'
 
 export type EvaluationExportMode = 'raw' | 'localized'
+
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+
 export type EvaluationExportProducer = RunProducer
 
 /** Counts content that was actually written to the archive, not merely found in the run. */

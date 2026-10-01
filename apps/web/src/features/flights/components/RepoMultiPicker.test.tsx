@@ -3,16 +3,13 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { listWorkspaceDirs, type WorkspaceDirsResponse } from '@/shared/api/client'
+import { listWorkspaceDirs, type WorkspaceDirsResponse } from '@/shared/api/workspace'
 import { RepoMultiPicker } from './RepoMultiPicker'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listWorkspaceDirs: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  listWorkspaceDirs: vi.fn(),
+}))
 
 const dirs = (absolute: string): WorkspaceDirsResponse => ({
   root: '/Users/dev',

@@ -4,7 +4,8 @@ import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
-import { updateManifest, type RunManifest, type RunProposedPr } from '../logic/runtime/manifest'
+import { updateManifest } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { applyFixCapture, buildApplyPreflight } from '../logic/apply-fixes'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -13,28 +14,26 @@ import { buildPrPreflight } from '../logic/pr/pr-preflight'
 import { proposeFixesForRun } from '../logic/pr/propose-fixes'
 import { verdictProvenanceOf } from '../logic/pr/pr-provenance'
 import { commitModelPlans } from '../logic/runtime/run-model-plan'
-import { EMPTY_AGENT_MODELS } from '../../agent-sessions/logic/agent-models'
+import { EMPTY_AGENT_MODELS } from '../../../../../../shared/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { readableTerminalLog } from '../logic/runtime/log-enrichment'
 import {
-  buildAgentSessionResponse,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
-import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { isTerminalRunStatus, type RunProposedPr } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
+import { notFound } from '../../../shared/http-error'
 
 const READABLE_LOGS_DIR = 'readable-logs'
 
 function captureIsFinal(manifest: RunManifest): boolean {
   return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
 }
-
-export { compareActiveRuns } from './runs-route-support'
-export type { ExternalHealAgentRequest } from './runs-route-support'
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
@@ -43,16 +42,13 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/queue', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) return reply.code(404).send({ error: 'run not found' })
+    if (!detail) return notFound(reply, 'run')
     return { diagnostics: detail.manifest.status === 'queued' ? deps.queueDiagnostics?.(req.params.runId) ?? null : null }
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     return withSingleAttemptDetailState(detail, deps.store.logsDir)
   })
 
@@ -64,10 +60,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // omitted keeps the run-level "every repo" behaviour.
   app.post<{ Params: { runId: string }; Body: { repoName?: string } }>('/api/runs/:runId/apply-fixes', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const fixCapture = detail.manifest.fixCapture
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
@@ -95,10 +88,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // which is which. Read-only. 404/409 mirror apply-fixes.
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/apply-preflight', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const fixCapture = detail.manifest.fixCapture
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
@@ -120,10 +110,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // needed. Best-effort launch: a failure is reported, not thrown.
   app.post<{ Params: { runId: string }; Body: { repoName?: string } }>('/api/runs/:runId/open-repo', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const repo = detail.manifest.fixCapture?.repos.find((r) => r.repoName === req.body?.repoName)
     if (!repo) {
       reply.code(404)
@@ -153,10 +140,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // every request (a restart truncates the raw log, so no copy goes stale) and
   // lives under `readable-logs/`, outside every `svc-*.log` reader.
   app.post<{ Params: { runId: string }; Body: { file?: string } }>('/api/runs/:runId/readable-log', async (req, reply) => {
-    if (!deps.store.get(req.params.runId)) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
     const file = req.body?.file
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
     const relative = typeof file === 'string' && path.isAbsolute(file) ? path.relative(runDir, file) : ''
@@ -175,8 +159,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       }
       raw = fs.readFileSync(file!, 'utf-8')
     } catch {
-      reply.code(404)
-      return { error: 'log not found' }
+      return notFound(reply, 'log')
     }
     const target = path.join(runDir, READABLE_LOGS_DIR, relative)
     fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -196,10 +179,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // so this can only ever read a patch this run wrote.
   app.get<{ Params: { runId: string; repoName: string } }>('/api/runs/:runId/fixes/:repoName/patch', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const repo = detail.manifest.fixCapture?.repos.find((r) => r.repoName === req.params.repoName)
     if (!repo) {
       reply.code(404)
@@ -220,10 +200,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // (auth changes outside the app). 404/409 mirror apply-fixes.
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/pr-preflight', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const fixCapture = detail.manifest.fixCapture
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
@@ -242,10 +219,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // Idempotent; persists manifest.proposedPrs so a refresh shows the link.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/propose-pr', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     const fixCapture = detail.manifest.fixCapture
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
@@ -311,10 +285,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/verification-report', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     if ((detail.manifest.executionType ?? 'run') !== 'verify') {
       reply.code(409)
       return { error: 'run is not a verification execution' }
@@ -389,7 +360,6 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(400)
       return { error: 'invalid artifact path' }
     }
-    reply.code(404)
-    return { error: 'artifact not found' }
+    return notFound(reply, 'artifact')
   })
 }

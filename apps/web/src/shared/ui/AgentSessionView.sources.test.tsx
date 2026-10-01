@@ -14,8 +14,31 @@ const mocks = vi.hoisted(() => ({
 const socket = vi.hoisted(() => ({
   connect: vi.fn<(opts: ConnectAgentSessionOptions) => { close(): void }>(),
 }))
-vi.mock('@/shared/api/client', async (original) => ({
-  ...(await original<typeof import('@/shared/api/client')>()), ...mocks,
+vi.mock('@/shared/api/discovery-repair', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/discovery-repair')>()),
+  getDiscoveryRepairAgentSession: mocks.getDiscoveryRepairAgentSession,
+}))
+vi.mock('@/shared/api/agent-sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/agent-sessions')>()),
+  getAgentSession: mocks.getAgentSession,
+}))
+vi.mock('@/shared/api/benchmark', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/benchmark')>()),
+  getBenchmarkAgentSession: mocks.getBenchmarkAgentSession,
+}))
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  getPortifyAgentSession: mocks.getPortifyAgentSession,
+}))
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getCoverageAgentSession: mocks.getCoverageAgentSession,
+  getEvaluationAgentSession: mocks.getEvaluationAgentSession,
+}))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  getFlightAgentSession: mocks.getFlightAgentSession,
+  getFlightPlanAgentSession: mocks.getFlightPlanAgentSession,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: socket.connect }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

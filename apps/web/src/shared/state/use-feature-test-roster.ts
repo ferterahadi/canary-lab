@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import * as api from '../api/client'
+import * as configApi from '../api/config'
+import * as internalApi from '../api/internal'
 import type { FeatureSpecFile } from '../api/types'
 import { useInvalidationKey } from './invalidation'
 import { useLiveResource } from './use-live-resource'
@@ -25,7 +26,7 @@ export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKe
   const resource = useLiveResource<Observation>('tests', key, async () => {
     const attempt = ++burst.attempts
     try {
-      const specs = await (runId || recover ? api.getFeatureTests(feature!, undefined, runId) : api.getFeatureTests(feature!))
+      const specs = await (runId || recover ? configApi.getFeatureTests(feature!, undefined, runId) : configApi.getFeatureTests(feature!))
       const diagnostic = specs.find((spec) => spec.discoveryError)?.discoveryError
       return { specs, attempt, failure: diagnostic ? { kind: 'discovery', message: diagnostic } : undefined }
     } catch (error) {
@@ -66,7 +67,7 @@ export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKe
 }
 
 function formatLoadError(err: unknown): string {
-  if (err instanceof api.ApiError) {
+  if (err instanceof internalApi.ApiError) {
     const context = `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
     if (err.body && typeof err.body === 'object') {
       const body = err.body as { message?: unknown; error?: unknown }
@@ -79,7 +80,7 @@ function formatLoadError(err: unknown): string {
 }
 
 function classifyLoadError(err: unknown): TestLoadFailure {
-  const body = err instanceof api.ApiError && err.body && typeof err.body === 'object'
+  const body = err instanceof internalApi.ApiError && err.body && typeof err.body === 'object'
     ? err.body as { code?: unknown; error?: unknown } : undefined
   const code = body?.code
   return {

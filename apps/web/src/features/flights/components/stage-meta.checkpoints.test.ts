@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CHECKPOINT_OPTIONS } from '@shared/flights/types'
-import { checkpointOptionLabel, checkpointTitle } from './stage-meta'
+import { checkpointOptionLabel } from './stage-meta'
+import { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
 
 // The checkpoint display vocabulary must cover the whole wire vocabulary.
 //

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
-import { ApiError } from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
+import { ApiError } from '@/shared/api/internal'
 
 // Shared terminal-run restart action. It keeps the same run id and asks the
 // server to retest failed, skipped, and pending tests before any full-suite
@@ -31,7 +31,7 @@ export function RestartHealButton({ runId, onRestarted, variant = 'bar' }: Props
     setSending(true)
     setErr(null)
     try {
-      await api.restartRun(runId)
+      await runsApi.restartRun(runId)
       onRestarted?.()
     } catch (e: unknown) {
       setErr(formatRestartError(e))

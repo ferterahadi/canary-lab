@@ -1,4 +1,5 @@
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 
 export interface RunWaitingState {
   kind: 'test-review' | 'agent' | 'queued'

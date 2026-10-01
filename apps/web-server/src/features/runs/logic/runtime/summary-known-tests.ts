@@ -1,8 +1,8 @@
 import fs from 'fs'
 import type { TestCase } from '@playwright/test/reporter'
-import { type SummaryForJournalOutcome } from './log-enrichment'
+import type { SummaryForJournalOutcome } from './heal-journal'
 import { getSummaryPath } from './paths'
-import { slugify } from './summary-reporter'
+import { slugify } from './summary-types'
 
 export interface KnownTestEntry {
   id: string

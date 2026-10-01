@@ -1,14 +1,14 @@
 import crypto from 'crypto'
-import {
-  regeneratePrdSummary,
-  runCoverageEngine,
-  type RegeneratePrdSummaryResult,
-  type RunCoverageEngineResult,
-} from '../service'
+import { regeneratePrdSummary, type RegeneratePrdSummaryResult } from '../feature-docs'
+import { runCoverageEngine, type RunCoverageEngineResult } from '../coverage-engine'
 import type { AnnotateAdapter } from '../annotate-engine'
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
-import type { CoverageJobKind, CoverageJobManifest, CoverageJobModels } from './types'
+import type {
+  CoverageJobKind,
+  CoverageJobManifest,
+  CoverageJobModels,
+} from '../../../../../../../../shared/coverage/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Background driver + single-flight gate for coverage jobs. The start path

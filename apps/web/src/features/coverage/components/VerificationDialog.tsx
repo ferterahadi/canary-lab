@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { VerificationConfig } from '@/shared/api/types'
+import * as verificationApi from '@/shared/api/verification'
+import type { VerificationConfig } from '@shared/verification'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import { Modal, Section } from '@/shared/ui/atoms'
+import { Section } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 
 // The dialog is built from the app's shared dialog chrome — `Modal` (backdrop,
 // eyebrow + title header, scrollable body, pinned footer) and `Section` (titled
@@ -52,10 +53,10 @@ function VerificationSettings({
 
   const configuration = useInvalidationKey('configuration')
   const scopedConfiguration = useInvalidationKey('configuration', feature)
-  const list = useLiveResource('verification', feature, api.listVerificationConfigs, { reconcileMs: 5000, refreshKey })
+  const list = useLiveResource('verification', feature, verificationApi.listVerificationConfigs, { reconcileMs: 5000, refreshKey })
   const targetRead = useLiveResource('verification', JSON.stringify([feature, playwrightEnvsetId]), async () => ({
     envset: playwrightEnvsetId,
-    index: await api.getVerificationTargets(feature, playwrightEnvsetId || undefined),
+    index: await verificationApi.getVerificationTargets(feature, playwrightEnvsetId || undefined),
   }), { reconcileMs: 5000, refreshKey: JSON.stringify([refreshKey, configuration, scopedConfiguration]) })
   const configs = list.value ?? []
   const targets = targetRead.value?.index.targets ?? []
@@ -167,8 +168,8 @@ function VerificationSettings({
     try {
       const body = { name: name.trim(), targetUrls, playwrightEnvsetId }
       const saved = selectedConfigId
-        ? await api.updateVerificationConfig(feature, selectedConfigId, body)
-        : await api.createVerificationConfig(feature, body)
+        ? await verificationApi.updateVerificationConfig(feature, selectedConfigId, body)
+        : await verificationApi.createVerificationConfig(feature, body)
       if (!lifetime.active || !list.accept((previous) => {
         const rows = previous ?? []
         return rows.some((config) => config.id === saved.id)

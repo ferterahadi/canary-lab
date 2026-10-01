@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import {
-  portifyReducer,
-  initialPortifyState,
-  frameToAction,
-  isActivePortify,
-  latestSavedWorkflowId,
-} from './portify-state'
-import type { PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
+import { portifyIndex, latestSavedWorkflowId } from './portify-state'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest } from '@/shared/api/portify'
+
+const { reducer: portifyReducer, initialState: initialPortifyState, frameToAction } = portifyIndex
 
 function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {

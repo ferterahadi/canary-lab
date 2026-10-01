@@ -1,11 +1,28 @@
 import { useFeatureTestRoster } from '@/shared/state/use-feature-test-roster'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { CoverageJobIndexEntry, CoverageJobKind, CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
-import type { AgentModelsConfig, AgentStagePlans, FlightStageKey, FlightStageStatus, ModelAgentKind, ModelStageKey } from '@/shared/api/client'
-import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
-import { ModelLaunchGate } from '@/features/config'
-import { StageStatusChip, stageLabel } from '@/features/flights/components/stage-meta'
+import { useEscapeToClose } from '@/shared/ui/Overlays'
+import * as coverageApi from '@/shared/api/coverage'
+import * as internalApi from '@/shared/api/internal'
+import * as configApi from '@/shared/api/config'
+import type {
+  CoverageJobIndexEntry,
+  CoverageJobKind,
+  CoverageLedger,
+  GapType,
+  TestCoverage,
+  TestStrength,
+} from '@shared/coverage/types'
+import type { FlightStageKey, FlightStageStatus } from '@shared/flights/types'
+import {
+  EMPTY_AGENT_MODELS,
+  type AgentModelsConfig,
+  type AgentStagePlans,
+  type ModelAgentKind,
+  type ModelStageKey,
+} from '@shared/agent-models'
+import { ModelLaunchGate } from '@/features/config/components/ModelLaunchGate'
+import { StageStatusChip } from '@/features/flights/components/stage-meta'
+import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { buildTestNumbering, testNumberKey } from '@/shared/test-numbering'
 import { useInvalidationKey } from '@/shared/state/invalidation'
@@ -64,11 +81,9 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
 
   const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // On the shared Escape stack, so a dialog open over the ledger closes alone
+  // instead of taking the whole page with it.
+  useEscapeToClose(onClose)
 
   useEffect(() => () => {
     if (focusClearRef.current) clearTimeout(focusClearRef.current)
@@ -84,14 +99,14 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     setLaunching(true)
     // A customized launch pins `adapter` to the agent the gate showed, so the
     // server resolves the override for the same agent's vocabulary.
-    api.startCoverageJob(feature, kind, launch ? { adapter: launch.agent, models: launch.models } : undefined)
+    coverageApi.startCoverageJob(feature, kind, launch ? { adapter: launch.agent, models: launch.models } : undefined)
       .then(onOpenGeneration)
       .catch(async (e: unknown) => {
         // A 409 means a job is already running (e.g. started from another tab/
         // session) — ATTACH to it instead of surfacing a raw error (R20).
-        if (e instanceof api.ApiError && e.status === 409) {
+        if (e instanceof internalApi.ApiError && e.status === 409) {
           const existing = (e.body as { existingJobId?: string } | null)?.existingJobId
-          if (existing) { onOpenGeneration(await api.getCoverageJob(existing)); return }
+          if (existing) { onOpenGeneration(await coverageApi.getCoverageJob(existing)); return }
         }
         setActionError(e instanceof Error ? e.message : String(e))
       })
@@ -105,7 +120,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     setActionError(null)
     // Config unreachable → generate with defaults rather than dead-ending the
     // button on a settings probe (the gate is best-effort, launching is not).
-    api.getProjectConfig()
+    configApi.getProjectConfig()
       .then((config) => {
         if (config.askModelsOnLaunch === true) {
           setLaunching(false)

@@ -3,15 +3,28 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightIndexEntry, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightIndexEntry,
+  type FlightStageStatus,
+  type PlanFeaturesTask,
+} from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction, resolveFeatureFlightTarget, summarizeFlightActivity } from './FlightsPill'
-import { ACTIVITY_CHIP, RUNNING_STAGE_CHIP } from './FlightChipState'
+import { FlightsPill } from './FlightsPill'
+import {
+  ACTIVITY_CHIP,
+  RUNNING_STAGE_CHIP,
+  featureActivityRows,
+  featureChipState,
+  groupPickerRows,
+  resolveFeatureFlightAction,
+  resolveFeatureFlightTarget,
+  summarizeFlightActivity,
+} from './FlightChipState'
 
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
   listCoverageStates,
 }))
 

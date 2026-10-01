@@ -8,11 +8,19 @@ import path from 'path'
 
 import Fastify from 'fastify'
 
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
+import { runsRoutes } from './runs'
+import type { ExternalHealAgentRequest } from './runs-route-support'
 
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../logic/run-store'
+import { RunStore } from '../logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorLike,
+  type RestartHealResult,
+  type RestartRunResult,
+} from '../logic/run-registry'
 
-import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 
 import { runDirFor } from '../logic/runtime/run-paths'
 

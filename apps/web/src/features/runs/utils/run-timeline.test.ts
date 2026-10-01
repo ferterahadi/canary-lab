@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { AuditEntry, RunLifecycleEvent } from '@/shared/api/types'
+import type { AuditEntry } from '@/shared/api/types-wizard'
+import type { RunLifecycleEvent } from '@shared/run-state'
 import { buildTimelineRows, lifecycleDurationLabel } from './run-timeline'
 
 function engine(overrides: Partial<RunLifecycleEvent> & Pick<RunLifecycleEvent, 'phase' | 'headline' | 'updatedAt'>): RunLifecycleEvent {

@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { TestResult, TestStep } from '@playwright/test/reporter'
 import { getSummaryPath } from './paths'
-import { RunningStep, TestEntry, slugify } from './summary-reporter'
+import { RunningStep, TestEntry, slugify } from './summary-types'
 
 export function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
   return entry.status !== 'passed' && entry.status !== 'skipped'

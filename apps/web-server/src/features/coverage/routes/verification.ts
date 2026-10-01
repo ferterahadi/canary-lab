@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import { loadFeatures } from '../../../shared/feature-loader'
-import type { OrchestratorLike, RunStore } from '../../runs/logic/run-store'
+import { findFeature } from '../../../shared/feature-loader'
+import type { RunStore } from '../../runs/logic/run-store'
+import type { OrchestratorLike } from '../../runs/logic/run-registry'
 import {
   createVerificationConfig,
   deriveVerificationTargets,
@@ -12,6 +13,7 @@ import {
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { notFound } from '../../../shared/http-error'
 
 export interface VerificationRouteDeps {
   featuresDir: string
@@ -32,10 +34,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verification-targets',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       return deriveVerificationTargets(feature, req.query.envset)
     },
   )
@@ -44,10 +43,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verification-configs',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       return listVerificationConfigs(feature)
     },
   )
@@ -56,15 +52,9 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verification-configs/:id',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       const config = getVerificationConfig(feature, req.params.id)
-      if (!config) {
-        reply.code(404)
-        return { error: 'verification config not found' }
-      }
+      if (!config) return notFound(reply, 'verification config')
       return config
     },
   )
@@ -73,10 +63,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verification-configs',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       const parsed = parseSaveConfigBody(req.body)
       if ('error' in parsed) {
         reply.code(400)
@@ -97,10 +84,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verification-configs/:id',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       const parsed = parseSaveConfigBody(req.body)
       if ('error' in parsed) {
         reply.code(400)
@@ -108,10 +92,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
       }
       try {
         const config = updateVerificationConfig(feature, req.params.id, parsed, deps.workspaceEvents)
-        if (!config) {
-          reply.code(404)
-          return { error: 'verification config not found' }
-        }
+        if (!config) return notFound(reply, 'verification config')
         return config
       } catch (err) {
         reply.code(statusCodeOf(err))
@@ -124,10 +105,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
     '/api/features/:name/verifications',
     async (req, reply) => {
       const feature = findFeature(deps.featuresDir, req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature) return notFound(reply, 'feature')
       const parsed = parseExecuteBody(req.body)
       if ('error' in parsed) {
         reply.code(400)
@@ -190,10 +168,6 @@ interface ExecuteVerificationBody {
   playwrightEnvsetId?: unknown
   bootRunId?: unknown
   gettingStartedSource?: unknown
-}
-
-function findFeature(featuresDir: string, name: string) {
-  return loadFeatures(featuresDir).find((feature) => feature.name === name) ?? null
 }
 
 function parseSaveConfigBody(body: SaveConfigBody) {

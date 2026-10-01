@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { RunStatus } from '@/shared/api/types'
+import type { RunStatus } from '@shared/run-state'
 import type { RunArrivalTab } from '@/shared/lib/workspace-view-state'
 import { branchForService } from '../utils/run-detail-playback'
 import { useRun } from '../state/RunsContext'
@@ -23,10 +23,6 @@ import { ServiceTabButton, TabButton } from './RunServicePanels'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
-
-export { canRestartHeal, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
-export { PlaywrightPlayback, shortLocation } from './RunPlaybackPanels'
-export { assertionFilename, assertionHref, downloadEvaluationReport, evaluationFilename, evaluationHref, hasAssertionVideos, isAssertionExportable, isEvaluationExportable, isTerminalRunStatus } from './run-export-links'
 
 type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'changes' | 'journal'
 

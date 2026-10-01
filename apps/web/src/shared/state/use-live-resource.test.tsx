@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useLiveResource, type LiveResource } from './use-live-resource'
 import { getFeatureCoverage } from '../api/coverage'
-import type { CoverageLedger } from '../api/types'
-
+import type { CoverageLedger } from '@shared/coverage/types'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement

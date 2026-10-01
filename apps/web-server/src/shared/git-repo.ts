@@ -4,6 +4,7 @@ import path from 'path'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../shared/launcher/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
 import { resolveRepoPath } from './repo-identity'
+import type { RepoBranchSnapshot } from '../../../../shared/run-manifest'
 
 export interface GitStatus {
   isGitRepo: boolean
@@ -15,21 +16,6 @@ export interface GitStatus {
   dirtyFiles: string[]
   localBranches: string[]
   remoteBranches: string[]
-}
-
-export interface RepoBranchSnapshot {
-  name: string
-  path: string
-  branch: string | null
-  expectedBranch?: string
-  detached: boolean
-  dirty: boolean
-  /** Commit the checkout sat on when the run launched — the one the run's
-   *  worktree was cut from. Null on an unborn branch. */
-  sha: string | null
-  /** Set when the run fast-forwarded the checkout to its upstream before
-   *  booting (`track: 'upstream'` or the `updateRepos` start option). */
-  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 export interface GitResult {

@@ -1,7 +1,12 @@
 import { connectReconnectingSocket } from '@/shared/api/reconnecting-socket'
 import type { createObservedReads } from './observed-reads'
 
-type ConnectionState = 'live' | 'reconnecting' | 'disconnected'
+/** A push-fed store's link to its server stream, as its views label it. */
+export type ConnectionState =
+  | 'connecting'      // initial, before the first WS open
+  | 'live'            // WS open, push frames flowing
+  | 'reconnecting'    // WS dropped after being live; recovery is in progress
+  | 'disconnected'    // gave up — surfaced to the user as a banner
 
 /** Shared connection policy for full-record streams. Domain adapters keep
  * frame shapes and reducers; observing a frame supersedes older HTTP reads. */
@@ -13,7 +18,8 @@ export function connectRecordStream<Action>(opts: {
   /** null denotes a full snapshot, which invalidates every pending read. */
   recordId: (action: Action) => string | null
   dispatch: (action: Action) => void
-  onConnection: (status: ConnectionState) => void
+  /** Never 'connecting': that is the store's state before this first reports. */
+  onConnection: (status: Exclude<ConnectionState, 'connecting'>) => void
 }): { close: () => void } {
   let closed = false
   const connection = connectReconnectingSocket({

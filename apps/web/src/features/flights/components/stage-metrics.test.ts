@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CoverageLedger, RunIndexEntry, RunLifecycleEvent } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunLifecycleEvent } from '@shared/run-state'
 import {
   CONFIG_GROUP,
   bootDurationMs,

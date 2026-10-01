@@ -16,8 +16,9 @@ import {
   type HealAgentChoice,
   type ProjectConfig,
 } from '../../runs/logic/runtime/launcher/project-config'
-import { normalizeAgentModels } from '../../agent-sessions/logic/agent-models'
+import { normalizeAgentModels } from '../../../../../../shared/agent-models'
 import { isWithin } from '../logic/path-containment'
+import { notFound } from '../../../shared/http-error'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -208,8 +209,7 @@ export async function projectConfigRoutes(
         return { error: 'file must be a file' }
       }
     } catch {
-      reply.code(404)
-      return { error: 'file not found' }
+      return notFound(reply, 'file')
     }
 
     // Linked project files may live elsewhere. Authorize the project entry path,

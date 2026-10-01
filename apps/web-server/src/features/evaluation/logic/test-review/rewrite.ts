@@ -1,5 +1,5 @@
 import path from 'path'
-import type { RunDetail } from '../../../runs/logic/run-store'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
 import { loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import { confidenceForAssertions, qualitySummaryForAudience } from './assertions'
 import { audienceFlowDetail, audienceFlowTitle, audienceTitle } from './audience'

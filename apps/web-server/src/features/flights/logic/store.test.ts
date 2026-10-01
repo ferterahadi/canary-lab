@@ -8,27 +8,32 @@ import {
   resumeFlight,
   setFlightAutopilot,
   respondToFlightCheckpoint,
-  abortFlight,
   pauseFlight,
   redoFlight,
+  reopenStages,
+  type FlightConductorDeps,
+} from './conductor'
+import {
+  abortFlight,
   deleteFlight,
   removeFlightRecordsForFeature,
   enqueueFlight,
   drainQueuedFlights,
-  reopenStages,
+} from './flight-queue'
+import {
   stampSystemLine,
   FlightConflictError,
   FlightExistsError,
   FlightFrozenError,
   FlightStageEntryError,
-  type FlightConductorDeps,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
-} from './conductor'
+} from './flight-errors'
 
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
-import { sameRepoSet } from './flight-stages'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
+import { sameRepoSet, type StageAdapter, type StageAdapters, type StageOutcome } from './flight-stages'
 
 let tmpDir: string
 

@@ -1,23 +1,20 @@
-import crypto from 'crypto'
 import path from 'path'
-import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import {
+  AGENT_DEFAULT_CHOICE,
+  type PerAgentStageChoices,
+  type StageModelChoice,
+} from '../../../../../../../shared/agent-models'
 import type { CoverageAgentSession } from './annotate-engine'
-import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
-import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
 import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
-import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import type { PrdSummary, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type DocsCollection } from './docs-collection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import { readDocumentSelection } from './document-resolution'
 import { ParsedRequirement, assembleSummary, parsePrdSummaryOutput, parseVariantDimension, reconcileRequirementIds } from './prd-summary-parse'
-
-export { assembleSummary, parsePrdSummaryOutput, parseVariantDimension, reconcileRequirementIds } from './prd-summary-parse'
-export type { ParsedRequirement } from './prd-summary-parse'
-export { PRD_SUMMARY_JSON, PRD_SUMMARY_MD, readPrdSummary, renderPrdSummaryMarkdown, writePrdSummary } from './prd-summary-render'
 
 // PRD summarization: turn a feature's source docs into structured requirements
 // with STABLE ids. Modeled on the evaluation-export agent pattern
@@ -124,45 +121,18 @@ function defaultResolveAgents(adapter: SummarizeAdapter): HealAgent[] {
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
-  return runAgentCompletion({
+  // This agent reads docs and answers with JSON, so it has no business holding
+  // a write tool on either arm.
+  return runReadOnlyAnswerAgent({
+    ...opts,
     agent,
-    signal: opts.signal,
+    prompt,
     idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
     outputDirectoryPrefix: 'canary-prd-summary-',
+    outputSchemaPath: PRD_SUMMARY_SCHEMA_PATH,
     errorLabel: 'prd summary agent',
     cancellationMessage: 'prd summary cancelled',
     cancellationMode: 'after-close',
-    start: ({ outputPath, onIdle }) => {
-      // Pin a claude session id so the CLI's JSONL session log is locatable and
-      // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-      // Agentic spawn via the shared runner. claude: stream-json for liveness +
-      // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-      // from stdin (`-`) and writes the final message to --output-last-message.
-      const models = opts.models ?? AGENT_DEFAULT_CHOICE
-      const args = agent === 'claude'
-        // `readOnly` matches what the codex arm below already declares with
-        // `--sandbox read-only`: this agent reads docs and answers with JSON, so it
-        // has no business holding a write tool on either arm.
-        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: PRD_SUMMARY_SCHEMA_PATH })
-      opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-      return runAgentProcess({
-        command: agent,
-        args,
-        cwd: opts.cwd,
-        stdin: agent === 'codex' ? prompt : undefined,
-        onChunk: (text) => opts.onOutput?.(text),
-        idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
-        activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
-        onIdle,
-        spawnScope: opts.spawnScope,
-        ...(opts.agentJob
-          ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
-          : {}),
-      })
-    },
   })
 }
 

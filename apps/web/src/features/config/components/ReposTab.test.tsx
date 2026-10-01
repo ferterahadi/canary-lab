@@ -3,27 +3,21 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  checkPathExists,
-  getFeatureConfigDoc,
-  getGitRemote,
-  getRepoGitStatus,
-  putFeatureConfigDoc,
-  type ParsedConfigDoc,
-} from '@/shared/api/client'
+import { checkPathExists, getGitRemote, getRepoGitStatus } from '@/shared/api/workspace'
+import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/config'
 import { ReposTab } from './ReposTab'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    checkPathExists: vi.fn(),
-    getFeatureConfigDoc: vi.fn(),
-    getGitRemote: vi.fn(),
-    getRepoGitStatus: vi.fn(),
-    putFeatureConfigDoc: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  checkPathExists: vi.fn(),
+  getGitRemote: vi.fn(),
+  getRepoGitStatus: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+  putFeatureConfigDoc: vi.fn(),
+}))
 
 const folders = vi.hoisted(() => new Map<string, (path: string) => void>())
 vi.mock('./FolderPicker', () => ({

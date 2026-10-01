@@ -1,9 +1,14 @@
-import * as api from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
+import * as configApi from '@/shared/api/config'
+import * as coverageApi from '@/shared/api/coverage'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
-import { usePortifyDetail } from '@/features/portify'
-import type { FlightManifest, FlightStage } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail } from '@/shared/api/types'
+import { usePortifyDetail } from '@/features/portify/state/PortifyContext'
+import type { FlightManifest, FlightStage } from '@shared/flights/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
+import type { CoverageLedger } from '@shared/coverage/types'
+import type { RunDetail } from '@shared/run-detail'
 import { asRecord } from './FeatureSetupPanel'
 import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
@@ -33,7 +38,7 @@ export function useStageBandData(
   companion: FlightStage | null,
   /** The export task the Evaluation Report stage pinned, resolved by the caller
    *  from the live export store (which already holds every task). */
-  evalTask: EvaluationExportTask | null,
+  evalTask: EvaluationExportTaskView | null,
 ): StageBandData {
 
   const feature = flight.feature
@@ -71,7 +76,7 @@ export function useStageBandData(
       // boot half of the stage is blank on every probed flight, which is most
       // older records.
       const runId = bootRunId ?? await latestBootRunId(feature)
-      return runId ? await api.getRunDetail(runId) : null
+      return runId ? await runsApi.getRunDetail(runId) : null
     },
     { cache: 'boot-proof' },
   )
@@ -92,7 +97,7 @@ export function useStageBandData(
   const { value: config, loading: configLoading } = useLiveResource<StageBandData['config']>(
     'repos',
     needsConfig ? feature : null,
-    async (f) => configCounts((await api.getFeatureConfigDoc(f)).parsed.value),
+    async (f) => configCounts((await configApi.getFeatureConfigDoc(f)).parsed.value),
     { cache: 'config-counts' },
   )
 
@@ -108,7 +113,7 @@ export function useStageBandData(
   const { value: docsListing, loading: docsLoading } = useLiveResource<FeatureDocsListing>(
     'coverage',
     needsDocs ? feature : null,
-    (f) => api.listFeatureDocs(f),
+    (f) => coverageApi.listFeatureDocs(f),
     { cache: 'docs-listing' },
   )
   // Split source from generated: the `_prd-summary` artifacts are this stage's
@@ -155,7 +160,7 @@ interface DocSizes {
  *  service reports ready — so the status is not a filter here; the per-service
  *  statuses on the manifest are what say whether it came up. */
 async function latestBootRunId(feature: string): Promise<string | null> {
-  const runs = await api.listRuns({ feature })
+  const runs = await runsApi.listRuns({ feature })
   // listRuns is newest-first.
   return runs.find((r) => r.executionType === 'boot')?.runId ?? null
 }

@@ -1,5 +1,5 @@
-import type { RepoBranchSnapshot, ServiceManifestEntry, ServiceStatus } from '@/shared/api/types'
-import type { RunBootFailure } from '@shared/run-state'
+import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
+import type { RunBootFailure, ServiceStatus } from '@shared/run-state'
 import { bootFailureSummary, bootNextAction, compilerErrors, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
 import { StatusDot } from '@/shared/ui/atoms'
 import { alertClass } from './RunDiagnosticsPanels'

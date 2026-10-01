@@ -1,4 +1,4 @@
-import { runIndexEntry } from '../../../../../../../shared/run-index'
+import { runIndexEntry, type RunIndexEntry } from '../../../../../../../shared/run-index'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -9,13 +9,15 @@ import {
   readRunsIndex,
   writeManifest,
   readManifest,
-  type RunLifecycleEvent,
-  type RunIndexEntry,
-  type RunManifest,
-  type ServiceStatus,
 } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
-import { reduceRunLifecycleSnapshot } from '../../../../../../../shared/run-state'
+import {
+  reduceRunLifecycleSnapshot,
+  type RunLifecycleEvent,
+  type ServiceStatus,
+} from '../../../../../../../shared/run-state'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
@@ -192,7 +194,5 @@ function clearRunningFromSummary(summaryPath: string): void {
   const summary = { ...(parsed as Record<string, unknown>) }
   delete summary.running
   delete summary.runningTests
-  const tmpPath = `${summaryPath}.tmp`
-  fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
-  fs.renameSync(tmpPath, summaryPath)
+  atomicWriteJson(summaryPath, summary)
 }

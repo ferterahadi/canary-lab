@@ -4,8 +4,9 @@
  */
 import { useState } from 'react'
 import { useFilesystemBrowser } from './use-filesystem-browser'
-import * as api from '@/shared/api/client'
-import { ChevronRightIcon, FolderIcon, Modal } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import { ChevronRightIcon, FolderIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 
 interface Props {
   /** The path currently saved in the config — string literal absolute path
@@ -80,7 +81,7 @@ export function FileBrowserList({
   maxHeightVh = 50,
   disabled = false,
 }: {
-  browse: api.FsBrowseResponse | null
+  browse: configApi.FsBrowseResponse | null
   onNavigate: (dir: string) => void
   /** Called with the picked file's full absolute path. */
   onPickFile: (fullPath: string) => void

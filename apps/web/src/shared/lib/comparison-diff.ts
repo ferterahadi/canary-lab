@@ -52,5 +52,3 @@ export function compareText(before: string, after: string, unit: 'words' | 'line
   append(right, suffix, false)
   return { before: left, after: right }
 }
-
-export { comparisonPatchRows, type PatchRow } from '@shared/comparison-patch'

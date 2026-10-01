@@ -18,6 +18,7 @@ runGit,
 snapshotWorkingTree,
 } from '../../../../shared/git-repo'
 import { listUntracked, sanitizeRepoFileName } from './repo-worktree'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 /** Stash-create a baseline ref for every per-run worktree so teardown can diff
  *  the agent's edits out. Best-effort: a repo we can't snapshot simply won't
@@ -118,9 +119,7 @@ export async function captureFixes(ctx: RunContext, provisional = false): Promis
     ...(provisional ? { provisional: true } : {}),
   }
   try {
-    const indexPath = path.join(ctx.paths.fixesDir, 'fixes.json')
-    fs.writeFileSync(`${indexPath}.tmp`, JSON.stringify(fixCapture, null, 2) + '\n')
-    fs.renameSync(`${indexPath}.tmp`, indexPath)
+    atomicWriteJson(path.join(ctx.paths.fixesDir, 'fixes.json'), fixCapture)
   } catch { /* the manifest carries the same data — index file is a convenience */ }
   ctx.stateSink.patchManifest(ctx.runId, { fixCapture })
   for (const repo of previous?.repos ?? []) {

@@ -1,8 +1,4 @@
 import type { SabotageLevel, BenchmarkStatus } from '@shared/benchmark-index'
-export type { SabotageLevel } from '@shared/benchmark-index'
-export type { BenchmarkStatus } from '@shared/benchmark-index'
-export type { BenchmarkIndexEntry } from '@shared/benchmark-index'
-
 // Front-end mirror of the server-side benchmark wire shapes
 // (apps/web-server/lib/runtime/benchmark/{types,report}.ts), matching the way
 // api/types.ts mirrors the run shapes. Keep field-for-field in sync.

@@ -1,14 +1,11 @@
-import crypto from 'crypto'
 import ts from 'typescript'
-import type { RunDetail } from '../../../runs/logic/run-store'
-import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
-import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
+import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
+import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
 import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
-import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath } from '../../../../shared/prompts'
 import { createFlowcharts } from './flowchart'
 import { buildTestReviewPacket } from './packet'
@@ -80,48 +77,26 @@ export function runEvaluationAgent(
   onSession?: (session: { agent: HealAgent; sessionId: string }) => void,
   models: StageModelChoice = AGENT_DEFAULT_CHOICE,
 ): Promise<string> {
-  return runAgentCompletion({
+  // Read-only on both arms: this agent rewrites the wording of a finished run's
+  // report, and a report that could edit the evidence it describes would not be
+  // evidence.
+  return runReadOnlyAnswerAgent({
     agent,
+    prompt,
+    models,
+    cwd,
     signal,
     idleMs: EVALUATION_IDLE_TIMEOUT_MS,
     outputDirectoryPrefix: 'canary-evaluation-rewrite-',
+    outputSchemaPath: EVALUATION_REWRITE_SCHEMA_PATH,
     errorLabel: 'evaluation rewrite agent',
     cancellationMessage: 'evaluation rewrite cancelled',
-    start: ({ outputPath, onIdle }) => {
-      // Pin a session id for claude so the CLI's JSONL session log is locatable and
-      // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-      // Codex has no --session-id; it's located later by cwd + start.
-      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-      // Agentic spawn via the shared runner. claude: stream-json for liveness +
-      // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-      // from stdin (`-`) and writes the final message to --output-last-message.
-      const args = agent === 'claude'
-        // `readOnly` matches the codex arm's `--sandbox read-only`. It matters most
-        // here: this agent rewrites the wording of a finished run's report, and a
-        // report that could edit the evidence it describes would not be evidence.
-        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH, models)
-      onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-      return runAgentProcess({
-        command: agent,
-        args,
-        cwd,
-        stdin: agent === 'codex' ? prompt : undefined,
-        onChunk: (text) => onOutput?.(text),
-        idleMs: EVALUATION_IDLE_TIMEOUT_MS,
-        activityPath: agentActivityPath(agent, cwd, claudeSessionId),
-        onIdle,
-        onTick: (idleMs) => {
-          if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
-        },
-      })
+    onOutput,
+    onSession,
+    onTick: (idleMs) => {
+      if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)
     },
   })
-}
-
-export function evaluationCodexArgs(prompt: string, outputPath?: string, outputSchemaPath?: string, models: StageModelChoice = AGENT_DEFAULT_CHOICE): string[] {
-  return buildReadOnlyCodexArgs({ prompt, models, outputPath, outputSchemaPath })
 }
 
 export function previewAgentOutput(output: string): string {

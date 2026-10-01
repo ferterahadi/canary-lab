@@ -3,7 +3,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
-import * as api from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '@/shared/lib/theme'
 import { isMissingLogError, paneTerminalNotice } from '../utils/pane-terminal-message'
 import { EmptyState } from '@/shared/ui/EmptyState'
@@ -236,7 +236,7 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
       if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return true
       const isC = e.key === 'c' || e.key === 'C' || e.code === 'KeyC'
       if (!isC) return true
-      api.cancelHealRun(runId).catch(() => { /* nothing to cancel — no-op */ })
+      runsApi.cancelHealRun(runId).catch(() => { /* nothing to cancel — no-op */ })
       return false
     }
     term.attachCustomKeyEventHandler(keyHandler)

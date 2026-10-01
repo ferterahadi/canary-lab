@@ -4,24 +4,17 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, listUntracked, removeWorktree, sanitizeRepoFileName } from './repo-worktree'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 let root: string
 let repo: string
-
-function gitInit(dir: string): void {
-  const opts = { cwd: dir, stdio: 'ignore' as const }
-  execFileSync('git', ['init', '-q'], opts)
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], opts)
-  execFileSync('git', ['config', 'user.name', 'Test'], opts)
-  execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'init'], opts)
-}
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-'))
   repo = path.join(root, 'app')
   fs.mkdirSync(path.join(repo, 'features', 'foo'), { recursive: true })
   fs.writeFileSync(path.join(repo, 'features', 'foo', 'server.ts'), 'export const x = 1\n')
-  gitInit(repo)
+  initGitRepo(repo, { commit: 'empty' })
   execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'ignore' })
   execFileSync('git', ['commit', '-q', '-m', 'add files'], { cwd: repo, stdio: 'ignore' })
 })
@@ -210,7 +203,7 @@ describe('listUntracked', () => {
   it('lists non-ignored untracked files and skips ignored ones', async () => {
     const dir = path.join(root, 'untracked-repo')
     fs.mkdirSync(dir, { recursive: true })
-    gitInit(dir)
+    initGitRepo(dir, { commit: 'empty' })
     fs.writeFileSync(path.join(dir, '.gitignore'), 'ignored.txt\n')
     fs.writeFileSync(path.join(dir, 'ignored.txt'), 'x')
     fs.writeFileSync(path.join(dir, 'fresh.txt'), 'x')

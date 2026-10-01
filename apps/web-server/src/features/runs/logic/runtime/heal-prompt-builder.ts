@@ -4,7 +4,7 @@ import {
   getSummaryPath,
 } from './paths'
 import { ESCALATION_THRESHOLD, escalationTracePaths } from './heal-escalation'
-import { readJournalTail } from './log-enrichment'
+import { readJournalTail } from './heal-journal'
 
 // Builds the state-aware addendum that gets appended to the static heal
 // prompt from apps/web-server/prompts/heal-agent.md. The static core describes the always-

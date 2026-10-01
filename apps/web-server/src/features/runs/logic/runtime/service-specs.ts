@@ -2,7 +2,7 @@ import path from 'path'
 import type { FeatureConfig, PortSlot } from '../../../../../../../shared/launcher/types'
 import { enabledForEnv, normalizeStartCommand, resolveHealthProbe, resolvePath } from '../../../../shared/launcher-startup'
 import { buildRunPaths } from './run-paths'
-import { type ServiceManifestEntry } from './manifest'
+import type { ServiceManifestEntry } from '../../../../../../../shared/run-manifest'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import type { BuildServiceSpecsOptions, ServiceSpec } from './run-orchestrator-types'
 

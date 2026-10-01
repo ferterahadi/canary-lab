@@ -7,7 +7,8 @@ import type { FeatureConfig } from '../../../../../../../../shared/launcher/type
 import { runGit } from '../../../../../shared/git-repo'
 import { loadFeatures } from '../../../../../shared/feature-loader'
 import { PortifyRunStore } from '../store'
-import { createPortifyRunner, portifyConcurrencyCap, safeKey } from '../runner'
+import { createPortifyRunner } from '../runner'
+import { portifyConcurrencyCap, safeKey } from '../portify-worktree-borrow'
 
 // Default mocked-agent behavior: edit a source file in the worktree so there's
 // something to commit. Also register a fake child in the set the real agent

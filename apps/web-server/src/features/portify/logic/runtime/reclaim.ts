@@ -7,6 +7,7 @@ import { removeWorktree } from '../../../runs/logic/runtime/repo-worktree'
 import { buildPortifyPaths, portifyDir } from './paths'
 import type { PortifyRunStore } from './store'
 import type { PortifyManifest } from './types'
+import { INTERRUPTED_BY_RESTART } from '../../../../../../../shared/lib/file-backed-task-store'
 
 // Startup reclaim for port-ification workflows orphaned by a dead process
 // (crash, or Ctrl-C of the UI mid-run). The normal exit paths (commit/cancel/
@@ -49,7 +50,7 @@ export async function reclaimOrphanedPortify(
       ...m,
       status: 'aborted',
       endedAt: m.endedAt ?? now(),
-      error: m.error ?? 'Interrupted by server restart',
+      error: m.error ?? INTERRUPTED_BY_RESTART,
     })
   }
 }

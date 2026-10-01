@@ -4,8 +4,8 @@ import path from 'path'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { FLIGHT_STAGE_KEYS } from '../logic/types'
-import type { StageAdapters } from '../logic/conductor'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import type { StageAdapters } from '../logic/flight-stages'
 import { flightsRoutes } from './flights'
 
 let tmpDir: string

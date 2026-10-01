@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { coverageJobStage, coverageSessionSources, stageCoverageJobs } from './coverage-activity'
 
 const job: CoverageJobIndexEntry = { jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: '2026-09-11T00:00:00Z' }

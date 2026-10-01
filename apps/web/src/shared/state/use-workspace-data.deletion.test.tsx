@@ -1,14 +1,29 @@
 import { act, useEffect, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { FlightIndexEntry } from '../api/client'
+import type { FlightIndexEntry } from '@shared/flights/types'
 import type { Feature } from '../api/types'
 import { useWorkspaceData } from './use-workspace-data'
 import { useWorkspaceSelection } from './use-workspace-selection'
 
 const api = vi.hoisted(() => ({ listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(), getVersionStatus: vi.fn() }))
-vi.mock('../api/client', async (importOriginal) => ({ ...await importOriginal<typeof import('../api/client')>(), ...api }))
-vi.mock('@/features/runs', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/runs')>(), useRun: () => ({ detail: undefined }) }))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  listFeatures: api.listFeatures,
+}))
+vi.mock('../api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/flights')>()),
+  listFlights: api.listFlights,
+  listPlanFeatures: api.listPlanFeatures,
+}))
+vi.mock('../api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/workspace')>()),
+  getVersionStatus: api.getVersionStatus,
+}))
+vi.mock('@/features/runs/state/RunsContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/runs/state/RunsContext')>()),
+  useRun: () => ({ detail: undefined }),
+}))
 
 // The data, selection, and Flight stream hooks run together. Only network I/O
 // is replaced; deletion frames must update the same mounted workspace.

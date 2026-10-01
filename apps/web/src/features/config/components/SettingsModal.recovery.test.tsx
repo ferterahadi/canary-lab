@@ -2,18 +2,26 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import * as runsApi from '@/shared/api/runs'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { SettingsModal } from './SettingsModal'
 
-vi.mock('@/shared/api/client', async (original) => ({ ...(await original<typeof import('@/shared/api/client')>()),
-  getProjectConfig: vi.fn(), putProjectConfig: vi.fn(), getGhStatus: vi.fn(), getAgentProbe: vi.fn(),
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
+  putProjectConfig: vi.fn(),
+  getAgentProbe: vi.fn(),
+}))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  getGhStatus: vi.fn(),
 }))
 let root: Root
 let element: HTMLDivElement
 let invalidate: () => void
 const close = vi.fn()
-const config: api.ProjectConfig = { healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: false, agentModels: { claude: {}, codex: {} }, port: 7421 }
+const config: configApi.ProjectConfig = { healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: false, agentModels: { claude: {}, codex: {} }, port: 7421 }
 function Capture() { const bus = useInvalidation(); invalidate = () => bus.invalidate('project-config'); return <SettingsModal onClose={close} /> }
 const render = () => act(async () => { root.render(<InvalidationProvider><Capture /></InvalidationProvider>) })
 const input = (name: string) => element.querySelector<HTMLInputElement>(`[data-testid="${name}"]`)!
@@ -23,21 +31,21 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: 
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks()
   element = document.createElement('div'); document.body.appendChild(element); root = createRoot(element)
-  vi.mocked(api.getProjectConfig).mockResolvedValue(config)
-  vi.mocked(api.putProjectConfig).mockImplementation(async (patch) => ({ ...config, ...patch }))
-  vi.mocked(api.getGhStatus).mockResolvedValue({ installed: true, authenticated: true })
-  vi.mocked(api.getAgentProbe).mockReturnValue(new Promise(() => {}))
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue(config)
+  vi.mocked(configApi.putProjectConfig).mockImplementation(async (patch) => ({ ...config, ...patch }))
+  vi.mocked(runsApi.getGhStatus).mockResolvedValue({ installed: true, authenticated: true })
+  vi.mocked(configApi.getAgentProbe).mockReturnValue(new Promise(() => {}))
 })
 afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
 
 it('refreshes untouched settings after invalidation and saves only the edited field', async () => {
   await render()
-  vi.mocked(api.getProjectConfig).mockResolvedValue({ ...config, askModelsOnLaunch: true })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ ...config, askModelsOnLaunch: true })
   await act(async () => { invalidate() })
   expect(input('settings-ask-models').checked).toBe(true)
   await act(async () => { codex().click() })
   await act(async () => { save().click() })
-  expect(api.putProjectConfig).toHaveBeenCalledExactlyOnceWith({ healAgent: 'codex' })
+  expect(configApi.putProjectConfig).toHaveBeenCalledExactlyOnceWith({ healAgent: 'codex' })
   expect(close).toHaveBeenCalledOnce()
 })
 
@@ -45,40 +53,40 @@ it('preserves dirty fields and rebases untouched fields after a missed event', a
   await render()
   const editor = element.querySelector<HTMLInputElement>('input[name="editor"][value="vscode"]')!
   await act(async () => { editor.click() })
-  vi.mocked(api.getProjectConfig).mockResolvedValue({ ...config, editor: 'cursor', askModelsOnLaunch: true })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ ...config, editor: 'cursor', askModelsOnLaunch: true })
   await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
   expect(editor.checked).toBe(true)
   expect(input('settings-ask-models').checked).toBe(true)
   expect(element.textContent).toContain('Changed elsewhere')
   await act(async () => { save().click() })
-  expect(api.putProjectConfig).toHaveBeenCalledWith({ editor: 'vscode' })
+  expect(configApi.putProjectConfig).toHaveBeenCalledWith({ editor: 'vscode' })
 })
 
 it.each(['failed', 'hung'])('recovers a %s initial read and rejects superseded results', async (mode) => {
-  const old = deferred<api.ProjectConfig>()
-  if (mode === 'hung') vi.mocked(api.getProjectConfig).mockReturnValueOnce(old.promise)
-  else vi.mocked(api.getProjectConfig).mockRejectedValueOnce(new Error('offline'))
-  vi.mocked(api.getProjectConfig).mockResolvedValue({ ...config, askModelsOnLaunch: true })
+  const old = deferred<configApi.ProjectConfig>()
+  if (mode === 'hung') vi.mocked(configApi.getProjectConfig).mockReturnValueOnce(old.promise)
+  else vi.mocked(configApi.getProjectConfig).mockRejectedValueOnce(new Error('offline'))
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ ...config, askModelsOnLaunch: true })
   await render()
   await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
   expect(input('settings-ask-models').checked).toBe(true)
   await act(async () => { old.resolve(config) })
   expect(input('settings-ask-models').checked).toBe(true)
-  vi.mocked(api.getProjectConfig).mockRejectedValueOnce(new Error('offline again'))
+  vi.mocked(configApi.getProjectConfig).mockRejectedValueOnce(new Error('offline again'))
   await act(async () => { invalidate() })
   expect(input('settings-ask-models').checked).toBe(true)
   expect(element.textContent).toContain('offline again')
 })
 
 it('accepts saves over delayed reads, keeps newer edits, and closes only after they are saved', async () => {
-  const writing = deferred<api.ProjectConfig>()
-  const reading = deferred<api.ProjectConfig>()
+  const writing = deferred<configApi.ProjectConfig>()
+  const reading = deferred<configApi.ProjectConfig>()
   await render()
   await act(async () => { codex().click() })
-  vi.mocked(api.putProjectConfig).mockReturnValueOnce(writing.promise)
+  vi.mocked(configApi.putProjectConfig).mockReturnValueOnce(writing.promise)
   await act(async () => { save().click() })
   await act(async () => { input('settings-ask-models').click() })
-  vi.mocked(api.getProjectConfig).mockReturnValueOnce(reading.promise)
+  vi.mocked(configApi.getProjectConfig).mockReturnValueOnce(reading.promise)
   await act(async () => { invalidate() })
   await act(async () => { writing.resolve({ ...config, healAgent: 'codex' }) })
   await act(async () => { reading.resolve(config) })
@@ -86,25 +94,25 @@ it('accepts saves over delayed reads, keeps newer edits, and closes only after t
   expect(input('settings-ask-models').checked).toBe(true)
   expect(close).not.toHaveBeenCalled()
   await act(async () => { save().click() })
-  expect(api.putProjectConfig).toHaveBeenLastCalledWith({ askModelsOnLaunch: true })
+  expect(configApi.putProjectConfig).toHaveBeenLastCalledWith({ askModelsOnLaunch: true })
   expect(close).toHaveBeenCalledOnce()
 })
 
 it('retains failed drafts and rejects late saves and reader work after teardown', async () => {
   await render()
   await act(async () => { codex().click() })
-  vi.mocked(api.putProjectConfig).mockRejectedValueOnce(new Error('read only'))
+  vi.mocked(configApi.putProjectConfig).mockRejectedValueOnce(new Error('read only'))
   await act(async () => { save().click() })
   expect(codex().checked).toBe(true)
   expect(element.textContent).toContain('read only')
-  const writing = deferred<api.ProjectConfig>()
-  vi.mocked(api.putProjectConfig).mockReturnValueOnce(writing.promise)
+  const writing = deferred<configApi.ProjectConfig>()
+  vi.mocked(configApi.putProjectConfig).mockReturnValueOnce(writing.promise)
   await act(async () => { save().click() })
   await act(async () => { root.render(null) })
-  const calls = vi.mocked(api.getProjectConfig).mock.calls.length
+  const calls = vi.mocked(configApi.getProjectConfig).mock.calls.length
   await act(async () => { writing.resolve(config); await vi.advanceTimersByTimeAsync(10000) })
   expect(close).not.toHaveBeenCalled()
-  expect(api.getProjectConfig).toHaveBeenCalledTimes(calls)
+  expect(configApi.getProjectConfig).toHaveBeenCalledTimes(calls)
 })
 
 it('publishes model-matrix responses without overwriting unrelated Settings drafts', async () => {
@@ -117,5 +125,5 @@ it('publishes model-matrix responses without overwriting unrelated Settings draf
   expect(codex().checked).toBe(true)
   expect(close).not.toHaveBeenCalled()
   await act(async () => { save().click() })
-  expect(api.putProjectConfig).toHaveBeenLastCalledWith({ healAgent: 'codex' })
+  expect(configApi.putProjectConfig).toHaveBeenLastCalledWith({ healAgent: 'codex' })
 })

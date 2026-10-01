@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { applyOverlay, reverseOverlay, resetWorktree } from './git-ops'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 const roots: string[] = []
 afterEach(() => {
@@ -22,15 +23,11 @@ const BASE = [
 
 const PORTED = BASE.replace('const PORT = 3007', 'const PORT = Number(process.env.PORT)')
 
-async function tmpRepo(body: string): Promise<string> {
+function tmpRepo(body: string): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-overlay-apply-'))
   roots.push(root)
   fs.writeFileSync(path.join(root, 'app.js'), body)
-  await runGit(root, ['init', '-q'])
-  await runGit(root, ['config', 'user.email', 't@t'])
-  await runGit(root, ['config', 'user.name', 'test'])
-  await runGit(root, ['add', '-A'])
-  await runGit(root, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(root)
   return root
 }
 

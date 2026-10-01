@@ -2,7 +2,18 @@ import type { DiagnosisPolicy } from '../../../../../../../shared/diagnosis-poli
 import path from 'path'
 import type { FeatureConfig, HealthProbe } from '../../../../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
-import { type ExternalHealSession, type RunLifecycleAbortReason, type RunLifecycleEvent, type RunLifecycleRestartPlan, type RunLifecycleSeverity, type RunLifecycleTargetedRerun, type RepoBranchSnapshot, type RunManifest } from './manifest'
+import type {
+  ExternalHealSession,
+  RepoBranchSnapshot,
+  RunManifest,
+} from '../../../../../../../shared/run-manifest'
+import type {
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleTargetedRerun,
+} from '../../../../../../../shared/run-state'
 import { type RunStateSink } from './run-state-sink'
 import type { PtyFactory } from './pty-spawner'
 import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
@@ -10,7 +21,7 @@ import type { BuildHealCyclePrompt } from './auto-heal'
 import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
-import type { RunModelPlan } from './run-model-plan'
+import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 

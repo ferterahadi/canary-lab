@@ -1,11 +1,13 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { getRepoGitStatus, type GitRepoStatus } from '@/shared/api/client'
+import { getRepoGitStatus, type GitRepoStatus } from '@/shared/api/workspace'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { BranchRow } from './FeatureSetupPanel'
 
-vi.mock('@/shared/api/client', () => ({ getRepoGitStatus: vi.fn() }))
+vi.mock('@/shared/api/workspace', () => ({
+  getRepoGitStatus: vi.fn(),
+}))
 const status = (currentBranch: string): GitRepoStatus => ({ path: '/workspace/app', expectedBranch: null, isGitRepo: true, currentBranch, detached: false, dirty: false, dirtyFiles: [], localBranches: ['main', 'other'], remoteBranches: [] })
 let container: HTMLDivElement
 let root: Root

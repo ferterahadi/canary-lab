@@ -45,9 +45,14 @@ import type { FlightInject, FlightStageDeps } from './context'
 
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 

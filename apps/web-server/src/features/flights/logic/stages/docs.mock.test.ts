@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 // A successful writer that leaves no file behind is a storage-boundary failure:
 // the stage must refuse to claim docs evidence until it can observe a readable
 // artifact in the feature directory.
-vi.mock('../../../config/logic/feature-authoring', () => ({
+vi.mock('../../../config/logic/feature-docs-authoring', () => ({
   writeFeatureDoc: () => ({ ok: true }),
   linkFeatureDoc: () => ({ ok: true }),
 }))
 
 import { docsStage } from './docs'
 import { stageContextStub } from './__fixtures__/stage-context'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 describe('docs stage storage verification', () => {
   it('fails when a reported successful write leaves no readable document behind', async () => {

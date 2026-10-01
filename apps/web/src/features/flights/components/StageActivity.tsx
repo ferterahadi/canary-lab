@@ -1,12 +1,12 @@
 import { useEffect, type ReactNode } from 'react'
-import type { FlightStageKey, SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
+import type { FlightStageKey, SpecsCoverageProgress as SpecsCoverageProgressT } from '@shared/flights/types'
 import { AgentSessionView, type AgentSessionSegmentSource, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { EMPTY_COPY, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { StatusDot } from '@/shared/ui/atoms'
 import { useResizableHeight } from '@/shared/ui/use-resizable-height'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
-import { useEvaluationExportLog } from '@/features/evaluation'
+import { useEvaluationExportLog } from '@/features/evaluation/state/EvaluationExportContext'
 import { StageColumn } from './stage-meta'
 
 interface StageActivityRailProps {

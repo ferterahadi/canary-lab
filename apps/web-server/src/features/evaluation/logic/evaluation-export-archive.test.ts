@@ -3,7 +3,8 @@ import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
-import type { RunDetail, PlaywrightArtifact } from '../../runs/logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
+import type { PlaywrightArtifact } from '../../../../../../shared/run-detail'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 
 let tmpDir: string | undefined

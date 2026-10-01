@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react'
-import type { GitRepoStatus } from '@/shared/api/client'
+import type { GitRepoStatus } from '@/shared/api/workspace'
 
 // One home for the branch-picking UI: the Advanced setup Service tab
 // (BranchControl) and the flight Suite setup panel render the SAME input +

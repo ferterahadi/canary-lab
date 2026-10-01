@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
-import type { CoverageJobManifest } from '@/shared/api/types'
+import type { CoverageJobManifest } from '@shared/coverage/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 import { FlightPage } from './FlightPage'
 
@@ -14,14 +14,23 @@ const mocks = vi.hoisted(() => ({
   getFlightAgentSession: vi.fn(async () => null),
   connect: vi.fn(() => ({ close: vi.fn() })),
 }))
-vi.mock('@/shared/api/client', async (original) => ({
-  ...(await original<typeof import('@/shared/api/client')>()),
-  ...mocks,
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  getFlight: mocks.getFlight,
+  getFlightAgentSession: mocks.getFlightAgentSession,
+  getFlightRemedy: vi.fn(async () => ({ remedy: null })),
+}))
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getCoverageJob: mocks.getCoverageJob,
+  getCoverageAgentSession: mocks.getCoverageAgentSession,
   listFeatureDocs: vi.fn(async () => ({ docs: [], sourceDocCount: 0, hasPrdSummary: false, docsDrift: false })),
   getFeatureCoverage: vi.fn(async () => null),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
   getFeatureConfigDoc: vi.fn(async () => null),
   getEnvsetsIndex: vi.fn(async () => null),
-  getFlightRemedy: vi.fn(async () => ({ remedy: null })),
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
 vi.mock('@/features/portify/state/PortifyContext', async () => {

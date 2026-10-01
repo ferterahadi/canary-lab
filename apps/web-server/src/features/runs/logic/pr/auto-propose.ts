@@ -5,7 +5,8 @@ import { readManifest } from '../runtime/manifest'
 import { commitModelPlans } from '../runtime/run-model-plan'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import type { RunContext } from '../runtime/run-context'
-import type { RunFixCapture, RunManifest, RunPrAttempt, RunProposedPr } from '../runtime/manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { RunFixCapture, RunPrAttempt, RunProposedPr } from '../../../../../../../shared/run-state'
 
 // End-of-run pull request. A test run that healed green leaves a captured diff
 // and, unless the workspace turned it off, proposes it as a DRAFT pull request

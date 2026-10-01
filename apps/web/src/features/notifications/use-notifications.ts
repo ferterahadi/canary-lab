@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/notifications'
+import * as typesApi from '@shared/notifications/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
 export function useNotifications() {
@@ -32,7 +33,7 @@ export function useNotifications() {
     loading: resource.value === null && !resource.error,
     busy,
     refresh: resource.refresh,
-    resolveAction: async (id: string): Promise<{ target: api.NotificationTarget; item: api.WorkspaceNotification } | undefined> => {
+    resolveAction: async (id: string): Promise<{ target: typesApi.NotificationTarget; item: typesApi.WorkspaceNotification } | undefined> => {
       const mounted = start()
       if (!mounted) return undefined
       try {

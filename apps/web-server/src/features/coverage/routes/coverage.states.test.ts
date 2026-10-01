@@ -41,7 +41,7 @@ import { FlightRunStore } from '../../flights/logic/store'
 
 import { coverageJobStore } from '../logic/coverage/jobs/store'
 
-import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
 let tmpDir: string
 

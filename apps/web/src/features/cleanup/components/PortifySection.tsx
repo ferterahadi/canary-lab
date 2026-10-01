@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { PortifyCleanupEntry } from '@/shared/api/types'
+import * as cleanupApi from '@/shared/api/cleanup'
+import * as portifyApi from '@/shared/api/portify'
+import type { PortifyCleanupEntry } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
-import { ConfirmModal } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
 
@@ -32,7 +33,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
     setLoading(true)
     setErr(null)
     try {
-      const wfs = (await api.cleanupPortify()).workflows
+      const wfs = (await cleanupApi.cleanupPortify()).workflows
       setWorkflows(wfs)
       // Drop selections for records that no longer exist (removed elsewhere).
       setSelected((prev) => new Set([...prev].filter((id) => wfs.some((w) => w.workflowId === id))))
@@ -72,7 +73,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
     const n = targets.length
     setConfirmTargets(null)
     setBulkBusy(true)
-    const results = await Promise.allSettled(targets.map((w) => api.removePortify(w.workflowId)))
+    const results = await Promise.allSettled(targets.map((w) => portifyApi.removePortify(w.workflowId)))
     const failures = results.filter((r) => r.status === 'rejected').length
     // Drop only the removed ids — a per-row delete must not wipe an in-progress
     // bulk selection elsewhere in the table.

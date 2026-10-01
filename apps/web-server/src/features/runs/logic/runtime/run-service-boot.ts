@@ -9,8 +9,11 @@ import fs from 'fs'
 import path from 'path'
 import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/types'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
-import { type RunBootFailure } from './manifest'
-import { COMPILER_FAILURE_NEXT_ACTION, type RunBootEvidence } from '../../../../../../../shared/run-state'
+import {
+  COMPILER_FAILURE_NEXT_ACTION,
+  type RunBootEvidence,
+  type RunBootFailure,
+} from '../../../../../../../shared/run-state'
 import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
 import type { PtyHandle } from './pty-spawner'
 import os from 'os'

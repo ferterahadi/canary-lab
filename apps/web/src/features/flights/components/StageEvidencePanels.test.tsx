@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, TestCoverage } from '@/shared/api/types'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { CoverageLedger, TestCoverage } from '@shared/coverage/types'
 import { BootCheckPanel, CoverageCompositionPanel, DoubleBootPanel, OverlayPanel } from './StageEvidencePanels'
 
 // The overlay card's job is ATTRIBUTION. Its paths are repo-relative, so a

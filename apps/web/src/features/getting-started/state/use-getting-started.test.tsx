@@ -1,8 +1,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightEntryOptions, OnboardingSamples, OnboardingWorkflow, OnboardingWorkflowAction } from '@/shared/api/client'
-import type { RunIndexEntry } from '@/shared/api/types'
+import type { FlightEntryOptions } from '@shared/flights/types'
+import type { OnboardingSamples, OnboardingWorkflow, OnboardingWorkflowAction } from '@/shared/api/config'
+import type { RunIndexEntry } from '@shared/run-index'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { DemoDialog } from '../components/DemoDialog'
@@ -13,7 +14,24 @@ const api = vi.hoisted(() => ({
   getOnboardingSamples: vi.fn(), getProjectConfig: vi.fn(), putProjectConfig: vi.fn(),
   startRun: vi.fn(), startFlight: vi.fn(), startCoverageJob: vi.fn(), getFlightEntryOptions: vi.fn(),
 }))
-vi.mock('@/shared/api/client', async () => ({ ...api, ApiError: (await import('@/shared/api/internal')).ApiError }))
+vi.mock('@/shared/api/config', async () => ({
+  getOnboardingSamples: api.getOnboardingSamples,
+  getProjectConfig: api.getProjectConfig,
+  putProjectConfig: api.putProjectConfig,
+}))
+vi.mock('@/shared/api/runs', async () => ({
+  startRun: api.startRun,
+}))
+vi.mock('@/shared/api/flights', async () => ({
+  startFlight: api.startFlight,
+  getFlightEntryOptions: api.getFlightEntryOptions,
+}))
+vi.mock('@/shared/api/coverage', async () => ({
+  startCoverageJob: api.startCoverageJob,
+}))
+vi.mock('@/shared/api/internal', async () => ({
+  ApiError: (await import('@/shared/api/internal')).ApiError,
+}))
 
 const navigation = {
   setDemoOpen: vi.fn(), setSelectedFeature: vi.fn(), navigateToRun: vi.fn(),

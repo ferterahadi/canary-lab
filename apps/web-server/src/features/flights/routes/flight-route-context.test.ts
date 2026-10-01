@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildFlightRouteContext } from './flight-route-context'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
-import type { FlightManifest } from '../logic/types'
-import type { PlanFeaturesTask } from '../../../../../../shared/flights/types'
+import type { PlanFeaturesTask, FlightManifest } from '../../../../../../shared/flights/types'
 
 // `buildFlightRouteContext` is where BOTH flight stores get attached to the
 // workspace bus. Nothing else does it: the routes, the MCP tools and the

@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import * as api from '@/shared/api/client'
-import type { ExecutionType } from '@/shared/api/types'
+import type { ExecutionType } from '@shared/verification'
 import { type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 
@@ -53,8 +52,8 @@ export function RunActionsKebab({
   onCancelHeal,
 }: {
   view: RunViewModel
-  displayStatus: import('@/shared/api/types').DisplayStatus
-  executionType?: import('@/shared/api/types').ExecutionType
+  displayStatus: import('@shared/run-state').DisplayStatus
+  executionType?: import('@shared/verification').ExecutionType
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
   onClose: () => void

@@ -1,14 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import { runGit } from '../../../../shared/git-repo'
-import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { atomicWrite, atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import { OVERLAY_DIRNAME, patchFileName } from '../../../../../../../shared/portify-overlay'
 import type { PortSlot } from '../../../../../../../shared/launcher/types'
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
-
-// Naming rules live in shared/portify-overlay.ts (the web UI shows these
-// paths); re-exported here so server-side callers keep one import.
-export { OVERLAY_DIRNAME, patchFileName }
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 
 // The ephemeral port overlay: a captured set of unified diffs (one per product
 // repo) that make a feature's services read canary-lab-injected ports. Unlike
@@ -173,7 +169,7 @@ export function writeOverlay(featureDir: string, input: WriteOverlayInput): Over
     capturedAt: input.capturedAt,
     repos,
   }
-  atomicWrite(metaPath(featureDir), JSON.stringify(meta, null, 2) + '\n')
+  atomicWriteJson(metaPath(featureDir), meta)
   // Snapshot the pre-Portify config alongside the patches so removal can revert
   // the feature config (slots + ${port.x} health-check rewrites), not just the
   // code overlay.

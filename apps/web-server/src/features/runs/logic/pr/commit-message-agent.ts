@@ -1,14 +1,11 @@
 import fs from 'fs'
-import crypto from 'crypto'
-import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
-import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
-import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
+import { pickAvailableHealAgent } from '../runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
+import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, renderPrompt } from '../../../../shared/prompts'
-import type { RunSummaryFailedEntry } from '../run-detail'
+import type { RunSummaryFailedEntry } from '../../../../../../../shared/run-detail'
 
 // Write the commit message and pull-request description for a captured repair,
 // by reading the diff.
@@ -161,27 +158,16 @@ export function runCommitMessageAgent(
   signal?: AbortSignal,
   models: StageModelChoice = AGENT_DEFAULT_CHOICE,
 ): Promise<string> {
-  return runAgentCompletion({
+  return runReadOnlyAnswerAgent({
     agent,
+    prompt,
+    models,
+    cwd,
     signal,
     idleMs: COMMIT_MESSAGE_IDLE_TIMEOUT_MS,
     outputDirectoryPrefix: 'canary-commit-msg-',
+    outputSchemaPath: COMMIT_MESSAGE_SCHEMA_PATH,
     errorLabel: 'commit message agent',
     cancellationMessage: 'commit message generation cancelled',
-    start: ({ outputPath, onIdle }) => {
-      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-      const args = agent === 'claude'
-        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: COMMIT_MESSAGE_SCHEMA_PATH })
-      return runAgentProcess({
-        command: agent,
-        args,
-        ...(cwd ? { cwd } : {}),
-        ...(agent === 'codex' ? { stdin: prompt } : {}),
-        idleMs: COMMIT_MESSAGE_IDLE_TIMEOUT_MS,
-        activityPath: agentActivityPath(agent, cwd, claudeSessionId),
-        onIdle,
-      })
-    },
   })
 }

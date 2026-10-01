@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import path from 'path'
 import { portifyCleanupListing } from './cleanup'
-import type { PortifyIndexEntry } from './types'
+import type { PortifyIndexEntry } from '../../../../../../../shared/portify-index'
 
 function entry(over: Partial<PortifyIndexEntry> & { workflowId: string }): PortifyIndexEntry {
   return { feature: 'f', status: 'saved', startedAt: '2026-01-01T00:00:00.000Z', ...over }

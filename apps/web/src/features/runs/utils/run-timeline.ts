@@ -1,6 +1,7 @@
-import type { AuditEntry, ExternalHealClientKind, RunLifecycleEvent } from '@/shared/api/types'
+import type { AuditEntry } from '@/shared/api/types-wizard'
+import type { ClientKind } from '@shared/run-mode'
 import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
-import type { RunLifecyclePhase, RunLifecycleSeverity } from '@shared/run-state'
+import type { RunLifecyclePhase, RunLifecycleSeverity, RunLifecycleEvent } from '@shared/run-state'
 import { formatDuration } from '@/shared/lib/format'
 
 export type TimelineRowSource = 'engine' | 'external'
@@ -138,6 +139,6 @@ function truncate(value: string, max: number): string {
 
 // This surface labels an unknown client "External" (terser than the shared
 // default "External Client") — reuse the shared switch for the named clients.
-export function clientLabel(kind: ExternalHealClientKind): string {
+export function clientLabel(kind: ClientKind): string {
   return brandingClientLabel(kind, 'External')
 }

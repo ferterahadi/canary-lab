@@ -1,5 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
 import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
 import { FAILED, HEALED } from './BenchmarkDetail'

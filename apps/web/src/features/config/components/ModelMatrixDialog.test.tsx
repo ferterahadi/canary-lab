@@ -3,19 +3,16 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { AgentProbe } from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import type { AgentProbe } from '@/shared/api/config'
 import { MODEL_STAGE_KEYS, recommendedChoice, type KnownModelOption } from '@shared/agent-models'
 import { ModelMatrixDialog, StageChoiceGrid } from './ModelMatrixDialog'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getAgentProbe: vi.fn(),
-    putProjectConfig: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getAgentProbe: vi.fn(),
+  putProjectConfig: vi.fn(),
+}))
 
 const OK_PROBE = (agent: 'claude' | 'codex', over: Partial<AgentProbe> = {}): AgentProbe => ({
   agent, state: 'ok', binaryPath: `/usr/local/bin/${agent}`, version: '9.9.9', models: [], remedy: null, ...over,
@@ -41,8 +38,8 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.getAgentProbe).mockReset().mockResolvedValue(SNAPSHOT)
-  vi.mocked(api.putProjectConfig).mockReset()
+  vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue(SNAPSHOT)
+  vi.mocked(configApi.putProjectConfig).mockReset()
 })
 
 afterEach(() => {
@@ -121,14 +118,14 @@ describe('ModelMatrixDialog', () => {
   it('saves ONLY the agentModels block, this agent replaced and the other kept', async () => {
     const codexPlans = { heal: { model: null, effort: 'xhigh' } }
     const saved = { healAgent: 'claude' as const, editor: 'auto' as const, personalWikiPath: null, agentModels: { claude: { heal: { model: 'opus', effort: 'high' } }, codex: codexPlans } }
-    vi.mocked(api.putProjectConfig).mockResolvedValue(saved)
+    vi.mocked(configApi.putProjectConfig).mockResolvedValue(saved)
     const props = await mount({ agentModels: { claude: {}, codex: codexPlans } })
 
     setSelect(select('Auto-repair model'), 'opus')
     setSelect(select('Auto-repair reasoning effort'), 'high')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
 
-    expect(api.putProjectConfig).toHaveBeenCalledWith({
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({
       agentModels: { claude: { heal: { model: 'opus', effort: 'high' } }, codex: codexPlans },
     })
     expect(props.onSaved).toHaveBeenCalledWith(saved)
@@ -147,7 +144,7 @@ describe('ModelMatrixDialog', () => {
   })
 
   it('a save failure stays open and says why', async () => {
-    vi.mocked(api.putProjectConfig).mockRejectedValue(new Error('disk full'))
+    vi.mocked(configApi.putProjectConfig).mockRejectedValue(new Error('disk full'))
     const props = await mount()
     setSelect(select('Report model'), 'haiku')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
@@ -209,7 +206,7 @@ describe('ModelMatrixDialog', () => {
   })
 
   it('Reset all selects GPT-6 Terra for balanced stages and Sol for authoring and repair', async () => {
-    vi.mocked(api.getAgentProbe).mockResolvedValue({
+    vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
         ...CODEX_MODELS,
@@ -227,7 +224,7 @@ describe('ModelMatrixDialog', () => {
     expect(select('Coverage mapping model').value).toBe('gpt-6-sol')
     expect(select('Repo scan model').value).toBe('gpt-6-terra')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
-    expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
         gen: { model: 'gpt-6-sol', effort: 'high' },
@@ -237,7 +234,7 @@ describe('ModelMatrixDialog', () => {
   })
 
   it('offers GPT-6.1 Sol without replacing saved pins until reset, then saves the new recommendation', async () => {
-    vi.mocked(api.getAgentProbe).mockResolvedValue({
+    vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
         ...CODEX_MODELS,
@@ -251,7 +248,7 @@ describe('ModelMatrixDialog', () => {
     })
     expect(select('Auto-repair model').value).toBe('gpt-6-sol')
     expect(document.querySelector('[data-testid="model-row-heal"]')?.textContent).toContain('custom')
-    expect(api.putProjectConfig).not.toHaveBeenCalled()
+    expect(configApi.putProjectConfig).not.toHaveBeenCalled()
 
     await act(async () => {
       [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
@@ -261,7 +258,7 @@ describe('ModelMatrixDialog', () => {
     expect(select('Auto-repair reasoning effort').value).toBe('high')
     expect(select('Commit message reasoning effort').value).toBe('medium')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
-    expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
         heal: { model: 'gpt-6.1-sol', effort: 'high' },
@@ -271,7 +268,7 @@ describe('ModelMatrixDialog', () => {
   })
 
   it('an auth-failed probe warns with the remedy and Retry re-probes fresh — nothing is disabled', async () => {
-    vi.mocked(api.getAgentProbe).mockResolvedValue({
+    vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       claude: OK_PROBE('claude', { state: 'auth', version: null, remedy: 'Run `claude login`.' }),
     })
@@ -280,15 +277,15 @@ describe('ModelMatrixDialog', () => {
     expect(warning.textContent).toContain('needs a sign-in')
     expect(warning.textContent).toContain('claude login')
 
-    vi.mocked(api.getAgentProbe).mockResolvedValue(SNAPSHOT)
+    vi.mocked(configApi.getAgentProbe).mockResolvedValue(SNAPSHOT)
     await act(async () => { warning.querySelector<HTMLButtonElement>('button')!.click() })
     await act(async () => {})
-    expect(api.getAgentProbe).toHaveBeenLastCalledWith(true)
+    expect(configApi.getAgentProbe).toHaveBeenLastCalledWith(true)
     expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')).toBeNull()
   })
 
   it('a missing CLI warns but the matrix stays editable', async () => {
-    vi.mocked(api.getAgentProbe).mockResolvedValue({
+    vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       claude: OK_PROBE('claude', { state: 'missing', binaryPath: null, version: null, remedy: 'Install the claude CLI.' }),
     })
@@ -298,7 +295,7 @@ describe('ModelMatrixDialog', () => {
   })
 
   it('a failed probe stays quiet ("unavailable") instead of warning', async () => {
-    vi.mocked(api.getAgentProbe).mockRejectedValue(new Error('down'))
+    vi.mocked(configApi.getAgentProbe).mockRejectedValue(new Error('down'))
     await mount()
     expect(document.body.textContent).toContain('CLI check unavailable — settings still apply.')
     expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')).toBeNull()

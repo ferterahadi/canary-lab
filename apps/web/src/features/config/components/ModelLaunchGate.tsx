@@ -1,8 +1,15 @@
 import { Fragment, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { AgentStagePlans, ModelAgentKind, ModelStageKey, StageModelChoice } from '@/shared/api/client'
-import { MODEL_STAGE_LABEL, resolveStageChoice } from '@shared/agent-models'
-import { Modal } from '@/shared/ui/atoms'
+import * as agentModelsApi from '@shared/agent-models'
+import * as configApi from '@/shared/api/config'
+import {
+  MODEL_STAGE_LABEL,
+  resolveStageChoice,
+  type AgentStagePlans,
+  type ModelAgentKind,
+  type ModelStageKey,
+  type StageModelChoice,
+} from '@shared/agent-models'
+import { Modal } from '@/shared/ui/Overlays'
 import { StageChoiceGrid } from './ModelMatrixDialog'
 import { agentTitle } from './settings-options'
 import { useAgentModelOptions } from './use-agent-model-options'
@@ -23,7 +30,7 @@ export interface ModelLaunchGateProps {
   /** Only the stages this launch actually spawns (a coverage job shows 2 rows). */
   stages: readonly ModelStageKey[]
   /** The saved workspace defaults this launch resolves against. */
-  config: api.AgentModelsConfig
+  config: agentModelsApi.AgentModelsConfig
   onCancel: () => void
   /** Fired with the per-launch override to ride the payload — null = use
    *  defaults (send nothing; the server resolves config itself). */
@@ -48,7 +55,7 @@ const SUMMARY_STEP_THRESHOLD = 3
  *  steps costs one line and answers more than a count would. */
 export function defaultsByChoice(
   agent: ModelAgentKind,
-  config: api.AgentModelsConfig,
+  config: agentModelsApi.AgentModelsConfig,
   stages: readonly ModelStageKey[],
 ): Array<{ choice: string; steps: string }> {
   const groups: Array<{ choice: string; labels: string[] }> = []
@@ -66,7 +73,7 @@ export function defaultsByChoice(
  *  whether to change anything, and the grid behind Change carries it. */
 export function savedModelsSummary(
   agent: ModelAgentKind,
-  config: api.AgentModelsConfig,
+  config: agentModelsApi.AgentModelsConfig,
   stages: readonly ModelStageKey[],
 ): string {
   const groups: Array<{ model: string; count: number }> = []
@@ -103,7 +110,7 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
   // a failed write leaves the gate armed, which only means being asked again.
   useEffect(() => {
     if (!dontAskAgain) return
-    api.putProjectConfig({ askModelsOnLaunch: false }).catch(() => {})
+    configApi.putProjectConfig({ askModelsOnLaunch: false }).catch(() => {})
   }, [dontAskAgain])
 
   return (

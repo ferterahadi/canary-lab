@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
-import { ConfirmModal, Modal, StatusDot } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ConfirmModal, Modal } from '@/shared/ui/Overlays'
 import { RunDetailColumn } from './RunDetailColumn'
 
 interface Props {

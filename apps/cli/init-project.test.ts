@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const execFileSync = vi.fn(() => Buffer.from(''))
 const setupProject = vi.fn()
@@ -12,12 +12,7 @@ const { main, parseArgs, copyDir, resolveFirstExisting, buildPackageJson } = awa
   './init-project'
 )
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-init-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
+const mkTmp = trackTempDirs('cl-init-')
 
 let originalCwd: string
 beforeEach(() => {
@@ -29,7 +24,6 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(originalCwd)
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 

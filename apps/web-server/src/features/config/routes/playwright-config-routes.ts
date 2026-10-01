@@ -8,7 +8,9 @@ import path from 'path'
 import { readPlaywrightConfig, writePlaywrightConfig, type ConfigValue } from '../../../shared/config-ast'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { PLAYWRIGHT_CONFIG_NAMES, findExistingConfig } from './feature-config-support'
+import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
+import { findExistingConfig } from '../../../shared/config-file'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerPlaywrightConfigRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── playwright.config.{ts,js,cjs} ────────────────────────────────────
@@ -16,15 +18,9 @@ export async function registerPlaywrightConfigRoutes(app: FastifyInstance, deps:
   app.get<{ Params: { name: string } }>('/api/features/:name/playwright', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     const cfg = findExistingConfig(feature.featureDir, PLAYWRIGHT_CONFIG_NAMES)
-    if (!cfg) {
-      reply.code(404)
-      return { error: 'playwright config not found' }
-    }
+    if (!cfg) return notFound(reply, 'playwright config')
     const content = fs.readFileSync(cfg.path, 'utf-8')
     const parsed = readPlaywrightConfig(content)
     return { path: cfg.path, format: cfg.format, content, parsed }
@@ -35,15 +31,9 @@ export async function registerPlaywrightConfigRoutes(app: FastifyInstance, deps:
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, PLAYWRIGHT_CONFIG_NAMES)
-      if (!cfg) {
-        reply.code(404)
-        return { error: 'playwright config not found' }
-      }
+      if (!cfg) return notFound(reply, 'playwright config')
       const source = fs.readFileSync(cfg.path, 'utf-8')
       let next: string
       try {

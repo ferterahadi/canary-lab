@@ -9,10 +9,12 @@ import type {
   VerificationTarget,
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
-import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
+import type { PlaywrightArtifactGroup } from '../../../../../../shared/run-detail'
+import type { RunDetail, RunSummaryFailedEntry } from '../../../../../../shared/run-detail'
 import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
 import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
@@ -290,11 +292,7 @@ function writeConfigFile(
   file: VerificationConfigFile,
   events?: WorkspaceEventPublisher,
 ): void {
-  const target = verificationConfigPath(feature)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  const tmp = `${target}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify({ configs: file.configs }, null, 2) + '\n')
-  fs.renameSync(tmp, target)
+  atomicWriteJson(verificationConfigPath(feature), { configs: file.configs })
   publishWorkspaceEvent(events, { type: 'verification-config-changed', feature: feature.name })
 }
 

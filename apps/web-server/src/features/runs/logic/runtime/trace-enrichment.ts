@@ -2,8 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { MAX_REQUEST_DETAILS, RunCliResult, parseFailedActionIds, parseRequestIds, runPlaywrightCli } from './trace-cli'
 import { renderFailureSummary, writeDrillDownFiles } from './trace-failure-summary'
-
-export { parseFailedActionIds, parseFirstFailedActionId, parseRequestIds, stripSnapshotsCliBlock } from './trace-cli'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 export interface ExtractTraceSummaryArgs {
   /** Absolute path to the Playwright trace.zip for a failed test. */
@@ -149,9 +148,7 @@ export async function extractTraceSummary(
   })
 
   const summaryPath = path.join(outputDir, 'failure-summary.md')
-  const tmp = `${summaryPath}.tmp`
-  fs.writeFileSync(tmp, summary)
-  fs.renameSync(tmp, summaryPath)
+  atomicWrite(summaryPath, summary)
 
   return {
     summaryPath,

@@ -6,8 +6,6 @@ import { pairedInterval } from './design'
 import { summarizeVariants, variantOverview } from './variant-report'
 
 import { totalTokens } from './usage'
-export { totalTokens } from './usage'
-
 const escape = (text: string): string => text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!)
 export function summarize(manifest: StudyManifest) {
   if (manifest.design?.variants) return []

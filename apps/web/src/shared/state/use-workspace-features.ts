@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { listFeatures } from '../api/client'
+import { listFeatures } from '../api/features'
 import type { Feature } from '../api/types'
 import { useLiveResource } from './use-live-resource'
 

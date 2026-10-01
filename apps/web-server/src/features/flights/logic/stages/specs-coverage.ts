@@ -2,25 +2,35 @@ import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { createHash } from 'crypto'
-import { applyExternalCoverageMappings, buildCoverageMappingContext, computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
+import { computeFeatureCoverage } from '../../../coverage/logic/coverage/service'
+import {
+  applyExternalCoverageMappings,
+  buildCoverageMappingContext,
+  LEGACY_MAPPINGS_JSON,
+  runCoverageEngine,
+} from '../../../coverage/logic/coverage/coverage-engine'
 import { IncompleteCoverageAnswerError, missingFromRoster, parseMappingSubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
 import type { MappingInferenceSnapshot } from '../../../coverage/logic/coverage/mapping-cache'
-import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
+import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary-render'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
 import { listPlaywrightTests } from '../../../runs/logic/playwright-list'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
-import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../../../shared/flights/types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type {
+  SpecsCoveragePass,
+  SpecsCoverageProgress,
+  FlightCheckpoint,
+} from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { decodeSubmission, defaultSpawnAgent, featureDirFor, stageModelPlan, stageModels, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
-import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply

@@ -4,16 +4,13 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import * as api from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
 import { RestartHealButton } from './RestartHealButton'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-	  return {
-	    ...actual,
-	    restartRun: vi.fn(),
-	  }
-})
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  restartRun: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root
@@ -22,7 +19,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-	  vi.mocked(api.restartRun).mockReset()
+	  vi.mocked(runsApi.restartRun).mockReset()
 })
 
 afterEach(() => {
@@ -45,7 +42,7 @@ describe('RestartHealButton', () => {
   })
 
   it('notifies the parent after the restart request succeeds', async () => {
-	    vi.mocked(api.restartRun).mockResolvedValue({ status: 'restarted', mode: 'remaining' })
+	    vi.mocked(runsApi.restartRun).mockResolvedValue({ status: 'restarted', mode: 'remaining' })
     const onRestarted = vi.fn()
 
     await act(async () => {
@@ -58,7 +55,7 @@ describe('RestartHealButton', () => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-	    expect(api.restartRun).toHaveBeenCalledWith('r1')
+	    expect(runsApi.restartRun).toHaveBeenCalledWith('r1')
 	    expect(onRestarted).toHaveBeenCalledTimes(1)
 	  })
 })

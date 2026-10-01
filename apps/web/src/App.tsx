@@ -2,10 +2,11 @@ import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from '
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
-import { DemoDialog, useGettingStarted } from './features/getting-started'
+import { DemoDialog } from './features/getting-started/components/DemoDialog'
+import { useGettingStarted } from './features/getting-started/state/use-getting-started'
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
-import { ModelLaunchGate } from './features/config'
+import { ModelLaunchGate } from './features/config/components/ModelLaunchGate'
 import { ResizablePanels, type PanelConfig } from './shared/ui/ResizablePanels'
 import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
@@ -20,12 +21,19 @@ const LogCleanupPage = lazy(() => import('./features/cleanup/components/LogClean
 const CoverageLedgerPage = lazy(() => import('./features/coverage/components/CoverageLedgerPage').then((m) => ({ default: m.CoverageLedgerPage })))
 const FlightPage = lazy(() => import('./features/flights/components/FlightPage').then((m) => ({ default: m.FlightPage })))
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
-import { runWaitingState } from './features/runs'
+import { runWaitingState } from './features/runs/utils/run-waiting-state'
 import { useRuns, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
-import { useWorkspaceFlights, resolveFeatureFlightTarget, latestTerminalRunByFeature, type FeatureActivity, type FlightsPillProps } from './features/flights'
+import { useWorkspaceFlights } from './features/flights/state/use-workspace-flights'
+import { resolveFeatureFlightTarget } from './features/flights/components/FlightChipState'
+import type { FeatureActivity } from './features/flights/state/feature-activity'
+import type { FlightsPillProps } from './features/flights/components/FlightsPill'
 import { TERMINAL_RUN_STATUSES } from '@shared/run-state'
-import { derivedFlightFeature, derivedFlightToken } from './features/flights/lib/derived-stages'
+import {
+  derivedFlightFeature,
+  derivedFlightToken,
+  latestTerminalRunByFeature,
+} from './features/flights/lib/derived-stages'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { NotificationCenter } from './features/notifications/NotificationCenter'
 import { useInvalidation } from './shared/state/invalidation'
@@ -33,8 +41,9 @@ import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { useWorkspaceSelection } from './shared/state/use-workspace-selection'
 import { resolveActivityTarget } from './shared/state/nav-state'
-import type { FlightStageKey, ModelStageKey } from './shared/api/client'
-import type { NotificationTarget } from './shared/api/notifications'
+import type { FlightStageKey } from '@shared/flights/types'
+import type { ModelStageKey } from '@shared/agent-models'
+import type { NotificationTarget } from '@shared/notifications/types'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']

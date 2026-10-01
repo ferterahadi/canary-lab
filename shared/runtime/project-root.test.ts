@@ -1,21 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { looksLikeProjectRoot, isCanaryLabWorkspace, getProjectRoot, getFeaturesDir } from './project-root'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-root-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
+const mkTmp = trackTempDirs('cl-root-')
 
 afterEach(() => {
-  while (tmpDirs.length) {
-    const d = tmpDirs.pop()!
-    fs.rmSync(d, { recursive: true, force: true })
-  }
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })

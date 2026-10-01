@@ -3,8 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { BenchmarkRunStore } from '../../../../../web-server/src/features/benchmark/logic/runtime/store'
-import type { BenchmarkManifest, BenchmarkStatus } from '../../../../../web-server/src/features/benchmark/logic/runtime/types'
-import { benchmarkReducer, initialBenchmarkState } from './benchmark-state'
+import type { BenchmarkManifest } from '../../../../../web-server/src/features/benchmark/logic/runtime/types'
+import type { BenchmarkStatus } from '@shared/benchmark-index'
+import { benchmarkIndex } from './benchmark-state'
+
+const { reducer: benchmarkReducer, initialState: initialBenchmarkState } = benchmarkIndex
 
 let logs: string
 beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-index-parity-')) })

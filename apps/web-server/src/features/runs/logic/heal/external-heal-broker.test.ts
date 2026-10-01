@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 
 import { ExternalHealBroker, type ExternalHealBrokerDeps, type ExternalHealAuditEntry } from './external-heal-broker'
 
-import type { ExternalHealSession } from '../runtime/manifest'
+import type { ExternalHealSession } from '../../../../../../../shared/run-manifest'
 
 import type { RunStoreEvent } from '../run-store'
 

@@ -1,4 +1,4 @@
-import type { FlightIndexEntry, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
+import type { FlightIndexEntry, FlightStageKey, FlightStageStatus } from '@shared/flights/types'
 import { presentedIndexStages } from './external-work'
 
 /** Only active document/coverage stages explain generation in the coverage ledger. */

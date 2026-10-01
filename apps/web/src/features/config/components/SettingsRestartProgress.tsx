@@ -1,4 +1,3 @@
-import * as api from '@/shared/api/client'
 import { parsePort } from './settings-options'
 
 // The restart moves through three honest phases the UI can narrate: the old

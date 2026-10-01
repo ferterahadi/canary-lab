@@ -12,16 +12,7 @@ import type {
   DraftSource,
   DraftStatus,
   ExternalDraftStage,
-} from './draft-types'
-
-export type {
-  DraftPrdDocument,
-  DraftRecord,
-  DraftRepo,
-  DraftSource,
-  DraftStatus,
-  ExternalDraftStage,
-} from './draft-types'
+} from '../../../../../../shared/draft-types'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,

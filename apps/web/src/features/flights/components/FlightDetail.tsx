@@ -1,21 +1,31 @@
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { coverageJobStage } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import { isActivePortify, usePortify } from '@/features/portify'
+import * as flightsApi from '@/shared/api/flights'
+import type {
+  ExternalWorkCheckpointData,
+  FlightEntryOptions,
+  FlightIndexEntry,
+  FlightManifest,
+  FlightStage,
+  FlightStageKey,
+} from '@shared/flights/types'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import { usePortify } from '@/features/portify/state/PortifyContext'
 import { capitalizeFirst } from '@/shared/lib/format'
-import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { useEscapeToClose } from '@/shared/ui/Overlays'
 import { Chip } from '@/shared/ui/StatusChip'
 import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
 import { AlertCircleIcon } from '@/shared/ui/Icons'
-import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { ACTIVITY_CHIP, featureChipState } from './FlightChipState'
+import { ACTIVITY_CHIP, featureChipState, FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternalWorkPark, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRowKey, presentStageStatus } from './stage-meta'
+import { STAGE_BLURB, STAGE_ICON, presentStageStatus } from './stage-meta'
+import { STAGE_COMPANION, stageRowKey } from './StageRail'
+import { formatStageDuration } from './StageStatusLines'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -27,7 +37,8 @@ import { ContinueMenu, FlightMenu } from './FlightControls'
 import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
-import { StageDetail, truncate } from './StageDetail'
+import { StageDetail } from './StageDetail'
+import { truncate } from './StageActivity'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { useFlightRecord } from '../state/use-flight-record'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
@@ -169,7 +180,7 @@ export function FlightDetail({
   useEffect(() => {
     if (!derivedFeature) return
     let current = true
-    api.getFlightEntryOptions(derivedFeature).then((o) => {
+    flightsApi.getFlightEntryOptions(derivedFeature).then((o) => {
       if (!current) return
       setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
       if (o.flight) onNavigateFlight?.(o.flight.flightId)
@@ -509,7 +520,7 @@ export function FlightDetail({
             <button
               type="button"
               data-testid="flight-pause"
-              onClick={() => act(() => api.pauseFlight(flightId))}
+              onClick={() => act(() => flightsApi.pauseFlight(flightId))}
               // Nothing here can stop work running inside the user's own agent:
               // pausing from this side would park the flight while the agent kept
               // going, and its result would then be discarded as stale. Kept
@@ -631,7 +642,7 @@ export function FlightDetail({
         // R81: no record → nothing to toggle. Autopilot is chosen in the
         // launcher when this suite is actually conducted. A seed doesn't know
         // the stored value, so the toggle waits for the manifest too.
-        onToggleAutopilot={derivedFeature || seeded ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
+        onToggleAutopilot={derivedFeature || seeded ? undefined : (next) => act(() => flightsApi.setFlightAutopilot(flight.flightId, next))}
         // Autopilot decides checkpoints — flipping it changes what the agent's
         // flight answers for itself, so it is the agent's setting while the
         // agent is driving. Disabled with a reason, not hidden: the toggle's

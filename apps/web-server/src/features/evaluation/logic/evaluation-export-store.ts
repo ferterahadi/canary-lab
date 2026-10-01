@@ -11,17 +11,7 @@ import type {
   EvaluationExportSessionRef,
   EvaluationExportTaskRecord,
   EvaluationExportTaskView,
-} from './evaluation-export-types'
-
-export type {
-  EvaluationArchiveContents,
-  EvaluationExportMode,
-  EvaluationExportProducer,
-  EvaluationExportSessionRef,
-  EvaluationExportStatus,
-  EvaluationExportTaskRecord,
-  EvaluationExportTaskView,
-} from './evaluation-export-types'
+} from '../../../../../../shared/evaluation-export-types'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string

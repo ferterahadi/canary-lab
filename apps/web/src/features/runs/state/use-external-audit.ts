@@ -1,6 +1,6 @@
-import { isTerminalRunStatus } from '@shared/run-state'
-import { getRunAudit } from '@/shared/api/client'
-import type { AuditEntry, RunStatus } from '@/shared/api/types'
+import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
+import { getRunAudit } from '@/shared/api/runs'
+import type { AuditEntry } from '@/shared/api/types-wizard'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useRuns } from './RunsContext'
 

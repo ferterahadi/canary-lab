@@ -3,11 +3,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PrPreflight } from '@/shared/api/client'
+import type { PrPreflight } from '@/shared/api/runs'
 import { ProposePrDialog } from './ProposePrDialog'
 
 const mocks = vi.hoisted(() => ({ getRunPrPreflight: vi.fn(), proposeRunPr: vi.fn() }))
-vi.mock('@/shared/api/client', () => mocks)
+vi.mock('@/shared/api/runs', () => ({
+  getRunPrPreflight: mocks.getRunPrPreflight,
+  proposeRunPr: mocks.proposeRunPr,
+}))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

@@ -8,18 +8,9 @@ import {
   registryPath,
   upsertWorkspace,
 } from './workspace-registry'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-registry-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const mkTmp = trackTempDirs('cl-registry-')
 
 describe('canaryLabHome', () => {
   it('prefers an explicit CANARY_LAB_HOME over the real home dir', () => {

@@ -1,5 +1,6 @@
-import * as api from '@/shared/api/client'
-import type { PlanFeaturesTask } from '@/shared/api/client'
+import * as flightsApi from '@/shared/api/flights'
+import * as internalApi from '@/shared/api/internal'
+import type { PlanFeaturesTask } from '@shared/flights/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
 type PlanningValue = { kind: 'task'; task: PlanFeaturesTask } | { kind: 'missing' }
@@ -8,9 +9,9 @@ type PlanningValue = { kind: 'task'; task: PlanFeaturesTask } | { kind: 'missing
 export function usePlanFeaturesTask(taskId: string | null, seed?: PlanFeaturesTask) {
   const resource = useLiveResource<PlanningValue>('pre-flights', taskId, async (id) => {
     try {
-      return { kind: 'task', task: await api.getPlanFeaturesTask(id) }
+      return { kind: 'task', task: await flightsApi.getPlanFeaturesTask(id) }
     } catch (error) {
-      if (error instanceof api.ApiError && error.status === 404) return { kind: 'missing' }
+      if (error instanceof internalApi.ApiError && error.status === 404) return { kind: 'missing' }
       throw error
     }
   }, {

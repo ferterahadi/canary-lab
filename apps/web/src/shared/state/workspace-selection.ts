@@ -1,4 +1,4 @@
-import type { RunIndexEntry } from '../api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 import { isAuxiliaryExecution } from '@shared/verification'
 
 type FeatureNames = readonly { name: string }[]

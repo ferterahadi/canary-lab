@@ -17,7 +17,17 @@ vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { readPersistedCoverageState, computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
+import { readPersistedCoverageState, computeFeatureCoverage } from './service'
+import {
+  runCoverageEngine as runCoverageEngineReal,
+  buildCoverageMappingContext,
+  applyExternalCoverageMappings,
+} from './coverage-engine'
+import {
+  regeneratePrdSummary as regeneratePrdSummaryReal,
+  clearPrdSummary,
+  applyExternalSummary,
+} from './feature-docs'
 
 import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 

@@ -4,8 +4,9 @@
 // one AI labelling and a second AI checking blind, with no human; every place a
 // hint is shown carries that disclosure.
 import { describe, it, expect } from 'vitest'
-import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
-import type { PendingSpecEdit } from '../dirty-specs/detect'
+import { deriveIntegrityHints } from './run-integrity-hints'
+import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
+import type { PendingSpecEdit } from '../../../../../../../shared/run-manifest'
 
 const predicate = (source: string) => ({
   matcher: 'toHaveText', target: 'page.getByTestId("total")', expected: 'literal' as const,

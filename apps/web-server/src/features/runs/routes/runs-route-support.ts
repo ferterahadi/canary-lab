@@ -1,5 +1,5 @@
 import path from 'path'
-import type { RunDetail } from '../logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import type { RunStore } from '../logic/run-store'
 import { loadFeatures } from '../../../shared/feature-loader'
 import type { ClientKind } from '../../../../../../shared/run-mode'

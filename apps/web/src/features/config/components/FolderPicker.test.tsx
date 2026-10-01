@@ -3,17 +3,14 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { listWorkspaceDirs } from '@/shared/api/client'
+import { listWorkspaceDirs } from '@/shared/api/workspace'
 import { FolderPickerModal } from './FolderPicker'
-import { Modal } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listWorkspaceDirs: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  listWorkspaceDirs: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root

@@ -1,10 +1,17 @@
 import path from 'path'
 import { resolveRepoIdentity } from '../../../shared/repo-identity'
-import type { FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey, FlightStatus } from './types'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, isTerminalFlightStatus } from './types'
 import { flightIndexEntry } from '../../../../../../shared/flights/index-entry'
-import { stageHasEvidence } from '../../../../../../shared/flights/types'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
+import {
+  stageHasEvidence,
+  type FlightIndexEntry,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStatus,
+  FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
+  isTerminalFlightStatus,
+} from '../../../../../../shared/flights/types'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the flight-specific
@@ -109,7 +116,7 @@ function settleLegacyTerminalStages(stages: FlightStage[], status: FlightStatus)
 }
 
 export class FlightRunStore implements FlightStore {
-  private readonly listeners = new Set<(event: FlightStoreEvent) => void>()
+  private readonly events = new TaskListeners<FlightStoreEvent>()
   private readonly store: FileBackedTaskStore<FlightManifest>
 
   constructor(public readonly logsDir: string) {
@@ -152,7 +159,7 @@ export class FlightRunStore implements FlightStore {
       },
     })
     this.repairLegacyRecords()
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, flightId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, flightId: e.id }))
   }
 
   /** Bring persisted records up to today's shape at open, before anything
@@ -220,18 +227,10 @@ export class FlightRunStore implements FlightStore {
   }
 
   onEvent(fn: (event: FlightStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: FlightStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: FlightStoreEvent): void {
-    for (const fn of this.listeners) {
-      try { fn(event) } catch { /* a bad listener must not break persistence */ }
-    }
+    this.events.delete(fn)
   }
 }
-
-export type { FlightManifest, FlightIndexEntry, FlightStageKey }

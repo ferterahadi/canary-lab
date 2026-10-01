@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { Tooltip } from '../ui/Tooltip'
-import { AlertCircleIcon, FileIcon, PlayIcon, StatusDot } from '../ui/atoms'
+import { StatusDot } from '../ui/atoms'
+import { AlertCircleIcon, FileIcon, PlayIcon } from '../ui/Icons'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '../ui/TestChangeMark'
 import type { useTestVersions } from './use-test-versions'
 import { TEST_CHANGE_KINDS } from '../lib/test-versions'
-import type { TestChangeKind, VersionTest } from '../lib/test-versions'
+import type { TestChangeKind, VersionTest } from '@shared/test-review'
 
 interface Props {
   currentTests: boolean

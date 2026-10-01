@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { PlaywrightPlaybackEvent } from '@/shared/api/types'
+import type { PlaywrightPlaybackEvent } from '@shared/run-detail'
 import { playbackTests } from './run-detail-playback'
 
 // Step-title compaction, reached through `playbackTests` because that is the only

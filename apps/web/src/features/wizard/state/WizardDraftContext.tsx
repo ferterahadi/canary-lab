@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
+import * as wizardApi from '@/shared/api/wizard'
 import { useWorkspaceRecords, type RecordSyncState } from '@/shared/state/use-workspace-records'
-import type { DraftRecord } from '@/shared/api/types'
+import type { DraftRecord } from '@shared/draft-types'
 
 // Live list of authoring drafts, fed by the REST list on mount and kept current
 // by workspace events. Every draft is authored by an external MCP client, so
@@ -28,7 +28,7 @@ export interface WizardDraftProviderProps {
 
 export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardDraftProviderProps) {
   const { records: draftsById, sync, remove: forgetDraft } = useWorkspaceRecords<DraftRecord>({
-    list: api.listDrafts,
+    list: wizardApi.listDrafts,
     idOf: (draft) => draft.draftId,
     decode: (event) => {
       if (event.type === 'draft-created' || event.type === 'draft-updated') return { kind: 'upsert', record: event.draft }
@@ -49,9 +49,9 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
   const deleteTask = useCallback(async (draftId: string): Promise<void> => {
     const draft = draftsById[draftId]
     if (draft && isActiveWizardTask(draft.status)) {
-      try { await api.cancelDraftGeneration(draftId) } catch { /* may already be stopped */ }
+      try { await wizardApi.cancelDraftGeneration(draftId) } catch { /* may already be stopped */ }
     }
-    try { await api.deleteDraft(draftId) } catch { /* already gone */ }
+    try { await wizardApi.deleteDraft(draftId) } catch { /* already gone */ }
     forgetDraft(draftId)
   }, [draftsById, forgetDraft])
 

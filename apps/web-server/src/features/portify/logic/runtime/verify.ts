@@ -1,7 +1,7 @@
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { portInjectability } from '../../../../../../../shared/launcher/port-injectability'
-import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime/orchestrator'
+import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime/service-specs'
 import { allocatePorts, releasePorts } from '../../../runs/logic/runtime/port-allocator'
 import { bootAndProbe, fileTee, type BootProbeResult } from '../../../runs/logic/runtime/boot-probe'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'

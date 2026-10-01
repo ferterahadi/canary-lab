@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import { ChevronRightIcon, ComplexValueBadge, FieldRow, IconButton, TextInput, TrashIcon } from '@/shared/ui/atoms'
+import * as workspaceApi from '@/shared/api/workspace'
+import { IconButton } from '@/shared/ui/atoms'
+import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { ComplexValueBadge, FieldRow, TextInput } from '@/shared/ui/FormFields'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
@@ -138,7 +140,7 @@ export function RepoCard({
     setCloning(true)
     setCloneError(null)
     try {
-      const r = await api.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
+      const r = await workspaceApi.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
       if (!current()) return
       onChange((latest) => ({ ...latest, localPath: r.localPath,
         name: latest.name === repo.name ? nextRepoName(latest.name, derivedName, r.localPath, latest.cloneUrl) : latest.name,

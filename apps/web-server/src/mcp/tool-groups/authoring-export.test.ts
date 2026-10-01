@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ZodTypeAny } from 'zod'
 import { decode } from '@toon-format/toon'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../../shared/run-detail'
 import {
   createEvaluationExportTask,
   deleteEvaluationExportTask,

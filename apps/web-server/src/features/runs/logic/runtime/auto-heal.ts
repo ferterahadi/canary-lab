@@ -8,27 +8,9 @@ import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
 import { promptPath, loadPromptTemplate, renderPrompt, renderPromptTemplate } from '../../../../shared/prompts'
-import {
-  resolveAgentBinary,
-  isAgentCliAvailable,
-  candidateAgentPaths,
-  type HealAgent,
-  type AgentResolveDeps,
-} from '../../../agent-sessions/logic/agent-binary'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { directoryExists, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 import { claimedSingleAttempt } from '../../../../shared/single-attempt'
-
-export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
-export type { AgentSpawnArgs, AgentSpawnCommandDefaults } from './heal-agent-spawn'
-export { buildHealPromptMap, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
-export type { HealPromptMap, HealPromptMapOptions, HealPromptResourceEntry, HealPromptStartEntry } from './heal-prompt-map'
-
-// Agent-binary resolution moved to the spawn primitive's module so the runner
-// can resolve a bare agent name itself; re-exported here for the orchestrator's
-// REPL command builder and the long-standing import surface.
-export { resolveAgentBinary, isAgentCliAvailable, candidateAgentPaths }
-
-export type { HealAgent, AgentResolveDeps }
 
 const HEAL_PROMPT_TEMPLATE_PATH = promptPath('heal-agent.md')
 

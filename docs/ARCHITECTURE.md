@@ -155,7 +155,7 @@ of the suite's environment list. The folders on disk are authoritative: capture
 now drops stale declarations and includes previously undeclared folders. Suite
 configs are written only when the AST writer produces changed content; config
 file discovery lives in `apps/web-server/src/shared/config-file.ts`, with thin
-configuration-domain and route-support re-exports. It selects the first existing
+no forwarding modules: callers import it directly. It selects the first existing
 file in cjs/js/ts order; callers retain loading, cache invalidation, and error
 handling, so an invalid higher-priority file prevents fallback. Callers also retain
 their discovery-versus-linked-suite directory choice. Coverage records every
@@ -280,8 +280,8 @@ releases the timer.
 Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
 browser updates retain the server's branch, producer, and terminal timestamp.
 Benchmark uses `shared/benchmark-index.ts` for its compact rows and terminal
-timestamps. The wire-contract gate requires canonical re-exports and both
-converter calls for all three domains. Portify and Benchmark lifecycle
+timestamps. The wire-contract gate requires both converter calls for all three domains and
+rejects any app file that declares its own copy of a root wire type. Portify and Benchmark lifecycle
 predicates live beside their canonical statuses; operation-specific eligibility
 (such as Benchmark cleanup excluding `invalid`) remains with the operation.
 
@@ -495,22 +495,24 @@ returns a handle other features consume — `runs` returns
 `coverage` and the MCP mount all take. Don't turn one into a re-export barrel;
 `server.ts` depends on the register/handle contract.
 
-**Web features are re-export barrels.** Each
-`apps/web/src/features/<name>/index.ts` names that feature's public surface. A
-feature may import another only through its barrel, never a path inside it:
+**Web features have no barrels; they declare public files.** A symbol lives in
+one file and every caller imports that file directly — there is no
+`features/<name>/index.ts` and no module that only forwards another's exports.
+A feature may import another feature's file only when that file is listed in
+the `PUBLIC` map in `tools/check-feature-boundaries.mjs`:
 
 ```
-✔  import { RunRow } from '@/features/runs'
-✘  import { RunRow } from '@/features/runs/components/RunRow'
+✔  import { RunRow } from '@/features/runs/components/RunRow'   (listed in PUBLIC.runs)
+✘  import { x } from '@/features/runs/state/runs-reducer'       (not listed)
 ```
 
-`npm run check:boundaries` enforces this and fails on three things: a deep
-cross-feature import, a feature that is consumed but has no barrel, and a stale
-entry in its `ALLOWED_DEEP` allowlist. The allowlist exists because routing
-**both** directions of a mutually-dependent pair through barrels is an ESM
-module-init cycle; `coverage ⇄ flights` is the one surviving pair (the flight
-page embeds coverage's docs rail, the coverage page renders flight stage chips).
-Shrink that list, don't grow it.
+`npm run check:boundaries` fails on an undeclared cross-feature import (either
+spelling, `@/features/…` or relative), any feature `index.ts`, and a `PUBLIC`
+entry nothing imports any more. Tests may additionally `vi.mock` another
+feature's module and import its fixtures, since neither is a production
+dependency. Repo-wide, `npm run check:conventions` rejects re-exports
+(`export … from` and import-then-`export { … }`); the only exception is the
+published `canary-lab/feature-support/log-marker-fixture` entry file.
 
 **Two shared aliases, easily confused.** `@shared/` is the repo-root `shared/`
 package (published types, shared with the CLI). `@/shared/` is the web app's own
@@ -1352,8 +1354,7 @@ link, or the per-repo reason there is none.
   The grouping is **by domain, not by profile**. Tools may belong to several profiles, so `tool-profiles.ts` owns membership; file layout does not.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`COVERAGE_TOOLS`/
   `EXPORT_TOOLS`/`FLIGHT_TOOLS`/`PORTIFY_TOOLS` arrays, which live in
-  **`mcp/tool-profiles.ts`** and reach the rest of the layer re-exported through
-  `tool-support.ts`. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
+  **`mcp/tool-profiles.ts`**, which the rest of the layer imports directly. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
   arrays + `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`);
   `FULL_TOOLS` is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`, while `COMPACT_TOOLS`
   contains only the public `exec` dispatcher. Because both composed direct-tool profiles are computed
@@ -1652,7 +1653,7 @@ procedure.
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Readable Test compiler ↔ source links ↔ consumers | TypeScript 5.9.3 in `package.json` ↔ `controlled-english/compiler-context.ts` and syntax inventories ↔ `readable-tests/translator.ts` ↔ `ast-extractor.ts` ↔ `shared/readable-tests/types.ts` ↔ `TestPresentation` / `ReadableTestView` and the evaluation flowchart adapter. The story stays deterministic and source-linked; runner verdicts stay at test level. | controlled-English, readable-tests, extractor, presentation, and `npm run check:wire` tests | `cl_run-evidence-invariants` |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
-| **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
+| **Web↔server wire contract** | Server response types are declared once in root `shared/` (`run-manifest.ts`, `run-detail.ts`, `cleanup-listing.ts`, `draft-types.ts`, `evaluation-export-types.ts`, `extracted-test.ts`, …) and imported by both apps, so drift is a compile error ↔ the `WorkspaceEvent` union, which each side still declares. The gate rejects a copy of a shared wire type in either app, a side that bypasses a shared converter, and an event tag only one side knows. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

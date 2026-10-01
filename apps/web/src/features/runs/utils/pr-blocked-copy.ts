@@ -1,4 +1,4 @@
-import type { PrBlockedReason } from '@/shared/api/client'
+import type { PrBlockedReason } from '@/shared/api/runs'
 
 // The one home for "why this repo can't get a pull request" in prose.
 //

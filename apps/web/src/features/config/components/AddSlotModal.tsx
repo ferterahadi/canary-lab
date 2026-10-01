@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { FieldRow, Modal, TextInput } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import { FieldRow, TextInput } from '@/shared/ui/FormFields'
+import { Modal } from '@/shared/ui/Overlays'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
@@ -54,7 +55,7 @@ function AddSlotSession({
     setBusy(true)
     setError(null)
     try {
-      const res = await api.addEnvsetSlot(feature, {
+      const res = await configApi.addEnvsetSlot(feature, {
         sourcePath: picked,
         slotName: slotName.trim() || undefined,
         target: target.trim() || undefined,

@@ -12,13 +12,17 @@ import { z } from 'zod'
 export type CanaryLabToolHandler = (args: Record<string, unknown>, ctx: ServerContext) =>
   CallToolResult | InputRequiredResult | Promise<CallToolResult | InputRequiredResult>
 import type { RunStore } from '../features/runs/logic/run-store'
-import type { RunDetail } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { DirtySpecStore } from '../features/runs/logic/dirty-specs/store'
 import type { RepoUpdateRefusal } from '../features/runs/logic/runtime/repo-upstream-update'
 import { type ResolveVerificationInput } from '../features/coverage/logic/verification'
-import { buildTestReviewPacket, deterministicEvaluationRewrite, evaluationTextSlots } from '../features/evaluation/logic/test-review-export'
+import { buildTestReviewPacket } from '../features/evaluation/logic/test-review/packet'
+import {
+  deterministicEvaluationRewrite,
+  evaluationTextSlots,
+} from '../features/evaluation/logic/test-review/rewrite'
 import { type WorkspaceEventPublisher } from '../shared/workspace-events'
 import type {
   PortifyManifest,
@@ -38,16 +42,6 @@ export const evaluationTextSlotInput = z.object({
   id: z.string(),
   text: z.string(),
 })
-
-// The external-submission shapes (coverage mappings, summary requirements, the
-// variant dimension) moved to the coverage logic layer so the flight's
-// external-work responders validate with the SAME schemas these tools declare —
-// re-exported here so the tool groups keep one import home.
-export {
-  coverageMappingInput,
-  summaryRequirementInput,
-  variantDimensionInput,
-} from '../features/coverage/logic/coverage/external-submissions'
 
 export const evaluationRewriteInput = z.object({
   formatVersion: z.number().optional(),

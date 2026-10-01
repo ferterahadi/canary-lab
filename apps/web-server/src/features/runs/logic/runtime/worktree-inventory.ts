@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { runGit, type GitResult } from '../../../../shared/git-repo'
-import { dirSizeBytes } from '../run-store'
+import { dirSizeBytes } from '../run-artifacts'
 
 // Inventory of every git worktree canary-lab created under the logs dir —
 // per-run isolation worktrees, benchmark arm/staging worktrees, and lazily

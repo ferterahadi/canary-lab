@@ -2,11 +2,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JournalTab } from './JournalTab'
-import type { JournalEntry } from '@/shared/api/types'
+import type { JournalSection } from '@shared/run-detail'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/runs', () => ({
   listJournal: vi.fn(),
 }))
 
@@ -27,8 +27,8 @@ afterEach(() => {
 
 describe('JournalTab live refresh', () => {
   it('refetches the selected run journal when refreshKey changes', async () => {
-    const api = await import('@/shared/api/client')
-    vi.mocked(api.listJournal)
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal)
       .mockResolvedValueOnce([entry(1, 'first')])
       .mockResolvedValueOnce([entry(2, 'second')])
 
@@ -44,16 +44,16 @@ describe('JournalTab live refresh', () => {
       await Promise.resolve()
     })
 
-    expect(api.listJournal).toHaveBeenCalledTimes(2)
-    expect(api.listJournal).toHaveBeenLastCalledWith({ feature: 'checkout', run: 'run-1' })
+    expect(runsApi.listJournal).toHaveBeenCalledTimes(2)
+    expect(runsApi.listJournal).toHaveBeenLastCalledWith({ feature: 'checkout', run: 'run-1' })
     expect(container.textContent).toContain('second')
   })
 })
 
 describe('JournalTab empty state', () => {
   it('reads an empty journal on a run that never healed as "nothing to repair"', async () => {
-    const api = await import('@/shared/api/client')
-    vi.mocked(api.listJournal).mockResolvedValue([])
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal).mockResolvedValue([])
 
     await act(async () => {
       root.render(<JournalTab feature="checkout" runId="run-1" healCycles={0} />)
@@ -65,8 +65,8 @@ describe('JournalTab empty state', () => {
   })
 
   it('says the agent wrote nothing when repair cycles did happen', async () => {
-    const api = await import('@/shared/api/client')
-    vi.mocked(api.listJournal).mockResolvedValue([])
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal).mockResolvedValue([])
 
     await act(async () => {
       root.render(<JournalTab feature="checkout" runId="run-1" healCycles={2} />)
@@ -77,8 +77,8 @@ describe('JournalTab empty state', () => {
   })
 
   it('renders entries without a redundant pane title above them', async () => {
-    const api = await import('@/shared/api/client')
-    vi.mocked(api.listJournal).mockResolvedValue([entry(1, 'first')])
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal).mockResolvedValue([entry(1, 'first')])
 
     await act(async () => {
       root.render(<JournalTab feature="checkout" runId="run-1" />)
@@ -91,7 +91,7 @@ describe('JournalTab empty state', () => {
   })
 })
 
-function entry(iteration: number, hypothesis: string): JournalEntry {
+function entry(iteration: number, hypothesis: string): JournalSection {
   return {
     iteration,
     timestamp: '2026-07-02T10:00:00.000Z',

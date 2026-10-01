@@ -3,7 +3,7 @@
 // step location drives the live source highlight; verdict badges remain
 // test-level because Playwright reports the final outcome at that level.
 
-import type { RunSummary } from '@/shared/api/types'
+import type { RunSummary } from '@shared/run-detail'
 
 export type StepStatus = 'unmatched' | 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type TestExecutionHighlightKind = 'running' | 'failed'

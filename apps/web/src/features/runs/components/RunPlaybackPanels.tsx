@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunLifecycleEvent, RunSummary } from '@/shared/api/types'
+import type {
+  PlaywrightArtifact,
+  PlaywrightArtifactGroup,
+  PlaywrightPlaybackEvent,
+  RunSummary,
+} from '@shared/run-detail'
+import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
+import type { RunLifecycleEvent } from '@shared/run-state'
 import { formatDuration } from '@/shared/lib/format'
 import { artifactsForPlayback, playbackTests, type PlaybackTest } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'

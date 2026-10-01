@@ -3,9 +3,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 
-export type { RunsRouteDeps } from './runs-route-deps'
-export type { ExternalHealAgentRequest } from './runs-route-support'
-
 import { registerRunActionRoutes } from './runs-actions'
 import { registerRunCleanupRoutes } from './runs-cleanup-routes'
 import { registerRunTestReviewRoutes } from './runs-test-review'

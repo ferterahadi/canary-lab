@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { applyExternalSummary, regeneratePrdSummary } from './feature-docs'
-import { readPrdSummary } from './prd-summary'
+import { readPrdSummary } from './prd-summary-render'
 import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
 
 let tmp: string

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RunDetail, RunIndexEntry } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
+import type { RunIndexEntry } from '../../../../shared/run-index'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import {
   activeRunPriority,

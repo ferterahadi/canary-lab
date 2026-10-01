@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildHealPromptMap, buildOrchestratorHealPrompt, renderPlaywrightMcpHint, renderTraceExtractHint } from './auto-heal'
+import { buildOrchestratorHealPrompt } from './auto-heal'
+import { buildHealPromptMap, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {

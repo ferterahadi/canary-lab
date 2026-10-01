@@ -12,8 +12,8 @@ import {
   upsertRunsIndexEntry,
   writeManifest,
   writeRunsIndex,
-  type RunManifest,
 } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { runsIndexPath } from './run-paths'
 
 let tmpDir: string

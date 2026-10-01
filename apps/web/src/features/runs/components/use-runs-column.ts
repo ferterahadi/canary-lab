@@ -3,9 +3,9 @@
 // Lifted out of the component verbatim so the column file is its markup; every
 // binding comes back under its original name.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { ApiError } from '@/shared/api/client'
-import type { RunIndexEntry } from '@/shared/api/types'
+import * as runsApi from '@/shared/api/runs'
+import { ApiError } from '@/shared/api/internal'
+import type { RunIndexEntry } from '@shared/run-index'
 import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { useInvalidationKey } from '@/shared/state/invalidation'
@@ -66,7 +66,7 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
       return next
     })
     try {
-      await api.restartRun(runId)
+      await runsApi.restartRun(runId)
     } catch (e: unknown) {
       const reason = e instanceof ApiError
         ? (e.body as { reason?: unknown })?.reason

@@ -1,6 +1,7 @@
 import type { RepositoryConsumer } from '@shared/repository-observation'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { DraftRecord, EvaluationExportTask } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { DraftRecord } from '@shared/draft-types'
 
 export type WorkspaceEvent =
   | { type: 'connected' }
@@ -19,8 +20,8 @@ export type WorkspaceEvent =
   | { type: 'draft-created'; draft: DraftRecord }
   | { type: 'draft-updated'; draft: DraftRecord }
   | { type: 'draft-deleted'; draftId: string }
-  | { type: 'evaluation-export-created'; task: EvaluationExportTask }
-  | { type: 'evaluation-export-updated'; task: EvaluationExportTask }
+  | { type: 'evaluation-export-created'; task: EvaluationExportTaskView }
+  | { type: 'evaluation-export-updated'; task: EvaluationExportTaskView }
   | { type: 'evaluation-export-deleted'; taskId: string }
   | { type: 'version-changed' }
   | { type: 'flights-changed' }

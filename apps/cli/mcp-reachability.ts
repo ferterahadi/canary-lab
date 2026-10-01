@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { Writable } from 'stream'
-import { type CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
+import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { type ClientKind } from '../../shared/run-mode'
 import { looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import {

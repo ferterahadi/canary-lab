@@ -1,13 +1,18 @@
 // MCP tools — feature skeletons, feature docs, and the coverage read a client
 // needs before authoring. Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
-import { captureFeatureEnvFiles, createFeatureSkeleton, writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import {
-  FeatureNotFoundError,
-  clearPrdSummary,
-  computeFeatureCoverage,
-  listFeatureDocs,
-} from '../../features/coverage/logic/coverage/service'
+  captureFeatureEnvFiles,
+  createFeatureSkeleton,
+  type EnvFileSource,
+} from '../../features/config/logic/feature-authoring'
+import {
+  writeFeatureDoc,
+  deleteFeatureDoc,
+  linkFeatureDoc,
+} from '../../features/config/logic/feature-docs-authoring'
+import { FeatureNotFoundError, computeFeatureCoverage } from '../../features/coverage/logic/coverage/service'
+import { clearPrdSummary, listFeatureDocs } from '../../features/coverage/logic/coverage/feature-docs'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, authoringCtx, coverageBlockedNext, errorResult, failureResult } from '../tool-support'
 

@@ -4,7 +4,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeaturesColumn } from './FeaturesColumn'
-import { resolveFeatureFlightAction, type FeatureActivity, type FeatureFlightAction } from '@/features/flights'
+import {
+  resolveFeatureFlightAction,
+  type FeatureFlightAction,
+} from '@/features/flights/components/FlightChipState'
+import type { FeatureActivity } from '@/features/flights/state/feature-activity'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -23,8 +27,8 @@ function InvalidationTap() {
   return null
 }
 
-vi.mock('../api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../api/client')>()),
+vi.mock('../api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/coverage')>()),
   listCoverageStates,
 }))
 
@@ -1002,7 +1006,7 @@ describe('FeaturesColumn last-run dot', () => {
   }
   const dot = (name: string) => container.querySelector<HTMLElement>(`[data-testid="last-run-${name}"]`)
 
-  it('shows passed, failed, aborted, and repaired passes, and nothing for a suite that never ran', () => {
+  it('shows passed, failed, aborted, and repaired passes, and a hollow circle for a suite with no run', () => {
     render(
       [suite('clean'), suite('broken'), suite('stopped'), suite('fixed'), suite('fresh')],
       new Map([
@@ -1022,7 +1026,10 @@ describe('FeaturesColumn last-run dot', () => {
     expect(dot('fixed')?.dataset.status).toBe('repaired')
     expect(dot('fixed')?.getAttribute('aria-label')).toMatch(/^Last run passed after 2 repair cycles · /)
     expect(dot('fixed')?.querySelector('.outline-success')).toBeTruthy()
-    expect(dot('fresh')).toBeNull()
+    expect(dot('fresh')?.dataset.status).toBe('none')
+    expect(dot('fresh')?.getAttribute('aria-label')).toBe('No runs on record')
+    expect(dot('fresh')?.querySelector('.border-line')).toBeTruthy()
+    expect(dot('fresh')?.querySelector('[class*="bg-"]')).toBeNull()
   })
 
   it('names a single repair cycle in the singular', () => {

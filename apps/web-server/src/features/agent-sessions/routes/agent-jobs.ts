@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { agentJobStore } from '../logic/agent-jobs/store'
 import { stopAgentProcesses } from '../logic/agent-process'
+import { notFound } from '../../../shared/http-error'
 
 // Read + stop the spawned-agent records. The read half makes an agent Canary
 // started visible outside the flight view that happens to own it; the stop half
@@ -28,10 +29,7 @@ export async function agentJobRoutes(app: FastifyInstance, deps: AgentJobRouteDe
 
   app.post<{ Params: { jobId: string } }>('/api/agent-jobs/:jobId/stop', async (req, reply) => {
     const record = store().get(req.params.jobId)
-    if (!record) {
-      reply.code(404)
-      return { error: 'agent job not found' }
-    }
+    if (!record) return notFound(reply, 'agent job')
     if (record.status !== 'running' || !record.scope) {
       // Idempotent, never a 409: "it already finished" is a success for a stop.
       // A running record with no scope predates scoped stopping and cannot be

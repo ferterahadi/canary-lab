@@ -1,5 +1,8 @@
 import { Fragment, useState } from 'react'
-import { useImmediateConfig, BranchSuggestInput, branchSuggestions, useRepoGitStatus, RepoGitStatusNotice } from '@/features/config'
+import { useImmediateConfig } from '@/features/config/state/use-immediate-config'
+import { BranchSuggestInput, branchSuggestions } from '@/features/config/components/BranchSuggestInput'
+import { useRepoGitStatus } from '@/features/config/state/use-repo-git-status'
+import { RepoGitStatusNotice } from '@/features/config/components/RepoGitStatusNotice'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import {

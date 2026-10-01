@@ -1,6 +1,6 @@
-import * as api from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
 import { useLiveResource } from '@/shared/state/use-live-resource'
-import { RefreshIcon } from '@/shared/ui/atoms'
+import { RefreshIcon } from '@/shared/ui/Icons'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 
 // Read-only "which GitHub account is connected" surface (R80). Detect-and-
@@ -18,7 +18,7 @@ export function GitHubSection({ divider }: {
   /** Hairline above the row, when it follows another row in the same section. */
   divider?: boolean
 }) {
-  const { value: status, loading, error, refresh: load } = useLiveResource(null, 'github-status', () => api.getGhStatus(), { retainOnError: true })
+  const { value: status, loading, error, refresh: load } = useLiveResource(null, 'github-status', () => runsApi.getGhStatus(), { retainOnError: true })
 
   const remediation = !status
     ? null

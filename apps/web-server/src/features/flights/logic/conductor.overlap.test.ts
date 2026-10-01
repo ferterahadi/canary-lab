@@ -3,8 +3,16 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FlightRunStore } from './store'
-import { startFlight, respondToFlightCheckpoint, pauseFlight, resumeFlight, abortFlight, type FlightConductorDeps, type StageAdapter, type StageAdapters, type StageOutcome } from './conductor'
-import { FLIGHT_STAGE_KEYS, type FlightStageKey } from './types'
+import {
+  startFlight,
+  respondToFlightCheckpoint,
+  pauseFlight,
+  resumeFlight,
+  type FlightConductorDeps,
+} from './conductor'
+import { abortFlight } from './flight-queue'
+import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
+import { FLIGHT_STAGE_KEYS, type FlightStageKey } from '../../../../../../shared/flights/types'
 
 let root: string
 let store: FlightRunStore

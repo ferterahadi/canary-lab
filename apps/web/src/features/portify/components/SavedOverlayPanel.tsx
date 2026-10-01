@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { PortifyManifest } from '@/shared/api/client'
+import * as cleanupApi from '@/shared/api/cleanup'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { DiffView } from '@/shared/ui/DiffView'
 import { patchFileName } from '@shared/portify-overlay'
 
@@ -34,7 +34,7 @@ export function SavedOverlayPanel({
   const openOverlay = async (): Promise<void> => {
     setOpenError(null)
     try {
-      const res = await api.openPortifyProject(m.workflowId)
+      const res = await cleanupApi.openPortifyProject(m.workflowId)
       if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
     } catch (e) {
       setOpenError(e instanceof Error ? e.message : 'Failed to open editor')

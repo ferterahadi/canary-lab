@@ -7,21 +7,26 @@ import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
-import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
+import type { OrchestratorLike, StartRunOutcome } from './logic/run-registry'
 import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
-import { RunOrchestrator, buildServiceSpecs, type AutoHealConfig } from './logic/runtime/orchestrator'
+import { RunOrchestrator } from './logic/runtime/orchestrator'
+import { buildServiceSpecs } from './logic/runtime/service-specs'
+import type { AutoHealConfig } from './logic/runtime/run-orchestrator-types'
 import { estimateRunCost } from './logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
 import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
 import { addWorktree, hydrateWorkingTreeDiff, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
-import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
-import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './logic/runtime/run-model-plan'
+import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
+import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
+import { resolveAgentBinary } from '../agent-sessions/logic/agent-binary'
+import { resolveRunModelPlan, reuseRunModelPlan } from './logic/runtime/run-model-plan'
+import type { RunModelPlan } from '../../../../../shared/run-manifest'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { assertStableSpecSelection } from '../../shared/playwright-config'
@@ -187,7 +192,7 @@ export function buildRunsRouteDeps(
       const projectConfig = loadProjectConfig(projectRoot)
       const externalOrigin = healAgentReq?.kind === 'external'
       const canClaim = externalOrigin && healAgentReq?.claimable !== false
-      let externalHealSession: import('./logic/runtime/manifest').ExternalHealSession | undefined
+      let externalHealSession: import('../../../../../shared/run-manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { atomicWrite } from '../../../../../shared/lib/atomic-write'
+import { atomicWriteJson } from '../../../../../shared/lib/atomic-write'
 import type { NotificationSource, WorkspaceNotification } from '../../../../../shared/notifications/types'
 import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 
@@ -37,7 +37,7 @@ export class NotificationStore {
   }
 
   private save(data: NotificationDatabase): void {
-    atomicWrite(this.file, JSON.stringify(data, null, 2) + '\n')
+    atomicWriteJson(this.file, data)
     this.events.publish({ type: 'notifications-changed' })
   }
 

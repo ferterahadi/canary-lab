@@ -9,7 +9,7 @@ import {
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
 import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo, type FeatureRepoDeps } from './feature-repos'
 import { listEnvFolders, readEnvsetsConfig, writeEnvsetsConfig, syncEnvsInConfig } from './envset-config'
@@ -22,8 +22,6 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 import { publishEnvsetChange } from './envset-events'
 import { isWithin } from './path-containment'
 import { deleteSuite } from './feature-deletion'
-
-export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 export interface FeatureAuthoringContext extends FeatureRepoDeps {
   projectRoot: string
@@ -335,10 +333,6 @@ export function parseRedactedEntries(raw: string): RedactedEntry[] {
     if (key) keys.add(key)
   }
   return Array.from(keys).sort().map((key) => ({ key, value: '********' as const }))
-}
-
-export function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
-  return loadFeatures(featuresDir).find((feature) => feature.name === featureName)
 }
 
 function listSlotFiles(envDir: string): string[] {

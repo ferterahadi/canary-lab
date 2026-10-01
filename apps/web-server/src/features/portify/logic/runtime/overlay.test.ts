@@ -6,7 +6,6 @@ import { runGit } from '../../../../shared/git-repo'
 import {
   OVERLAY_VERSION,
   overlayDir,
-  patchFileName,
   overlayExists,
   writeOverlay,
   readOverlay,
@@ -15,6 +14,8 @@ import {
   captureTouchedFiles,
   checkStaleness,
 } from './overlay'
+import { patchFileName } from '../../../../../../../shared/portify-overlay'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 const roots: string[] = []
 afterEach(() => {
@@ -28,14 +29,10 @@ function tmpDir(prefix: string): string {
   return root
 }
 
-async function tmpRepo(initialFile: { name: string; body: string }): Promise<string> {
+function tmpRepo(initialFile: { name: string; body: string }): string {
   const root = tmpDir('portify-overlay-git-')
   fs.writeFileSync(path.join(root, initialFile.name), initialFile.body)
-  await runGit(root, ['init', '-q'])
-  await runGit(root, ['config', 'user.email', 't@t'])
-  await runGit(root, ['config', 'user.name', 'test'])
-  await runGit(root, ['add', '-A'])
-  await runGit(root, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(root)
   return root
 }
 

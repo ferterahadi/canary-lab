@@ -1,5 +1,7 @@
 import { useCallback, useRef } from 'react'
-import { ApiError, getFlight, type FlightManifest } from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
+import { getFlight } from '@/shared/api/flights'
+import type { FlightManifest } from '@shared/flights/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
 const RECONCILE_MS = 30_000

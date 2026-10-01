@@ -5,8 +5,7 @@ import { listSpecFiles } from '../../../../shared/feature-loader'
 import { extractTestMetadataFromSource, extractTestPredicatesFromSource } from '../../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
 import { diffSpecPredicates } from '../../../../shared/verification-strength/differential'
-import type { SpecDiff } from '../../../../../../../shared/verification-strength/types'
-
+import type { SpecStrength, DirtySpec, PendingSpecEdit } from '../../../../../../../shared/run-manifest'
 // Test-file integrity detection. Canary Lab's promise is that a verdict stays
 // outside the agent's control; the threat is the heal agent silently editing a
 // *.spec.ts so a failing test goes green. Detection is content-hash based:
@@ -51,33 +50,9 @@ export interface DirtyBaseline {
   runStartSourceDir?: string
 }
 
-/** The verification-strength differential for one dirty spec: the assertion set
- *  before the edit against the assertion set now. An advisory hint, never a gate
- *  (D13) — `weaker` and `unclassifiable` are what a reader is told about. */
-export interface SpecStrength extends SpecDiff {
-  /** Where the before-side content came from: the run-start copy, or the
-   *  committed spec when no copy holds this file. */
-  baseline: 'run-start' | 'head'
-}
-
-export interface DirtySpec {
-  file: string
-  affectedTests: string[]
-  /** Absent when no baseline content is readable (a hash-only legacy record,
-   *  an untracked file with no run-start copy) — the file is still dirty. */
-  strength?: SpecStrength
-}
-
 export interface DirtyResult {
   status: 'clean' | 'dirty'
   dirtySpecs: DirtySpec[]
-}
-
-/** A live spec that differs from the copy a run executed — an edit the run has
- *  NOT run. Run-level and strict: HEAD and approvals play no part, since a
- *  committed edit is still one the verdict never saw. */
-export interface PendingSpecEdit extends DirtySpec {
-  change: 'modified' | 'added' | 'deleted'
 }
 
 export function hashContent(content: string): string {

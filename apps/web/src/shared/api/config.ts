@@ -313,16 +313,6 @@ export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
 // the settings UI exposes only auto/vscode/cursor.
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
-// Not a mirror: the model-cockpit vocabulary has ONE home in
-// shared/agent-models.ts, imported by this client and the server alike.
-export type {
-  AgentModelsConfig,
-  AgentStagePlans,
-  ModelAgentKind,
-  ModelStageKey,
-  StageModelChoice,
-} from '@shared/agent-models'
-
 export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice

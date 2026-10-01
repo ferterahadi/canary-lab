@@ -2,9 +2,10 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
-import { loadFeatures, listSpecFiles, suiteAvailability } from '../../../shared/feature-loader'
+import { findFeature, listSpecFiles, loadFeatures, suiteAvailability } from '../../../shared/feature-loader'
 import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
-import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
+import { extractTestsFromSource } from '../../../shared/ast-extractor'
+import type { ExtractedTest } from '../../../../../../shared/extracted-test'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
@@ -23,8 +24,7 @@ import type { FeaturesRouteDeps } from './features-route-deps'
 import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-
-export type { FeaturesRouteDeps } from './features-route-deps'
+import { notFound } from '../../../shared/http-error'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
   const statusCode = (error as { statusCode?: number }).statusCode ?? 500
@@ -62,11 +62,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   // Approve the current spec content as intended (Canary-local). Records the
   // current hashes as the accepted baseline so the cue clears without a commit.
   app.post<{ Params: { name: string } }>('/api/features/:name/approve-dirty', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) {
       reply.code(503)
       return { error: 'test-file integrity tracking is not available' }
@@ -76,8 +73,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/test-review-plan', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     try {
       const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
@@ -95,8 +92,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/accept-test-review', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     const revision = req.body?.expectedRevision
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
@@ -122,8 +119,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/restore-test-review', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     const revision = req.body?.expectedRevision
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
@@ -153,11 +150,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   // then recomputes; HEAD now matches the working tree so the cue clears. An
   // external commit (user's own terminal) clears the same way via the .git watch.
   app.post<{ Params: { name: string } }>('/api/features/:name/commit-dirty', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) {
       reply.code(503)
       return { error: 'test-file integrity tracking is not available' }
@@ -198,10 +192,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature || !feature.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature || !feature.featureDir) return notFound(reply, 'feature')
       const rel = req.query.file
       if (!rel) {
         reply.code(400)
@@ -238,17 +229,13 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     const config = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
     if (config) {
       const content = fs.readFileSync(config.path, 'utf-8')
       return { path: config.path, content, format: config.format }
     }
-    reply.code(404)
-    return { error: 'config file not found' }
+    return notFound(reply, 'config file')
   })
 
   app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {

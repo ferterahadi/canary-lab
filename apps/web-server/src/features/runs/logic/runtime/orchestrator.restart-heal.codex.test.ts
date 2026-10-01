@@ -4,7 +4,8 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import * as sessionLog from '../../../agent-sessions/logic/agent-session-log'
+import * as sessionLogAgentSessionRender from '../../../agent-sessions/logic/agent-session-render'
+import * as sessionLogAgentSessionPaths from '../../../agent-sessions/logic/agent-session-paths'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
@@ -147,7 +148,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
       logPath: '/tmp/claude-session.jsonl',
     }))
     fs.writeFileSync(paths.agentSessionIdPath, 'd5f3e235-2470-4a1c-bb31-2030880a1670')
-    const renderSpy = vi.spyOn(sessionLog, 'renderAgentSessionContext')
+    const renderSpy = vi.spyOn(sessionLogAgentSessionRender, 'renderAgentSessionContext')
       .mockReturnValue('Previous claude session d5f3...\nASSISTANT: use FAKE_CNS_v1_BASE_URL')
 
     try {
@@ -213,7 +214,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
         },
       },
     }))
-    const locateSpy = vi.spyOn(sessionLog, 'locateLatestSessionLogForAgent').mockReturnValue({
+    const locateSpy = vi.spyOn(sessionLogAgentSessionPaths, 'locateLatestSessionLogForAgent').mockReturnValue({
       agent: 'codex',
       sessionId: PRIOR_SID,
       logPath: '/tmp/codex-session.jsonl',

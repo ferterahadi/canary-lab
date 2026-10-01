@@ -7,7 +7,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
-import { FLIGHT_STAGE_KEYS } from './features/flights/logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 import { writeManifest } from './features/runs/logic/runtime/manifest'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 

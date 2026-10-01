@@ -10,7 +10,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // override any more — the mock was targeting a path that no longer exists, which
 // vitest tolerates silently because nothing imports it.
 
-import { bridgeDraftEvents, createDraft, paths as draftPaths, readDraft, writeDraft, type DraftRecord } from '../logic/draft-store'
+import {
+  bridgeDraftEvents,
+  createDraft,
+  paths as draftPaths,
+  readDraft,
+  writeDraft,
+} from '../logic/draft-store'
+import type { DraftRecord } from '../../../../../../shared/draft-types'
 import { resetSharedTaskStores } from '../../../../../../shared/lib/file-backed-task-store'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './tests-draft'
 

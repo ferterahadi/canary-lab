@@ -1,14 +1,14 @@
 import type { ClientKind } from '../../../../../../shared/run-mode'
-import type { RunDetail } from '../../runs/logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
   patchEvaluationExportTask,
   writeEvaluationExportBuild,
-  type EvaluationExportTaskRecord,
 } from './evaluation-export-store'
+import type { EvaluationExportTaskRecord } from '../../../../../../shared/evaluation-export-types'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
-import type { EvaluationRewrite } from './test-review-export'
+import type { EvaluationRewrite } from './test-review/types'
 
 // The externally-authored evaluation export's task lifecycle — one home shared
 // by the MCP tool pair (start/submit_external_evaluation_export) and the

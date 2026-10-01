@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OnboardingSamples, ProjectConfig } from '@/shared/api/client'
+import type { OnboardingSamples, ProjectConfig } from '@/shared/api/config'
 import type { DemoLauncher } from './demo-launcher'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -19,7 +19,11 @@ const api = vi.hoisted(() => ({
   getProjectConfig: vi.fn(),
   putProjectConfig: vi.fn(),
 }))
-vi.mock('@/shared/api/client', () => api)
+vi.mock('@/shared/api/config', () => ({
+  getOnboardingSamples: api.getOnboardingSamples,
+  getProjectConfig: api.getProjectConfig,
+  putProjectConfig: api.putProjectConfig,
+}))
 
 const keys = { onboarding: 0, 'project-config': 0 } as Record<string, number>
 vi.mock('@/shared/state/invalidation', () => ({ useInvalidationKey: (topic: string) => keys[topic] ?? 0 }))

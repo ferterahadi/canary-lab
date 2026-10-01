@@ -1,4 +1,5 @@
-import { FieldRow, HintIcon, NumberInput, Segmented } from '@/shared/ui/atoms'
+import { FieldRow, NumberInput, Segmented } from '@/shared/ui/FormFields'
+import { HintIcon } from '@/shared/ui/Icons'
 import { TemplatedInput } from './TemplatedInput'
 import { Disclosure } from './RepoCard'
 import type { Health, Probe } from './repo-slice'

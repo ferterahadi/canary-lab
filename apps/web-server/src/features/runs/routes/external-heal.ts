@@ -7,7 +7,7 @@ import {
   type ClaimInput,
   type ExternalHealAuditEntry,
 } from '../logic/heal/external-heal-broker'
-import type { ExternalHealSessionStatus } from '../logic/runtime/manifest'
+import type { ExternalHealSessionStatus } from '../../../../../../shared/run-manifest'
 import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
 import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../logic/heal/external-heal-surface'
 import { runDirFor } from '../logic/runtime/run-paths'
@@ -19,6 +19,7 @@ import {
   deriveRunActionAvailability,
   type HealSignalKind,
 } from '../../../../../../shared/run-state'
+import { notFound } from '../../../shared/http-error'
 
 const VALID_CLIENT_KINDS: ClientKind[] = [
   'claude',
@@ -93,10 +94,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/heal-agent/claim',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       const sessionId = req.body?.sessionId
       const clientKind = req.body?.clientKind
       if (typeof sessionId !== 'string' || !sessionId) {
@@ -181,10 +179,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/heal-context',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       return buildExternalHealContext({ detail, logsDir: deps.store.logsDir })
     },
   )
@@ -195,10 +190,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/run-snapshot',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       return buildExternalRunSnapshot({ detail, logsDir: deps.store.logsDir })
     },
   )
@@ -211,10 +203,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/signal',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       if (!isActiveRunStatus(detail.manifest.status)) {
         reply.code(409)
         return { reason: 'run-not-active' }
@@ -281,10 +270,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/heal-agent/handoff',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       const to = req.body?.to
       if (!isHandoffTarget(to)) {
         reply.code(400)
@@ -343,10 +329,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/audit',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       const runDir = runDirFor(deps.store.logsDir, req.params.runId)
       const auditPath = path.join(runDir, 'external-commands.jsonl')
       if (!fs.existsSync(auditPath)) return { entries: [] }
@@ -367,10 +350,7 @@ export async function externalHealRoutes(
     '/api/runs/:runId/actions',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
-      if (!detail) {
-        reply.code(404)
-        return { error: 'run not found' }
-      }
+      if (!detail) return notFound(reply, 'run')
       const availability = deriveRunActionAvailability(detail.manifest.status, null)
       const isActive = isActiveRunStatus(detail.manifest.status)
       const isTerminal = isTerminalRunStatus(detail.manifest.status)

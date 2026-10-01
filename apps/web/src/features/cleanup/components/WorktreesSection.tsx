@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { CleanupWorktree } from '@/shared/api/types'
+import * as cleanupApi from '@/shared/api/cleanup'
+import type { CleanupWorktree } from '@/shared/api/types-cleanup'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
-import { ConfirmModal } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupEmptyState, QuickSelectMenu, SpinnerGlyph, WarnGlyph, WorktreeGlyph } from './CleanupTableParts'
 import { SEVEN_DAYS_MS, WORKTREE_OWNER_LABEL } from './cleanup-rows'
 
@@ -30,7 +30,7 @@ export function WorktreesSection({ now }: { now: number }) {
     setLoading(true)
     setErr(null)
     try {
-      const wts = (await api.cleanupWorktrees()).worktrees
+      const wts = (await cleanupApi.cleanupWorktrees()).worktrees
       setWorktrees(wts)
       // Drop selections for worktrees that no longer exist (e.g. removed
       // elsewhere or pruned), so the bulk count never references stale paths.
@@ -46,7 +46,7 @@ export function WorktreesSection({ now }: { now: number }) {
   const open = async (wt: CleanupWorktree): Promise<void> => {
     setActionError(null)
     try {
-      const r = await api.openWorktreePath(wt.path)
+      const r = await cleanupApi.openWorktreePath(wt.path)
       // The path stays selectable in the error strip, which is what the
       // `window.prompt` this replaced was really being used for.
       if (!r.opened) setActionError(`Could not launch your editor. The worktree is at ${wt.path}`)
@@ -59,7 +59,7 @@ export function WorktreesSection({ now }: { now: number }) {
     setActionError(null)
     setBusyPath(wt.path)
     try {
-      await api.removeWorktree(wt.path)
+      await cleanupApi.removeWorktree(wt.path)
       await load()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
@@ -103,7 +103,7 @@ export function WorktreesSection({ now }: { now: number }) {
     const n = selectedTargets.length
     setConfirmOpen(false)
     setBulkBusy(true)
-    const results = await Promise.allSettled(selectedTargets.map((w) => api.removeWorktree(w.path)))
+    const results = await Promise.allSettled(selectedTargets.map((w) => cleanupApi.removeWorktree(w.path)))
     const failures = results.filter((r) => r.status === 'rejected').length
     setSelected(new Set())
     setBulkBusy(false)

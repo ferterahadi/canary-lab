@@ -1,37 +1,37 @@
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from '../logic/coverage/freshness-monitor'
-import {
-  FeatureNotFoundError,
-  clearPrdSummary,
-  computeFeatureCoverage,
-  featureExists,
-  listFeatureDocs,
-  regeneratePrdSummary,
-} from '../logic/coverage/service'
+import { FeatureNotFoundError, computeFeatureCoverage, featureExists } from '../logic/coverage/service'
+import { clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from '../logic/coverage/feature-docs'
 import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
 import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
-import type { CoverageJobKind, CoverageJobModels } from '../logic/coverage/jobs/types'
+import type { CoverageJobKind, CoverageJobModels } from '../../../../../../shared/coverage/types'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { pickAvailableHealAgent } from '../../runs/logic/runtime/heal-agent-spawn'
-import { normalizeStagePlans, perAgentStageChoices, resolveStageChoice } from '../../agent-sessions/logic/agent-models'
-import { readPrdSummary } from '../logic/coverage/prd-summary'
+import {
+  normalizeStagePlans,
+  perAgentStageChoices,
+  resolveStageChoice,
+} from '../../../../../../shared/agent-models'
+import { readPrdSummary } from '../logic/coverage/prd-summary-render'
 import { deriveCoverageStateView } from '../logic/coverage/state'
 import { readCoverageRunState } from '../logic/coverage/run-state'
 import { readDocsCollection } from '../logic/coverage/docs-collection'
-import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
+import { type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
+import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/logic/feature-docs-authoring'
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
 import { loadFeatures } from '../../../shared/feature-loader'
+import { type AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import {
   findClaudeLogBySessionId,
-  buildAgentSessionResponse,
   locateCodexSessionLog,
-  type AgentSessionRef,
-} from '../../agent-sessions/logic/agent-session-log'
+} from '../../agent-sessions/logic/agent-session-paths'
+import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { notFound } from '../../../shared/http-error'
 
 export interface CoverageRouteDeps {
   coverageMonitor?: CoverageFreshnessMonitor
@@ -351,10 +351,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
 
   app.get<{ Params: { jobId: string } }>('/api/coverage/jobs/:jobId', async (req, reply) => {
     const manifest = jobStore.get(req.params.jobId)
-    if (!manifest) {
-      reply.code(404)
-      return { error: 'job not found' }
-    }
+    if (!manifest) return notFound(reply, 'job')
     return manifest
   })
 
@@ -364,10 +361,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   // deterministic-fallback run, or the log not on disk yet).
   app.get<{ Params: { jobId: string } }>('/api/coverage/jobs/:jobId/agent-session', async (req, reply) => {
     const manifest = jobStore.get(req.params.jobId)
-    if (!manifest) {
-      reply.code(404)
-      return { error: 'job not found' }
-    }
+    if (!manifest) return notFound(reply, 'job')
     const ref = manifest.sessionRef
     if (!ref) return null
     let located: AgentSessionRef | null = null

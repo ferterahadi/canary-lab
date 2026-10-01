@@ -1,14 +1,9 @@
-import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
-import type {
-  CoverageLedger,
-  RunIndexEntry,
-  RunLifecycleEvent,
-  ServiceManifestEntry,
-  TestStrength,
-} from '@/shared/api/types'
+import type { CoverageLedger, TestStrength } from '@shared/coverage/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { ServiceManifestEntry } from '@shared/run-manifest'
 import { durationBetween } from '@/shared/lib/format'
-import { isTerminalRunStatus } from '@shared/run-state'
-import { stageHasEvidence } from '@shared/flights/types'
+import { isTerminalRunStatus, type RunLifecycleEvent } from '@shared/run-state'
+import { stageHasEvidence, type FlightStage, type FlightStageStatus } from '@shared/flights/types'
 
 // ─── Stage band measurements ────────────────────────────────────────────────
 // The "At a glance" band reports COUNTS, so each one is derived here, once, and

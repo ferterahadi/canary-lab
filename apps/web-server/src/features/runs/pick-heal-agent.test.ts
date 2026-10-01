@@ -6,7 +6,7 @@ import type { HealAgentChoice } from './logic/runtime/launcher/project-config'
 // module delegates. What it decides for itself is the PRECEDENCE, so the fake
 // records what it was asked for and the assertions are about that.
 const picked = vi.hoisted(() => ({ calls: [] as unknown[], answer: 'claude' as unknown }))
-vi.mock('./logic/runtime/auto-heal', () => ({
+vi.mock('./logic/runtime/heal-agent-spawn', () => ({
   pickAvailableHealAgent: (...args: unknown[]) => {
     picked.calls.push(args[0])
     return picked.answer

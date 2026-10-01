@@ -5,8 +5,6 @@ import { porcelainPath } from '../../../shared/git-status-path'
 import { normalizeFixCaptureNames } from './fix-capture-names'
 import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/run-state'
 
-export { porcelainPath } from '../../../shared/git-status-path'
-
 // Apply a run's captured heal-fix patches (see RunFixCapture) INTO the real
 // product repos on demand — the one place a run's edits reach the user's source
 // tree, and only when they ask. Each repo's patch is applied 3-way so it lands

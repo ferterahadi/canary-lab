@@ -3,8 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import { prepareWorkflow as prepare } from './prepare-workflow'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
@@ -18,10 +18,6 @@ import { RepoGroup, SeededFrom, buildSeededNote, portifyConcurrencyCap, seededSl
 import { collectPortSlots } from '../../../runs/logic/runtime/service-specs'
 import { hasDeclaredPortInjection } from './verify'
 import { renderPrompt } from '../../../../shared/prompts'
-
-export { canonicalConfigDiff, captureOverlayRepos, declaredPortsForRepo, readFileOrNull, realpathOrSelf, restoreConfig } from './portify-overlay-capture'
-export { buildSeededNote, buildSiblingOverlayIndex, describeSeededSlots, pickBorrowable, portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
-export type { GroupMember, RepoGroup, SeededFrom } from './portify-worktree-borrow'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,

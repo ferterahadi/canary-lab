@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { RunDetail } from '../run-store'
-import type { RunManifest } from '../runtime/manifest'
-import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
+import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 import { buildExternalRunSnapshot, buildSpecEditsWarning } from './external-heal-surface'
 
 // The specEdits warning is the agent-facing reading of the D9 boundary: the

@@ -17,7 +17,13 @@ import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, type RunPaths } from './run-paths'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
-import { HealSignalGate, type RunBootFailure, type RunServiceFailure } from '../../../../../../../shared/run-state'
+import {
+  HealSignalGate,
+  type RunBootFailure,
+  type RunServiceFailure,
+  type RunLifecyclePhase,
+  type RunLifecycleAbortReason,
+} from '../../../../../../../shared/run-state'
 import { AgentSessionRefStore } from './agent-session-refs'
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import { isHealthy } from '../../../../shared/launcher-startup'
@@ -31,15 +37,13 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { WorktreeHandle } from './repo-worktree'
 import type {
   RunManifest,
-  RunLifecyclePhase,
-  RunLifecycleAbortReason,
   RepoBranchSnapshot,
   StoppedEarlyReason,
   ExternalHealSession,
-} from './manifest'
+} from '../../../../../../../shared/run-manifest'
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
-import type { RunModelPlan } from './run-model-plan'
+import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 

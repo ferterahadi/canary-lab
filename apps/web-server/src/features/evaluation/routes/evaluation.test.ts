@@ -10,7 +10,8 @@ import Fastify from 'fastify'
 
 import { evaluationRoutes } from './evaluation'
 
-import { createRegistry, RunStore } from '../../runs/logic/run-store'
+import { RunStore } from '../../runs/logic/run-store'
+import { createRegistry } from '../../runs/logic/run-registry'
 
 import { createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
 

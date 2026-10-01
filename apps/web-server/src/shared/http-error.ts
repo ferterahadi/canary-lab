@@ -1,3 +1,5 @@
+import type { FastifyReply } from 'fastify'
+
 // The repo's HTTP-facing failure shape, in one place.
 //
 // A route-layer failure is `Object.assign(new Error(msg), { statusCode: N })` —
@@ -22,4 +24,14 @@ export type HttpFailure = Error & { statusCode: number }
  */
 export function httpFailure(err: unknown, statusCode: number): HttpFailure {
   return Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode })
+}
+
+/**
+ * Answer 404 with the route layer's `{ error: '<thing> not found' }` body. It
+ * returns the payload rather than sending it, so a handler stays one line:
+ * `if (!detail) return notFound(reply, 'run')`.
+ */
+export function notFound(reply: FastifyReply, thing: string): { error: string } {
+  reply.code(404)
+  return { error: `${thing} not found` }
 }

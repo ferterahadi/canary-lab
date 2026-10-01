@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { CoverageLedger, ProposedMapping, Requirement } from '../../../../../../../shared/coverage/types'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
-import type { PerAgentStageChoices } from '../../../agent-sessions/logic/agent-models'
+import type { PerAgentStageChoices } from '../../../../../../../shared/agent-models'
 import { hasNegativeAssertion } from './strength'
 import {
   buildAnnotatePrompt,
@@ -14,7 +14,7 @@ import { writeCoversTag } from './tag-writer'
 import { changedRequirementIds, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
 import { readCoverageRunState, writeCoverageRunState } from './run-state'
 import { mappingInferenceSnapshot, rememberMappingInference, unexaminedMappingTests, type MappingInferenceSnapshot, type MappingTestInput } from './mapping-cache'
-import { readPrdSummary } from './prd-summary'
+import { readPrdSummary } from './prd-summary-render'
 import { clearPrdSummary } from './feature-docs'
 import { FeatureNotFoundError, collectTests, computeFeatureCoverage, resolveFeatureDir } from './service'
 

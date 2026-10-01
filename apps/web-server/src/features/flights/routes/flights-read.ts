@@ -6,9 +6,14 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightEntryOptions, type FlightStageEntryOption } from '../logic/types'
+import {
+  FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
+  type FlightEntryOptions,
+  type FlightStageEntryOption,
+} from '../../../../../../shared/flights/types'
 import { flightStageRemedy } from '../logic/stage-remedy'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { buildStageEntryValidator } from './flight-route-support'
 import { withWorkspaceEvidence, workspaceStageEvidence } from '../logic/workspace-evidence'
 import { recommendFlightContinuation } from '../../../../../../shared/flights/continuation'
@@ -47,7 +52,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
       // validation elsewhere must not take the entry menu down with it.
       let config
       try {
-        config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+        config = findFeature(deps.featuresDir, feature)
       } catch {
         config = undefined
       }

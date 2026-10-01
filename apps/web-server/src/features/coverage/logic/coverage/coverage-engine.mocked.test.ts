@@ -14,7 +14,8 @@ vi.mock('./annotate-engine', async (importOriginal) => {
   }
 })
 
-import { runCoverageEngine, regeneratePrdSummary as regeneratePrdSummaryReal } from './service'
+import { runCoverageEngine } from './coverage-engine'
+import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs'
 import { proposeCoverageMappings } from './annotate-engine'
 import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
 

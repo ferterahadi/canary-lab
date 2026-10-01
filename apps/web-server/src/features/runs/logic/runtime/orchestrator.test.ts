@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildServiceSpecs, buildQueuedServiceEntries, collectPortSlots } from './orchestrator'
+import { buildServiceSpecs, buildQueuedServiceEntries, collectPortSlots } from './service-specs'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { ConfirmModal } from '@/shared/ui/atoms'
-import * as api from '@/shared/api/client'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import * as flightsApi from '@/shared/api/flights'
+import * as configApi from '@/shared/api/config'
 
 /** R76: the one type-name destructive confirm, opened from Advanced setup and
  *  the flight page's ⋯ menu. A scaffolded suite removes its folder and history;
@@ -37,8 +38,8 @@ export function DeleteSuiteConfirm({
     setDeleting(true)
     setError(null)
     try {
-      if (flightId) await api.deleteFlight(flightId)
-      else await api.deleteFeature(feature, confirmName)
+      if (flightId) await flightsApi.deleteFlight(flightId)
+      else await configApi.deleteFeature(feature, confirmName)
       setDeleting(false)
       setConfirmName('')
       onDeleted()

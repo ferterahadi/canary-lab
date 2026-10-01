@@ -1,4 +1,4 @@
-import type { RunManifest } from '@/shared/api/types'
+import type { RunManifest } from '@shared/run-manifest'
 
 /** Map only the selected run's declared suite roots. A basename/suffix match
  *  would let another suite's same-named test borrow this run's verdict. */

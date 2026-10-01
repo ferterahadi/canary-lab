@@ -1,17 +1,13 @@
 import { describe, it, expect } from 'vitest'
+import { HEAL_MODELS, agentModelArgs, effortArgs, healModelsFromEnv, modelArgs } from './agent-models'
 import {
   AGENT_DEFAULT_CHOICE,
   EFFORT_LEVELS,
-  HEAL_MODELS,
   KNOWN_MODELS,
   MODEL_STAGE_KEYS,
   RECOMMENDED_BY_STAGE,
   STAGE_RECOMMENDATION_REASON,
   STAGE_TIERS,
-  agentModelArgs,
-  effortArgs,
-  healModelsFromEnv,
-  modelArgs,
   normalizeAgentModels,
   normalizePerAgentChoices,
   normalizeStageChoice,
@@ -20,7 +16,7 @@ import {
   pinnedPlanSummary,
   recommendedChoice,
   resolveStageChoice,
-} from './agent-models'
+} from '../../../../../../shared/agent-models'
 
 describe('modelArgs', () => {
   it('returns ["--model", id] when a model string is provided', () => {

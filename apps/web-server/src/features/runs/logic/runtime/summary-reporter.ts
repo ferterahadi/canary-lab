@@ -8,18 +8,16 @@ import type {
   TestResult,
   TestStep,
 } from '@playwright/test/reporter'
-import { classifyJournalOutcome, enrichSummaryWithLogs, stripAnsi, updateLatestPendingJournalOutcome, writeHealIndex } from './log-enrichment'
+import { enrichSummaryWithLogs, stripAnsi } from './log-enrichment'
+import { classifyJournalOutcome, updateLatestPendingJournalOutcome } from './heal-journal'
+import { writeHealIndex } from './heal-index'
 import { getSummaryPath } from './paths'
 import { extractTraceSummary } from './trace-enrichment'
 import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
 import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
 import type { PlaybackEvent, RunningStep, RunningTest, TestEntry } from './summary-types'
 import { declaredEnvironments, environmentExclusions, type EnvironmentExclusion } from '../../../../../../../shared/run-applicability'
-
-export { slugify } from './summary-types'
-export type { RunningStep, TestEntry } from './summary-types'
-
-export { testIdFor } from './summary-known-tests'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 class SummaryReporter implements Reporter {
   private readonly environment = process.env.CANARY_LAB_ENV
@@ -389,11 +387,7 @@ class SummaryReporter implements Reporter {
         })),
     }
 
-    const finalPath = getSummaryPath()
-    fs.mkdirSync(path.dirname(finalPath), { recursive: true })
-    const tmpPath = `${finalPath}.tmp`
-    fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
-    fs.renameSync(tmpPath, finalPath)
+    atomicWriteJson(getSummaryPath(), summary)
   }
 
   private runningSummaryFields(): { running?: RunningTest; runningTests?: RunningTest[] } {

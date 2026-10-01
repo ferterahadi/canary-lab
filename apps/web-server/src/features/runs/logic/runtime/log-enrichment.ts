@@ -3,10 +3,7 @@ import path from 'path'
 import { MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
 import { compressLogByTemplate } from './log-template'
 import { writeHealIndex } from './heal-index'
-
-export { writeHealIndex } from './heal-index'
-export { MAX_JOURNAL_DIFF_BYTES, appendJournalIteration, classifyJournalOutcome, countConsecutiveSameFailures, nextIterationNumber, parseJournalMarkdown, readJournalTail, stuckSlugsFromJournal, truncateDiffForJournal, updateLatestPendingJournalOutcome, writeFullDiffPatch } from './heal-journal'
-export type { JournalAppendInput, JournalOutcome, JournalOutcomeUpdateInput, SummaryForJournalOutcome } from './heal-journal'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -379,9 +376,7 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
     },
   )
 
-  const tmpPath = `${summaryPath}.tmp`
-  fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
-  fs.renameSync(tmpPath, summaryPath)
+  atomicWriteJson(summaryPath, summary)
   return {
     manifest,
     summary,

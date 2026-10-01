@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
-import { FLIGHT_STAGE_KEYS } from './features/flights/logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 
 let root: string
 let repo: string

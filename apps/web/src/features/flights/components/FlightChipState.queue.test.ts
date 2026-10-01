@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { featureChipState } from './FlightChipState'
-import { runWaitingState } from '@/features/runs'
+import { runWaitingState } from '@/features/runs/utils/run-waiting-state'
 
 it('keeps queued flight chips neutral and non-pulsing', () => {
   const waiting = runWaitingState({ runId: 'q', feature: 'merchant', status: 'queued', startedAt: '' })

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { getEnvSetsDir, loadConfig, selectedEnvsetSources, type EnvSetsConfig } from './envset-runtime'
-import { parseDotenv } from './dotenv-edit'
+import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 
 export function envsetProcessEnv(
   featureDir: string,

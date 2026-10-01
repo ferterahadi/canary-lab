@@ -6,7 +6,7 @@ import {
   DEFAULT_CANARY_LAB_MCP_PROFILE,
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
-} from '../web-server/src/mcp/tools'
+} from '../web-server/src/mcp/tool-profiles'
 import { isClientKind, type ClientKind } from '../../shared/run-mode'
 import { type CanaryLabWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
 import {
@@ -18,11 +18,6 @@ import { BridgeTransport, bridge, requiredToolsForProfile } from './mcp-bridge'
 import { inferMcpClientKind } from './mcp-client-kind'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../shared/mcp-protocol'
 import { ensureMcpServerReachable, healthUrlFor, resolveUiProjectRootForMcpAutostart, urlWithContext } from './mcp-reachability'
-
-export { REINIT_ID, bridge } from './mcp-bridge'
-export type { BridgeTransport } from './mcp-bridge'
-export { inferClientKindFromProcessLines, inferMcpClientKind } from './mcp-client-kind'
-export { ensureMcpServerReachable, resolveUiProjectRootForMcpAutostart } from './mcp-reachability'
 
 // Resolve the bridge's target /mcp URL with no explicit --url. A *live* server
 // (recorded in ~/.canary-lab/active-servers.json by `canary-lab ui`) always

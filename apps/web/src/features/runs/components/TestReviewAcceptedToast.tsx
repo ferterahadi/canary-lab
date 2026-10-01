@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { RunDetail } from '@/shared/api/types'
-import { getFeatureTests } from '@/shared/api/client'
+import type { RunDetail } from '@shared/run-detail'
+import { getFeatureTests } from '@/shared/api/config'
 import { ToastHost } from '@/shared/ui/Toasts'
 
 export function TestReviewAcceptedToast({ feature, detail, onDismiss, onRun }: {

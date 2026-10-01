@@ -5,11 +5,9 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import {
-  buildAgentSessionResponse,
-  resolveWorkflowAgentRef,
-} from '../../agent-sessions/logic/agent-session-log'
-import { abortFlight, drainQueuedFlights } from '../logic/conductor'
+import { resolveWorkflowAgentRef } from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
+import { abortFlight, drainQueuedFlights } from '../logic/flight-queue'
 import { deriveFeatureSlug, isTerminalFlightStatus, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
 import { cancelPlanFeatures, startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'

@@ -2,12 +2,16 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { OnboardingSamples } from '@/shared/api/client'
+import type { OnboardingSamples } from '@/shared/api/config'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useDemoLauncher } from './demo-launcher'
 
 const api = vi.hoisted(() => ({ getOnboardingSamples: vi.fn(), getProjectConfig: vi.fn() }))
-vi.mock('@/shared/api/client', async (original) => ({ ...await original<typeof import('@/shared/api/client')>(), ...api }))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getOnboardingSamples: api.getOnboardingSamples,
+  getProjectConfig: api.getProjectConfig,
+}))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement

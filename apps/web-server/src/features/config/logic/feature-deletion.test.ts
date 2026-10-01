@@ -6,7 +6,7 @@ import { deleteSuite } from './feature-deletion'
 import { deleteFeature } from './feature-authoring'
 import { FlightRunStore } from '../../flights/logic/store'
 import { removeFlightRecordsForFeature } from '../../flights/logic/flight-queue'
-import type { FlightManifest } from '../../flights/logic/types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 
 let dir: string
 let featuresDir: string

@@ -1,19 +1,30 @@
 import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
-import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type {
+  ExternalWorkCheckpointData,
+  FlightManifest,
+  FlightStage,
+  FlightStageKey,
+} from '@shared/flights/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { coverageSessionSources, stageCoverageJobs } from '../lib/coverage-activity'
-import * as api from '@/shared/api/client'
+import * as coverageApi from '@/shared/api/coverage'
 import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
-import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
+import { FeatureSetupPanel } from './FeatureSetupPanel'
+import { FlightDocsPanel } from './FlightDocsPanel'
+import { RepoScanPanel } from './RepoScanPanel'
+import { RequirementsFork } from './RequirementsFork'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageRowKey, stageStateLine, type StageRailRow } from './stage-meta'
-import { useEvaluationExports } from '@/features/evaluation'
-import { PortifyWorkflowControls } from '@/features/portify'
+import { StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress } from './stage-meta'
+import { evaluationTaskId, FactsGrid, stageFacts } from './StageFacts'
+import { stageRowKey, type StageRailRow } from './StageRail'
+import { stageStateLine } from './StageStatusLines'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { PortifyWorkflowControls } from '@/features/portify/components/PortifyWorkflowControls'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
@@ -38,8 +49,6 @@ import {
 } from './StageEvidencePanels'
 import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
-
-export { AgentBlock, SpecsPassTimeline, StageActivityRail, specsPhaseSub, truncate } from './StageActivity'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -286,7 +295,7 @@ export function StageDetail({
   const { value: coverageJob } = useLiveResource(
     'coverage',
     coverageOwnsCurrent ? `${latestCoverageJob.jobId}:${latestCoverageJob.status}` : null,
-    () => api.getCoverageJob(latestCoverageJob!.jobId),
+    () => coverageApi.getCoverageJob(latestCoverageJob!.jobId),
     { cache: 'flight-coverage-job', pollWhile: (job) => job === null || job.status === 'running' },
   )
   const stage = coverageOwnsCurrent

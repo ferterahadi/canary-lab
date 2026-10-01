@@ -2,14 +2,16 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import * as api from '../api/client'
+import * as featuresApi from '../api/features'
 import { ApiError } from '../api/internal'
 import type { TestSourceComparison } from '@shared/test-review'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useTestSourceComparison } from './use-test-source-comparison'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-vi.mock('../api/client', () => ({ getTestSourceComparison: vi.fn() }))
+vi.mock('../api/features', () => ({
+  getTestSourceComparison: vi.fn(),
+}))
 let root: Root
 let live: ReturnType<typeof useTestSourceComparison>
 let invalidate: () => void
@@ -27,12 +29,12 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   root = createRoot(document.createElement('div'))
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue(ready())
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue(ready())
 })
 afterEach(() => { act(() => root.unmount()); vi.useRealTimers() })
 it('recovers a hung initial read and rejects it after a newer comparison', async () => {
   let late!: (value: TestSourceComparison) => void
-  vi.mocked(api.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
   await render()
   expect(live.comparison.state).toBe('loading')
   await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
@@ -42,7 +44,7 @@ it('recovers a hung initial read and rejects it after a newer comparison', async
 })
 it('retains evidence on failure but withdraws action trust, then recovers without events', async () => {
   await render()
-  vi.mocked(api.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
   await act(async () => invalidate())
   expect(live.comparison.files).toEqual(['new.spec.ts'])
   expect(live.error).toBeTruthy()
@@ -53,7 +55,7 @@ it('retains evidence on failure but withdraws action trust, then recovers withou
 })
 it.each([404, 409])('clears authoritative missing data (%s) and discovers its restoration', async (status) => {
   await render()
-  vi.mocked(api.getTestSourceComparison).mockRejectedValueOnce(new ApiError(status, null, status === 404 ? 'Suite not found' : 'Snapshot missing'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValueOnce(new ApiError(status, null, status === 404 ? 'Suite not found' : 'Snapshot missing'))
   await act(async () => invalidate())
   expect(live.comparison.files).toEqual([])
   expect(live.confirmed).toBe(false)
@@ -62,10 +64,10 @@ it.each([404, 409])('clears authoritative missing data (%s) and discovers its re
   expect(live.comparison.files).toEqual(['new.spec.ts'])
 })
 it('recovers failed initial reads and keeps reconciling empty and incomplete results', async () => {
-  vi.mocked(api.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
   await render()
   expect(live.comparison.state).toBe('error')
-  vi.mocked(api.getTestSourceComparison).mockResolvedValueOnce({ state: 'unavailable', files: [], differences: [], reasons: ['incomplete'] })
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValueOnce({ state: 'unavailable', files: [], differences: [], reasons: ['incomplete'] })
   await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
   expect(live.comparison.state).toBe('unavailable')
   expect(live.confirmed).toBe(false)
@@ -75,15 +77,15 @@ it('recovers failed initial reads and keeps reconciling empty and incomplete res
 it('rechecks on reconnect invalidation and rejects results across identity replacement or teardown', async () => {
   let late!: (value: TestSourceComparison) => void
   await render()
-  vi.mocked(api.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
   await act(async () => invalidate())
   await render('replacement', '/other-snapshot')
   await act(async () => late(ready('obsolete.spec.ts')))
   expect(live.comparison.files).toEqual(['new.spec.ts'])
-  vi.mocked(api.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
   await act(async () => invalidate())
   await act(async () => root.render(null))
-  const calls = vi.mocked(api.getTestSourceComparison).mock.calls.length
+  const calls = vi.mocked(featuresApi.getTestSourceComparison).mock.calls.length
   await act(async () => { late(ready('late.spec.ts')); await vi.advanceTimersByTimeAsync(30_000) })
-  expect(api.getTestSourceComparison).toHaveBeenCalledTimes(calls)
+  expect(featuresApi.getTestSourceComparison).toHaveBeenCalledTimes(calls)
 })

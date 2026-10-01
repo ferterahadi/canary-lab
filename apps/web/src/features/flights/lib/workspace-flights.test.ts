@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FlightIndexEntry } from '@/shared/api/client'
+import type { FlightIndexEntry } from '@shared/flights/types'
 import { coverageGeneratingFlight } from './workspace-flights'
 
 const flight = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({

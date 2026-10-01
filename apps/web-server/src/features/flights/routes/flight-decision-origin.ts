@@ -19,7 +19,7 @@
 // user's own dirty repos; takeover request/force is the explicit ownership
 // transfer protocol; DELETE is only reachable once the flight is settled.
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import type { FlightManifest } from '../logic/types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 
 /** Set by the MCP REST adapters and by nothing else — a
  *  browser cannot forge it into a same-origin fetch worth guarding against,

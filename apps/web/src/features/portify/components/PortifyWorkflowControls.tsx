@@ -1,9 +1,9 @@
 import { isExecutingPortifyStatus } from '@shared/portify-index'
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { PortifyManifest } from '@/shared/api/client'
+import * as portifyApi from '@/shared/api/portify'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { useInvalidation } from '@/shared/state/invalidation'
-import { ConfirmModal } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { usePortify } from '../state/PortifyContext'
 import { FeedbackModal, ReviewScreen } from './PortifyScreens'
 
@@ -37,7 +37,7 @@ export function PortifyWorkflowControls({
     setBusy(true)
     setError(null)
     try {
-      await api.savePortify(manifest.workflowId)
+      await portifyApi.savePortify(manifest.workflowId)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -50,7 +50,7 @@ export function PortifyWorkflowControls({
     setBusy(true)
     setError(null)
     try {
-      await api.revisePortify(manifest.workflowId, feedback)
+      await portifyApi.revisePortify(manifest.workflowId, feedback)
       setFeedbackOpen(false)
       await refresh()
     } catch (err) {
@@ -64,7 +64,7 @@ export function PortifyWorkflowControls({
     setBusy(true)
     setError(null)
     try {
-      await api.cancelPortify(manifest.workflowId)
+      await portifyApi.cancelPortify(manifest.workflowId)
       setConfirmCancel(false)
       await refresh()
     } catch (err) {

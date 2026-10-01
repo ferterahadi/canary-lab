@@ -9,10 +9,23 @@ import type { LifecycleRecordOptions } from './run-orchestrator-types'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createRunLifecycleEvent, isTerminalRunStatus, type HealSignalKind } from '../../../../../../../shared/run-state'
+import {
+  createRunLifecycleEvent,
+  isTerminalRunStatus,
+  type HealSignalKind,
+  type RunLifecyclePhase,
+} from '../../../../../../../shared/run-state'
 import { resolvePath } from '../../../../shared/launcher-startup'
-import { readManifest, type RunLifecyclePhase, type RunManifest, type ServiceManifestEntry, type StoppedEarlyReason } from './manifest'
-import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
+import { readManifest } from './manifest'
+import type {
+  RunManifest,
+  ServiceManifestEntry,
+  StoppedEarlyReason,
+} from '../../../../../../../shared/run-manifest'
+import {
+  appendJournalIteration as appendJournalIterationToFile,
+  type JournalAppendInput,
+} from './heal-journal'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { signalLabel, startingServicesDetail } from './run-verdict'
 

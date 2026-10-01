@@ -1,5 +1,10 @@
-import type { AgentStagePlans, EditorChoice, HealAgentChoice, ModelAgentKind } from '@/shared/api/client'
-import { MODEL_STAGE_KEYS, pinnedPlanEntries } from '@shared/agent-models'
+import type { EditorChoice, HealAgentChoice } from '@/shared/api/config'
+import {
+  MODEL_STAGE_KEYS,
+  pinnedPlanEntries,
+  type AgentStagePlans,
+  type ModelAgentKind,
+} from '@shared/agent-models'
 
 // `auto` and `manual` are intentionally omitted from the settings UI (the
 // server still accepts them for old config files), and `external` was retired

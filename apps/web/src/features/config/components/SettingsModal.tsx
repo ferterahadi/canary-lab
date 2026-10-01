@@ -3,10 +3,12 @@ import type { ReactNode } from 'react'
 import { useProjectConfig } from '@/shared/state/use-project-config'
 import { CHANGED_ELSEWHERE, useEditableDraft } from '@/shared/state/use-editable-draft'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
-import * as api from '@/shared/api/client'
-import type { ModelAgentKind, ProjectConfig } from '@/shared/api/client'
-import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
-import { HintIcon, Modal, Section, SlidersIcon } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import type { ProjectConfig } from '@/shared/api/config'
+import { EMPTY_AGENT_MODELS, type ModelAgentKind } from '@shared/agent-models'
+import { Section } from '@/shared/ui/atoms'
+import { HintIcon, SlidersIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CLASS, OPTION_ROW_COMPACT_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 import { FolderPicker } from './FolderPicker'
 import { GitHubSection } from './GitHubSection'
@@ -221,7 +223,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
     setSaving(true)
     setError(null)
     try {
-      const next = await api.putProjectConfig(patch)
+      const next = await configApi.putProjectConfig(patch)
       if (!resource.accept(next)) return
       if (editable.acceptSaved(next, draft)) onClose()
     } catch (e: unknown) {
@@ -241,7 +243,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
     setPortBusy(true)
     setPortError(null)
     try {
-      const res = await api.changeProjectPort(port, confirm)
+      const res = await configApi.changeProjectPort(port, confirm)
       if (!mounted()) return
       if (res.needsConfirm) {
         setPendingConfirm(res.activeRuns ?? 0)

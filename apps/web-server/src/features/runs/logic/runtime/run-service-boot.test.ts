@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { RunContext } from './run-context'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 
 const h = vi.hoisted(() => ({ recordLifecycle: vi.fn() }))
 vi.mock('./run-manifest-writer', async (importOriginal) => ({

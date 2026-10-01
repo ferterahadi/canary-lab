@@ -1,15 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
+import * as evaluationApi from '@/shared/api/evaluation'
 import { connectEvaluationExport, type EvaluationExportConnection } from '../api/evaluation-export-socket'
 import { useWorkspaceRecords, type RecordSyncState } from '@/shared/state/use-workspace-records'
-import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
+import type {
+  EvaluationExportMode,
+  EvaluationExportTaskView,
+} from '@shared/evaluation-export-types'
 
 interface EvaluationExportContextValue {
   sync: RecordSyncState
-  tasks: EvaluationExportTask[]
-  startExport: (runId: string, mode: EvaluationExportMode) => Promise<EvaluationExportTask>
-  taskForRun: (runId: string) => EvaluationExportTask | null
-  taskById: (taskId: string) => EvaluationExportTask | null
+  tasks: EvaluationExportTaskView[]
+  startExport: (runId: string, mode: EvaluationExportMode) => Promise<EvaluationExportTaskView>
+  taskForRun: (runId: string) => EvaluationExportTaskView | null
+  taskById: (taskId: string) => EvaluationExportTaskView | null
   /** Ensure a task's log stream is attached (no-op when already streaming) —
    *  panels call this when they surface a task they didn't start. */
   watchTask: (taskId: string) => void
@@ -93,8 +96,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   /** Task ids ever attached to a log stream — see `subscribeTask`. */
   const subscribedRef = useRef<Set<string>>(new Set())
 
-  const { records: tasksById, recordsRef: tasksByIdRef, sync, upsert: rememberTask, remove: forgetTask, readRecord } = useWorkspaceRecords<EvaluationExportTask>({
-    list: api.listEvaluationExportTasks,
+  const { records: tasksById, recordsRef: tasksByIdRef, sync, upsert: rememberTask, remove: forgetTask, readRecord } = useWorkspaceRecords<EvaluationExportTaskView>({
+    list: evaluationApi.listEvaluationExportTasks,
     idOf: (task) => task.taskId,
     decode: (event) => {
       if (event.type === 'evaluation-export-created' || event.type === 'evaluation-export-updated') {
@@ -119,7 +122,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 
   const refreshTask = useCallback(async (taskId: string): Promise<void> => {
     try {
-      await readRecord(taskId, () => api.getEvaluationExportTask(taskId))
+      await readRecord(taskId, () => evaluationApi.getEvaluationExportTask(taskId))
     } catch (err) {
       appendLog(taskId, `[evaluation] unable to refresh task: ${err instanceof Error ? err.message : String(err)}\n`)
     }
@@ -163,8 +166,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const startExport = useCallback(async (
     runId: string,
     mode: EvaluationExportMode,
-  ): Promise<EvaluationExportTask> => {
-    const task = await api.startEvaluationExport(runId, mode)
+  ): Promise<EvaluationExportTaskView> => {
+    const task = await evaluationApi.startEvaluationExport(runId, mode)
     rememberTask(task)
     appendLog(task.taskId, `[evaluation] queued ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
     subscribeTask(task.taskId)
@@ -183,11 +186,11 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     [tasksById],
   )
 
-  const taskForRun = useCallback((runId: string): EvaluationExportTask | null => (
+  const taskForRun = useCallback((runId: string): EvaluationExportTaskView | null => (
     tasks.find((task) => task.runId === runId) ?? null
   ), [tasks])
 
-  const taskById = useCallback((taskId: string): EvaluationExportTask | null => (
+  const taskById = useCallback((taskId: string): EvaluationExportTaskView | null => (
     tasksById[taskId] ?? null
   ), [tasksById])
 
@@ -202,12 +205,12 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const downloadTask = useCallback(async (taskId: string): Promise<void> => {
     const task = tasksById[taskId]
     if (!task) return
-    await api.downloadEvaluationExportTask(task)
+    await evaluationApi.downloadEvaluationExportTask(task)
   }, [tasksById])
 
   const dismissTask = useCallback(async (taskId: string): Promise<void> => {
     try {
-      await api.cancelEvaluationExportTask(taskId)
+      await evaluationApi.cancelEvaluationExportTask(taskId)
     } catch {
       // The server may already have forgotten the task after a restart. The
       // UI-level dismiss should still clear the stale local task.

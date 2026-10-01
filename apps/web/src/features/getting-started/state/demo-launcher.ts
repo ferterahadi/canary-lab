@@ -1,12 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type {
-  GettingStartedSessionState,
-  OnboardingSamples,
-  OnboardingWorkflow,
-} from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@/shared/api/config'
 import type { StartFlightBody } from '@/shared/api/flights'
-import type { RunIndexEntry } from '@/shared/api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { useProjectConfig } from '@/shared/state/use-project-config'
@@ -274,7 +270,7 @@ export interface DemoLauncher extends DemoAvailability {
  */
 export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry[]): DemoLauncher {
   const { value: samples } = useLiveResource('onboarding', 'workspace',
-    () => api.getOnboardingSamples(), { reconcileMs: 5000 })
+    () => configApi.getOnboardingSamples(), { reconcileMs: 5000 })
   const [seen, setSeen] = useState<boolean>(() => readDemoSeen())
   const config = useProjectConfig()
   const acceptConfig = config.accept
@@ -312,7 +308,7 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
         while (mounted() && writes.current.pending) {
           const submitted = writes.current.pending
           try {
-            const saved = await api.putProjectConfig({ showDemo: submitted.value })
+            const saved = await configApi.putProjectConfig({ showDemo: submitted.value })
             if (!acceptConfig(saved)) return
           } catch {
             // A failed toggle exposes the newest confirmed settings, not an

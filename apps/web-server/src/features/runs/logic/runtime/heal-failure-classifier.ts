@@ -9,7 +9,7 @@
 // recognize), and an empty tail returns undefined (nothing to go on).
 
 import type { HealEnd } from '../../../../../../../shared/run-state'
-import type { LocalHealAgent } from './manifest'
+import type { LocalHealAgent } from '../../../../../../../shared/run-manifest'
 
 type HealFailureCause = NonNullable<HealEnd['agentCause']>
 

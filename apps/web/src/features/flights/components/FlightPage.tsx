@@ -1,13 +1,11 @@
-import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@shared/flights/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity, FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab, RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { type DerivedStage } from '../lib/derived-stages'
 import { FlightDetail } from './FlightDetail'
-
-export { configDigestFacts } from './FlightSummaryStrip'
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
  *  surface — the actual run detail, coverage ledger, or supporting config —

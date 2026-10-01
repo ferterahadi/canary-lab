@@ -1,4 +1,7 @@
-import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
+import type {
+  EvaluationExportMode,
+  EvaluationExportTaskView,
+} from '@shared/evaluation-export-types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
@@ -21,7 +24,7 @@ import {
  *  - server-spawned localized rewrite (sessionRef) → live agent timeline
  *  - external (handed-off) export → the shared external-agent card
  *  - raw / cached → the formatted progress text */
-export function EvaluationTaskOutput({ task, log }: { task: EvaluationExportTask; log: string }) {
+export function EvaluationTaskOutput({ task, log }: { task: EvaluationExportTaskView; log: string }) {
   if (task.sessionRef) {
     return (
       <div
@@ -58,11 +61,11 @@ export function modeLabel(mode: EvaluationExportMode): string {
   return mode === 'localized' ? 'Plain-English report' : 'Evidence report'
 }
 
-export function evaluationTaskRunLabel(task: Pick<EvaluationExportTask, 'feature' | 'runId'>): string {
+export function evaluationTaskRunLabel(task: Pick<EvaluationExportTaskView, 'feature' | 'runId'>): string {
   return task.feature.trim() || task.runId
 }
 
-export function evaluationTaskMeta(task: Pick<EvaluationExportTask, 'mode' | 'status' | 'runId'>): string {
+export function evaluationTaskMeta(task: Pick<EvaluationExportTaskView, 'mode' | 'status' | 'runId'>): string {
   return `${modeLabel(task.mode)} · ${task.status} · ${task.runId}`
 }
 
@@ -71,7 +74,7 @@ export function evaluationTaskMeta(task: Pick<EvaluationExportTask, 'mode' | 'st
 // (handed-off) tasks render ExternalEvaluationPanel instead; server-spawned ones
 // with a sessionRef stream through AgentSessionView.
 export function evaluationOutputPanel(
-  task: Pick<EvaluationExportTask, 'mode'>,
+  task: Pick<EvaluationExportTaskView, 'mode'>,
   rawLog: string,
 ): { heading: 'Agent output' | 'Export progress'; text: string } {
   const log = rawLog.trim()
@@ -109,7 +112,7 @@ export function evaluationOutputPanel(
 // Canary's tracked log on the shared ExternalAgentCard — matching external
 // heal / portify / draft / coverage. (Server-spawned localized rewrites carry a
 // sessionRef and stream through AgentSessionView instead.)
-export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTask; log: string }) {
+export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTaskView; log: string }) {
   const clientKind = (task.clientKind ?? 'other') as ExternalClientKind
   const { opening, error: openError, open } = useOpenAgentApp()
   // Jump-to-agent: prefer the client's own conversation deep-link; otherwise
@@ -175,13 +178,13 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
 
 // status → pill label/palette. Sky (in-progress) / green (ready) / rose (failed),
 // reusing the shared status hues.
-function exportStatusPill(status: EvaluationExportTask['status']): { label: string; palette: PillPalette } {
+function exportStatusPill(status: EvaluationExportTaskView['status']): { label: string; palette: PillPalette } {
   if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
   if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
   return { label: 'Exporting', palette: pillPalette('var(--accent)') }
 }
 
-function exportBodyCopy(status: EvaluationExportTask['status']): string {
+function exportBodyCopy(status: EvaluationExportTaskView['status']): string {
   if (status === 'completed') {
     return "The evaluation wording was authored in your connected client and submitted — Canary rendered evaluation.html. Download it from the list."
   }

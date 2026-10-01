@@ -1,7 +1,9 @@
-import * as api from '@/shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
-import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@/shared/lib/heal-threshold'
-import { FieldRow, HintIcon, Section, TextInput, Textarea } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@shared/launcher/types'
+import { Section } from '@/shared/ui/atoms'
+import { FieldRow, TextInput, Textarea } from '@/shared/ui/FormFields'
+import { HintIcon } from '@/shared/ui/Icons'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
@@ -24,7 +26,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     // Shared with Service + Ports — one config doc, one fetch per dialog open.
     cacheKey: `config-doc:${feature}`,
-    load: () => api.getFeatureConfigDoc(feature),
+    load: () => configApi.getFeatureConfigDoc(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
       return {
@@ -53,7 +55,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       return next
     },
     save: async (payload) => {
-      const next = await api.putFeatureConfigDoc(feature, payload as ConfigValue)
+      const next = await configApi.putFeatureConfigDoc(feature, payload as ConfigValue)
       const nextValue = (next.parsed.value ?? {}) as { [k: string]: ConfigValue }
       const nextName = asString(nextValue.name)
       if (nextName && nextName !== feature) onFeatureRenamed?.(nextName)

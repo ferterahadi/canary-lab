@@ -1,11 +1,17 @@
-import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightIndexEntry,
+  type FlightStageKey,
+  type FlightStageStatus,
+  type FlightStatus,
+  type PlanFeaturesTask,
+} from '@shared/flights/types'
 import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureActivityKind } from '../state/feature-activity'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { Chip } from '@/shared/ui/StatusChip'
-import { presentRunStatus } from '@/features/runs'
+import { presentRunStatus } from '@/features/runs/utils/run-presentation'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { stageLabel } from './stage-meta'
+import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
 

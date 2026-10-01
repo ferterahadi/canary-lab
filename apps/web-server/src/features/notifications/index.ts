@@ -3,9 +3,6 @@ import type { ServerContext } from '../../server-context'
 import { createNotificationRuntime } from './logic/notification-runtime'
 import { notificationRoutes, registerFeatureNotificationRoute } from './routes/notifications'
 
-export { NOTIFICATION_RECOVERY_MS } from './logic/notification-runtime'
-export { notificationRoutes } from './routes/notifications'
-
 export async function register(app: FastifyInstance, ctx: ServerContext): Promise<void> {
   const runtime = createNotificationRuntime({
     logsDir: ctx.logsDir,

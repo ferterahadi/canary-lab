@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import path from 'path'
 import ts from 'typescript'
-import type { RunDetail, PlaywrightPlaybackEvent } from '../../../runs/logic/run-store'
+import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 
 export function coverageLedgerFor(testTitle: string): CoverageLedger {

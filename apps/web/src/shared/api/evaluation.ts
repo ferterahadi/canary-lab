@@ -1,7 +1,10 @@
 // Evaluation exports: start, poll, cancel, download.
 // Split out of client.ts; see that barrel for the shared surface.
 
-import type { EvaluationExportMode, EvaluationExportTask } from './types'
+import type {
+  EvaluationExportMode,
+  EvaluationExportTaskView,
+} from '@shared/evaluation-export-types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 
@@ -9,9 +12,9 @@ export function startEvaluationExport(
   runId: string,
   mode: EvaluationExportMode,
   opts?: ClientOptions,
-): Promise<EvaluationExportTask> {
+): Promise<EvaluationExportTaskView> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<EvaluationExportTask>(
+  return request<EvaluationExportTaskView>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}/evaluation-export`,
     {
       method: 'POST',
@@ -25,9 +28,9 @@ export function startEvaluationExport(
 export function getEvaluationExportTask(
   taskId: string,
   opts?: ClientOptions,
-): Promise<EvaluationExportTask> {
+): Promise<EvaluationExportTaskView> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<EvaluationExportTask>(
+  return request<EvaluationExportTaskView>(
     `${baseUrl}/api/evaluation-exports/${encodeURIComponent(taskId)}`,
     { method: 'GET' },
     fetchImpl,
@@ -37,10 +40,10 @@ export function getEvaluationExportTask(
 export function listEvaluationExportTasks(
   query: { runId?: string } = {},
   opts?: ClientOptions,
-): Promise<EvaluationExportTask[]> {
+): Promise<EvaluationExportTaskView[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const qs = query.runId ? `?runId=${encodeURIComponent(query.runId)}` : ''
-  return request<EvaluationExportTask[]>(
+  return request<EvaluationExportTaskView[]>(
     `${baseUrl}/api/evaluation-exports${qs}`,
     { method: 'GET' },
     fetchImpl,
@@ -60,7 +63,7 @@ export async function cancelEvaluationExportTask(
 }
 
 export async function downloadEvaluationExportTask(
-  task: EvaluationExportTask,
+  task: EvaluationExportTaskView,
   opts: ClientOptions & {
     documentRef?: Document
     urlApi?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>

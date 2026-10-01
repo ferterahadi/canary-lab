@@ -10,7 +10,7 @@ import {
   hasPrdSummary,
 } from './stage-evidence'
 import { runDirFor, runsIndexPath } from '../../runs/logic/runtime/run-paths'
-import type { RunManifest } from '../../runs/logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 
 let featureDir: string
 let logsDir: string

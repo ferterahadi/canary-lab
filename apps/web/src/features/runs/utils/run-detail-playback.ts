@@ -1,13 +1,10 @@
+import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
+import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
-  PlaywrightArtifact,
-  PlaywrightArtifactGroup,
   PlaywrightArtifactPolicy,
-  PlaywrightPlaybackEvent,
   PlaywrightRetainedArtifactMode,
   PlaywrightScreenshotMode,
-  RepoBranchSnapshot,
-  ServiceManifestEntry,
-} from '@/shared/api/types'
+} from '@shared/configs/playwright-modes'
 import { parseLocation } from '@/shared/test-numbering'
 
 export interface PlaybackTest {

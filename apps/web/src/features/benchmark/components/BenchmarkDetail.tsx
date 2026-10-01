@@ -1,9 +1,15 @@
 import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
 import { useBenchmarkDetail, useBenchmarks } from '../state/BenchmarkContext'
-import { RunDetailColumn } from '@/features/runs'
+import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
@@ -237,7 +243,7 @@ export function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; acce
 // couldn't be launched, surface the path so it can be opened by hand.
 export async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B'): Promise<void> {
   try {
-    const r = await api.openBenchmarkWorktree(id, target)
+    const r = await benchmarkApi.openBenchmarkWorktree(id, target)
     if (!r.opened) {
       window.prompt('Could not launch your editor automatically — copy this path:', r.path)
     }
@@ -252,14 +258,14 @@ export async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B
 // hide on their own — nothing to refresh here.
 export async function clearWorktreesAction(id: string): Promise<void> {
   try {
-    const preview = await api.clearBenchmarkWorktrees(id, false)
+    const preview = await benchmarkApi.clearBenchmarkWorktrees(id, false)
     if (preview.alreadyCleared) return
     const size = formatBytes(preview.freedBytes)
     const ok = window.confirm(
       `Clear all worktrees for this benchmark? "Open frozen bug" and the arm checkouts will no longer be available. Reclaims ${size}.`,
     )
     if (!ok) return
-    await api.clearBenchmarkWorktrees(id, true)
+    await benchmarkApi.clearBenchmarkWorktrees(id, true)
   } catch (e) {
     window.alert(e instanceof Error ? e.message : String(e))
   }

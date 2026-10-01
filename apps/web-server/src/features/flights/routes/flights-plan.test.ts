@@ -12,11 +12,11 @@ import { flightsRoutes } from './flights'
 
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 
-import type { StageAdapters } from '../logic/conductor'
+import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
 import type { PlanFeaturesTask, PlannedFeature } from '../../../../../../shared/flights/types'
 

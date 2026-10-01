@@ -5,10 +5,21 @@
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
-import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
+import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
+import {
+  type ToolGroupContext,
+  CLAIM_SUPPRESSED_MESSAGE,
+  asJsonResult,
+  claimRun,
+  errorResult,
+  failureResult,
+  findContinuingRunForFeature,
+  resolveRunRef,
+  runCandidate,
+} from '../tool-support'
+import { bootSessionValue, healWaitNext, isActiveBootRun } from '../heal-task-wait'
 import { readCoverageUpdate } from '../coverage-catchup'
 import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
 import { runDirFor } from '../../features/runs/logic/runtime/run-paths'

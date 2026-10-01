@@ -7,8 +7,6 @@ import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@shared/launcher/types'
 // enabled-at-the-default, not off. Splitting that reading across two components
 // is how the two lenses on one document start disagreeing.
 
-export { DEFAULT_HEAL_ON_FAILURE_THRESHOLD }
-
 /** A feature stops & heals by default; only an explicit `0` opts out. */
 export function healEnabled(threshold: number | undefined): boolean {
   return threshold == null ? true : threshold > 0

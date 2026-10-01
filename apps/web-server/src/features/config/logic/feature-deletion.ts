@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isWithin } from './path-containment'
 
@@ -19,7 +19,7 @@ type SuiteDeletionResult =
  * checking active work. A refused target must not have lost its history already.
  * Writes retain their existing order; this is not a filesystem transaction. */
 export function deleteSuite(deps: SuiteDeletionDeps, input: { feature: string; confirmName?: string }): SuiteDeletionResult {
-  const feature = loadFeatures(deps.featuresDir).find((entry) => entry.name === input.feature)
+  const feature = findFeature(deps.featuresDir, input.feature)
   if (!feature?.featureDir) return { ok: false, statusCode: 404, error: 'feature not found' }
   if (input.confirmName !== feature.name) return { ok: false, statusCode: 400, error: 'confirmName must match the feature name' }
   const featuresRoot = path.resolve(deps.featuresDir)

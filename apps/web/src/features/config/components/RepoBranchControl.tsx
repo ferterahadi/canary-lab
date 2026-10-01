@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { FieldRow } from '@/shared/ui/atoms'
+import * as workspaceApi from '@/shared/api/workspace'
+import { FieldRow } from '@/shared/ui/FormFields'
 import { BranchSuggestInput, branchSuggestions } from './BranchSuggestInput'
 import { RepoSlice, deriveRepoName } from './repo-slice'
 import { useRepoGitStatus } from '../state/use-repo-git-status'
@@ -47,7 +47,7 @@ export function BranchControl({
     setAction({ identity, switching: true, error: null })
     let checkoutError: string | null = null
     try {
-      await api.checkoutRepoBranch(feature, repoName, target.trim())
+      await workspaceApi.checkoutRepoBranch(feature, repoName, target.trim())
     } catch (e) {
       checkoutError = e instanceof Error ? e.message : 'Checkout failed'
     } finally {

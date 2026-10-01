@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { CLIENT_KIND, FULL_TOOLS, type CanaryLabMcpDeps } from './tool-support'
+import { CLIENT_KIND } from './tool-support'
+import { FULL_TOOLS } from './tool-profiles'
+import type { CanaryLabMcpDeps } from './tool-schemas'
 import { createCanaryLabToolRegistry } from './tool-registry'
 
 const inertDeps = {} as CanaryLabMcpDeps

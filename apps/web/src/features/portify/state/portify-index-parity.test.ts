@@ -4,7 +4,9 @@ import path from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { PortifyRunStore } from '../../../../../web-server/src/features/portify/logic/runtime/store'
 import type { PortifyManifest } from '../../../../../web-server/src/features/portify/logic/runtime/types'
-import { initialPortifyState, portifyReducer } from './portify-state'
+import { portifyIndex } from './portify-state'
+
+const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex
 
 let logs: string
 beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-index-parity-')) })

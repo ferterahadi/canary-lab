@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type {
-  ExternalHealSession,
-  ExternalHealSessionStatus,
-  RunStatus,
-} from '@/shared/api/types'
-import { isTerminalRunStatus } from '@shared/run-state'
+import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
+import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'

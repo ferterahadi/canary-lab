@@ -1,6 +1,12 @@
 import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
 
 // Lifecycle → stepper index. 0 Sabotage (config) · 1 Progress (sabotaging) ·
 // 2 Race (running) · 3 Report (terminal).

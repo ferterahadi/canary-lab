@@ -1,18 +1,16 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
-import { PlusIcon, Section } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import { Section } from '@/shared/ui/atoms'
+import { PlusIcon } from '@/shared/ui/Icons'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
-import { useRuns } from '@/features/runs'
+import { useRuns } from '@/features/runs/state/RunsContext'
 import { isActiveRunStatus } from '@shared/run-state'
 import { createRepoEditorRows } from './repo-editor-rows'
 import { RepoCard } from './RepoCard'
 import { PortSlotSlice, RepoSlice, Slice, parseRepo, sameProbePath, serializeRepo } from './repo-slice'
-
-export { deriveRepoName, parseRepo, serializeRepo } from './repo-slice'
-export type { CommandSlice, PortSlotSlice, ProbePath, RepoSlice } from './repo-slice'
 
 export function ReposTab({ feature }: { feature: string }) {
   const rowIds = useMemo(createRepoEditorRows, [feature])
@@ -22,7 +20,7 @@ export function ReposTab({ feature }: { feature: string }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     // Shared with General + Ports — one config doc, one fetch per dialog open.
     cacheKey: `config-doc:${feature}`,
-    load: () => api.getFeatureConfigDoc(feature),
+    load: () => configApi.getFeatureConfigDoc(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
       const repos = Array.isArray(v.repos)
@@ -38,7 +36,7 @@ export function ReposTab({ feature }: { feature: string }) {
       const repos = slice.repos.map(serializeRepo)
       return { ...current, repos }
     },
-    save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
+    save: (payload) => configApi.putFeatureConfigDoc(feature, payload as ConfigValue),
   })
 
   if (ed.error && !ed.draft) {

@@ -6,8 +6,6 @@ import { allocatePorts, releasePorts } from '../../apps/web-server/src/features/
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { command, copy, json, prefixedCommand } from './files'
 import { services, serviceInvocation, playwrightOutputArgs } from './runtime'
-
-export { services } from './runtime'
 export async function ports(): Promise<Record<string, number>> {
   return Object.fromEntries(await allocatePorts(services.map((name) => ({ name }))))
 }

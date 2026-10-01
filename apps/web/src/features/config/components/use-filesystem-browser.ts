@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import * as workspaceApi from '@/shared/api/workspace'
 import { ApiError } from '@/shared/api/internal'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 
@@ -12,9 +13,9 @@ const normalized = (path: string) => {
   }
   return `/${parts.join('/')}`
 }
-async function readDirectory(kind: BrowserKind, dir: string): Promise<api.FsBrowseResponse | null> {
+async function readDirectory(kind: BrowserKind, dir: string): Promise<configApi.FsBrowseResponse | null> {
   try {
-    const result = kind === 'files' ? await api.browseDir(dir) : await api.listWorkspaceDirs(dir).then((value) => ({
+    const result = kind === 'files' ? await configApi.browseDir(dir) : await workspaceApi.listWorkspaceDirs(dir).then((value) => ({
       dir: value.absolute ?? value.root, parent: value.parent ?? null,
       entries: value.dirs.map((name) => ({ name, isDir: true })),
     }))
@@ -41,7 +42,7 @@ export function useFilesystemBrowser({ session, kind, initialPath = '', enabled 
   const active = request.session === session ? request : { session, dir: initialPath, revision: 0, textVersion: textVersion.current }
   const resource = useLiveResource(null, enabled ? JSON.stringify([session, kind, active.dir]) : null,
     () => readDirectory(kind, active.dir), { refreshKey: active.revision })
-  const [accepted, setAccepted] = useState<{ session: string; value: api.FsBrowseResponse | null } | null>(null)
+  const [accepted, setAccepted] = useState<{ session: string; value: configApi.FsBrowseResponse | null } | null>(null)
   useEffect(() => {
     if (!enabled || !resource.confirmed) return
     setAccepted({ session, value: resource.value })

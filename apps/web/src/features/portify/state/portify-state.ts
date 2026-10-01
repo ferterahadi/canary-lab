@@ -1,95 +1,26 @@
-import { portifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
+import { portifyIndexEntry, type PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest } from '@/shared/api/portify'
+import {
+  byStartedDesc,
+  createRecordIndex,
+  type RecordIndexAction,
+  type RecordIndexFrame,
+  type RecordIndexState,
+} from '@/shared/state/record-index-store'
 
-// Pure reducer driving PortifyContext. Mirrors benchmark-state.ts so it
-// unit-tests in the node vitest config (no jsdom). The server pushes the full
-// manifest on every change (status, attempt, diff, verification), so a single
-// `update` frame covers every transition without bespoke frame types.
+// Pure reducer driving PortifyContext, built by the shared record-index store
+// so it unit-tests in the node vitest config (no jsdom). The server pushes the
+// full manifest on every change (status, attempt, diff, verification), so a
+// single `update` frame covers every transition without bespoke frame types.
 
-export type PortifyStreamFrame =
-  | {
-      type: 'snapshot'
-      workflows: PortifyIndexEntry[]
-      details: Record<string, PortifyManifest>
-    }
-  | { type: 'update'; workflowId: string; manifest: PortifyManifest }
-  | { type: 'removed'; workflowId: string }
-  | { type: 'detail-missing'; workflowId: string }
+export const portifyIndex = createRecordIndex<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>({
+  keys: { list: 'workflows', id: 'workflowId' },
+  entryOf: portifyIndexEntry,
+})
 
-export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'disconnected'
-
-export interface PortifyState {
-  workflows: PortifyIndexEntry[]
-  details: Record<string, PortifyManifest>
-  connection: ConnectionState
-}
-
-export const initialPortifyState: PortifyState = {
-  workflows: [],
-  details: {},
-  connection: 'connecting',
-}
-
-export type PortifyAction =
-  | {
-      type: 'snapshot'
-      workflows: PortifyIndexEntry[]
-      details: Record<string, PortifyManifest>
-    }
-  | { type: 'update'; workflowId: string; manifest: PortifyManifest }
-  | { type: 'removed'; workflowId: string }
-  | { type: 'detail-missing'; workflowId: string }
-  | { type: 'connection'; status: ConnectionState }
-
-function byStartedDesc(a: PortifyIndexEntry, b: PortifyIndexEntry): number {
-  return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
-}
-
-export function portifyReducer(state: PortifyState, action: PortifyAction): PortifyState {
-  switch (action.type) {
-    case 'snapshot':
-      return { ...state, workflows: action.workflows, details: action.details }
-    case 'update': {
-      const entry = portifyIndexEntry(action.manifest)
-      const others = state.workflows.filter((w) => w.workflowId !== action.workflowId)
-      return {
-        ...state,
-        workflows: [entry, ...others].sort(byStartedDesc),
-        details: { ...state.details, [action.workflowId]: action.manifest },
-      }
-    }
-    case 'detail-missing': {
-      const { [action.workflowId]: _missing, ...details } = state.details
-      return { ...state, details }
-    }
-    case 'removed': {
-      const { [action.workflowId]: _dropped, ...details } = state.details
-      return {
-        ...state,
-        workflows: state.workflows.filter((w) => w.workflowId !== action.workflowId),
-        details,
-      }
-    }
-    case 'connection':
-      return { ...state, connection: action.status }
-  }
-}
-
-/** Translate a WS frame into a reducer action; unknown frame types → null. */
-export function frameToAction(frame: PortifyStreamFrame): PortifyAction | null {
-  switch (frame.type) {
-    case 'snapshot':
-      return { type: 'snapshot', workflows: frame.workflows, details: frame.details }
-    case 'update':
-      return { type: 'update', workflowId: frame.workflowId, manifest: frame.manifest }
-    case 'removed':
-      return { type: 'removed', workflowId: frame.workflowId }
-    default:
-      return null
-  }
-}
-
-export { isActivePortifyStatus as isActivePortify } from '@shared/portify-index'
+export type PortifyStreamFrame = RecordIndexFrame<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>
+export type PortifyAction = RecordIndexAction<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>
+export type PortifyState = RecordIndexState<PortifyIndexEntry, PortifyManifest, 'workflows'>
 
 /**
  * The workflowId of a feature's most-recent SAVED port-ification — the one that

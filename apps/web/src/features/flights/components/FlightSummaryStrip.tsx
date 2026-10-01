@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
+import type { FlightManifest, FlightStageKey } from '@shared/flights/types'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { MODEL_STAGE_KEYS, pinnedPlanChoices, type PinnedStageChoice } from '@shared/agent-models'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ModelPlanPopover } from './ModelPlanPopover'
-import { formatDuration, num, specsCoverageProgress, stageLabel, stageStatusTone, type StageFact } from './stage-meta'
+import { num, specsCoverageProgress, stageStatusTone } from './stage-meta'
+import { formatDuration } from './StageStatusLines'
+import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
+import type { StageFact } from './StageFacts'
 import { asRecord } from './StageDetail'
 
 /** The header's summary strip (R61, R71/W5): the flight's headline numbers —
