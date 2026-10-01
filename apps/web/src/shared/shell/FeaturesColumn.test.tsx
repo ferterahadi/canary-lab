@@ -258,7 +258,7 @@ describe('FeaturesColumn active-run highlight', () => {
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-waiting')).toBe(true)
     expect(row.classList.contains('cl-list-row-changed')).toBe(false)
-    expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.textContent).toBe('Review')
+    expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.getAttribute('aria-label')).toBe('Review test changes in alpha')
     expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('Awaiting test review')
   })
 
@@ -475,7 +475,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     const section = container.querySelector('[data-testid="feature-group-shop"]')
     expect(section).toBeTruthy()
     // Both grouped rows live under the shop accordion; the ungrouped one does not.
-    expect(section!.querySelector('li.feature-row')?.textContent).toContain('checkout')
+    expect(section!.querySelector('li.feature-row')?.textContent).toContain('cart')
     expect([...section!.querySelectorAll('li.feature-row')]).toHaveLength(2)
     const admin = featureRow('admin')
     expect(section!.contains(admin)).toBe(false)
@@ -518,12 +518,15 @@ describe('FeaturesColumn grouping (R55)', () => {
     expect(container.querySelector('[data-testid="feature-group-toggle-shop"]')?.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('orders groups worst-first — a group with an active run sorts above a calm one', () => {
+  it('orders groups, then rows, by name — an active run moves nothing', () => {
     act(() => {
       root.render(
         <FeaturesColumn
           onOpenConfig={onOpenConfig}
-          features={[feature('calm', 'zzz-calm'), feature('busy', 'aaa-active')]}
+          features={[
+            feature('zeta', 'shop'), feature('busy', 'zzz-calm'), feature('alpha', 'shop'),
+            feature('item10', 'shop'), feature('item2', 'shop'), feature('solo', 'CNS-A'), feature('base', 'CNS'),
+          ]}
           selectedFeature={null}
           activeRunFeature="busy"
           activeRunStatus="running"
@@ -532,9 +535,15 @@ describe('FeaturesColumn grouping (R55)', () => {
       )
     })
     const groups = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
-    // The active group floats above the calm one despite the reverse alphabetical names.
-    expect(groups[0]?.getAttribute('data-testid')).toBe('feature-group-toggle-aaa-active')
-    expect(groups[1]?.getAttribute('data-testid')).toBe('feature-group-toggle-zzz-calm')
+      .map((el) => el.getAttribute('data-testid'))
+    expect(groups).toEqual([
+      'feature-group-toggle-CNS', 'feature-group-toggle-CNS-A',
+      'feature-group-toggle-shop', 'feature-group-toggle-zzz-calm',
+    ])
+    const shopRows = [...container.querySelectorAll('[data-testid="feature-group-shop"] li.feature-row')]
+      .map((li) => li.textContent)
+    expect(shopRows.map((text) => ['alpha', 'item2', 'item10', 'zeta'].find((name) => text?.includes(name))))
+      .toEqual(['alpha', 'item2', 'item10', 'zeta'])
   })
 })
 
@@ -594,19 +603,16 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     expect(container.querySelector('[data-testid="feature-group-toggle-Auth"]')?.textContent).toContain('2')
   })
 
-  it('floats a group with a real question above one whose step runs in the user\'s agent', () => {
-    // Both flights wear `waiting-for-approval`. Only the second asks anything of
-    // this reader, so only it should pull its group to the top — otherwise the
-    // column nags about work that is already under way somewhere else.
-    const parked = (name: string, group: string, checkpointKind: 'external-work' | 'missing-env') => ({
+  it('keeps a group with a parked question in its name position', () => {
+    const parked = (name: string, group: string) => ({
       ...pendingFeature(name, group),
-      pending: { flightId: `fl_${name}`, status: 'waiting-for-approval' as const, currentStage: null, checkpointKind },
+      pending: { flightId: `fl_${name}`, status: 'waiting-for-approval' as const, currentStage: null, checkpointKind: 'missing-env' as const },
     })
     act(() => {
       root.render(
         <FeaturesColumn
           onOpenConfig={onOpenConfig}
-          features={[parked('scan', 'Alpha', 'external-work'), parked('keys', 'Beta', 'missing-env')]}
+          features={[parked('keys', 'Beta'), pendingFeature('scan', 'Alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
         />,
@@ -614,7 +620,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     })
     const sections = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
       .map((el) => el.getAttribute('data-testid'))
-    expect(sections).toEqual(['feature-group-toggle-Beta', 'feature-group-toggle-Alpha'])
+    expect(sections).toEqual(['feature-group-toggle-Alpha', 'feature-group-toggle-Beta'])
   })
 })
 
@@ -937,7 +943,9 @@ describe('FeaturesColumn modified-tests badge', () => {
   it('shows an amber review action for weaker hints without a failure outline', () => {
     render([dirty('shop', ['equivalent', 'weaker'])])
     const b = badge('shop')!
-    expect(b.textContent).toBe('Review')
+    // An icon, not a word: the 16px box is the whole badge.
+    expect(b.textContent).toBe('')
+    expect(b.querySelector('svg')).toBeTruthy()
     expect(b.getAttribute('data-tone')).toBe('weaker')
     expect(b.getAttribute('aria-label')).toBe('Review test changes in shop')
     expect(b.getAttribute('style')).toContain('--warning')
@@ -948,7 +956,6 @@ describe('FeaturesColumn modified-tests badge', () => {
     render([dirty('a', ['equivalent']), dirty('b', ['unclassifiable']), dirty('c', [undefined]), dirty('d', ['stronger', 'equivalent'])])
     for (const name of ['a', 'b', 'c', 'd']) {
       const b = badge(name)!
-      expect(b.textContent, name).toBe('Review')
       expect(b.getAttribute('style'), name).not.toContain('--danger')
       expect(b.getAttribute('style'), name).toContain('--warning')
       expect(featureRow(name).className, name).toContain('cl-list-row-changed')
@@ -959,7 +966,6 @@ describe('FeaturesColumn modified-tests badge', () => {
   it('keeps stronger edits amber because they still need review', () => {
     render([dirty('up', ['stronger', 'stronger'])])
     const b = badge('up')!
-    expect(b.textContent).toBe('Review')
     expect(b.getAttribute('style')).toContain('--warning')
     expect(b.getAttribute('aria-label')).toBe('Review test changes in up')
     expect(featureRow('up').className).toContain('cl-list-row-changed')
@@ -972,5 +978,76 @@ describe('FeaturesColumn modified-tests badge', () => {
     act(() => { badge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
 
     expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Ready for parallel runs.')
+  })
+})
+
+describe('FeaturesColumn last-run dot', () => {
+  const suite = (name: string, extra: Record<string, unknown> = {}) => ({ name, repos: [], envs: [], ...extra })
+  const entry = (feature: string, status: 'passed' | 'failed' | 'aborted', extra: Record<string, unknown> = {}) => ({
+    runId: `run-${feature}`, feature, status, startedAt: '2026-10-01T06:00:00Z', endedAt: '2026-10-01T06:05:00Z', ...extra,
+  })
+  const render = (features: unknown[], lastRuns: Map<string, unknown>, extra: Record<string, unknown> = {}) => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          onOpenConfig={onOpenConfig}
+          features={features as never}
+          lastRuns={lastRuns as never}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          {...extra}
+        />,
+      )
+    })
+  }
+  const dot = (name: string) => container.querySelector<HTMLElement>(`[data-testid="last-run-${name}"]`)
+
+  it('shows passed, failed, aborted, and repaired passes, and nothing for a suite that never ran', () => {
+    render(
+      [suite('clean'), suite('broken'), suite('stopped'), suite('fixed'), suite('fresh')],
+      new Map([
+        ['clean', entry('clean', 'passed')],
+        ['broken', entry('broken', 'failed', { env: 'staging' })],
+        ['stopped', entry('stopped', 'aborted')],
+        ['fixed', entry('fixed', 'passed', { healCycles: 2 })],
+      ]),
+    )
+    expect(dot('clean')?.dataset.status).toBe('passed')
+    expect(dot('clean')?.querySelector('.bg-success')).toBeTruthy()
+    expect(dot('broken')?.dataset.status).toBe('failed')
+    expect(dot('broken')?.querySelector('.bg-danger')).toBeTruthy()
+    expect(dot('broken')?.getAttribute('aria-label')).toMatch(/^Last run failed · .+ · staging$/)
+    expect(dot('stopped')?.dataset.status).toBe('aborted')
+    expect(dot('stopped')?.querySelector('.bg-idle')).toBeTruthy()
+    expect(dot('fixed')?.dataset.status).toBe('repaired')
+    expect(dot('fixed')?.getAttribute('aria-label')).toMatch(/^Last run passed after 2 repair cycles · /)
+    expect(dot('fixed')?.querySelector('.outline-success')).toBeTruthy()
+    expect(dot('fresh')).toBeNull()
+  })
+
+  it('names a single repair cycle in the singular', () => {
+    render([suite('once')], new Map([['once', entry('once', 'passed', { healCycles: 1 })]]))
+    expect(dot('once')?.getAttribute('aria-label')).toMatch(/^Last run passed after 1 repair cycle · /)
+  })
+
+  it('keeps the previous result beside a live run chip', () => {
+    render([suite('busy')], new Map([['busy', entry('busy', 'failed')]]), { activeRunFeature: 'busy', activeRunStatus: 'running' })
+    expect(dot('busy')?.dataset.status).toBe('failed')
+    expect(featureRow('busy').textContent).toContain('Running')
+  })
+
+  it('repaints when a newer run settles, without remounting the column', () => {
+    render([suite('shop')], new Map([['shop', entry('shop', 'failed')]]))
+    const row = featureRow('shop')
+    render([suite('shop')], new Map([['shop', entry('shop', 'passed')]]))
+    expect(featureRow('shop')).toBe(row)
+    expect(dot('shop')?.dataset.status).toBe('passed')
+  })
+
+  it('puts the portified mark after the name, inside the row\'s click target', () => {
+    render([suite('parallel', { portified: true })], new Map())
+    const mark = container.querySelector('[data-testid="portified-badge-parallel"]')!
+    expect(mark.closest('button.feature-row__name')).toBeTruthy()
+    expect(mark.previousElementSibling?.textContent).toBe('parallel')
   })
 })

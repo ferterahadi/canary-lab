@@ -47,9 +47,10 @@ vi.mock('@/features/runs/state/RunsContext', () => ({
 // PortsTab reads the live workflow index from PortifyContext (active workflow
 // + latest saved overlay). Tests set `mockWorkflows` to simulate the WS feed.
 let mockWorkflows: { workflowId: string; feature: string; status: string; startedAt: string }[] = []
-vi.mock('@/features/portify/state/PortifyContext', () => ({
-  usePortify: () => ({ workflows: mockWorkflows }),
-}))
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return { usePortify: () => ({ workflows: mockWorkflows }), usePortifyDetail: detailFixture((id) => getPortify(id)) }
+})
 
 let container: HTMLDivElement
 let root: Root
@@ -85,6 +86,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('PortsTab', () => {
@@ -508,3 +510,18 @@ function emptyDoc(): ParsedConfigDoc {
     },
   }
 }
+
+
+it('recovers the reproduced failed saved-workflow hydration without reopening Ports', async () => {
+  vi.useFakeTimers()
+  vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+  vi.mocked(getPortify).mockRejectedValueOnce(new Error('temporary network failure'))
+  mockWorkflows = [{ workflowId: 'wf_saved', feature: 'cns_exactly_once_fallback', status: 'saved', startedAt: '2026-01-01' }]
+  await act(async () => root.render(<PortsTab feature="cns_exactly_once_fallback" portified />))
+  expect(container.textContent).toContain('temporary network failure')
+  expect(container.textContent).not.toContain('Booted twice')
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(container.textContent).toContain('Booted twice')
+  expect(container.textContent).not.toContain('temporary network failure')
+  expect(getPortify).toHaveBeenCalledTimes(2)
+})

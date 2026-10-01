@@ -24,10 +24,13 @@ vi.mock('@/shared/api/client', async (original) => ({
   getFlightRemedy: vi.fn(async () => ({ remedy: null })),
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ workflows: [], loadPortify: vi.fn() }),
   usePortifyWorkflow: () => null,
-}))
+  usePortifyDetail: detailFixture(async () => undefined),
+}) })
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({ tasks: [], taskById: () => null }),
   useEvaluationExportLog: () => ({ log: '', watchTask: vi.fn() }),

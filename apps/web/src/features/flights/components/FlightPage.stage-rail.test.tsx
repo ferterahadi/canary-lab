@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(async () => {}),
+  loadPortify: vi.fn(async (_id: string) => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -131,10 +131,13 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ loadPortify: mocks.loadPortify }),
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
-}))
+  usePortifyDetail: detailFixture(async (id) => { await mocks.loadPortify(id); return mocks.portifyWorkflow(id) }, (id) => mocks.portifyWorkflow(id)),
+}) })
 
 // TestRunPanel reads the run detail + the run index off the shared runs store
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
@@ -602,7 +605,7 @@ describe('trailer model (R14–R18)', () => {
     // Screenshot renders Playwright's real default when the config omits it.
     expect(panel?.querySelector<HTMLSelectElement>('[data-testid="setup-pw-screenshot"]')?.value).toBe('off')
     // An edit writes through to the SAME on-disk doc Advanced setup edits.
-    mocks.putFeatureConfigDoc.mockResolvedValue({})
+    mocks.putFeatureConfigDoc.mockImplementation(async (_feature, value) => ({ parsed: { value } }))
     await act(async () => {
       // Drive the CONTROLLED input the way React sees it: native setter + input
       // event (React dedupes plain .value writes), then focusout for onBlur.

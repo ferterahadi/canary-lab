@@ -23,7 +23,7 @@ export {
   stageRowKey,
 } from './components/stage-meta'
 export type { DerivedStage } from './lib/derived-stages'
-export { derivedFlightToken } from './lib/derived-stages'
+export { derivedFlightToken, latestTerminalRunByFeature } from './lib/derived-stages'
 export {
   readGroupOpen,
   writeGroupOpen,

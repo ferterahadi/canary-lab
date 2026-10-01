@@ -69,6 +69,7 @@ export interface StageBandData {
   boot?: RunDetail | null
   /** The portify workflow, for attempts, instances and the overlay diff. */
   portify?: PortifyManifest | null
+  portifyRecovery?: { error: string | null; missing: boolean; retry: () => void }
   /** Counts read off the on-disk feature config. */
   config?: { services: number; portSlots: number } | null
   /** The docs stage's full listing — the docs panel and the requirements fork

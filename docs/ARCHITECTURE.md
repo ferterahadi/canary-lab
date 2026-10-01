@@ -267,6 +267,14 @@ through `apps/web/src/shared/state/record-stream.ts`, which owns connection labe
 backoff, frame observation, and teardown. Their reducers and HTTP actions remain
 feature-owned. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
+Portify detail demand belongs to the provider's `portify-hydration` controller.
+Ports and Flight use `usePortifyDetail`, sharing manifests, read tokens and a
+2.5-second failed/hung-read recovery timer per demanded workflow. Stream updates
+settle demand; removals stop recovery; reconnect snapshots rehydrate demanded
+terminal records whose details were omitted. An authoritative 404 stops retries
+until explicit retry or a new stream observation; releasing the last consumer
+releases the timer.
+
 Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
 browser updates retain the server's branch, producer, and terminal timestamp.
 Benchmark uses `shared/benchmark-index.ts` for its compact rows and terminal
@@ -393,6 +401,15 @@ work, and closing the dialog releases its cache, including slot values.
 when their edited slice changed externally. Discard takes the latest snapshot;
 Save merges the draft into that snapshot, preserving unrelated fields. Envset
 pickers retain valid selections and fall back when a selected row disappears.
+Flight's `useImmediateConfig` uses the same document store and editable-state
+mechanisms, with a local cache per mounted editor. Field changes queue as
+transforms against the latest accepted document; writes serialize per document.
+A failed write retains its draft and pauses further writes until Retry. Server
+responses supersede older reads. Advanced setup retains explicit Save/Discard.
+Verification settings use separate five-second list and envset-target readers,
+without module-global configuration caching. Initial values seed the form once;
+refreshes preserve edits, and a removed saved selection becomes an unsaved draft.
+
 Connected agents can obtain current redacted metadata through
 `get_feature_envset_summary`; this read path does not provide unsolicited wakeups
 to passive clients.

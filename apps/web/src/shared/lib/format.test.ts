@@ -6,6 +6,7 @@ import {
   formatElapsedSeconds,
   durationBetween,
   shortTime,
+  shortDateTime,
   formatBytes,
   timeAgo,
   evaluationArchiveFilename,
@@ -74,6 +75,19 @@ describe('durationBetween', () => {
   })
   it('returns null when timestamps are unparseable', () => {
     expect(durationBetween('not-a-date', 'also-bad')).toBeNull()
+  })
+})
+
+describe('shortDateTime', () => {
+  it('formats a local month, day, and 24-hour time', () => {
+    const d = new Date(2026, 9, 1, 14, 2, 30)
+    const out = shortDateTime(d.toISOString())
+    expect(out).toMatch(/Oct/)
+    expect(out).toMatch(/\b1\b/)
+    expect(out).toMatch(/14:02/)
+  })
+  it('falls back to the raw input when it cannot parse', () => {
+    expect(shortDateTime('garbage')).toBe('garbage')
   })
 })
 

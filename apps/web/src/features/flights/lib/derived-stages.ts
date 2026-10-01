@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import type { FlightStageKey, FlightStageStatus, PortifyIndexEntry } from '@/shared/api/client'
-import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
+import type { EvaluationExportTask, Feature, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { useRuns } from '@/features/runs'
 import { isActivePortify, usePortify } from '@/features/portify'
@@ -204,12 +204,16 @@ export function derivedEntryStage(stages: DerivedStage[]): FlightStageKey | null
 }
 
 /** The latest settled test run per feature (boots/benchmarks/verifies are not
- *  feature runs; active runs surface via the activity overlay instead). */
-export function latestTerminalRunByFeature(runs: RunIndexEntry[]): Map<string, RunIndexEntry> {
+ *  feature runs; active runs surface via the activity overlay instead). Stage
+ *  evidence counts only a verdict; the suites column also shows an abort. */
+export function latestTerminalRunByFeature(
+  runs: RunIndexEntry[],
+  statuses: readonly RunStatus[] = ['passed', 'failed'],
+): Map<string, RunIndexEntry> {
   const map = new Map<string, RunIndexEntry>()
   for (const r of runs) {
     if (isAuxiliaryExecution(r.executionType) || r.executionType === 'verify') continue
-    if (r.status !== 'passed' && r.status !== 'failed') continue
+    if (!statuses.includes(r.status)) continue
     const prev = map.get(r.feature)
     if (!prev || r.startedAt.localeCompare(prev.startedAt) > 0) map.set(r.feature, r)
   }

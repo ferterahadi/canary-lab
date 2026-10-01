@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
-import { usePortify, usePortifyWorkflow } from '@/features/portify'
+import { usePortifyDetail } from '@/features/portify'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail } from '@/shared/api/types'
 import { asRecord } from './FeatureSetupPanel'
@@ -86,25 +85,7 @@ export function useStageBandData(
   // verification and save, so reading it keeps both panels live. The one-shot
   // hydrate covers the cold-load case — the WS snapshot omits details for
   // terminal workflows, which is every settled flight.
-  const livePortify = usePortifyWorkflow(portifyId)
-  const { loadPortify } = usePortify()
-  // Which id the hydrate has FINISHED for — the portify half of `pending`. The
-  // store cannot answer it: an absent workflow and one still being fetched are
-  // the same `undefined`, and `loadPortify` swallows its own failure, so gating
-  // on the value alone would hold the placeholders forever on a workflow whose
-  // record has been cleaned away.
-  const [hydratedId, setHydratedId] = useState<string | null>(null)
-  useEffect(() => {
-    if (!portifyId || livePortify) return
-    let alive = true
-    void loadPortify(portifyId)
-      // `loadPortify` already swallows its own fetch failure; this keeps a
-      // future rewrite of it from turning a hydrate miss into an unhandled
-      // rejection, and the `finally` releases the hold either way.
-      .catch(() => {})
-      .finally(() => { if (alive) setHydratedId(portifyId) })
-    return () => { alive = false }
-  }, [portifyId, livePortify, loadPortify])
+  const { manifest: livePortify, loading: portifyLoading, error: portifyError, missing: portifyMissing, retry: retryPortify } = usePortifyDetail(portifyId)
 
   // `repos` is bumped on `features-changed`, which is what a config edit
   // publishes — so the digest re-reads itself instead of waiting for a remount.
@@ -147,12 +128,13 @@ export function useStageBandData(
       || (bootLoading && !boot)
       || (configLoading && !config)
       || (docsLoading && !docSizes)
-      || (portifyId != null && !livePortify && hydratedId !== portifyId),
+      || portifyLoading,
     evalTask,
     ledger,
     ledgerConfirmed,
     boot,
     portify: livePortify ?? null,
+    portifyRecovery: { error: portifyError, missing: portifyMissing, retry: retryPortify },
     config,
     docsListing,
     // A zero total means "no docs". The frontend keeps the Source docs slot but

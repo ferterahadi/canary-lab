@@ -6,8 +6,10 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { createPortifyHydration } from './portify-hydration'
 import * as api from '@/shared/api/client'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
@@ -25,10 +27,11 @@ import {
 // Port-ification store, mirroring BenchmarkContext: a `/ws/portify`-fed reducer
 // for the index + per-workflow manifests, plus one-shot start/save/cancel
 // actions. The GlobalStatusBar button reads the active workflow from here; the
-// wizard reads a single manifest via usePortifyWorkflow.
+// detail consumers share hydration through usePortifyDetail.
 
 interface PortifyContextValue {
   state: PortifyState
+  hydration: ReturnType<typeof createPortifyHydration>
   startPortify: (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => Promise<string>
   savePortify: (id: string) => Promise<void>
   cancelPortify: (id: string) => Promise<void>
@@ -53,18 +56,26 @@ export function PortifyProvider({
   dispatchRef.current = dispatch
   const readsRef = useRef(createObservedReads())
 
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const hydration = useMemo(() => createPortifyHydration({
+    reads: readsRef.current, read: api.getPortify,
+    apply: (action) => dispatchRef.current(action),
+    hasDetail: (id) => Boolean(stateRef.current.details[id]),
+  }), [])
   useEffect(() => {
+    hydration.start()
     const connection = connectRecordStream({
       url: wsUrl ?? defaultWsUrl(),
       WebSocketImpl,
       reads: readsRef.current,
       decode: (frame) => frameToAction(frame as PortifyStreamFrame),
       recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.workflowId : null,
-      dispatch: (action) => dispatchRef.current(action),
+      dispatch: (action) => { dispatchRef.current(action); hydration.observe(action) },
       onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
     })
-    return () => connection.close()
-  }, [wsUrl, WebSocketImpl])
+    return () => { connection.close(); hydration.stop() }
+  }, [wsUrl, WebSocketImpl, hydration])
 
   const startPortify = useCallback(
     async (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => {
@@ -82,23 +93,11 @@ export function PortifyProvider({
     await api.cancelPortify(id)
   }, [])
 
-  const loadPortify = useCallback(async (id: string) => {
-    const reads = readsRef.current
-    const token = reads.begin(id)
-    if (!token) return
-    try {
-      const manifest = await api.getPortify(id)
-      if (manifest && reads.current(id, token)) dispatchRef.current({ type: 'update', workflowId: id, manifest })
-    } catch {
-      /* leave it unhydrated — the caller shows a loading/empty state */
-    } finally {
-      reads.finish(id, token)
-    }
-  }, [])
+  const loadPortify = hydration.load
 
   const value = useMemo<PortifyContextValue>(
-    () => ({ state, startPortify, savePortify, cancelPortify, loadPortify }),
-    [state, startPortify, savePortify, cancelPortify, loadPortify],
+    () => ({ state, hydration, startPortify, savePortify, cancelPortify, loadPortify }),
+    [state, hydration, startPortify, savePortify, cancelPortify, loadPortify],
   )
   return <PortifyContext.Provider value={value}>{children}</PortifyContext.Provider>
 }
@@ -125,6 +124,21 @@ export function usePortify() {
 export function usePortifyWorkflow(id: string | null | undefined): PortifyManifest | undefined {
   const ctx = usePortifyContext()
   return id ? ctx.state.details[id] : undefined
+}
+
+/** A canonical manifest with mounted recovery demand, never a private copy. */
+export function usePortifyDetail(id: string | null | undefined) {
+  const { state, hydration } = usePortifyContext()
+  const status = useSyncExternalStore(hydration.subscribe, () => hydration.snapshot(id))
+  useEffect(() => id ? hydration.watch(id) : undefined, [id, hydration])
+  const manifest = id ? state.details[id] : undefined
+  return {
+    manifest,
+    loading: Boolean(id && !manifest && (status.status === 'idle' || status.status === 'loading')),
+    error: status.error,
+    missing: status.status === 'missing',
+    retry: () => { if (id) hydration.retry(id) },
+  }
 }
 
 /** The single active workflow, if any (portify is one-at-a-time). */

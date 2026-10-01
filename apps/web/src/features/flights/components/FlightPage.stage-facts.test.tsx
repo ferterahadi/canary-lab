@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(async () => {}),
+  loadPortify: vi.fn(async (_id: string) => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -132,10 +132,13 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ loadPortify: mocks.loadPortify }),
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
-}))
+  usePortifyDetail: detailFixture(async (id) => { await mocks.loadPortify(id); return mocks.portifyWorkflow(id) }, (id) => mocks.portifyWorkflow(id)),
+}) })
 
 // TestRunPanel reads the run detail + the run index off the shared runs store
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks

@@ -23,7 +23,8 @@ import { FlightStartDialog } from './features/flights/components/FlightStartDial
 import { runWaitingState } from './features/runs'
 import { useRuns, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
-import { useWorkspaceFlights, resolveFeatureFlightTarget, type FeatureActivity, type FlightsPillProps } from './features/flights'
+import { useWorkspaceFlights, resolveFeatureFlightTarget, latestTerminalRunByFeature, type FeatureActivity, type FlightsPillProps } from './features/flights'
+import { TERMINAL_RUN_STATUSES } from '@shared/run-state'
 import { derivedFlightFeature, derivedFlightToken } from './features/flights/lib/derived-stages'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { NotificationCenter } from './features/notifications/NotificationCenter'
@@ -72,6 +73,9 @@ export function App() {
   // Runs come from the WebSocket-backed RunsProvider — no polling here. `runs` is
   // the full index across all features; the per-feature filter happens at render.
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
+  // Each suite row's last-run dot. Derived from the same live index, so a run
+  // settling anywhere (GUI, MCP, CLI) repaints the column without a refetch.
+  const lastRuns = useMemo(() => latestTerminalRunByFeature(allRuns, TERMINAL_RUN_STATUSES), [allRuns])
   // Cross-feature refetch bus — the WS handler publishes topic invalidations that
   // fetch-owning leaves subscribe to (replaces the drilled `*RefreshKey`s).
   const { invalidate } = useInvalidation()
@@ -242,6 +246,7 @@ export function App() {
         features={featuresWithPending}
         selectedFeature={selectedFeature}
         activity={featureActivity}
+        lastRuns={lastRuns}
         activeRunFeature={globalActiveRunEntry?.feature ?? null}
         activeRunStatus={globalActiveRunEntry?.status ?? null}
         activeRunWaiting={activeRunWaiting}

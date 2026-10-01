@@ -110,6 +110,15 @@ export function shortTime(iso: string): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+/** Short date + time ("Oct 1, 14:02") in the viewer's locale — a stable stamp
+ *  for a label that stays on screen, where a relative age would go stale.
+ *  Falls back to the raw input if it doesn't parse. */
+export function shortDateTime(iso: string): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso
+  return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 /** Short, stable run reference for an identity line — the trailing token of
  *  the run id (`…-z6kc` → `z6kc`), falling back to the whole id. */
 export function shortRunRef(runId: string): string {

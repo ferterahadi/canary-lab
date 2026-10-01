@@ -14,6 +14,7 @@ export type PortifyStreamFrame =
     }
   | { type: 'update'; workflowId: string; manifest: PortifyManifest }
   | { type: 'removed'; workflowId: string }
+  | { type: 'detail-missing'; workflowId: string }
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 
@@ -37,6 +38,7 @@ export type PortifyAction =
     }
   | { type: 'update'; workflowId: string; manifest: PortifyManifest }
   | { type: 'removed'; workflowId: string }
+  | { type: 'detail-missing'; workflowId: string }
   | { type: 'connection'; status: ConnectionState }
 
 function byStartedDesc(a: PortifyIndexEntry, b: PortifyIndexEntry): number {
@@ -55,6 +57,10 @@ export function portifyReducer(state: PortifyState, action: PortifyAction): Port
         workflows: [entry, ...others].sort(byStartedDesc),
         details: { ...state.details, [action.workflowId]: action.manifest },
       }
+    }
+    case 'detail-missing': {
+      const { [action.workflowId]: _missing, ...details } = state.details
+      return { ...state, details }
     }
     case 'removed': {
       const { [action.workflowId]: _dropped, ...details } = state.details

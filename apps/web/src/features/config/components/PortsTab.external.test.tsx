@@ -16,7 +16,10 @@ vi.mock('@/shared/api/client', async (importOriginal) => ({
 vi.mock('@/shared/api/workspace-socket', () => ({ connectWorkspaceEvents: vi.fn() }))
 vi.mock('@/features/flights', () => ({ useFlightsStream: () => ({ hydrated: false, flights: [], details: {} }) }))
 vi.mock('@/features/runs/state/RunsContext', () => ({ useRuns: () => ({ runs: [] }) }))
-vi.mock('@/features/portify/state/PortifyContext', () => ({ usePortify: () => ({ workflows: [] }) }))
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return { usePortify: () => ({ workflows: [] }), usePortifyDetail: detailFixture(async () => undefined) }
+})
 
 let container: HTMLDivElement
 let root: Root

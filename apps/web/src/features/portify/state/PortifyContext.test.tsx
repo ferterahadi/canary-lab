@@ -10,6 +10,7 @@ import {
   useActivePortify,
   usePortify,
   usePortifyWorkflow,
+  usePortifyDetail,
 } from './PortifyContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -389,4 +390,25 @@ describe('PortifyProvider — read hooks', () => {
     expect(() => act(() => { root.render(<Outside />) }))
       .toThrow(/usePortify must be used inside <PortifyProvider>/)
   })
+})
+
+
+it('shares provider-owned demand across two mounted detail consumers through retry and reconnect', async () => {
+  vi.useFakeTimers()
+  const details: Array<ReturnType<typeof usePortifyDetail>> = []
+  function Detail({ slot }: { slot: number }) { details[slot] = usePortifyDetail('wf-1'); return null }
+  const renderDetails = (second: boolean) => root.render(<PortifyProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><Detail slot={0} />{second && <Detail slot={1} />}</PortifyProvider>)
+  vi.mocked(api.getPortify).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(manifest({ status: 'saved' }))
+  await act(async () => renderDetails(true))
+  expect(api.getPortify).toHaveBeenCalledTimes(1)
+  expect(details[0].error).toBe('offline')
+  await act(async () => renderDetails(false))
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(details[0].manifest?.status).toBe('saved')
+  expect(api.getPortify).toHaveBeenCalledTimes(2)
+  await act(async () => socket().fire({ type: 'snapshot', workflows: [entry({ status: 'saved' })], details: {} }))
+  expect(details[0].manifest?.status).toBe('saved')
+  expect(api.getPortify).toHaveBeenCalledTimes(3)
+  await act(async () => root.render(null))
+  expect(vi.getTimerCount()).toBe(0)
 })

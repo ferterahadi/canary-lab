@@ -159,6 +159,15 @@ describe('latestTerminalRunByFeature', () => {
     ])
     expect(map.get('f')?.runId).toBe('newest')
   })
+
+  it('counts an abort only when the caller asks for it', () => {
+    const runs = [
+      run({ runId: 'aborted', startedAt: '2026-03-02T00:00:00Z', status: 'aborted' }),
+      run({ runId: 'passed', startedAt: '2026-03-01T00:00:00Z', status: 'passed' }),
+    ]
+    expect(latestTerminalRunByFeature(runs).get('f')?.runId).toBe('passed')
+    expect(latestTerminalRunByFeature(runs, ['passed', 'failed', 'aborted']).get('f')?.runId).toBe('aborted')
+  })
 })
 
 // R81 — the derived-flight id space and the pseudo-manifest FlightPage renders.

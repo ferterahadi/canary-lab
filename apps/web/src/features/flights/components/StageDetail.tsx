@@ -820,6 +820,14 @@ export function StageDetail({
           to get there. */}
       {stage.key === 'portify' && (
         <>
+          {(band.portifyRecovery?.error || band.portifyRecovery?.missing) && (
+            <StageColumn>
+              <div role="alert" className="text-sm text-[var(--muted)]">
+                {band.portifyRecovery.error ?? 'Port work is no longer available.'}
+                <button type="button" className="cl-button ml-2 px-2 py-1" onClick={band.portifyRecovery.retry}>Retry</button>
+              </div>
+            </StageColumn>
+          )}
           <DoubleBootPanel portify={band.portify ?? null} awaiting={awaitingData} />
           <OverlayPanel portify={band.portify ?? null} awaiting={awaitingData} />
           {band.portify && standalonePortifyActionable && !flightOwnsPortify && (

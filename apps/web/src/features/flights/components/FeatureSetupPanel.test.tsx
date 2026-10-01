@@ -36,6 +36,7 @@ afterEach(() => {
     root.unmount()
   })
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('FeatureSetupPanel — heal behavior card', () => {
@@ -219,3 +220,37 @@ function configDoc(extra: Record<string, unknown> = {}): ParsedConfigDoc {
     },
   }
 }
+
+
+it('shows Retry and retains the failed immediate edit while subsequent edits stay local', async () => {
+  await mount({ healOnFailureThreshold: 3 })
+  vi.mocked(putFeatureConfigDoc).mockRejectedValueOnce(new Error('save offline'))
+  await act(async () => mode('full')?.click())
+  expect(container.textContent).toContain('save offline')
+  expect(mode('full')?.getAttribute('aria-checked')).toBe('true')
+  await act(async () => mode('stop')?.click())
+  expect(putFeatureConfigDoc).toHaveBeenCalledTimes(1)
+  vi.mocked(putFeatureConfigDoc).mockImplementation(async (_feature, value) => ({ ...configDoc(), parsed: { ...configDoc().parsed, value } }))
+  const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!
+  await act(async () => retry.click())
+  expect(putFeatureConfigDoc).toHaveBeenCalledTimes(2)
+  expect(container.textContent).not.toContain('save offline')
+})
+
+it('reconciles mounted numeric controls without discarding an uncommitted field edit', async () => {
+  vi.useFakeTimers()
+  const doc = (workers: number): ParsedConfigDoc => ({ ...configDoc(), parsed: { ...configDoc().parsed, value: { workers, retries: 0 } } })
+  vi.mocked(getPlaywrightConfig).mockResolvedValue(doc(1))
+  await mount()
+  const workers = () => container.querySelector<HTMLInputElement>('[data-testid="setup-pw-workers"]')!
+  vi.mocked(getPlaywrightConfig).mockResolvedValue(doc(2))
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(workers().value).toBe('2')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(workers(), '7')
+    workers().dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  vi.mocked(getPlaywrightConfig).mockResolvedValue(doc(3))
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(workers().value).toBe('7')
+})

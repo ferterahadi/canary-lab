@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
-import type { ConfigValue, PortifyManifest } from '@/shared/api/client'
+import type { ConfigValue } from '@/shared/api/client'
 import { ConfirmModal, Section, TrashIcon } from '@/shared/ui/atoms'
 import { ReadOnlyBar } from './SaveBar'
 import {
@@ -8,6 +8,7 @@ import {
   latestSavedWorkflowId,
   SavedOverlayPanel,
   usePortify,
+  usePortifyDetail,
 } from '@/features/portify'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useCachedDoc } from './config-doc-cache'
@@ -101,19 +102,7 @@ export function PortsTab({
   // is the reliable source. `portified` is the verified gate — bandState below
   // is `'verified'` iff `portified` is true, and it's computed after the early
   // returns, so gate the fetch on the prop here.
-  const [overlay, setOverlay] = useState<PortifyManifest | null>(null)
-  const [overlayLoading, setOverlayLoading] = useState(false)
-  useEffect(() => {
-    if (!portified || !savedWorkflowId) { setOverlay(null); return }
-    let cancelled = false
-    setOverlay(null)
-    setOverlayLoading(true)
-    api.getPortify(savedWorkflowId)
-      .then((m) => { if (!cancelled) setOverlay(m) })
-      .catch(() => { if (!cancelled) setOverlay(null) })
-      .finally(() => { if (!cancelled) setOverlayLoading(false) })
-    return () => { cancelled = true }
-  }, [portified, savedWorkflowId])
+  const { manifest: overlay, loading: overlayLoading, error: overlayError, missing: overlayMissing, retry: retryOverlay } = usePortifyDetail(portified ? savedWorkflowId : null)
   // Live sync with every other Portify entry point (flight Parallel-readiness
   // stage, run-collision dialog, MCP): the `/ws/portify`-fed index is shared,
   // so an active workflow started ANYWHERE shows up here without a refresh.
@@ -165,6 +154,9 @@ export function PortsTab({
   return (
     <>
       <PortsFrame>
+    {(overlayError || overlayMissing) && <div role="alert" className="p-4 text-xs text-danger">
+      {overlayError ?? 'Saved port work is no longer available.'} <button className="cl-button" onClick={retryOverlay}>Retry</button>
+    </div>}
         {/* Same inset card stack every other config tab uses (General, Service,
             Playwright): sibling Sections in a `flex flex-col gap-3 p-3` scroller,
             so no block bleeds to the modal edge. */}
