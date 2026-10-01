@@ -20,6 +20,7 @@ import { stageIntervals, type StageBoundary } from './telemetry'
 import { parseUsage, sessionRole } from './usage'
 import { attributeUsage, assessPolicy, type SessionInput } from './attribution'
 import { claudePermissionArgs, claudeStudyCommand, REPAIR_ALLOWED_TOOLS } from './claude-permissions'
+import { DEFAULT_DIAGNOSIS_POLICY } from '../../shared/diagnosis-policy'
 export { parseUsage, sessionRole, groupUsage } from './usage'
 
 export function freezeToolConfig(command: string, agent: 'claude' | 'codex', args: AgentSpawnArgs, codexToolArgs: string[] = []): string {
@@ -179,7 +180,7 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
     },
     autoHeal: { agent: attempt.agent, diagnosisPolicy: attempt.variant?.diagnosisPolicy, buildCyclePrompt: (args) => {
       const prompt = buildPrompt(args)
-      const receipt = { cycle: args.cycle, diagnosisPolicy: attempt.variant?.diagnosisPolicy ?? 'per-failure', digest: sha(prompt), bytes: Buffer.byteLength(prompt) }
+      const receipt = { cycle: args.cycle, diagnosisPolicy: attempt.variant?.diagnosisPolicy ?? DEFAULT_DIAGNOSIS_POLICY, digest: sha(prompt), bytes: Buffer.byteLength(prompt) }
       write(path.join(root, `prompts/cycle-${args.cycle}.md`), prompt)
       json(path.join(root, `prompts/cycle-${args.cycle}.json`), receipt)
       return prompt
