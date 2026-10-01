@@ -8,7 +8,7 @@ import { useWorkspaceSelection } from './use-workspace-selection'
 
 const api = vi.hoisted(() => ({ listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(), getVersionStatus: vi.fn() }))
 vi.mock('../api/client', async (importOriginal) => ({ ...await importOriginal<typeof import('../api/client')>(), ...api }))
-vi.mock('@/features/runs', () => ({ useRun: () => ({ detail: undefined }) }))
+vi.mock('@/features/runs', async (importOriginal) => ({ ...await importOriginal<typeof import('@/features/runs')>(), useRun: () => ({ detail: undefined }) }))
 
 // The data, selection, and Flight stream hooks run together. Only network I/O
 // is replaced; deletion frames must update the same mounted workspace.

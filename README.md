@@ -7,6 +7,8 @@
 
 Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. You get a report that links requirements, tests, captured evidence, and the actual pass or fail result.
 
+**Measured on the bundled demo:** Claude Code and Codex fixed the same bugs in a median 74 seconds instead of 128, with 64% fewer output tokens, when Canary Lab ran the repair loop. [How we measured](docs/BENCHMARK.md).
+
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
 ## Quick Start
@@ -104,6 +106,19 @@ New workspaces include demonstrations for a prepared repair loop, a bare repo Fl
 
 Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary Lab start application services with their normal development commands. This keeps hot reload available during repair.
 
+## Measured Repair Speed
+
+We gave Claude Code and Codex the same seeded bugs in the bundled storefront demo. Each agent fixed each bug once through Canary Lab and once with plain shell commands and Playwright, five times per bug.
+
+| Agent and bug | Median time: Canary → plain | Median output tokens |
+| --- | --- | --- |
+| Claude, one-service bug | 34s → 113s | 1.6k → 7.1k |
+| Codex, one-service bug | 67s → 156s | 1.8k → 3.7k |
+| Codex, three-service bug | 106s → 188s | 3.3k → 5.7k |
+| Claude, three-service bug | 77s → 123s | 4.7k → 8.5k |
+
+Both workflows fixed all 20 of their attempts, so the gain is speed and cost, not correctness. Most of the saving comes from Canary Lab starting services and running tests, so the agent does not do it step by step. This is a small sample on Canary Lab's own demo. The Claude three-service result could still be a tie. See [Benchmark](docs/BENCHMARK.md) for the method, what affects the numbers, and every pair.
+
 ## How It Compares
 
 | | Plain Playwright | Docker Compose with watch | Hosted dashboard | Canary Lab |
@@ -150,6 +165,7 @@ Restart Canary Lab and connected agent apps afterwards so they load the refreshe
 | --- | --- |
 | [Changelog](docs/CHANGELOG.md) | Release history. |
 | [Roadmap](docs/ROADMAP.md) | Planned product milestones and their evidence bars. |
+| [Benchmark](docs/BENCHMARK.md) | Repair speed and token use with and without Canary Lab, and how they were measured. |
 | [Guide](docs/GUIDE.md) | Environment switching, run output, repairs, and evaluation reports. |
 | [Commands](docs/COMMANDS.md) | Full CLI and trigger-surface reference. |
 | [Suite Folders](docs/FEATURES.md) | Suite structure, configuration, and Playwright tests. |

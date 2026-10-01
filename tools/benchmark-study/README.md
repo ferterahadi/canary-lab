@@ -2,6 +2,8 @@
 
 This contributor script compares a prepared three-service storefront repaired through Canary with the same application repaired through ordinary shell commands and Playwright. It does not change the Benchmark product feature. The demo is a controlled sample, not evidence of general superiority or onboarding value.
 
+Published results, with their method and limits, are in [docs/BENCHMARK.md](../../docs/BENCHMARK.md).
+
 ## Run
 
 Use an explicit `demo-project` directory created by `npm run demo`. Preparation copies its application, suite, and installed dependencies; it never repairs the interactive demo. The selected output parent must exist, and the output directory must not already exist or overlap the source checkout or demo workspace.
