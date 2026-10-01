@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
@@ -7,6 +7,7 @@ import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 import { useRuns } from '@/features/runs'
 import { isActiveRunStatus } from '@shared/run-state'
+import { createRepoEditorRows } from './repo-editor-rows'
 import { RepoCard } from './RepoCard'
 import { PortSlotSlice, RepoSlice, Slice, parseRepo, sameProbePath, serializeRepo } from './repo-slice'
 
@@ -14,6 +15,7 @@ export { deriveRepoName, parseRepo, serializeRepo } from './repo-slice'
 export type { CommandSlice, PortSlotSlice, ProbePath, RepoSlice } from './repo-slice'
 
 export function ReposTab({ feature }: { feature: string }) {
+  const rowIds = useMemo(createRepoEditorRows, [feature])
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))
@@ -47,6 +49,7 @@ export function ReposTab({ feature }: { feature: string }) {
   }
 
   const { repos, rootEnvs } = ed.draft
+  rowIds.identify(repos)
 
   const addRepo = (): void => {
     ed.setDraft((d) => ({
@@ -70,11 +73,12 @@ export function ReposTab({ feature }: { feature: string }) {
           {repos.length === 0 && (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
           )}
-          {repos.map((repo, i) => {
+          {repos.map((repo) => {
+            const rowId = rowIds.id(repo)
             const persistedRepo = ed.baseline?.repos.find((r) => sameProbePath(r.localPath, repo.localPath))
             return (
               <RepoCard
-                key={i}
+                key={`${feature}:${rowId}`}
                 feature={feature}
                 repo={repo}
                 repoLookupName={persistedRepo?.name}
@@ -82,11 +86,11 @@ export function ReposTab({ feature }: { feature: string }) {
                 activeRun={activeRun}
                 onChange={(next) => ed.setDraft((d) => ({
                   ...d,
-                  repos: d.repos.map((r, j) => j === i ? next : r),
+                  repos: rowIds.update(d.repos, rowId, next),
                 }))}
                 onRemove={() => ed.setDraft((d) => ({
                   ...d,
-                  repos: d.repos.filter((_, j) => j !== i),
+                  repos: d.repos.filter((r) => rowIds.id(r) !== rowId),
                 }))}
               />
             )
@@ -112,7 +116,7 @@ export function ReposTab({ feature }: { feature: string }) {
         error={ed.error}
         savedAt={ed.savedAt}
         onSave={ed.doSave}
-        onDiscard={ed.discard}
+        onDiscard={() => { rowIds.reset(); ed.discard() }}
       />
     </div>
   )

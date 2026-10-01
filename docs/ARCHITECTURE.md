@@ -323,6 +323,19 @@ Failed reads retain choices but disable insertion; authoritative deletion clears
 choices. Environment/slot replacement rejects older reads without changing
 already-entered tokens. Configuration is not kept in a module-global cache.
 
+Repository path probes and filesystem pickers use no-topic live readers with
+identity changes and explicit Retry, without polling. Repository editor rows
+carry private identities outside configuration; asynchronous patches target the
+latest row, and removal, replacement, or Discard expires old callbacks. Directory
+navigation retains a disabled previous listing until the requested directory
+succeeds, while typed path text has its own lifetime. Copy previews also expire
+when their source or picker session changes.
+
+Discovery-repair starts keep one outstanding lock per suite within the mounted
+hook. Switching suites changes which lock is displayed without releasing another
+suite's request. Completion publication belongs to the originating mounted
+identity; the dedicated reconnecting task stream remains authoritative.
+
 Notification lists use the same live reader with ten-second reconciliation.
 Its synchronous `accept` operation applies mutation observations to the current
 value and invalidates older reads. Acceptance callbacks survive refreshes but

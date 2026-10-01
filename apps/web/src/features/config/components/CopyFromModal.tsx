@@ -2,11 +2,17 @@ import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { ComparisonLegend, ComparisonTable } from '@/shared/ui/ComparisonTable'
 import { FieldRow, Modal, TextInput } from '@/shared/ui/atoms'
+import { useLiveResource } from '@/shared/state/use-live-resource'
+import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
 import { inlineSelectStyle } from './AddSlotModal'
 import { KvEntry, diffKvEntries } from './envset-diff'
 
-export function CopyFromModal({
+export function CopyFromModal(props: Parameters<typeof CopyFromSession>[0]) {
+  return <CopyFromSession key={JSON.stringify([props.feature, props.targetEnv, props.slot])} {...props} />
+}
+
+function CopyFromSession({
   feature,
   targetEnv,
   slot,
@@ -25,31 +31,25 @@ export function CopyFromModal({
 }) {
   const [mode, setMode] = useState<'env' | 'file'>(siblingEnvs.length > 0 ? 'env' : 'file')
   const [sourceEnv, setSourceEnv] = useState<string | null>(siblingEnvs[0] ?? null)
-  const [filePath, setFilePath] = useState('')
-  const [browse, setBrowse] = useState<api.FsBrowseResponse | null>(null)
   const [sourceEntries, setSourceEntries] = useState<KvEntry[] | null>(null)
   const [sourceLabel, setSourceLabel] = useState<string>('')
-  const [error, setError] = useState<string | null>(null)
   const [stage, setStage] = useState<'pick' | 'review'>('pick')
   const [overwrite, setOverwrite] = useState<Record<string, boolean>>({})
   const [addNew, setAddNew] = useState<Record<string, boolean>>({})
   const [keepExtra, setKeepExtra] = useState<Record<string, boolean>>({})
-  const [busy, setBusy] = useState(false)
-
-  const loadDir = async (dir: string): Promise<void> => {
-    setError(null)
-    try {
-      const res = await api.browseDir(dir)
-      setBrowse(res)
-      setFilePath(res.dir)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Browse failed')
-    }
-  }
-
-  useEffect(() => {
-    if (mode === 'file' && !browse) loadDir('')
-  }, [mode])
+  const browser = useFilesystemBrowser({ session: mode, kind: 'files', enabled: mode === 'file' && stage === 'pick' })
+  const { browse, pathInput: filePath, setPathInput: setFilePath } = browser
+  const [preview, setPreview] = useState<{ mode: typeof mode; source: string; revision: number } | null>(null)
+  const selected = preview?.mode === mode && (mode === 'file' || preview.source === sourceEnv) ? preview : null
+  const resource = useLiveResource(null, selected ? JSON.stringify([feature, slot, selected.mode, selected.source]) : null,
+    async () => {
+      if (!selected) return null
+      const result = selected.mode === 'env' ? await api.getEnvsetSlot(feature, selected.source, slot) : await api.readDotenvFile(selected.source)
+      return { entries: result.entries, label: selected.source }
+    }, { refreshKey: selected?.revision })
+  const busy = selected !== null && !resource.confirmed && !resource.error
+  const error = resource.error
+  const loadDir = (dir: string) => { setPreview(null); browser.navigate(dir) }
 
   const applyEntries = (entries: KvEntry[], label: string): void => {
     setSourceEntries(entries)
@@ -61,31 +61,17 @@ export function CopyFromModal({
     setStage('review')
   }
 
-  const onLoadEnv = async (): Promise<void> => {
-    if (!sourceEnv) return
-    setBusy(true)
-    setError(null)
-    try {
-      const doc = await api.getEnvsetSlot(feature, sourceEnv, slot)
-      applyEntries(doc.entries, sourceEnv)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Load failed')
-    } finally {
-      setBusy(false)
-    }
-  }
+  useEffect(() => {
+    if (resource.confirmed && resource.value) applyEntries(resource.value.entries, resource.value.label)
+    // Initialize review choices once per accepted preview, preserving later edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resource.confirmed, resource.value])
 
-  const onLoadFile = async (full: string): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await api.readDotenvFile(full)
-      applyEntries(res.entries, full)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Read failed')
-    } finally {
-      setBusy(false)
-    }
+  const onLoadEnv = (): void => {
+    if (sourceEnv) setPreview((previous) => ({ mode, source: sourceEnv, revision: (previous?.revision ?? 0) + 1 }))
+  }
+  const onLoadFile = (full: string): void => {
+    if (browser.confirmed) setPreview((previous) => ({ mode, source: full, revision: (previous?.revision ?? 0) + 1 }))
   }
 
   const diff = sourceEntries ? diffKvEntries(sourceEntries, current) : null
@@ -119,7 +105,7 @@ export function CopyFromModal({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => { if (siblingEnvs.length > 0) setMode('env') }}
+              onClick={() => { if (siblingEnvs.length > 0) { setPreview(null); setMode('env') } }}
               disabled={siblingEnvs.length === 0}
               className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
               style={{
@@ -131,7 +117,7 @@ export function CopyFromModal({
             </button>
             <button
               type="button"
-              onClick={() => setMode('file')}
+              onClick={() => { setPreview(null); setMode('file') }}
               className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
               style={{
                 color: mode === 'file' ? 'var(--text-primary)' : undefined,
@@ -145,7 +131,7 @@ export function CopyFromModal({
             <FieldRow label="Source env">
               <select
                 value={sourceEnv ?? ''}
-                onChange={(e) => setSourceEnv(e.target.value)}
+                onChange={(e) => { setPreview(null); setSourceEnv(e.target.value) }}
                 className="themed-select w-full rounded-md py-1.5 pl-2.5 pr-8 text-xs outline-none"
                 style={inlineSelectStyle}
               >
@@ -170,13 +156,16 @@ export function CopyFromModal({
                   Go
                 </button>
               </div>
-              <FileBrowserList browse={browse} onNavigate={loadDir} onPickFile={onLoadFile} minHeight={200} maxHeightVh={40} />
+              <FileBrowserList disabled={!browser.confirmed} browse={browse} onNavigate={loadDir} onPickFile={onLoadFile} minHeight={200} maxHeightVh={40} />
               <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Click a file to load it. Anything parseable as <code>KEY=VALUE</code> works.
               </div>
             </div>
           )}
-          {error && <div className="text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
+          {mode === 'file' && (browser.loading || browser.error) && <div role="status" className="text-xs text-muted">
+            {browser.error || 'Loading directory…'} <span className="font-mono">{browser.requestedPath || '~'}</span> <button type="button" className="cl-button px-2" onClick={browser.retry}>Retry</button>
+          </div>}
+          {error && <div className="text-xs" style={{ color: 'var(--danger)' }}>{error} <button type="button" className="cl-button px-2" onClick={resource.refresh}>Retry</button></div>}
           <div className="flex justify-end gap-2 pt-2" style={{ borderTop: '1px solid var(--border-default)' }}>
             <button
               type="button"
@@ -246,7 +235,7 @@ export function CopyFromModal({
           <div className="flex justify-end gap-2 px-4 py-2" style={{ borderTop: '1px solid var(--border-default)' }}>
             <button
               type="button"
-              onClick={() => setStage('pick')}
+              onClick={() => { setPreview(null); setStage('pick') }}
               className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
               style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
             >

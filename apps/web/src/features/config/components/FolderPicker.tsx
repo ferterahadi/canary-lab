@@ -2,7 +2,8 @@
  * Modal folder picker. canary-lab is a local dev tool, so the picker can
  * navigate anywhere on the user's filesystem via /api/workspace/dirs.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useFilesystemBrowser } from './use-filesystem-browser'
 import * as api from '@/shared/api/client'
 import { ChevronRightIcon, FolderIcon, Modal } from '@/shared/ui/atoms'
 
@@ -70,13 +71,14 @@ export function FolderPicker({ value, onChange, placeholder, title, confirmLabel
  *  `listWorkspaceDirs`) and the file pickers in `EnvsetsTab` (dirs + files,
  *  via `browseDir` — a different endpoint since those need to select a
  *  specific file, not just land on a folder). The two APIs return different
- *  shapes, so this only shares the list rendering, not the data fetch. */
+ *  shapes; useFilesystemBrowser adapts their reads to this shared listing. */
 export function FileBrowserList({
   browse,
   onNavigate,
   onPickFile,
   minHeight = 260,
   maxHeightVh = 50,
+  disabled = false,
 }: {
   browse: api.FsBrowseResponse | null
   onNavigate: (dir: string) => void
@@ -84,6 +86,7 @@ export function FileBrowserList({
   onPickFile: (fullPath: string) => void
   minHeight?: number
   maxHeightVh?: number
+  disabled?: boolean
 }) {
   return (
     <div
@@ -93,7 +96,8 @@ export function FileBrowserList({
       {browse?.parent && (
         <button
           type="button"
-          onClick={() => onNavigate(browse.parent!)}
+          disabled={disabled}
+          onClick={() => { if (!disabled) onNavigate(browse.parent!) }}
           className="block w-full truncate px-3 py-1.5 text-left text-xs"
           style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
         >
@@ -104,7 +108,9 @@ export function FileBrowserList({
         <button
           key={e.name}
           type="button"
+          disabled={disabled}
           onClick={() => {
+            if (disabled) return
             const full = `${browse.dir}/${e.name}`.replace(/\/+/g, '/')
             if (e.isDir) onNavigate(full)
             else onPickFile(full)
@@ -135,22 +141,9 @@ export function FolderPickerModal({
   onConfirm: (path: string) => void
   onCancel: () => void
 }) {
-  const [at, setAt] = useState<string>(initialPath)
-  const [resp, setResp] = useState<api.WorkspaceDirsResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    api.listWorkspaceDirs(at)
-      .then((r) => { if (!cancelled) { setResp(r); setError(null) } })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Failed to list directories')
-      })
-    return () => { cancelled = true }
-  }, [at])
-
-  const current = resp?.absolute ?? at
+  const browser = useFilesystemBrowser({ session: JSON.stringify([initialPath, title]), kind: 'folders', initialPath })
+  const { browse: resp, error } = browser
+  const current = browser.confirmed ? resp?.dir ?? initialPath : browser.requestedPath
   const parent = resp?.parent ?? null
 
   return (
@@ -167,8 +160,8 @@ export function FolderPickerModal({
         >
           <button
             type="button"
-            disabled={!parent}
-            onClick={() => parent && setAt(parent)}
+            disabled={!parent || !browser.confirmed}
+            onClick={() => parent && browser.confirmed && browser.navigate(parent)}
             className="cl-button rounded px-2 py-1 text-xs"
             style={{
               fontFamily: 'var(--font-mono)',
@@ -199,10 +192,10 @@ export function FolderPickerModal({
           <button
             type="button"
             data-testid="folder-picker-confirm"
-            disabled={!resp?.absolute}
+            disabled={!browser.confirmed}
             onClick={() => {
-              if (!resp?.absolute) return
-              onConfirm(resp.absolute)
+              if (!browser.confirmed || !resp) return
+              onConfirm(resp.dir)
             }}
             className="cl-button-primary px-3.5 py-1 text-xs"
           >
@@ -214,28 +207,16 @@ export function FolderPickerModal({
       {error && (
         <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
           {error}
+          <button type="button" className="cl-button ml-2 px-2" onClick={browser.retry}>Retry</button>
         </div>
       )}
-      {!error && resp && resp.dirs.length === 0 && (
+      {!error && browser.confirmed && resp && resp.entries.length === 0 && (
         <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
           (no subdirectories)
         </div>
       )}
-      {resp?.dirs.map((d) => (
-        <button
-          key={d}
-          type="button"
-          onDoubleClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
-          onClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
-          className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-xs transition-colors duration-150"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-        >
-          <FolderIcon />
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{d}</span>
-        </button>
-      ))}
+      {browser.loading && <div role="status" className="px-4 py-2 text-xs text-muted">Loading directory… <button type="button" className="cl-button px-2" onClick={browser.retry}>Retry</button></div>}
+      <FileBrowserList browse={resp} disabled={!browser.confirmed} onNavigate={browser.navigate} onPickFile={() => {}} />
     </Modal>
   )
 }
