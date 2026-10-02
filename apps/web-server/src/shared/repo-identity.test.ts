@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { resolveRepoIdentity, resolveRepoPath, sameRepoSet } from './repo-identity'
+import { resolveRepoIdentity, resolveRepoPath, resolveRepoPaths, sameRepoSet } from './repo-identity'
 
 let root: string
 beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-'))) })
@@ -85,4 +85,24 @@ it('compares identities without changing order or duplicate multiplicity', () =>
   expect(sameRepoSet(['~'], [os.homedir()])).toBe(true)
   expect(sameRepoSet(['~/missing-repo'], [path.join(os.homedir(), 'missing-repo')])).toBe(true)
   expect(sameRepoSet([], [])).toBe(true)
+})
+
+it('resolves a repository list in order with duplicate aliases and no input changes', () => {
+  const repo = path.join(root, 'repo')
+  const alias = path.join(root, 'alias')
+  fs.mkdirSync(repo); fs.symlinkSync(repo, alias)
+  const input = [alias, '~', repo, '']
+  expect(resolveRepoPaths(input)).toEqual({ ok: true, paths: [repo, fs.realpathSync(os.homedir()), repo, fs.realpathSync(process.cwd())] })
+  expect(input).toEqual([alias, '~', repo, ''])
+  expect(resolveRepoPaths([])).toEqual({ ok: true, paths: [] })
+  const file = path.join(root, 'file')
+  fs.writeFileSync(file, '')
+  expect(resolveRepoPaths([file])).toEqual({ ok: true, paths: [file] })
+})
+it('returns the first original failing path without processing later paths', () => {
+  const first = path.join(root, 'missing-1')
+  const second = path.join(root, 'missing-2')
+  const spy = vi.spyOn(fs, 'realpathSync')
+  expect(resolveRepoPaths([root, first, second])).toEqual({ ok: false, path: first })
+  expect(spy).not.toHaveBeenCalledWith(second)
 })

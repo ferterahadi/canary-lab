@@ -25,3 +25,16 @@ export function sameRepoSet(a: readonly string[], b: readonly string[]): boolean
   const norm = (paths: readonly string[]) => paths.map((p) => resolveRepoIdentity(p, 'best-effort')).sort().join('\n')
   return norm(a) === norm(b)
 }
+
+
+export function resolveRepoPaths(paths: readonly string[]): { ok: true; paths: string[] } | { ok: false; path: string } {
+  const resolved: string[] = []
+  for (const candidate of paths) {
+    try {
+      resolved.push(resolveRepoIdentity(candidate, 'required'))
+    } catch {
+      return { ok: false, path: candidate }
+    }
+  }
+  return { ok: true, paths: resolved }
+}

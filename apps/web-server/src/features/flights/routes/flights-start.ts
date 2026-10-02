@@ -1,7 +1,7 @@
 import type { GettingStartedOwner, GettingStartedWorkflow } from '../../../../../../shared/getting-started'
 // Flights REST — starting a flight and the plan-features task surface.
 // Split out of flights.ts; handler bodies are unchanged.
-import { resolveRepoIdentity } from '../../../shared/repo-identity'
+import { resolveRepoPaths } from '../../../shared/repo-identity'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
@@ -137,15 +137,12 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     // Realpath the repo set: it is the single-flight key, so two spellings of
     // the same directory must collide, not slip past each other. Configs may
     // declare repos as `~/...` — expand like the entry prefill does.
-    const resolved: string[] = []
-    for (const p of repoPaths) {
-      try {
-        resolved.push(resolveRepoIdentity(p, 'required'))
-      } catch {
-        reply.code(400)
-        return { error: `repo path does not exist: ${p}` }
-      }
+    const resolution = resolveRepoPaths(repoPaths)
+    if (!resolution.ok) {
+      reply.code(400)
+      return { error: `repo path does not exist: ${resolution.path}` }
     }
+    const resolved = resolution.paths
 
     const agent = body.agent === 'claude' || body.agent === 'codex' ? body.agent : undefined
     const opts: FlightOptions = {

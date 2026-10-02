@@ -1,3 +1,4 @@
+import { createExternalHealSession } from './external-heal-session'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
@@ -127,18 +128,7 @@ export class ExternalHealBroker {
             ? { clientVersion: input.clientVersion }
             : {}),
         }
-      : {
-          sessionId: input.sessionId,
-          clientKind: input.clientKind,
-          ...(input.clientVersion !== undefined ? { clientVersion: input.clientVersion } : {}),
-          ...(input.conversationName !== undefined
-            ? { conversationName: input.conversationName }
-            : {}),
-          claimedAt: nowIso,
-          lastHeartbeatAt: nowIso,
-          status: 'connected',
-          cycleCount: 0,
-        }
+      : createExternalHealSession(input, nowIso, 'defined')
 
     this.sessions.set(runId, session)
     this.deps.patchManifest(runId, {

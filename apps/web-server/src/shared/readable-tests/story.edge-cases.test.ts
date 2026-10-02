@@ -372,3 +372,25 @@ describe('optional compact test summary flow edge cases', () => {
     ]))
   })
 })
+
+const expressionWrappers = ['(%s)', 'await %s', '(%s as unknown)', '<unknown>%s', '(%s)!', '(%s satisfies unknown)', '(await ((%s as unknown)!) satisfies unknown)']
+it.each(expressionWrappers)('retains story arguments and authored source through %s', (wrapper) => {
+  const statement = `await sendValue(${wrapper.replace('%s', '42')});`
+  const result = translate(`{\n${statement}\n}`)
+  expect(result.summary?.steps[0]).toMatchObject({ text: 'Send value using 42', source: { startLine: 11, endLine: 11, snippet: statement } })
+  expect(result.nodes[0].source.snippet).toBe(statement)
+})
+it.each(expressionWrappers)('retains conditional narration and source through %s', (wrapper) => {
+  const statement = `const result = ${wrapper.replace('%s', '(ready ? sendA() : sendB())')};`
+  const result = translate(`{\n${statement}\n}`)
+  expect(result.summary?.steps[0]).toMatchObject({ text: 'If ready is true', source: { startLine: 11, snippet: statement } })
+  expect(storyItems(result.summary?.steps).map((step) => step.text)).toContain('Send a, saving the result as result')
+  expect(result.nodes[0].source.snippet).toBe(statement)
+})
+it('keeps non-block callback recognition limited to parentheses and await', () => {
+  const plain = translate('{ values.forEach(item => (sendValue(item))); }')
+  const cast = translate('{ values.forEach(item => (sendValue(item) as unknown)); }')
+  expect(storyItems(plain.summary?.steps).map((item) => item.text)).toContain('Send value using item')
+  expect(storyItems(cast.summary?.steps).map((item) => item.text)).not.toContain('Send value using item')
+  expect(cast.nodes[0].source.snippet).toContain('as unknown')
+})

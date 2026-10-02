@@ -1124,7 +1124,7 @@ describe('startRun — external heal origin', () => {
     expect(runnerLogText(runId)).toContain('claimed and will drive the heal loop')
   })
 
-  it('omits the optional client fields the request did not supply', async () => {
+  it.each([undefined, ''])('omits absent or empty optional client fields (%j)', async (metadata) => {
     writeFeature('demo')
     const h = harness()
 
@@ -1132,6 +1132,8 @@ describe('startRun — external heal origin', () => {
       kind: 'external',
       sessionId: 'session-0000000000',
       clientKind: 'other',
+      clientVersion: metadata,
+      conversationName: metadata,
     })
 
     const session = lastOpts().externalHealSession as Record<string, unknown>

@@ -1,3 +1,4 @@
+import { createExternalHealSession } from './logic/heal/external-heal-session'
 // The dependency object the runs REST surface is registered with: every callback
 // the routes hand back into the run loop. Split out of index.ts, where it was a
 // 430-line object literal inline in `register` — the closures it is built from
@@ -195,16 +196,7 @@ export function buildRunsRouteDeps(
       let externalHealSession: import('../../../../../shared/run-manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
-        externalHealSession = {
-          sessionId: healAgentReq.sessionId,
-          clientKind: healAgentReq.clientKind,
-          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-          claimedAt: nowIso,
-          lastHeartbeatAt: nowIso,
-          status: 'connected',
-          cycleCount: 0,
-        }
+        externalHealSession = createExternalHealSession(healAgentReq, nowIso, 'nonempty')
       }
       let autoHeal: AutoHealConfig | undefined
       const agentChoice = (externalOrigin || isBoot)

@@ -1,3 +1,4 @@
+import { normalizeKnownTestRecord } from './known-test-record'
 // Turning a Playwright run's summary + manifest into a verdict: pass counts,
 // rerun/verification plans, failure extraction, and the final run status.
 //
@@ -299,26 +300,9 @@ export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[]
   const raw = Array.isArray(summary.knownTests) ? summary.knownTests : []
   const out: KnownSummaryTest[] = []
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const value = entry as {
-      name?: unknown
-      title?: unknown
-      titlePath?: unknown
-      listLine?: unknown
-      location?: unknown
-    }
-    if (typeof value.name !== 'string' || value.name.length === 0) continue
-    if (typeof value.title !== 'string' || value.title.length === 0) continue
-    if (out.some((test) => test.name === value.name)) continue
-    out.push({
-      name: value.name,
-      title: value.title,
-      ...(Array.isArray(value.titlePath)
-        ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
-        : {}),
-      ...(typeof value.listLine === 'string' && value.listLine.length > 0 ? { listLine: value.listLine } : {}),
-      ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
-    })
+    const record = normalizeKnownTestRecord(entry)
+    if (!record || out.some((test) => test.name === record.fields.name)) continue
+    out.push(record.fields)
   }
   return out
 }

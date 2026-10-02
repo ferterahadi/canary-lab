@@ -1,6 +1,6 @@
 // Flights REST — the multi-repo plan surface (propose a plan, poll the task,
 // launch the planned flights) plus stage evidence and abort. Bodies unchanged.
-import { resolveRepoIdentity } from '../../../shared/repo-identity'
+import { resolveRepoPaths } from '../../../shared/repo-identity'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
@@ -29,15 +29,12 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
         reply.code(400)
         return { error: 'description is required' }
       }
-      const resolved: string[] = []
-      for (const p of repoPaths) {
-        try {
-          resolved.push(resolveRepoIdentity(p, 'required'))
-        } catch {
-          reply.code(400)
-          return { error: `repo path does not exist: ${p}` }
-        }
+      const resolution = resolveRepoPaths(repoPaths)
+      if (!resolution.ok) {
+        reply.code(400)
+        return { error: `repo path does not exist: ${resolution.path}` }
       }
+      const resolved = resolution.paths
       const task = startPlanFeatures(
         {
           repoPaths: resolved,

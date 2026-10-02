@@ -206,3 +206,19 @@ describe('connectEvaluationExport', () => {
     expect(FakeSocket.instances[1].closeCalls).toBe(0)
   })
 })
+
+it('survives malformed frames and ignores pane reset without losing reconnect recovery', () => {
+  reset()
+  const onData = vi.fn(); const onError = vi.fn()
+  connectEvaluationExport({ taskId: 'task', wsBase: 'ws://test', WebSocketImpl: FakeSocket as unknown as typeof WebSocket, onData, onError })
+  const first = FakeSocket.instances[0]
+  for (const msg of [null, [], { type: 'reset' }, { type: 'exit', code: '0' }, { type: 'data', chunk: {} }]) first.fire(msg)
+  first.fire({ type: 'error', error: 1 }); first.fireClose()
+  expect(FakeSocket.instances).toHaveLength(2)
+  const next = FakeSocket.instances[1]
+  next.fire({ type: 'data', chunk: 'recovered' })
+  expect(onData).toHaveBeenCalledExactlyOnceWith('recovered')
+  expect(onError).toHaveBeenCalledExactlyOnceWith('unknown error')
+  next.fire({ type: 'exit', code: 0 }); next.fireClose()
+  expect(FakeSocket.instances).toHaveLength(2)
+})

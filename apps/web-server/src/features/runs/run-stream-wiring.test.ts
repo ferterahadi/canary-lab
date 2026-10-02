@@ -558,6 +558,17 @@ describe('makeRestartExternalRun — restart', () => {
     await until(() => registry.get('r-1') === undefined)
   })
 
+  it('omits empty metadata from restarted sessions and the broker claim', async () => {
+    writeFeature('foo', { envs: ['local'] })
+    writeRunManifest({ runId: 'r-1' })
+    await build()('r-1', healReq({ clientVersion: '', conversationName: '', claimable: true }))
+    const session = orchHarness.options[0].externalHealSession as import('../../../../../shared/run-manifest').ExternalHealSession
+    expect(session).not.toHaveProperty('clientVersion')
+    expect(session).not.toHaveProperty('conversationName')
+    expect(session.claimedAt).toBe(session.lastHeartbeatAt)
+    expect(claims[0].input).toEqual({ sessionId: 's-1', clientKind: 'claude-desktop' })
+  })
+
   it('re-enters external mode without a session when the caller may not own the heal loop', async () => {
     writeFeature('foo', { envs: ['staging'] })
     writeRunManifest({ runId: 'r-1' })

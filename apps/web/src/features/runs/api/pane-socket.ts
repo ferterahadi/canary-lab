@@ -1,3 +1,4 @@
+import { dispatchOutputFrame } from '@/shared/api/output-frame'
 // Thin wrapper around the per-run pane WebSocket. Replay-on-connect is handled
 // server-side by PaneBroker; we just forward chunks to the consumer.
 //
@@ -59,24 +60,7 @@ export function connectPane(opts: ConnectPaneOptions): PaneConnection {
     maxReconnects: opts.maxReconnects,
     onOpen: opts.onOpen,
     onError: opts.onError,
-    onMessage: (data) => {
-      let msg: PaneSocketMessage
-      try {
-        msg = JSON.parse(data) as PaneSocketMessage
-      } catch {
-        return
-      }
-      if (msg.type === 'data' && typeof msg.chunk === 'string') {
-        opts.onData(msg.chunk)
-      } else if (msg.type === 'exit' && typeof msg.code === 'number') {
-        conn.markDone()
-        opts.onExit?.(msg.code)
-      } else if (msg.type === 'reset') {
-        opts.onReset?.()
-      } else if (msg.type === 'error') {
-        opts.onError?.(msg.error ?? 'unknown error')
-      }
-    },
+    onMessage: (data) => dispatchOutputFrame(data, opts, () => conn.markDone()),
   })
 
   return {

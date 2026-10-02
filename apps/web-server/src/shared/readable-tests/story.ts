@@ -1,4 +1,4 @@
-import { authoredStep, callFromStatement } from './call-syntax'
+import { authoredStep, callFromStatement, unwrapCallExpression } from './call-syntax'
 import ts from 'typescript'
 import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
@@ -287,15 +287,7 @@ function storyArgument(
   }
   const path = expressionPath(argument)
   if (path) return exactIdentifierText(path)
-  let expression = argument
-  while (
-    ts.isAwaitExpression(expression)
-    || ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-  ) expression = expression.expression
+  const expression = unwrapCallExpression(argument)
   if (ts.isPropertyAccessExpression(expression)) {
     const owner = storyArgument(expression.expression, sourceFile)
     return owner ? `${owner} ${humanizeIdentifier(expression.name.text)}` : undefined
@@ -1203,15 +1195,7 @@ export function storyCandidates(
     options: WalkOptions,
     assigned?: string,
   ): StoryCandidate[] {
-    let expression = sourceExpression
-    while (
-      ts.isAwaitExpression(expression)
-      || ts.isParenthesizedExpression(expression)
-      || ts.isAsExpression(expression)
-      || ts.isTypeAssertionExpression(expression)
-      || ts.isNonNullExpression(expression)
-      || ts.isSatisfiesExpression(expression)
-    ) expression = expression.expression
+    const expression = unwrapCallExpression(sourceExpression)
 
     const rendered = renderActionExpression(expression, sourceFile)
     const directDescription = rendered
@@ -1391,14 +1375,7 @@ export function storyCandidates(
         ? statement.declarationList.declarations[0].initializer
         : undefined
     if (!expression) return undefined
-    while (
-      ts.isAwaitExpression(expression)
-      || ts.isParenthesizedExpression(expression)
-      || ts.isAsExpression(expression)
-      || ts.isTypeAssertionExpression(expression)
-      || ts.isNonNullExpression(expression)
-      || ts.isSatisfiesExpression(expression)
-    ) expression = expression.expression
+    expression = unwrapCallExpression(expression)
     if (!ts.isConditionalExpression(expression)) return undefined
 
     const assigned = assignedIdentifier(statement)

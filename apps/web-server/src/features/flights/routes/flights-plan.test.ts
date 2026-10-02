@@ -531,7 +531,7 @@ it.each(['/api/flights', '/api/flights/plan-features'])('retains the unresolved-
   const alias = path.join(tmpDir, 'dangling')
   fs.symlinkSync(missing, alias)
   app = await buildApp(allDone())
-  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [alias] }) })
+  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [repoDir, alias, missing] }) })
   expect(result.statusCode).toBe(400)
   expect(result.json()).toEqual({ error: `repo path does not exist: ${alias}` })
 })

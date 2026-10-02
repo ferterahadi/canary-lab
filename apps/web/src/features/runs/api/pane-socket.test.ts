@@ -389,3 +389,22 @@ describe('connectPane', () => {
     }
   })
 })
+
+it('survives malformed frames, preserves reset, and only stops reconnecting on a valid exit', () => {
+  reset()
+  const onData = vi.fn(); const onError = vi.fn(); const onReset = vi.fn()
+  connectPane({ runId: 'r', paneId: 'p', wsBase: 'ws://test', WebSocketImpl: FakeSocket as unknown as typeof WebSocket, onData, onError, onReset })
+  const first = FakeSocket.instances[0]
+  for (const msg of [null, [], { type: 'exit', code: '0' }, { type: 'data', chunk: {} }]) first.fire(msg)
+  first.fire({ type: 'error', error: {} })
+  first.fire({ type: 'reset' })
+  first.fireClose()
+  expect(FakeSocket.instances).toHaveLength(2)
+  const next = FakeSocket.instances[1]
+  next.fire({ type: 'data', chunk: 'recovered' })
+  expect(onData).toHaveBeenCalledExactlyOnceWith('recovered')
+  expect(onError).toHaveBeenCalledExactlyOnceWith('unknown error')
+  expect(onReset).toHaveBeenCalledOnce()
+  next.fire({ type: 'exit', code: 0 }); next.fireClose()
+  expect(FakeSocket.instances).toHaveLength(2)
+})
