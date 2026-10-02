@@ -1,7 +1,7 @@
 import type { PortifyManifest } from '@/shared/api/portify'
 import type { PortifyStatus } from '@shared/portify-index'
-import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 // Portify-side analog of ExternalDraftAgentPanel / ExternalHealPanel. When a
 // port-ification workflow is driven by an external MCP client (the agent runs
@@ -24,15 +24,15 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
       statusPill={<ExternalStatusPill label={statusLabel(m.status)} palette={statusPalette(m.status)} />}
       meta={
         m.external?.sessionId && (
-          <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-            <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-            <span style={{ fontFamily: 'var(--font-mono)' }} title={m.external.sessionId}>
-              {shortSession(m.external.sessionId)}
-            </span>
-          </span>
+          <ExternalMetaFact label="Session" title={m.external.sessionId}>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(m.external.sessionId)}</span>
+          </ExternalMetaFact>
         )
       }
       body={bodyCopy(m.status, clientLabel(clientKind))}
+      action={m.external?.sessionUrl && (
+        <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={m.external.sessionUrl} />
+      )}
     >
       {/* The worktree paths the client edits in place — only meaningful while
           the workflow is still live (the scratch worktrees are discarded on
@@ -85,12 +85,6 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
           }}
         >
           {m.error}
-        </div>
-      )}
-
-      {m.external?.sessionUrl && (
-        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-          <ExternalClientCta tint={clientTint(clientKind)} label={`Open ${clientLabel(clientKind)}`} href={m.external.sessionUrl} />
         </div>
       )}
     </ExternalAgentCard>

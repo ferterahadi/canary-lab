@@ -540,8 +540,10 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
 
-    expect(container.textContent).toContain('Heal agent')
-    expect(container.textContent).toContain('Codex')
+    // Agent and cycle count share one Overview tile: who healed, how often.
+    const tile = [...container.querySelectorAll('[data-testid="run-fact"]')]
+      .find((node) => node.firstElementChild?.textContent === 'Heal')
+    expect(tile?.textContent).toContain('Codex')
   })
 
   it('shows an external waiting panel instead of an empty terminal before claim', async () => {

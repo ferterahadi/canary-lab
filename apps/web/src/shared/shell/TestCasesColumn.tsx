@@ -15,7 +15,7 @@ import type { RunSummary, RunSummaryRunningStep } from '@shared/run-detail'
 import { StepStatusBadge } from '../ui/TestCodeBlock'
 import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
-import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
+import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { sourceFileInRun } from '@/features/runs/utils/run-source-file'
 import { StatusDot } from '@/shared/ui/atoms'
 import { ChevronRightIcon } from '@/shared/ui/Icons'
@@ -345,13 +345,6 @@ function workspaceTestKey(specFile: string, test: ExtractedTest): string {
   return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
 }
 
-function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {
-  if (!location) return null
-  const match = /^(.*):(\d+)(?::\d+)?$/.exec(location)
-  if (!match) return { file: location, line: 0 }
-  return { file: match[1], line: Number(match[2]) }
-}
-
 function summaryIdentityForWorkspaceTest(
   name: string,
   line: number,
@@ -368,12 +361,12 @@ function summaryIdentityForWorkspaceTest(
   // roster last saw it. The line decides only when one file declares the same
   // title more than once.
   const sameTest = (summary?.knownTests ?? []).filter((entry) => {
-    const parsed = parseSummaryLocation(entry.location)
+    const parsed = parseLocation(entry.location)
     return Boolean(parsed && sameSourceFile(parsed.file, file) && matchesName(entry))
   })
   const known = sameTest.length === 1
     ? sameTest[0]
-    : sameTest.find((entry) => parseSummaryLocation(entry.location)?.line === line)
+    : sameTest.find((entry) => parseLocation(entry.location)?.line === line)
   if (known?.id) return { name, id: known.id }
   const hasExplicitLegacyResult = summary?.passedNames !== undefined
     || summary?.skippedNames?.includes(summaryEntryName(name))

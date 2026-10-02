@@ -1,3 +1,4 @@
+import { prepareRestartResources } from './logic/restart-preparation'
 import { createExternalHealSession } from './logic/heal/external-heal-session'
 // The dependency object the runs REST surface is registered with: every callback
 // the routes hand back into the run loop. Split out of index.ts, where it was a
@@ -12,7 +13,7 @@ import type { OrchestratorLike, StartRunOutcome } from './logic/run-registry'
 import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
-import { loadFeatures } from '../../shared/feature-loader'
+import { loadFeatures, findFeature } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
@@ -387,8 +388,7 @@ export function buildRunsRouteDeps(
         return { ok: false, reason: 'new-run-required' as const }
       }
 
-      const features = loadFeatures(featuresDir)
-      const feature = features.find((f) => f.name === manifest.feature)
+      const feature = findFeature(featuresDir, manifest.feature)
       if (!feature) return { ok: false, reason: 'not-restartable' as const }
 
       const runDir = runDirFor(logsDir, runId)
@@ -397,27 +397,19 @@ export function buildRunsRouteDeps(
       if (!manifest.env && env) {
         runnerLog.warn(`Restarting run for legacy manifest without persisted env; defaulting to "${env}".`)
       }
-      const portMap = await allocateRunPorts(feature, env)
-      let backups: BackupRecord[] | null = null
-      if (env) {
-        try {
-          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
-          if (backups) runnerLog.info(`Applied envset "${env}" for run restart ${feature.name}`)
-        } catch (err) {
-          runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+      const prepared = await prepareRestartResources({
+        feature, env, runnerLog,
+        envsetAppliedMessage: `Applied envset "${env}" for run restart ${feature.name}`,
+      })
+      if (!prepared.ok) {
+        if (prepared.stage === 'envset') {
+          runnerLog.warn(`envset apply failed: ${(prepared.error as Error).message}`)
           return { ok: false, reason: 'spawn-failed' as const }
         }
-      }
-
-      let repoBranchSnapshots
-      try {
-        await validateConfiguredRepoBranches(feature)
-        repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
-      } catch (err) {
-        if (backups) restore(backups)
-        runnerLog.warn(`Run restart rejected: ${(err as Error).message}`)
+        runnerLog.warn(`Run restart rejected: ${(prepared.error as Error).message}`)
         return { ok: false, reason: 'not-restartable' as const }
       }
+      const { portMap, backups, repoBranchSnapshots } = prepared
 
       const projectConfig = loadProjectConfig(projectRoot)
       const preserveExternal = manifest.healMode === 'external'

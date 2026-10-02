@@ -7,7 +7,6 @@ import { applyPortifyOverlay, captureFixBaseline, captureFixes, hydrateWorktreeE
 import { autoProposeFixes } from '../pr/auto-propose'
 import fs from 'fs'
 import path from 'path'
-import { claimedSingleAttempt, NEW_RUN_REQUIRED_MESSAGE } from '../../../../shared/single-attempt'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { TestReviewGitReceipt } from '../../../../../../../shared/test-review'
@@ -27,9 +26,10 @@ import { selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
 import { ensureServicesRunning } from './run-service-boot'
-import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite } from './run-suite-snapshot'
-import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, removeSuiteRuntimeInputs } from './suite-runtime-inputs'
-import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
+import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits } from './run-suite-snapshot'
+import { removeSuiteRuntimeInputs } from './suite-runtime-inputs'
+import { markStoppedEarly, noteHealCycle, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
+import { prepareRunForExecution } from './run-setup'
 import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
 export class RunOrchestrator extends EventEmitter {
@@ -164,28 +164,7 @@ export class RunOrchestrator extends EventEmitter {
   // caller drives Playwright via runPlaywright(), which lets the future
   // server show "services up" before tests start.
   async start({ resume = false }: { resume?: boolean } = {}): Promise<void> {
-    const previous = resume ? readManifest(this.ctx.paths.manifestPath) : null
-    if (claimedSingleAttempt(this.ctx.runDir, previous?.singleAttempt ?? this.ctx.feature.singleAttempt)) {
-      throw new Error(NEW_RUN_REQUIRED_MESSAGE)
-    }
-    if (previous?.suiteSnapshot?.kind === 'taken' && !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) {
-      throw new Error('Cannot resume: the recorded suite snapshot is missing. Restore it before continuing this run.')
-    }
-    prepareRun(this.ctx, 'starting', previous ?? undefined)
-    // Copy the suite before any service (and therefore any heal agent) can
-    // touch a test file: Playwright runs from the copy, so a mid-run spec edit
-    // is inert until a human adopts it (D9). Then hash that copy as the
-    // pre-heal baseline — the run-start fallback baseline and the reference the
-    // green promotion compares against. Both are best-effort: integrity
-    // tracking must never block a run from booting, and a failed copy is
-    // recorded on the manifest rather than hidden.
-    if (!resume || !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) snapshotSuite(this.ctx)
-    else {
-      prepareSuiteRuntimeInputs(this.ctx)
-      materializeSuiteRuntimeInputs(this.ctx)
-      refreshSpecEdits(this.ctx, this.ctx.feature.name)
-    }
-    await captureDirtySpecBaseline(this.ctx)
+    await prepareRunForExecution(this.ctx, 'starting', resume)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
     // — we must never boot a portified feature un-portified (the second

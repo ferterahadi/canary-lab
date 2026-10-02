@@ -1,15 +1,9 @@
-import path from 'path'
 import fs from 'fs'
-import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { sharedTaskStore, type FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 import { discoveryRepairActive, type DiscoveryRepair } from '../../../../../../shared/discovery-repair'
 
-const stores = new Map<string, FileBackedTaskStore<DiscoveryRepair>>()
-
 export function discoveryRepairStore(logsDir: string): FileBackedTaskStore<DiscoveryRepair> {
-  const key = path.resolve(logsDir)
-  const existing = stores.get(key)
-  if (existing) return existing
-  const store = new FileBackedTaskStore<DiscoveryRepair>({
+  return sharedTaskStore<DiscoveryRepair>({
     logsDir, dirName: 'discovery-repairs', recordFile: 'repair.json',
     idOf: (r) => r.id,
     indexEntryOf: (r) => ({ id: r.id, createdAt: r.createdAt, feature: r.feature, status: r.status }),
@@ -22,6 +16,4 @@ export function discoveryRepairStore(logsDir: string): FileBackedTaskStore<Disco
       mark: (r, now) => ({ ...r, status: 'failed', endedAt: now, updatedAt: now, message: 'Repair interrupted by server restart', diagnostic: 'Repair interrupted by server restart. Resume repair to verify the current files.' }),
     },
   })
-  stores.set(key, store)
-  return store
 }

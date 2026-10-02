@@ -3,10 +3,11 @@ import type {
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { clientKindToDesktopAgent, clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
   ExternalAgentCard,
   ExternalClientCta,
+  ExternalMetaFact,
   ExternalStatusPill,
   pillPalette,
   useOpenAgentApp,
@@ -118,7 +119,6 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
   // Jump-to-agent: prefer the client's own conversation deep-link; otherwise
   // launch the desktop app for a known client. PTY/unknown → no CTA.
   const desktopAgent = clientKindToDesktopAgent(clientKind)
-  const tint = clientTint(clientKind)
   const { label, palette } = exportStatusPill(task.status)
   return (
     <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
@@ -130,15 +130,23 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
         statusPill={<ExternalStatusPill label={label} palette={palette} />}
         meta={
           task.sessionId && (
-            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-              <span style={{ fontFamily: 'var(--font-mono)' }} title={task.sessionId}>
-                {shortSession(task.sessionId)}
-              </span>
-            </span>
+            <ExternalMetaFact label="Session" title={task.sessionId}>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(task.sessionId)}</span>
+            </ExternalMetaFact>
           )
         }
         body={exportBodyCopy(task.status)}
+        action={task.externalSessionUrl ? (
+          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={task.externalSessionUrl} />
+        ) : (
+          desktopAgent && (
+            <ExternalClientCta
+              label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+              onClick={() => open(desktopAgent)}
+              busy={opening !== null}
+            />
+          )
+        )}
       >
         <pre
           data-testid="evaluation-external-log"
@@ -150,22 +158,6 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
           {log.trim() || 'Waiting for the client to submit the evaluation wording…'}
         </pre>
 
-        {(task.externalSessionUrl || desktopAgent) && (
-          <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-            {task.externalSessionUrl ? (
-              <ExternalClientCta tint={tint} label={`Open ${clientLabel(clientKind)}`} href={task.externalSessionUrl} />
-            ) : (
-              desktopAgent && (
-                <ExternalClientCta
-                  tint={tint}
-                  label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-                  onClick={() => open(desktopAgent)}
-                  busy={opening !== null}
-                />
-              )
-            )}
-          </div>
-        )}
         {openError && (
           <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
             {openError}

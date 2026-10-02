@@ -1,3 +1,4 @@
+import { prepareRestartResources } from './logic/restart-preparation'
 import { createExternalHealSession } from './logic/heal/external-heal-session'
 // Wiring one live run to the workspace: the pane/runner-log/state-sink stream
 // attachment, and the external-heal restart that rebuilds an orchestrator for a
@@ -6,14 +7,12 @@ import { createExternalHealSession } from './logic/heal/external-heal-session'
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import type { OrchestratorLike } from './logic/run-registry'
-import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import { PaneBroker } from './logic/pane-broker'
-import { loadFeatures } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { httpFailure } from '../../shared/http-error'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
 import {
   restore,
@@ -145,35 +144,26 @@ export function makeRestartExternalRun(
     throw Object.assign(new Error(NEW_RUN_REQUIRED_MESSAGE), { statusCode: 409 })
   }
 
-  const features = loadFeatures(featuresDir)
-  const feature = features.find((f) => f.name === manifest.feature)
+  const feature = findFeature(featuresDir, manifest.feature)
   if (!feature) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
 
   const env = manifest.env ?? feature.envs?.[0]
   const runDir = runDirFor(logsDir, runId)
   const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
 
-  const portMap = await allocateRunPorts(feature, env)
-  let backups: BackupRecord[] | null = null
-  if (env) {
-    try {
-      backups = applyFeatureEnvset(feature.featureDir, env, portMap)
-      if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
-    } catch (err) {
-      runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
-      throw httpFailure(err, 500)
+  const prepared = await prepareRestartResources({
+    feature, env, runnerLog,
+    envsetAppliedMessage: `Applied envset "${env}" for external restart ${feature.name}`,
+  })
+  if (!prepared.ok) {
+    if (prepared.stage === 'envset') {
+      runnerLog.warn(`envset apply failed: ${(prepared.error as Error).message}`)
+      throw httpFailure(prepared.error, 500)
     }
+    runnerLog.warn(`External restart rejected: ${(prepared.error as Error).message}`)
+    throw httpFailure(prepared.error, 409)
   }
-
-  let repoBranchSnapshots
-  try {
-    await validateConfiguredRepoBranches(feature)
-    repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
-  } catch (err) {
-    if (backups) restore(backups)
-    runnerLog.warn(`External restart rejected: ${(err as Error).message}`)
-    throw httpFailure(err, 409)
-  }
+  const { portMap, backups, repoBranchSnapshots } = prepared
 
   const nowIso = new Date().toISOString()
   const externalHealSession: import('../../../../../shared/run-manifest').ExternalHealSession | undefined = canClaim

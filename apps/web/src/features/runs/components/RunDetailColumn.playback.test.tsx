@@ -24,25 +24,26 @@ afterEach(() => {
 })
 
 describe('PlaywrightPlayback', () => {
-  it('renders trace in the card header and keeps evidence collapsed', () => {
+  it('renders trace at the end of the evidence bar and keeps evidence collapsed', () => {
     renderPlayback()
 
     expect(container.textContent).toContain('passed checkout')
-    // The title owns its own row now, so it is no longer squeezed by the
-    // verdict/id/trace line above it.
-    // Icon + tooltip, not the widest words on the row.
-    const trace = container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')
+    // The title strip is identity and verdict only; the trace is evidence, so
+    // it closes the evidence bar along with screenshot, video, and steps.
+    const card = container.querySelector('.cl-card')
+    expect(card?.firstElementChild?.querySelector('a[download="trace.zip"]')).toBeNull()
+    const trace = card?.lastElementChild?.querySelector('a[download="trace.zip"]')
     expect(trace).toBeTruthy()
     expect(trace?.getAttribute('aria-label')).toBe('Download trace')
-    expect(trace?.textContent).toBe('')
+    expect(trace?.textContent).toBe('Trace')
     expect(trace?.querySelector('svg')).toBeTruthy()
-    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('truncate')
-    expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('max-w-full')
+    expect(trace?.className).toContain('truncate')
+    expect(trace?.className).toContain('max-w-full')
     expect(container.textContent).toContain('Screenshot')
     expect(container.textContent).toContain('Video')
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).not.toContain('Open video')
-    expect(container.textContent).toContain('Steps (2)')
+    expect(container.querySelector('[data-testid="evidence-badge-steps"]')?.textContent).toBe('2')
     expect(container.textContent).not.toContain('Opened /en_SG')
     expect(container.textContent).not.toContain('Clicked Redeem')
   })
@@ -56,9 +57,26 @@ describe('PlaywrightPlayback', () => {
     act(() => { chip('Screenshot')?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.querySelector('img')).toBeTruthy()
 
-    act(() => { chip('Steps (')?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    act(() => { chip('Steps')?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(container.textContent).toContain('Opened /en_SG')
     expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('lays a matcher failure out as its headline over an expected/received table', () => {
+    renderPlayback({ events: failedWith('Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: "ready"\nReceived: "broken"') })
+
+    const block = container.querySelector('[data-testid="assertion-message"]')
+    expect(block?.firstElementChild?.textContent).toBe('Error: expect(received).toBe(expected) // Object.is equality')
+    expect([...(block?.querySelectorAll('dt') ?? [])].map((n) => n.textContent)).toEqual(['Expected', 'Received'])
+    expect([...(block?.querySelectorAll('dd') ?? [])].map((n) => n.textContent)).toEqual(['"ready"', '"broken"'])
+    expect(container.textContent).toContain('failed')
+  })
+
+  it('keeps a message it cannot split verbatim', () => {
+    renderPlayback({ events: failedWith('TypeError: boom') })
+
+    expect(container.querySelector('[data-testid="assertion-message"]')).toBeNull()
+    expect(container.querySelector('pre')?.textContent).toBe('TypeError: boom')
   })
 
   it('says nothing at all on a clean pass instead of narrating the absence of an error', () => {
@@ -128,7 +146,7 @@ describe('PlaywrightPlayback', () => {
     renderPlayback()
 
     const button = [...container.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.includes('Steps ('))
+      .find((candidate) => candidate.textContent?.includes('Steps'))
     expect(button).toBeTruthy()
 
     act(() => {
@@ -142,12 +160,12 @@ describe('PlaywrightPlayback', () => {
   it('keeps steps after the eighth in the collapsed trace count and expanded list', () => {
     renderPlayback({ events: manyActionEvents })
 
-    expect(container.textContent).toContain('Steps (10)')
+    expect(container.querySelector('[data-testid="evidence-badge-steps"]')?.textContent).toBe('10')
     expect(container.textContent).not.toContain('Clicked Continue')
     expect(container.textContent).not.toContain('Verified Order confirmed')
 
     const button = [...container.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.includes('Steps ('))
+      .find((candidate) => candidate.textContent?.includes('Steps'))
     expect(button).toBeTruthy()
 
     act(() => {
@@ -166,7 +184,8 @@ describe('PlaywrightPlayback', () => {
       ],
     })
 
-    expect(container.textContent).toContain('No screenshot retained')
+    expect(container.querySelector('[data-testid="evidence-badge-screenshot"]')?.textContent).toBe('None')
+    expect(container.querySelector('[data-testid="evidence-tab-screenshot"]')?.getAttribute('title')).toBe('No screenshot retained')
     expect(container.querySelector('a[download="trace.zip"]')).toBeTruthy()
     expect(container.textContent).not.toContain('Open video')
   })
@@ -195,7 +214,7 @@ describe('PlaywrightPlayback', () => {
     })
 
     expect(container.textContent).toContain('Video')
-    expect(container.textContent).toContain('Disabled')
+    expect(container.querySelector('[data-testid="evidence-badge-video"]')?.textContent).toBe('Disabled')
     expect(container.textContent).not.toContain('Feature Configuration > Playwright > Browser & Artifacts > Video')
     expect(container.querySelector('a[download="trace.zip"]')).toBeTruthy()
 
@@ -352,6 +371,12 @@ const manyActionEvents: PlaywrightPlaybackEvent[] = [
     retry: 0,
   },
 ]
+
+function failedWith(message: string): PlaywrightPlaybackEvent[] {
+  return events.map((event) => event.type === 'test-end'
+    ? { ...event, status: 'failed', passed: false, error: { message } }
+    : event)
+}
 
 function artifact(kind: PlaywrightArtifactGroup['artifacts'][number]['kind'], name: string): PlaywrightArtifactGroup['artifacts'][number] {
   return {

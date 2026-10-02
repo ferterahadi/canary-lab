@@ -3,6 +3,7 @@ import { useRunJournal } from '../state/use-run-journal'
 import type { JournalSection } from '@shared/run-detail'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
+import { SourceModal } from '@/shared/ui/ActivityLogModal'
 import { RunPane } from './RunPane'
 import {
   classifyOutcome,
@@ -53,72 +54,79 @@ export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: P
  * A cycle is a short story — what the agent thought was wrong, what it changed,
  * and whether that worked — so the hypothesis is the card's headline instead of
  * the first row of a four-row key/value table with the code's own field names
- * down the left. The remaining fields sit under it as a compact ledger in the
- * same mono-caps rubric the service cards use, and the raw markdown is a
- * disclosure that no longer pushes the card sideways when a field runs long.
+ * down the left. The card has the run-detail anatomy: a title strip with the
+ * outcome chip, the body, and a footer whose one action opens the raw markdown
+ * in a modal — read in full, at full width, without pushing the card around.
  */
 function EntryCard({ entry }: { entry: JournalSection }) {
-  const [expanded, setExpanded] = useState(false)
+  const [rawOpen, setRawOpen] = useState(false)
   const fields = presentJournalFields(parseBodyFields(entry.body))
   const headline = fields.find((f) => f.key === 'hypothesis')
   const rest = fields.filter((f) => f !== headline)
   const outcome = classifyOutcome(entry.outcome)
+  const iteration = `Iteration ${entry.iteration ?? '?'}`
+  const when = entry.timestamp ? formatLocalDateTime(entry.timestamp) : undefined
   return (
-    <li className="cl-card p-3.5">
-      <header className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 text-[11px] font-medium" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-          Iteration {entry.iteration ?? '?'}
+    <li className="cl-card overflow-hidden">
+      <header className="cl-card-head">
+        <span className="shrink-0 text-[11px] font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+          {iteration}
         </span>
-        {entry.timestamp && (
+        {when && (
           <span
             className="min-w-0 truncate text-[10px]"
             style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-            title={entry.timestamp}
+            title={entry.timestamp ?? undefined}
           >
-            {formatLocalDateTime(entry.timestamp)}
+            {when}
           </span>
         )}
         <div className="min-w-2 flex-1" />
-        <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
+        {/* The outcome's hue comes from `outcomeBadgeClass`; the chip supplies
+            only the shape, as every other status chip on these cards. */}
+        <span className={`cl-status-chip ${outcomeBadgeClass(outcome)}`}>
           {outcomeLabel(outcome)}
         </span>
       </header>
-      {headline && (
-        <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
-          {headline.value}
-        </p>
+      {(headline || rest.length > 0) && (
+        <div className="cl-card-body">
+          {headline && (
+            <p className="m-0 text-[12.5px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+              {headline.value}
+            </p>
+          )}
+          {rest.length > 0 && (
+            <dl className={`${headline ? 'mt-2.5' : ''} grid grid-cols-[118px_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs`}>
+              {rest.map((f, idx) => (
+                <FieldRow key={`${f.key}-${idx}`} field={f} />
+              ))}
+            </dl>
+          )}
+        </div>
       )}
-      {rest.length > 0 && (
-        <dl className="mt-2.5 grid grid-cols-[118px_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-          {rest.map((f, idx) => (
-            <FieldRow key={`${f.key}-${idx}`} field={f} />
-          ))}
-        </dl>
-      )}
-      <div className="mt-2.5 border-t pt-2" style={{ borderColor: 'var(--border-default)' }}>
+      <footer className="cl-card-foot">
+        <span className="min-w-0 flex-1 truncate text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+          As the agent wrote it
+        </span>
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-150 -ml-1.5"
-          style={{ color: 'var(--text-muted)' }}
+          onClick={() => setRawOpen(true)}
+          className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+          data-testid="journal-raw-entry"
         >
-          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
           Raw entry
-          <span className="font-normal" style={{ opacity: 0.7 }}>as the agent wrote it</span>
         </button>
-        {expanded && (
-          // `whitespace-pre-wrap` + `break-all`, not a horizontal scroller: a
-          // journal body carries hyphen-joined test names hundreds of characters
-          // long, and a `<pre>` that scrolls sideways hides them off-card.
-          <pre
-            className="mt-1.5 max-h-72 overflow-y-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-[11px] leading-relaxed scrollbar-thin"
-            style={{ background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-          >
-            {entry.body}
-          </pre>
-        )}
-      </div>
+      </footer>
+      <SourceModal
+        open={rawOpen}
+        onClose={() => setRawOpen(false)}
+        eyebrow="Journal"
+        title={iteration}
+        description={when}
+        source={entry.body}
+        lang="markdown"
+        testId="journal-raw-modal"
+      />
     </li>
   )
 }

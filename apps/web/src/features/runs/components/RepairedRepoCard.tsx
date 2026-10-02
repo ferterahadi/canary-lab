@@ -207,8 +207,8 @@ export function RepairedRepoCard({
   const waitForStop = 'Available after this run stops and captures its final changes.'
 
   return (
-    <li className="cl-card group/card p-3" data-testid={`changes-repo-${repoName}`}>
-      <div className="flex min-w-0 items-center gap-2">
+    <li className="cl-card group/card overflow-hidden" data-testid={`changes-repo-${repoName}`}>
+      <div className="cl-card-head">
         {/* Sky for a repair waiting to be reviewed — the app's in-progress hue,
             and this is unfinished work until it's read or merged. An untouched
             repo takes the idle dot rather than going unmarked. No pulse: this
@@ -222,89 +222,96 @@ export function RepairedRepoCard({
           {repoName}
         </div>
         {repoRoot && <CopyIconButton label="repo path" value={repoRoot} />}
-        <span className="cl-rubric shrink-0" data-testid={`changes-state-${repoName}`}>
+        <span
+          className={`cl-status-chip ${changed ? 'bg-[var(--bg-base)] text-secondary' : 'text-muted'}`}
+          data-testid={`changes-state-${repoName}`}
+        >
           {changed ? fileCountLabel(repo!.files) : 'unchanged'}
         </span>
       </div>
 
-      {changed && tests.length > 0 && (
-        // A repair is supposed to fix the app, not the test — so an edited spec
-        // is the one thing on this card that must not sit at position 23 of a
-        // flat list.
-        <div className="mt-2" data-testid={`changes-tests-${repoName}`}>
-          <div className="flex items-center gap-2">
-            <StatusDot state="warning" pulse={false} />
-            <span className="text-[11px]" style={{ color: 'var(--warning)' }}>
-              {tests.length === 1 ? '1 test file was edited' : `${tests.length} test files were edited`} — review these first
-            </span>
-          </div>
-          <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 pl-[18px]">
-            {tests.slice(0, FILE_LIST_LIMIT).map((f) => (
-              <li
-                key={f}
-                className="min-w-0 truncate text-[11px]"
-                style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-                title={f}
-              >
-                {f}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {changed && !rolled && source.length > 0 && (
-        <ul className="m-0 mt-2 flex list-none flex-col gap-0.5 p-0" data-testid={`changes-files-${repoName}`}>
-          {source.map((f) => (
-            <li
-              key={f}
-              className="min-w-0 truncate text-[11px]"
-              style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-              title={f}
-            >
-              {f}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {changed && rolled && (
-        <div
-          className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5"
-          data-testid={`changes-dirs-${repoName}`}
-        >
-          {dirs.slice(0, DIR_ROLLUP_LIMIT).map((g) => (
-            <div key={g.dir} className="col-span-2 grid grid-cols-subgrid">
-              <span
-                className="min-w-0 truncate text-[11px]"
-                style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-                title={g.dir}
-              >
-                {g.dir}
-              </span>
-              <span className="text-[11px]" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                {g.count}
-              </span>
+      {changed && (tests.length > 0 || source.length > 0) && (
+        <div className="cl-card-body space-y-2">
+          {tests.length > 0 && (
+            // A repair is supposed to fix the app, not the test — so an edited spec
+            // is the one thing on this card that must not sit at position 23 of a
+            // flat list.
+            <div data-testid={`changes-tests-${repoName}`}>
+              <div className="flex items-center gap-2">
+                <StatusDot state="warning" pulse={false} />
+                <span className="text-[11px]" style={{ color: 'var(--warning)' }}>
+                  {tests.length === 1 ? '1 test file was edited' : `${tests.length} test files were edited`} — review these first
+                </span>
+              </div>
+              <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 pl-[18px]">
+                {tests.slice(0, FILE_LIST_LIMIT).map((f) => (
+                  <li
+                    key={f}
+                    className="min-w-0 truncate text-[11px]"
+                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
+                    title={f}
+                  >
+                    {f}
+                  </li>
+                ))}
+              </ul>
             </div>
-          ))}
-          {foldedDirs > 0 && (
-            <span className="col-span-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              +{foldedDirs} more {foldedDirs === 1 ? 'directory' : 'directories'}
-            </span>
+          )}
+
+          {!rolled && source.length > 0 && (
+            <ul className="m-0 flex list-none flex-col gap-0.5 p-0" data-testid={`changes-files-${repoName}`}>
+              {source.map((f) => (
+                <li
+                  key={f}
+                  className="min-w-0 truncate text-[11px]"
+                  style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
+                  title={f}
+                >
+                  {f}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {rolled && (
+            <div
+              className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5"
+              data-testid={`changes-dirs-${repoName}`}
+            >
+              {dirs.slice(0, DIR_ROLLUP_LIMIT).map((g) => (
+                <div key={g.dir} className="col-span-2 grid grid-cols-subgrid">
+                  <span
+                    className="min-w-0 truncate text-[11px]"
+                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
+                    title={g.dir}
+                  >
+                    {g.dir}
+                  </span>
+                  <span className="text-[11px]" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                    {g.count}
+                  </span>
+                </div>
+              ))}
+              {foldedDirs > 0 && (
+                <span className="col-span-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  +{foldedDirs} more {foldedDirs === 1 ? 'directory' : 'directories'}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
 
       {changed && (
         <>
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <div className="cl-card-foot">
             {moved ? (
               <button
                 type="button"
                 data-testid={`changes-view-patch-${repoName}`}
                 onClick={() => setPatchOpen(true)}
                 title="Shows the captured diff — this repo can no longer be opened"
-                className="cl-button cl-button-primary px-2.5 py-1 text-[11px]"
+                className="cl-button cl-button-accent px-2.5 py-1 text-[11px]"
               >
                 View patch
               </button>
@@ -315,7 +322,7 @@ export function RepairedRepoCard({
                 onClick={onOpen}
                 disabled={openState.kind === 'working' || (!provisional && (!runStopped || preflight?.confirmed === false))}
                 title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
-                className="cl-button cl-button-primary px-2.5 py-1 text-[11px]"
+                className="cl-button cl-button-accent px-2.5 py-1 text-[11px]"
               >
                 {openState.kind === 'working' ? 'Opening…' : 'Open in editor'}
               </button>
@@ -345,23 +352,24 @@ export function RepairedRepoCard({
                 All {repo!.files} files
               </button>
             )}
-          </div>
-
-          <div className="mt-2 flex flex-col gap-1">
-            {preflight && !preflight.confirmed && (
-              <div role="status" className="text-[11px] text-muted">
-                {preflight.error ? `Repository status unavailable: ${preflight.error}` : 'Checking current repository status…'}
-                {target && ' Last known status shown.'}
-                <button type="button" className="cl-button ml-2 px-2 py-0.5" onClick={preflight.refresh}>Refresh status</button>
-              </div>
-            )}
-            <OpenOutcome repoName={repoName} state={openState} target={target} />
-            <PrLine
-              repoName={repoName}
-              pr={pr}
-              blockedReason={blockedReason}
-              auto={auto}
-            />
+            {/* The outcome of the actions above, on its own full-width line
+                inside the same strip; collapses when there is nothing to say. */}
+            <div className="flex basis-full flex-col gap-1 empty:hidden">
+              {preflight && !preflight.confirmed && (
+                <div role="status" className="text-[11px] text-muted">
+                  {preflight.error ? `Repository status unavailable: ${preflight.error}` : 'Checking current repository status…'}
+                  {target && ' Last known status shown.'}
+                  <button type="button" className="cl-button ml-2 px-2 py-0.5" onClick={preflight.refresh}>Refresh status</button>
+                </div>
+              )}
+              <OpenOutcome repoName={repoName} state={openState} target={target} />
+              <PrLine
+                repoName={repoName}
+                pr={pr}
+                blockedReason={blockedReason}
+                auto={auto}
+              />
+            </div>
           </div>
 
           <RepairPatchDialog

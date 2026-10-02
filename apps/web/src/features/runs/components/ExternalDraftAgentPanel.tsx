@@ -1,6 +1,6 @@
 import type { DraftRecord, ExternalDraftStage } from '@shared/draft-types'
-import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 interface Props {
   draft: DraftRecord
@@ -28,22 +28,16 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
       statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
       meta={
         draft.externalSessionId && (
-          <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-            <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-            <span style={{ fontFamily: 'var(--font-mono)' }} title={draft.externalSessionId}>
-              {shortSession(draft.externalSessionId)}
-            </span>
-          </span>
+          <ExternalMetaFact label="Session" title={draft.externalSessionId}>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(draft.externalSessionId)}</span>
+          </ExternalMetaFact>
         )
       }
       body={bodyCopy(stage, stageView, clientKind)}
-    >
-      {draft.externalSessionUrl && (
-        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-          <ExternalClientCta tint={clientTint(clientKind)} label={`Open ${clientLabel(clientKind)}`} href={draft.externalSessionUrl} />
-        </div>
+      action={draft.externalSessionUrl && (
+        <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={draft.externalSessionUrl} />
       )}
-
+    >
       {draft.errorMessage && stage === 'error' && (
         <div
           className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"

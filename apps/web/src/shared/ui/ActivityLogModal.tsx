@@ -20,6 +20,7 @@ import type { CodeLanguage } from './code-highlighter'
 import { clientLabel } from './external-client-branding'
 import { Modal } from './Overlays'
 import { useCodeHighlight } from './use-code-highlight'
+import { TIMELINE_CSS } from './agent-session-css'
 
 // The full content of one Activity row. The rail shows each entry as a single
 // line; this is where everything the line left out lives — the whole payload,
@@ -175,7 +176,9 @@ function entryView(entry: LogEntry, onOpenEntry: (id: string) => void, onPickNes
     case 'assistant-message':
       return {
         line, context, meta: [sessionFact],
-        body: event.apiError ? <PlainBlock text={event.text} /> : <Markdown text={event.text} />,
+        // The message as the agent wrote it, like a user message: a rendered
+        // Markdown view hides its raw markup (and any tags the client added).
+        body: event.apiError ? <PlainBlock text={event.text} /> : <CodeView source={event.text} lang="markdown" />,
         copyText: event.text,
       }
     case 'assistant-thinking':
@@ -302,6 +305,38 @@ export function CodeView({ source, lang, numbers }: { source: string; lang: Code
         </div>
       ))}
     </div>
+  )
+}
+
+/** A document shown verbatim, in the Activity modal's chrome: the same header,
+ *  Copy control and numbered code block, for a surface outside a session view
+ *  (a journal entry's raw markdown). Carries the timeline stylesheet itself,
+ *  since no `AgentSessionView` is mounted to supply it. */
+export function SourceModal({ open, onClose, eyebrow, title, description, source, lang, testId }: {
+  open: boolean
+  onClose: () => void
+  eyebrow: string
+  title: string
+  description?: string
+  source: string
+  lang: CodeLanguage | null
+  testId?: string
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      eyebrow={eyebrow}
+      title={title}
+      description={description}
+      width={860}
+      viewportInset={6}
+      testId={testId}
+      headerActions={<CopyButton text={source} />}
+    >
+      <style>{TIMELINE_CSS}</style>
+      <div className="agentts-modalbody"><CodeView source={source} lang={lang} /></div>
+    </Modal>
   )
 }
 

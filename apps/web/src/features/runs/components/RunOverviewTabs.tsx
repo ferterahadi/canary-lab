@@ -10,7 +10,8 @@ import { buildTimelineRows } from '../utils/run-timeline'
 import { branchForService, branchLabel } from '../utils/run-detail-playback'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus, type RunStatus } from '@shared/run-state'
-import { RecoveryTimeline, alertClass, useTimelineNow } from './RunDiagnosticsPanels'
+import { RecoveryTimeline, alertClass, formatLifecycleDate, formatLifecycleTime, useTimelineNow } from './RunDiagnosticsPanels'
+import { plural } from '@shared/lib/plural'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { ReviewEvaluationMenu } from './ReviewEvaluationMenu'
@@ -97,67 +98,40 @@ export function RunOverviewTab({
     ...services.filter(needsAttention),
     ...services.filter((service) => !needsAttention(service)),
   ]
-  // The "Create evaluation report" trigger moved to the run's tab row
-  // (`ReviewEvaluationMenu`) — it is a run-level action, not an Overview one.
   return (
     <RunPane padded>
-      {/* The run's facts read down the left; the deliverable sits in the gutter
-          they leave empty on the right. It is the one thing you *do* from this
-          pane, so it belongs beside the facts rather than in the chrome above,
-          where a fixed-width button squeezed the tab row on a narrow panel. */}
-      <div className="flex items-start gap-4">
-        <dl className="grid min-w-0 flex-1 grid-cols-[92px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
-        <dt className="cl-rubric self-center">Suite</dt>
-        <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
-        <dt className="cl-rubric self-center">Envset</dt>
-        <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={manifest.env ?? ''}>{manifest.env ?? '-'}</dd>
-        <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
-        <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
-        {manifest.endedAt && (
-          <>
-            <dt className="cl-rubric self-center">Ended</dt>
-            <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
-          </>
-        )}
-        {manifest.healCycles > 0 && (
-          <>
-            <dt className="cl-rubric self-center">Heal cycles</dt>
-            <dd style={{ color: 'var(--text-secondary)' }}>{manifest.healCycles}</dd>
-          </>
-        )}
-        {healAgentOverviewLabel(manifest) && (
-          <>
-            <dt className="cl-rubric self-center">Heal agent</dt>
-            <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={healAgentOverviewLabel(manifest) ?? undefined}>
-              {healAgentOverviewLabel(manifest)}
-            </dd>
-          </>
-        )}
-        {pinnedPlanSummary(manifest.models) && (
-          <>
-            <dt className="cl-rubric self-center">Models</dt>
-            <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={pinnedPlanSummary(manifest.models) ?? undefined}>
-              {pinnedPlanSummary(manifest.models)}
-            </dd>
-          </>
-        )}
-        {/* No `State` row: the run's verdict is already the status badge in the
-            run header a few pixels above, and "Run passed" under a green PASSED
-            chip is the same fact told twice. Anything the headline says that the
-            badge cannot (a held boot session, a recovery note) arrives as the
-            alert below or in the Run Logs timeline. */}
-        </dl>
-        {isAssertionExportable(manifest.status) && (
-          <div className="shrink-0">
-            <ReviewEvaluationMenu
-              runId={manifest.runId}
-              onExportStarted={(task) => onOpenEvaluationReport?.(task.feature)}
-            />
+      {/* The run's facts as one titled card of tiles — the same card anatomy
+          (title strip, then body) as the service cards below it and the test
+          cards on the Playwright tab. No Suite tile: the run header names the
+          suite a few pixels above. No `State` tile either: the verdict is the
+          header's status badge, and anything it cannot say (a held boot
+          session, a recovery note) arrives as the alert below or in Run Logs.
+          The deliverable sits on the strip's right: it is the one thing you
+          *do* from this pane, and on the strip it never squeezes the tab row. */}
+      <section className="cl-card overflow-hidden" data-testid="run-facts">
+        <div className="cl-card-head">
+          <h2 className="cl-rubric min-w-0 flex-1 truncate">At a glance</h2>
+          {isAssertionExportable(manifest.status) && (
+            <div className="-my-1 shrink-0">
+              <ReviewEvaluationMenu
+                runId={manifest.runId}
+                onExportStarted={(task) => onOpenEvaluationReport?.(task.feature)}
+              />
+            </div>
+          )}
+        </div>
+        {/* Six slots, always: the grid only ever folds 6 → 3 → 2 columns, so no
+            row is left half-full. The 1px gap over the border colour draws the
+            hairlines between cells at every column count. */}
+        <div className="@container">
+          <div
+            className="grid grid-cols-2 gap-px @[420px]:grid-cols-3 @[760px]:grid-cols-6"
+            style={{ background: 'var(--border-default)' }}
+          >
+            {runFacts(manifest, duration).map((fact) => <RunFactTile key={fact.label} fact={fact} />)}
           </div>
-        )}
-      </div>
+        </div>
+      </section>
       {/* For a boot-only session the held-state message is the point of the
           screen, so surface it on the overview (normal runs keep it in the
           Run Logs timeline only). */}
@@ -170,7 +144,7 @@ export function RunOverviewTab({
         <BootFailureEvidence runId={manifest.runId} failure={manifest.bootFailure} />
       )}
       {manifest.serviceFailure && <ServiceFailureEvidence runId={manifest.runId} failure={manifest.serviceFailure} />}
-      <div className="mt-4">
+      <div className="mt-3">
         {/* No `Services` heading: a stack of named service cards is self-evident,
             and the label was one more line of chrome between the run's facts and
             the thing they describe. The boot-session hint still needs saying. */}
@@ -180,7 +154,7 @@ export function RunOverviewTab({
         {services.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {displayedServices.map((s) => (
               <ServiceCard
                 key={s.safeName}
@@ -197,6 +171,72 @@ export function RunOverviewTab({
         )}
       </div>
     </RunPane>
+  )
+}
+
+/** One cell in the Overview's "At a glance" card. */
+export interface RunFact {
+  label: string
+  value: string
+  /** A second, quieter part — the date after a time, the cycle count after the agent. */
+  sub?: string
+  /** Hover text when the cell shows a shortened form (the full ISO timestamp). */
+  title?: string
+  mono?: boolean
+  /** No value recorded for this run: the slot shows a muted dash. */
+  empty?: boolean
+}
+
+const NO_VALUE = '—'
+
+/** The run's six facts, in a fixed order. Every slot is always present — an
+ *  unknown value reads as a dash, as on a service card — so the grid keeps a
+ *  whole number of rows. A timestamp splits into the time (what you compare
+ *  between runs) and the date, with the exact ISO value on hover. The heal
+ *  agent and its cycle count are one fact — who healed, and how many times. */
+export function runFacts(manifest: RunManifest, duration: number | null): RunFact[] {
+  const agent = healAgentOverviewLabel(manifest)
+  const cycles = manifest.healCycles > 0 ? plural(manifest.healCycles, 'cycle') : null
+  const heal = agent ?? cycles
+  const models = pinnedPlanSummary(manifest.models)
+  return [
+    { label: 'Envset', value: manifest.env ?? NO_VALUE, mono: true, empty: !manifest.env },
+    { label: 'Duration', value: manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration) },
+    heal
+      ? { label: 'Heal', value: heal, ...(agent && cycles ? { sub: cycles } : {}) }
+      : { label: 'Heal', value: NO_VALUE, empty: true },
+    timestampFact(manifest.status === 'queued' ? 'Queued at' : 'Started', manifest.startedAt),
+    timestampFact('Ended', manifest.endedAt),
+    models ? { label: 'Models', value: models, title: models } : { label: 'Models', value: NO_VALUE, empty: true },
+  ]
+}
+
+function timestampFact(label: string, iso: string | undefined): RunFact {
+  if (!iso) return { label, value: NO_VALUE, empty: true }
+  return { label, value: formatLifecycleTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
+}
+
+/** A cell of the facts grid: a rubric label over the value, on the card's own
+ *  surface — the hairlines come from the grid behind it. */
+export function RunFactTile({ fact }: { fact: RunFact }) {
+  const mono = fact.mono ? { fontFamily: 'var(--font-mono)' } : {}
+  return (
+    <div className="min-w-0 bg-surface px-3 py-2.5" data-testid="run-fact">
+      <div className="cl-rubric truncate">{fact.label}</div>
+      <div
+        className="mt-1 flex min-w-0 items-baseline gap-1.5 text-xs"
+        title={fact.title ?? fact.value}
+      >
+        <span className="truncate" style={{ color: fact.empty ? 'var(--text-muted)' : 'var(--text-primary)', ...mono }}>
+          {fact.value}
+        </span>
+        {fact.sub && (
+          <span className="shrink-0 text-[10.5px]" style={{ color: 'var(--text-muted)', ...mono }}>
+            {fact.sub}
+          </span>
+        )}
+      </div>
+    </div>
   )
 }
 

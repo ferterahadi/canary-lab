@@ -91,6 +91,27 @@ describe('JournalTab empty state', () => {
   })
 })
 
+describe('JournalTab raw entry', () => {
+  it('opens the entry as the agent wrote it in a modal code block, not an inline disclosure', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal).mockResolvedValue([entry(3, 'tax line missing')])
+
+    await act(async () => {
+      root.render(<JournalTab feature="checkout" runId="run-1" healCycles={1} />)
+      await Promise.resolve()
+    })
+
+    expect(document.querySelector('[data-testid="journal-raw-modal"]')).toBeNull()
+    const open = container.querySelector<HTMLButtonElement>('[data-testid="journal-raw-entry"]')
+    act(() => { open?.click() })
+
+    const modal = document.querySelector('[data-testid="journal-raw-modal"]')
+    expect(modal?.textContent).toContain('Iteration 3')
+    expect(modal?.querySelector('[data-testid="activity-log-code"]')?.textContent).toContain('- hypothesis: tax line missing')
+    expect(modal?.querySelector('[data-testid="activity-log-copy"]')).toBeTruthy()
+  })
+})
+
 function entry(iteration: number, hypothesis: string): JournalSection {
   return {
     iteration,

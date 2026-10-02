@@ -1,12 +1,7 @@
 import { useState } from 'react'
+import { formatBytes } from '@/shared/lib/format'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { DocRelink } from './DocRelink'
-
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
 
 export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken, onRelink, disclosure }: {
   relPath: string

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { clientKindToDesktopAgent, clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
@@ -47,12 +47,9 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const clientKind = session?.clientKind ?? 'other'
   const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
-  const tint = clientTint(clientKind)
-
   return (
     <ExternalAgentCard
       clientKind={clientKind}
-      brandElevated
       fill
       eyebrow="External agent session"
       headline={headlineFor(clientKind, Boolean(session))}
@@ -63,22 +60,21 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       }
       meta={
         <>
-          <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background: heartbeatColor,
-                boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
-              }}
-              aria-hidden
-            />
-            {heartbeatLabel}
-          </span>
-          {session && session.cycleCount > 0 && (
-            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-              {session.cycleCount} {session.cycleCount === 1 ? 'cycle' : 'cycles'}
+          <ExternalMetaFact label="Heartbeat">
+            <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: heartbeatColor,
+                  boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
+                }}
+                aria-hidden
+              />
+              {heartbeatLabel}
             </span>
+          </ExternalMetaFact>
+          {session && session.cycleCount > 0 && (
+            <ExternalMetaFact label="Cycles">{session.cycleCount}</ExternalMetaFact>
           )}
         </>
       }
@@ -91,19 +87,16 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
           : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
       }
-    >
-      {desktopAgent && (
-        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-          <ExternalClientCta
-            tint={tint}
-            label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-            onClick={() => onOpenAgent(desktopAgent)}
-            busy={opening !== null}
-          />
-        </div>
+      action={desktopAgent && (
+        <ExternalClientCta
+          label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+          onClick={() => onOpenAgent(desktopAgent)}
+          busy={opening !== null}
+        />
       )}
+    >
       {openError && (
-        <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
+        <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>
           {openError}
         </div>
       )}

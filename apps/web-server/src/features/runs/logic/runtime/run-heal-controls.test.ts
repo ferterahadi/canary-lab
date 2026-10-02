@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
 vi.mock('./run-playwright', () => ({ waitForPlaywrightExit: h.waitForPlaywrightExit }))
 vi.mock('./run-heal-agent', () => ({ recordHealEnd: h.recordHealEnd }))
 vi.mock('./run-verdict', () => ({ summarizeFailures: h.summarizeFailures }))
+vi.mock('./run-setup', () => ({ prepareRunForExecution: h.prepareRun }))
 // Spread the originals: `run-context` pulls `defaultPlaywrightSpawner` from
 // this same module, so a bare factory would leave it undefined at import time.
 vi.mock('./run-spawn', async (importOriginal) => ({
@@ -252,7 +253,7 @@ describe('restartHealFromFailure', () => {
     const { ctx } = ctxFor({}, { autoHeal: { maxCycles: 3 } })
 
     expect(await restartHealFromFailure(ctx, makeLoopHost(), 'check the cart total')).toBe('passed')
-    expect(h.prepareRun).toHaveBeenCalledWith(ctx, 'stopped')
+    expect(h.prepareRun).toHaveBeenCalledWith(ctx, 'stopped', true)
     expect(h.runAutoHealLoop).toHaveBeenCalledWith(ctx, expect.anything(), 'check the cart total')
   })
 })

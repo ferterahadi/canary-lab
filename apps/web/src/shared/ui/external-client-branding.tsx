@@ -43,17 +43,14 @@ export function clientKindToDesktopAgent(kind: ExternalClientKind): 'claude' | '
   return null
 }
 
+// The client's 32px mark on an external-agent card's title strip: the app's
+// own icon for Claude/Codex, a tinted monitor glyph for any other client.
 export function BrandMark({
   clientKind,
   tint,
-  elevated = false,
 }: {
   clientKind: ExternalClientKind
   tint: string
-  // The standalone heal hero card lifts the generic ('other') monogram with a
-  // soft shadow; the embedded draft/portify cards stay flat. No effect on the
-  // claude/codex monogram (which is flat everywhere).
-  elevated?: boolean
 }) {
   const isClaude = clientKind.startsWith('claude')
   const isCodex = clientKind.startsWith('codex')
@@ -63,7 +60,7 @@ export function BrandMark({
     const alt = clientLabel(clientKind)
     return (
       <div
-        className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
+        className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg"
         style={{
           border: `1px solid color-mix(in srgb, ${tint} 30%, var(--border-default))`,
         }}
@@ -75,19 +72,16 @@ export function BrandMark({
 
   return (
     <div
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg @[320px]:h-12 @[320px]:w-12 @[320px]:rounded-xl @[480px]:h-14 @[480px]:w-14"
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
       style={{
         background: `linear-gradient(135deg, color-mix(in srgb, ${tint} 22%, transparent), color-mix(in srgb, ${tint} 8%, transparent))`,
         border: `1px solid color-mix(in srgb, ${tint} 38%, var(--border-default))`,
         color: tint,
-        ...(elevated
-          ? { boxShadow: `inset 0 0 0 1px color-mix(in srgb, white 7%, transparent), 0 10px 24px color-mix(in srgb, ${tint} 14%, transparent)` }
-          : {}),
       }}
       role="img"
       aria-label="External agent session"
     >
-      <svg viewBox="0 0 32 32" width="30" height="30" fill="none" aria-hidden="true" className="h-7 w-7 @[320px]:h-8 @[320px]:w-8">
+      <svg viewBox="0 0 32 32" width="30" height="30" fill="none" aria-hidden="true" className="h-5 w-5">
         <rect x="6" y="8" width="20" height="14" rx="3" fill="currentColor" opacity="0.13" />
         <rect x="6" y="8" width="20" height="14" rx="3" stroke="currentColor" strokeWidth="2" />
         <path d="M11 13h10M11 17h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.72" />
