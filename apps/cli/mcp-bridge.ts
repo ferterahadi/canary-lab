@@ -1,7 +1,7 @@
 import type { JSONRPCMessage } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { type CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
+import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { DEFAULT_MCP_PROFILE, McpCommandOptions, resolveDefaultMcpUrl, stripProfile } from './mcp'
 import { inferMcpClientKind } from './mcp-client-kind'
 import { checkHealth, ensureMcpServerReachable, isAttachableServer, sleep, urlWithContext } from './mcp-reachability'

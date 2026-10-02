@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FlightManifest } from './types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 import { issueCheckpointInput, allowsCheckpointInput } from './checkpoint-input'
 
 const flight = (over: Record<string, unknown> = {}) => ({

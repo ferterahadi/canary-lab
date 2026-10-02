@@ -1,4 +1,4 @@
-import type { EvaluationExportTask } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from '../EvaluationExportContext'
 import { FakeWebSocket } from '../EvaluationExportContext.test'
 
@@ -28,12 +28,13 @@ export function Probe({ captured }: {
   return null
 }
 
-export function task(overrides: Partial<EvaluationExportTask> = {}): EvaluationExportTask {
+export function task(overrides: Partial<EvaluationExportTaskView> = {}): EvaluationExportTaskView {
   return {
     taskId: 'task-1',
     runId: 'run-1',
     feature: 'checkout',
     mode: 'raw',
+    producer: 'internal',
     status: 'running',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

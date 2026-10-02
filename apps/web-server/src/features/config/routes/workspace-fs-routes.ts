@@ -6,8 +6,10 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { parseDotenv } from '../logic/dotenv-edit'
-import { checkoutBranch, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
+import { checkoutBranch, getGitStatus } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── generic filesystem browser ────────────────────────────────────────
@@ -33,10 +35,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
       reply.code(400)
       return { error: 'path must be absolute or start with ~' }
     }
-    if (!fs.existsSync(expanded) || !fs.statSync(expanded).isFile()) {
-      reply.code(404)
-      return { error: 'file not found' }
-    }
+    if (!fs.existsSync(expanded) || !fs.statSync(expanded).isFile()) return notFound(reply, 'file')
     const content = fs.readFileSync(expanded, 'utf-8')
     const parsed = parseDotenv(content)
     return { path: expanded, entries: parsed.entries, unparsedLines: parsed.unparsedLines }

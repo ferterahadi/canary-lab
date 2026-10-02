@@ -4,9 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VersionUpdateButton } from './VersionUpdateButton'
-import * as api from '../api/client'
-import type { VersionStatus } from '../api/types'
-
+import * as workspaceApi from '../api/workspace'
+import type { VersionStatus } from '@shared/version-status'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
@@ -46,7 +45,7 @@ describe('VersionUpdateButton', () => {
   })
 
   it('on the latest version: click opens a popover confirming it; no install call', () => {
-    const spy = vi.spyOn(api, 'startVersionUpdate')
+    const spy = vi.spyOn(workspaceApi, 'startVersionUpdate')
     render(base)
     expect(trigger()!.getAttribute('aria-label')).toContain('up to date')
     openPopover()
@@ -58,7 +57,7 @@ describe('VersionUpdateButton', () => {
   })
 
   it('update available: popover shows the delta + an Update button that starts the job', () => {
-    const spy = vi.spyOn(api, 'startVersionUpdate').mockResolvedValue({
+    const spy = vi.spyOn(workspaceApi, 'startVersionUpdate').mockResolvedValue({
       jobId: 'current', status: 'running', targetVersion: '1.4.2', startedAt: 't', log: '',
     })
     render({ ...base, latest: '1.4.2', updateAvailable: true })

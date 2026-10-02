@@ -1,9 +1,11 @@
-import { execFile, execFileSync } from 'child_process'
+import { commandResult } from './command-result'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../shared/launcher/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
+import { resolveRepoPath } from './repo-identity'
+import type { RepoBranchSnapshot } from '../../../../shared/run-manifest'
 
 export interface GitStatus {
   isGitRepo: boolean
@@ -17,21 +19,6 @@ export interface GitStatus {
   remoteBranches: string[]
 }
 
-export interface RepoBranchSnapshot {
-  name: string
-  path: string
-  branch: string | null
-  expectedBranch?: string
-  detached: boolean
-  dirty: boolean
-  /** Commit the checkout sat on when the run launched — the one the run's
-   *  worktree was cut from. Null on an unborn branch. */
-  sha: string | null
-  /** Set when the run fast-forwarded the checkout to its upstream before
-   *  booting (`track: 'upstream'` or the `updateRepos` start option). */
-  updatedFromUpstream?: { upstream: string; from: string; to: string }
-}
-
 export interface GitResult {
   code: number
   stdout: string
@@ -39,23 +26,7 @@ export interface GitResult {
 }
 
 export function runGit(cwd: string, args: string[]): Promise<GitResult> {
-  return new Promise((resolve) => {
-    const child = execFile('git', args, { cwd }, (error, stdout, stderr) => {
-      const code = typeof (error as { code?: unknown } | null)?.code === 'number'
-        ? (error as { code: number }).code
-        : error
-          ? 1
-          : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
-    child.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }))
-  })
-}
-
-export function resolveRepoPath(localPath: string): string {
-  if (localPath === '~') return os.homedir()
-  if (localPath.startsWith('~/')) return path.join(os.homedir(), localPath.slice(2))
-  return localPath
+  return commandResult('git', args, { cwd }, 1)
 }
 
 export function parsePorcelainStatus(stdout: string): string[] {
@@ -63,6 +34,23 @@ export function parsePorcelainStatus(stdout: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean)
+}
+
+export type WorkingTreeRead =
+  | { ok: true; lines: string[]; stdout: string }
+  | { ok: false; result: GitResult }
+
+/** Inspect exactly the caller's scope without refreshing the Git index. */
+export async function readWorkingTree(
+  cwd: string,
+  scope: 'repository' | 'directory',
+): Promise<WorkingTreeRead> {
+  const args = ['--no-optional-locks', 'status', '--porcelain']
+  if (scope === 'directory') args.push('--', '.')
+  const result = await runGit(cwd, args)
+  return result.code === 0
+    ? { ok: true, lines: parsePorcelainStatus(result.stdout), stdout: result.stdout }
+    : { ok: false, result }
 }
 
 export function parseRefList(stdout: string): string[] {
@@ -80,6 +68,15 @@ function safeBranchName(branch: string): boolean {
     && !branch.includes('\r')
 }
 
+function gitReadError(command: string, result: GitResult) {
+  const diagnostic = result.stderr.trim() || result.stdout.trim() || 'git command failed'
+  return Object.assign(new Error(`Unable to read Git status (${command}): ${diagnostic}`), { statusCode: 500 })
+}
+
+function requireGitRead(command: string, result: GitResult): void {
+  if (result.code !== 0) throw gitReadError(command, result)
+}
+
 export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   const target = resolveRepoPath(repoPath)
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
@@ -94,13 +91,23 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   const [branch, head, status, locals, remotes] = await Promise.all([
     runGit(target, ['branch', '--show-current']),
     runGit(target, ['rev-parse', '--verify', '--quiet', 'HEAD']),
-    runGit(target, ['status', '--porcelain']),
+    readWorkingTree(target, 'repository'),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes']),
   ])
 
+  requireGitRead('branch --show-current', branch)
+  // --quiet reports an unborn HEAD with exit 1 and no diagnostic. Spawn errors
+  // also normalize to 1, but carry a diagnostic and must not become null evidence.
+  if (!(head.code === 1 && !head.stdout.trim() && !head.stderr.trim())) {
+    requireGitRead('rev-parse --verify --quiet HEAD', head)
+  }
+  if (!status.ok) throw gitReadError('status --porcelain', status.result)
+  requireGitRead('for-each-ref refs/heads', locals)
+  requireGitRead('for-each-ref refs/remotes', remotes)
+
   const currentBranch = branch.stdout.trim() || null
-  const dirtyFiles = parsePorcelainStatus(status.stdout)
+  const dirtyFiles = status.lines
   return {
     isGitRepo: true,
     currentBranch,
@@ -151,9 +158,12 @@ export async function checkoutBranch(
       { statusCode: 500 },
     )
   }
-  const next = await getGitStatus(target)
-  publishWorkspaceEvent(events, { type: 'features-changed' })
-  return next
+  try {
+    return await getGitStatus(target)
+  } finally {
+    // Checkout already changed the tree, even if its follow-up read fails.
+    publishWorkspaceEvent(events, { type: 'features-changed' })
+  }
 }
 
 /** `updates` are the upstream fast-forwards run start performed just before
@@ -321,11 +331,10 @@ export async function diffNamesSinceSnapshot(
   pathspecs?: readonly DiffPathspec[],
 ): Promise<string[]> {
   const target = resolveRepoPath(repoPath)
-  const result = await runGit(target, ['diff', '--name-only', ref, ...buildPathspecArgs(target, pathspecs)])
+  const result = await runGit(target, ['diff', '--name-only', '-z', ref, ...buildPathspecArgs(target, pathspecs)])
   if (result.code !== 0) return []
   return result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
+    .split('\0')
     .filter(Boolean)
 }
 

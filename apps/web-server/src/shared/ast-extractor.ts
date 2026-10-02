@@ -1,13 +1,12 @@
+import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
+export type TestModifier = DeclarationModifier
 import ts from 'typescript'
-import {
-  formatSourceSnippetForDisplay,
-  type FormattedCodeDisplay,
-} from '../../../../shared/code-display-format'
+import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
-import type { ReadableSemanticRuleConfig, ReadableTest } from '../../../../shared/readable-tests/types'
+import type { ReadableSemanticRuleConfig } from '../../../../shared/readable-tests/types'
 import type { TestPredicate, TestGuard,
   UnparsedExpectation } from '../../../../shared/verification-strength/types'
-import { collectTestPredicates, guardFrom, TEST_DECLARATORS } from './verification-strength/predicates'
+import { collectTestPredicates, guardFrom } from './verification-strength/predicates'
 import {
   translateReadableTest,
   createReadableTestAstTranslator,
@@ -15,56 +14,7 @@ import {
 } from './readable-tests/translator'
 import { parseSource } from './controlled-english/compiler-context'
 import { compileSemanticSource } from './controlled-english/semantic-context'
-
-// Parse Playwright spec source and return every `test('name', …)` call along
-// with the `test.step('label', …)` invocations nested inside (recursively).
-//
-// Errors during parse are caught — we return an empty array rather than
-// blowing up the route handler. The TypeScript compiler is forgiving about
-// syntax errors anyway (it produces a partial AST), so this is mostly a
-// belt-and-braces safety net for truly broken input.
-
-export interface ExtractedStep {
-  label: string
-  line: number
-  bodySource: string
-  children: ExtractedStep[]
-}
-
-export interface ExtractedTest {
-  name: string
-  line: number
-  endLine?: number
-  sourceChanges?: { changedLines: number[]; count: number }
-  bodySource: string
-  /** First source line represented by bodySource. Distinct from the test call
-   *  line when a multiline declaration places its callback on a later line. */
-  bodyLine?: number
-  steps: ExtractedStep[]
-  readable: ReadableTest
-  /** In-memory, display-only rendering added by the tests route. The extractor
-   *  leaves it absent so coverage and rerun callers do no formatting work. */
-  codeDisplay?: FormattedCodeDisplay
-  // Present when the `test(...)` lives in a different file than the spec
-  // that owns it (e.g. a factory helper). UI uses this to link the code
-  // viewer at the real definition site instead of the importing spec.
-  sourceFile?: string
-  // Verified-coverage linkage. Primary source is Playwright tags on the test
-  // (`{ tag: ['@req-R3', '@path-happy'] }`); `@requirement <id>` / `@path
-  // happy|sad|edge` comment annotations are honoured as a migration fallback and
-  // unioned in. Absent when the test carries no linkage at all.
-  requirements?: string[]
-  pathTypes?: PathType[]
-  // Variant value(s) the test exercises (`@variant-email`). The third coverage
-  // axis (D1) — a feature-specific dimension (channel/tenant/region) a requirement
-  // must hold across. Open vocabulary; validated against the feature's declared
-  // dimension upstream. Absent when the test carries no variant linkage.
-  variants?: string[]
-  // Assertion / check snippets collected from the test body — `expect(...)`
-  // matcher chains plus navigation/network/db/file calls. Fed to the rigor
-  // tier classifier (verified-coverage depth dimension). Absent when none found.
-  assertions?: string[]
-}
+import type { ExtractedStep, ExtractedTest } from '../../../../shared/extracted-test'
 
 export interface ExtractResult {
   file: string
@@ -106,48 +56,6 @@ function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | nu
     return raw.slice(1, -1)
   }
   return null
-}
-
-function getCalleeChain(expr: ts.Expression): string[] {
-  // Returns the dotted access chain, e.g. `test.step.skip` → ["test","step","skip"].
-  // Returns [] if the callee isn't an Identifier or a chain of property accesses
-  // rooted at one.
-  if (ts.isIdentifier(expr)) return [expr.text]
-  if (ts.isPropertyAccessExpression(expr)) {
-    const head = getCalleeChain(expr.expression)
-    if (head.length === 0) return []
-    return [...head, expr.name.text]
-  }
-  return []
-}
-
-/** A declaration-level modifier: `test.skip(...)`, `test.fixme(...)`, `test.fail(...)`,
- *  `test.only(...)`. The first three stop the test from proving anything; `only`
- *  stops every other test in the file from running. */
-export type TestModifier = 'only' | 'skip' | 'fixme' | 'fail'
-
-const TEST_DECLARATION_MODIFIERS: ReadonlySet<string> = new Set<TestModifier>(['only', 'skip', 'fixme', 'fail'])
-
-function isTestModifier(name: string): name is TestModifier {
-  return TEST_DECLARATION_MODIFIERS.has(name)
-}
-
-// Only meaningful for a call `isTestCall` accepted: a declaration's modifier is
-// the second segment of its callee chain, and a bare `test(...)` has none.
-function declarationModifier(call: ts.CallExpression): TestModifier | undefined {
-  const tail = getCalleeChain(call.expression)[1] ?? ''
-  return isTestModifier(tail) ? tail : undefined
-}
-
-function isTestCall(call: ts.CallExpression): boolean {
-  // Match the test declaration forms — `test(...)` and its `it` spelling — but not
-  // hooks/configuration methods such as test.beforeEach(), test.use(), or
-  // test.setTimeout(). A titled hook also carries a string + callback, so argument
-  // shape alone cannot distinguish it from a test.
-  const [root, modifier, ...rest] = getCalleeChain(call.expression)
-  if (root === undefined || !TEST_DECLARATORS.has(root)) return false
-  if (modifier === undefined) return true
-  return rest.length === 0 && isTestModifier(modifier)
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {

@@ -1,5 +1,5 @@
-import type { PlaywrightArtifactGroup } from '@/shared/api/types'
-import { evaluationArchiveFilename } from '@/shared/lib/format'
+import type { PlaywrightArtifactGroup } from '@shared/run-detail'
+import { evaluationArchiveFilename } from '@shared/evaluation-archive-naming'
 import { isTerminalRunStatus as isSharedTerminalRunStatus } from '@shared/run-state'
 
 // Run has reached a terminal state — the agent pty is gone, so the live
@@ -64,5 +64,3 @@ export async function downloadEvaluationReport(
 export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined): boolean {
   return groups?.some((group) => group.artifacts.some((artifact) => artifact.kind === 'video')) ?? false
 }
-
-export { safeFilename } from '@/shared/lib/format'

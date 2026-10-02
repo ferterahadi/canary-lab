@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { ProposedMapping, VariantDimension } from '../../../../../../../shared/coverage/types'
-import type { ParsedRequirement } from './prd-summary'
+import type { ParsedRequirement } from './prd-summary-parse'
 
 // What an EXTERNAL producer is allowed to hand back — the zod shapes for the
 // PRD-summary and coverage-mapping submissions. Shared by the MCP submit_*
@@ -128,20 +128,7 @@ export function parseMappingSubmission(
   }
 }
 
-/** Tests the answer left unaccounted for — the roster-completeness rule. Once
- *  the client owns its own fan-out, a test silently missing from the answer is
- *  indistinguishable from one read and found to have no requirement; the ledger
- *  would score it uncovered on silence rather than evidence, so completeness is
- *  checked against the roster the client was HANDED (pinned at hand-off time,
- *  never recomputed — a test added since is not the client's to answer for). */
-export function missingFromRoster(
-  roster: readonly string[],
-  mappings: ReadonlyArray<{ testName: string }>,
-  unmappable: readonly string[],
-): string[] {
-  const accounted = new Set<string>([...mappings.map((m) => m.testName), ...unmappable])
-  return roster.filter((name) => !accounted.has(name))
-}
+export { missingFromRoster } from './mapping-roster'
 
 /** Thrown when a submitted answer leaves some of the job's tests unaccounted for.
  *  Carries the names so the client can finish the job rather than guess. Lives

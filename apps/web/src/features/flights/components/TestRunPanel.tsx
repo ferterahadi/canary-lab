@@ -1,12 +1,18 @@
 import { useMemo, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import * as runsApi from '@/shared/api/runs'
+import type { HealEnd, RunStatus } from '@shared/run-state'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { shortRunRef } from '@/shared/lib/format'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
-import { RunRow, useRun, useRuns } from '@/features/runs'
+import { RunRow } from '@/features/runs/components/RunRow'
+import { useRun, useRuns } from '@/features/runs/state/RunsContext'
 import { FailingTests } from './FailingTests'
-import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, runHistoryFacts } from './stage-meta'
+import { HERO_ROW, STAGE_COLUMN } from './stage-meta'
+import { FactsGrid, runHistoryFacts } from './StageFacts'
+import { healEndShort } from './StageStatusLines'
+import { plural } from '@shared/lib/plural'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { isAuxiliaryExecution } from '@shared/verification'
@@ -533,7 +539,7 @@ function RunControls({
             type="button"
             data-testid="run-stage-cancel-heal"
             disabled={mutationLockedReason != null}
-            onClick={() => { api.cancelHealRun(runId).catch(onError) }}
+            onClick={() => { runsApi.cancelHealRun(runId).catch(onError) }}
             className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Stops the repair and keeps the failing result. The flight will ask what to do next.'}
           >
@@ -547,7 +553,7 @@ function RunControls({
             type="button"
             data-testid="run-stage-stop"
             disabled={mutationLockedReason != null}
-            onClick={() => { api.stopRun(runId).catch(onError) }}
+            onClick={() => { runsApi.stopRun(runId).catch(onError) }}
             className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Ends this run only — the flight keeps going and asks what to do next. Pause stops everything.'}
           >

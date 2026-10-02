@@ -1,15 +1,14 @@
-import path from 'path'
-import { resolveRepoPath } from '../../../../shared/git-repo'
+import { resolveRepoIdentity } from '../../../../shared/repo-identity'
 
 /**
  * Same-repo collision detection. Two concurrent runs that edit the same repo
  * working tree (e.g. two runs of the same feature) would corrupt each other —
- * the heal loop edits code in place. Different apps point at different
- * `localPath`s, so they never collide and run in place with no worktree.
+ * the heal loop can edit code in place. Different physical directories remain
+ * independent, including sibling subdirectories of one Git root.
  *
- * This module is pure: given the repo paths a candidate run needs and the repo
- * paths of currently-active runs, it reports the first overlap. The caller
- * decides what to do (prompt for worktree isolation vs queue).
+ * Resolve current filesystem identity for candidate and occupied paths, including
+ * historical manifests that recorded a symlink. The caller decides what to do
+ * with the first overlap (prompt for worktree isolation vs queue).
  */
 
 export interface ActiveRunRepos {
@@ -26,12 +25,12 @@ export interface RepoCollision {
   repoPaths: string[]
 }
 
-/** Resolve `~`, make absolute, and dedupe a set of repo paths. */
+/** Dedupe physical directories, retaining absolute spellings for unavailable paths. */
 export function normalizeRepoPaths(paths: Iterable<string> | undefined): string[] {
   const out = new Set<string>()
   for (const p of paths ?? []) {
     if (typeof p !== 'string' || p.length === 0) continue
-    out.add(path.resolve(resolveRepoPath(p)))
+    out.add(resolveRepoIdentity(p, 'best-effort'))
   }
   return [...out]
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ExternalHealPanel } from './ExternalHealPanel'
-import type { ExternalHealSession } from '@/shared/api/types'
+import type { ExternalHealSession } from '@shared/run-manifest'
 
 describe('ExternalHealPanel', () => {
   it('shows the terminal run status instead of stale session status once the run is terminal', () => {
@@ -27,8 +27,21 @@ describe('ExternalHealPanel', () => {
       />,
     )
 
-    expect(html).toContain('Waiting')
+    expect(html).toContain('Awaiting Agent')
+    expect(html).toContain('var(--warning)')
     expect(html).not.toContain('Aborted')
+  })
+
+  it('uses the same waiting label and amber tone before an external agent claims the run', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="healing" />)
+    expect(html).toContain('Awaiting Agent')
+    expect(html).toContain('var(--warning)')
+  })
+
+  it('uses the run presentation for an actively healing external session', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="healing" session={session({ status: 'healing' })} />)
+    expect(html).toContain('Healing')
+    expect(html).toContain('var(--warning)')
   })
 
   it.each([

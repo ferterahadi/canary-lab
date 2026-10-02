@@ -740,15 +740,19 @@ body {
 .cl-column-header.cl-tests-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-  height: auto;
-  min-height: 40px;
+  flex-wrap: nowrap;
+  gap: 16px;
+  height: 40px;
   padding: 0 12px;
 }
 
 .cl-tests-tabs { display: flex; align-items: center; gap: 20px; }
 .cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 5px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
+
+/* A cold suite switch holds the card slots still while Playwright discovers
+   tests. The authoring placeholder keeps its sweep because it represents work
+   actively writing the suite. */
+.cl-tests-loading .cl-skeleton { animation: none; }
 
 /* One numeral system across both tabs. The source total used the standalone
    count chip and the run ratio used a bare mono span, so the two halves of a
@@ -786,8 +790,18 @@ body {
   transform: translateY(-50%);
   background: var(--border-subtle);
 }
-.cl-test-version-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.cl-test-changes { display: flex; align-items: center; gap: 9px; }
+.cl-test-version-actions {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.cl-test-changes { display: flex; align-items: center; gap: 9px; margin-left: auto; flex: 0 0 auto; }
+.cl-test-version-actions > .cl-test-change { margin-left: auto; }
 
 /* A drift mark is a tinted glyph and a numeral, with no border of its own. The
    bordered version read as three more buttons competing with the tabs, when the
@@ -1114,6 +1128,17 @@ body {
 .cl-button-danger:not(:disabled):focus-visible {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border-default));
+}
+
+/* The card-level lead action, worn beside `.cl-button`: the neutral slab with
+   accent ink and an accent-leaning border. For a dense card where a filled
+   `.cl-button-primary` would be the loudest thing on screen (the Changes
+   card's Open in editor); same equal-specificity ordering as the danger tone. */
+.cl-button-accent,
+.cl-button-accent:not(:disabled):hover,
+.cl-button-accent:not(:disabled):focus-visible {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
 }
 
 /* Branch choice cards in the run-start branch-mismatch dialog — the whole card
@@ -1708,6 +1733,64 @@ body {
   box-shadow: var(--shadow-panel);
 }
 
+/* A card's title strip. The run-detail cards (the Overview facts, a service, a
+   played-back test) all open with this band: identity on the left, state on the
+   right, a hairline under it. One anatomy, so every card in a run pane reads as
+   the same object holding different facts. The card needs `overflow-hidden` so
+   the strip's fill follows its rounded corners. */
+.cl-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+}
+
+/* A card that is only its title strip (an unchanged repo) ends on the card's
+   own border, not a second hairline under it. */
+.cl-card-head:last-child {
+  border-bottom: 0;
+}
+
+.cl-card-body {
+  padding: 10px 12px;
+}
+
+/* A card's action strip: the closing band of the head / body / foot anatomy,
+   holding the card's buttons (evidence tabs, Raw entry, Open in editor) on the
+   same quiet surface as the title strip. */
+.cl-card-foot {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, var(--bg-surface));
+}
+
+/* A state word on a card's title strip (READY, FAILED). Shape only: the tone is
+   a `bg-*`/`text-*` utility pair beside it, so this rule declares no colour —
+   an unlayered colour here would silently beat that utility. */
+.cl-status-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .cl-card-hover {
   transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -1783,6 +1866,37 @@ body {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
+}
+
+/* A select that reads as its value until touched, worn with `.themed-select`
+   for the chevron. Dense editors (the model plan: two per stage, nine stages)
+   turned into a wall of bordered fields; the frame now appears only on hover
+   and focus, while the chevron stays so a value still reads as a choice. An
+   empty value (agent default) drops to muted ink. */
+.cl-ghost-select {
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.cl-ghost-select[data-empty='true'] {
+  color: var(--text-muted);
+}
+.cl-ghost-select:hover {
+  background-color: var(--bg-hover);
+}
+.cl-ghost-select:focus,
+.cl-ghost-select:focus-visible {
+  background-color: var(--bg-input);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+.cl-ghost-select option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .cl-popover {

@@ -8,7 +8,8 @@ import { BenchmarkRunStore } from './logic/runtime/store'
 import { benchmarkDir } from './logic/runtime/paths'
 import { benchmarkRoutes } from './routes/benchmarks'
 import { benchmarkStreamRoutes } from './ws/benchmark-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry } from '../runs/logic/run-store'
+import { RunStore } from '../runs/logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from '../runs/logic/run-registry'
 import type { RunsFeature } from '../runs/index'
 import type { PtyFactory } from '../runs/logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
@@ -23,8 +24,8 @@ import { register } from './index'
  */
 const probe = vi.hoisted(() => ({ asked: [] as (string | undefined)[], answer: 'claude' as string | null }))
 
-vi.mock('../runs/logic/runtime/auto-heal', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../runs/logic/runtime/auto-heal')>()),
+vi.mock('../runs/logic/runtime/heal-agent-spawn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../runs/logic/runtime/heal-agent-spawn')>()),
   pickAvailableHealAgent: (requested?: string) => {
     probe.asked.push(requested)
     return probe.answer

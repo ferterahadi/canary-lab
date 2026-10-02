@@ -4,8 +4,8 @@ import { findPlaywrightConfig } from '../../../../shared/playwright-config'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
   PLAYWRIGHT_SCREENSHOT_MODES,
+  type PlaywrightArtifactPolicy,
 } from '../../../../../../../shared/configs/playwright-modes'
-import type { PlaywrightArtifactPolicy } from './manifest'
 
 export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   screenshot: 'only-on-failure',

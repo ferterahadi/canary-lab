@@ -2,7 +2,7 @@ import path from 'path'
 import type { FeatureConfig, PortSlot } from '../../../../../../../shared/launcher/types'
 import { enabledForEnv, normalizeStartCommand, resolveHealthProbe, resolvePath } from '../../../../shared/launcher-startup'
 import { buildRunPaths } from './run-paths'
-import { type ServiceManifestEntry } from './manifest'
+import type { ServiceManifestEntry } from '../../../../../../../shared/run-manifest'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
 import type { BuildServiceSpecsOptions, ServiceSpec } from './run-orchestrator-types'
 
@@ -38,6 +38,14 @@ export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot
     }
   }
   return [...slots.values()]
+}
+
+/** Whether any start command boots in `env` — the same filters buildServiceSpecs
+ *  applies, without resolving tokens or paths. */
+export function bootsServicesForEnv(feature: FeatureConfig, env?: string): boolean {
+  return (feature.repos ?? []).some((repo) => enabledForEnv(repo.envs, env)
+    && (repo.startCommands ?? []).some((command, i) =>
+      enabledForEnv(normalizeStartCommand(command, `${repo.name}-cmd-${i + 1}`).envs, env)))
 }
 
 export function buildServiceSpecs(

@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { FieldRow, Modal, TextInput } from '@/shared/ui/atoms'
+import { useRef, useState } from 'react'
+import * as configApi from '@/shared/api/config'
+import { FieldRow, TextInput } from '@/shared/ui/FormFields'
+import { Modal } from '@/shared/ui/Overlays'
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
+import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
 
 export const inlineSelectStyle = {
@@ -10,7 +13,11 @@ export const inlineSelectStyle = {
   fontFamily: 'var(--font-mono)',
 } as const
 
-export function AddSlotModal({
+export function AddSlotModal(props: Parameters<typeof AddSlotSession>[0]) {
+  return <AddSlotSession key={props.feature} {...props} />
+}
+
+function AddSlotSession({
   feature,
   envCount,
   onClose,
@@ -22,8 +29,10 @@ export function AddSlotModal({
   onAdded: (slot: string) => void | Promise<void>
 }) {
   const [stage, setStage] = useState<'pick' | 'confirm'>('pick')
-  const [browse, setBrowse] = useState<api.FsBrowseResponse | null>(null)
-  const [pathInput, setPathInput] = useState('')
+  const browser = useFilesystemBrowser({ session: feature, kind: 'files', enabled: stage === 'pick' && envCount > 0 })
+  const { browse, pathInput, setPathInput, navigate: loadDir } = browser
+  const current = useMountedIdentity(feature)
+  const submitting = useRef(false)
   const [picked, setPicked] = useState<string | null>(null)
   const [slotName, setSlotName] = useState('')
   const [target, setTarget] = useState('')
@@ -31,20 +40,8 @@ export function AddSlotModal({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const loadDir = async (dir: string): Promise<void> => {
-    setError(null)
-    try {
-      const res = await api.browseDir(dir)
-      setBrowse(res)
-      setPathInput(res.dir)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Browse failed')
-    }
-  }
-
-  useEffect(() => { loadDir('') }, [])
-
   const onPickFile = (full: string): void => {
+    if (!browser.confirmed) return
     const name = full.split('/').pop() ?? full
     setPicked(full)
     setSlotName(name)
@@ -53,21 +50,23 @@ export function AddSlotModal({
   }
 
   const onSubmit = async (): Promise<void> => {
-    if (!picked) return
+    if (!picked || submitting.current) return
+    submitting.current = true
     setBusy(true)
     setError(null)
     try {
-      const res = await api.addEnvsetSlot(feature, {
+      const res = await configApi.addEnvsetSlot(feature, {
         sourcePath: picked,
         slotName: slotName.trim() || undefined,
         target: target.trim() || undefined,
         description: description.trim() || undefined,
       })
-      await onAdded(res.slot)
+      if (current()) await onAdded(res.slot)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Add slot failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Add slot failed')
     } finally {
-      setBusy(false)
+      submitting.current = false
+      if (current()) setBusy(false)
     }
   }
 
@@ -98,8 +97,11 @@ export function AddSlotModal({
             </button>
           </div>
           <div className="mx-4 mb-3">
-            <FileBrowserList browse={browse} onNavigate={loadDir} onPickFile={onPickFile} />
+            <FileBrowserList disabled={!browser.confirmed} browse={browse} onNavigate={loadDir} onPickFile={onPickFile} />
           </div>
+          {(browser.loading || browser.error) && <div role="status" className="px-4 pb-2 text-xs text-muted">
+            {browser.error || 'Loading directory…'} <span className="font-mono">{browser.requestedPath || '~'}</span> <button type="button" className="cl-button px-2" onClick={browser.retry}>Retry</button>
+          </div>}
           {error && <div className="px-4 pb-2 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
         </div>
       ) : (

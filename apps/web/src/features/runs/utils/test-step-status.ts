@@ -1,9 +1,10 @@
+import { summaryEntryName } from '@shared/test-names'
 // Pure utilities to map a Playwright test (extracted from the AST) onto its
 // status and latest reporter-owned step location from e2e-summary.json. The
 // step location drives the live source highlight; verdict badges remain
 // test-level because Playwright reports the final outcome at that level.
 
-import type { RunSummary } from '@/shared/api/types'
+import type { RunSummary } from '@shared/run-detail'
 
 export type StepStatus = 'unmatched' | 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type TestExecutionHighlightKind = 'running' | 'failed'
@@ -62,21 +63,6 @@ export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
     cardClassName: 'border-line-strong bg-elevated/40',
     pillClassName: 'border-idle/70 bg-transparent text-secondary',
   },
-}
-
-// Slugify the test name the same way the summary reporter does
-// (shared/e2e-runner/summary-reporter.ts). The summary entry is then
-// `test-case-${slug}`. Kept inline so the frontend doesn't pull in a
-// server-side module.
-export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
-export function summaryEntryName(testName: string): string {
-  return `test-case-${slugify(testName)}`
 }
 
 // Map a Playwright test's status from the summary. A test is only marked as

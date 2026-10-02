@@ -13,12 +13,8 @@ import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
 import { registerCoverageChangeTools } from './tool-groups/coverage-changes'
 import { withCoverageCatchup } from './coverage-catchup'
 import type { CanaryLabToolHandler } from './tool-schemas'
-export type { CanaryLabToolHandler } from './tool-schemas'
-import {
-  FULL_TOOLS,
-  type CanaryLabMcpToolName,
-  type ToolGroupContext,
-} from './tool-support'
+import { type ToolGroupContext } from './tool-support'
+import { FULL_TOOLS, type CanaryLabMcpToolName } from './tool-profiles'
 
 export interface CanaryLabToolConfig {
   title?: string

@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RepoBranchSnapshot, ServiceManifestEntry } from '@/shared/api/types'
+import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import { COMPILER_FAILURE_NEXT_ACTION } from '@shared/run-state'
 import { UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
 import { openRunLog } from '../utils/open-run-log'

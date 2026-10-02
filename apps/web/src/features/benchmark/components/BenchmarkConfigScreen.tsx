@@ -1,7 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import * as featuresApi from '@/shared/api/features'
 import type { Feature } from '@/shared/api/types'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { ArmComparisonPage, badgeStyle } from './BenchmarkArmMatrix'
 import { BenchmarkHeader } from './BenchmarkHeader'
@@ -33,10 +40,10 @@ export function ConfigScreen({
   // When the selected feature's apps aren't configured for injectable ports,
   // the benchmark would clash on a hardcoded port (both arms boot it at once).
   // We park the start here and offer the port-ification workflow.
-  const [gate, setGate] = useState<api.BenchmarkPreflight | null>(null)
+  const [gate, setGate] = useState<benchmarkApi.BenchmarkPreflight | null>(null)
 
   useEffect(() => {
-    api.listFeatures().then((f) => {
+    featuresApi.listFeatures().then((f) => {
       setFeatures(f)
       if (f.length && !feature) setFeature(f[0].name)
     }).catch(() => {})
@@ -45,7 +52,7 @@ export function ConfigScreen({
 
   useEffect(() => {
     if (!feature) return
-    api.listSabotageSkills(feature).then((s) => {
+    benchmarkApi.listSabotageSkills(feature).then((s) => {
       setSkills(s)
       // Keep the current pick if the new feature still offers it (skills are
       // generic, so it usually does) — only fall back to the first otherwise.
@@ -61,7 +68,7 @@ export function ConfigScreen({
     try {
       // Gate: benchmark arms boot the same feature concurrently, so an app with
       // hardcoded ports clashes. Block here and offer the port-ification flow.
-      const preflight = await api.benchmarkPreflight(feature)
+      const preflight = await benchmarkApi.benchmarkPreflight(feature)
       if (!preflight.portsConfigured) {
         setGate(preflight)
         setBusy(false)
@@ -237,7 +244,7 @@ export function DynamicPortsGate({
   onCancel,
 }: {
   feature: string
-  preflight: api.BenchmarkPreflight
+  preflight: benchmarkApi.BenchmarkPreflight
   onSetup: () => void
   onCancel: () => void
 }) {

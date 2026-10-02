@@ -1,24 +1,28 @@
+import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import crypto from 'crypto'
 import path from 'path'
 import {
   runAgentProcess,
   buildClaudeAgenticArgs,
 } from '../../../agent-sessions/logic/agent-process'
-import { agentModelArgs, type AgentStagePlans, type ModelStageKey, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import type {
+  AgentStagePlans,
+  ModelStageKey,
+  PerAgentStageChoices,
+  StageModelChoice,
+} from '../../../../../../../shared/agent-models'
 import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-stream'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import {
-  claudeSessionLogPath,
   resolveWorkflowAgentRef,
   writeWorkflowAgentRef,
 } from '../../../agent-sessions/logic/agent-session-log'
-import { loadFeatures } from '../../../../shared/feature-loader'
+import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
+import { findFeature } from '../../../../shared/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../../shared/workspace-events'
-import type {
-  computeFeatureCoverage,
-  regeneratePrdSummary,
-  runCoverageEngine,
-} from '../../../coverage/logic/coverage/service'
+import type { computeFeatureCoverage } from '../../../coverage/logic/coverage/service'
+import type { regeneratePrdSummary } from '../../../coverage/logic/coverage/feature-docs'
+import type { runCoverageEngine } from '../../../coverage/logic/coverage/coverage-engine'
 
 // Shared plumbing for the flight's stage adapters: the dependency bag every
 // adapter factory receives, the one agent spawner (composing the consolidated
@@ -156,14 +160,7 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
             model: opts.models?.model ?? null,
             effort: opts.models?.effort ?? null,
           })
-        : [
-            'exec',
-            '--full-auto',
-            '--skip-git-repo-check',
-            // Model/effort ride as exec options, before the stdin marker.
-            ...agentModelArgs('codex', opts.models ?? { model: null, effort: null }),
-            '-',
-          ],
+        : buildCodexAgenticArgs('-', { ...opts.models, skipGitRepoCheck: true }),
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
     captureStdout: true,
@@ -333,7 +330,7 @@ export function featureDirFor(deps: FlightStageDeps, feature: string): string {
   // place because persisted run/coverage/portify records hold absolute paths.
   // Once a config exists, its featureDir is therefore the authority. The join
   // remains the pre-scaffold fallback, where there is no config to resolve yet.
-  return loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)?.featureDir
+  return findFeature(deps.featuresDir, feature)?.featureDir
     ?? path.join(deps.featuresDir, feature)
 }
 

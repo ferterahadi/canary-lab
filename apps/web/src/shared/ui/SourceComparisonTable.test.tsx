@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
-import { sourceRows } from '../lib/test-review-model'
+import { sourceRows } from '@shared/test-source-diff'
 import { SourceComparisonTable } from './SourceComparisonTable'
 import { ShikiCode } from './TestCodeBlock'
 

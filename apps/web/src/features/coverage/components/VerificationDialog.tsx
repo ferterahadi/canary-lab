@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { VerificationConfig, VerificationTarget } from '@/shared/api/types'
-import { Modal, Section } from '@/shared/ui/atoms'
+import * as verificationApi from '@/shared/api/verification'
+import type { VerificationConfig } from '@shared/verification'
+import { useLiveResource } from '@/shared/state/use-live-resource'
+import { useInvalidationKey } from '@/shared/state/invalidation'
+import { Section } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 
 // The dialog is built from the app's shared dialog chrome — `Modal` (backdrop,
 // eyebrow + title header, scrollable body, pinned footer) and `Section` (titled
@@ -27,7 +30,11 @@ interface VerificationDialogProps {
   refreshKey?: number
 }
 
-export function VerificationDialog({
+export function VerificationDialog(props: VerificationDialogProps) {
+  return <VerificationSettings key={props.feature} {...props} />
+}
+
+function VerificationSettings({
   feature,
   envs,
   disabled,
@@ -36,23 +43,40 @@ export function VerificationDialog({
   onStart,
   refreshKey,
 }: VerificationDialogProps) {
-  const [configs, setConfigs] = useState<VerificationConfig[]>([])
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null)
-  const [targets, setTargets] = useState<VerificationTarget[]>([])
-  const [defaultTargetUrls, setDefaultTargetUrls] = useState<Record<string, string>>({})
   const [targetUrls, setTargetUrls] = useState<Record<string, string>>({})
   const [playwrightEnvsetId, setPlaywrightEnvsetId] = useState(envs[0] ?? '')
   const [name, setName] = useState('')
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [starting, setStarting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [actionError, setError] = useState<string | null>(null)
+
+  const configuration = useInvalidationKey('configuration')
+  const scopedConfiguration = useInvalidationKey('configuration', feature)
+  const list = useLiveResource('verification', feature, verificationApi.listVerificationConfigs, { reconcileMs: 5000, refreshKey })
+  const targetRead = useLiveResource('verification', JSON.stringify([feature, playwrightEnvsetId]), async () => ({
+    envset: playwrightEnvsetId,
+    index: await verificationApi.getVerificationTargets(feature, playwrightEnvsetId || undefined),
+  }), { reconcileMs: 5000, refreshKey: JSON.stringify([refreshKey, configuration, scopedConfiguration]) })
+  const configs = list.value ?? []
+  const targets = targetRead.value?.index.targets ?? []
+  const defaultTargetUrls = targetRead.value?.index.targetUrls ?? {}
+  const loading = (list.value === null && !list.error) || (targetRead.value === null && !targetRead.error)
+  const error = actionError ?? list.error ?? targetRead.error
+  const [initialized, setInitialized] = useState(false)
+  const touched = useRef(false)
+  const lifetime = useMemo(() => ({ active: false }), [])
+  useEffect(() => { lifetime.active = true; return () => { lifetime.active = false } }, [lifetime])
+  const form = { selectedConfigId, name, targetUrls, playwrightEnvsetId }
+  const formRef = useRef(form)
+  formRef.current = form
 
   // What the CURRENTLY selected envset seeded into the form — the baseline
   // `reseedTargetUrls` compares against to tell "still the envset's value" from
   // "the user's own". A ref, not state: the re-seed reads it inside a setState
   // updater, and writing it must not re-fire the effect that maintains it.
   const seededUrls = useRef<Record<string, string>>({})
+  const seededEnvset = useRef<string | null>(null)
 
   const selectedConfig = useMemo(
     () => configs.find((config) => config.id === selectedConfigId) ?? null,
@@ -65,96 +89,56 @@ export function VerificationDialog({
   )
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      api.listVerificationConfigs(feature),
-      api.getVerificationTargets(feature, playwrightEnvsetId || undefined),
-    ]).then(([loadedConfigs, targetIndex]) => {
-      if (cancelled) return
-      setConfigs(loadedConfigs)
-      setTargets(targetIndex.targets)
-      setDefaultTargetUrls(targetIndex.targetUrls)
-      if (loadedConfigs.length > 0) {
-        const first = loadedConfigs[0]
-        setSelectedConfigId(first.id)
-        setName(first.name)
-        setPlaywrightEnvsetId(first.playwrightEnvsetId)
-        setTargetUrls(first.targetUrls)
-        // Saved values, not an envset seed — see `selectConfig`.
-        seededUrls.current = {}
-      } else {
-        setSelectedConfigId(null)
-        setName('')
-        setTargetUrls(targetIndex.targetUrls)
-        seededUrls.current = targetIndex.targetUrls
-      }
-    }).catch((err) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load verification settings')
-    }).finally(() => {
-      if (!cancelled) setLoading(false)
-    })
-    return () => { cancelled = true }
-  // Load once per feature. Envset changes fetch targets in the effect below.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feature])
+    if (!list.value || initialized) return
+    const first = touched.current ? undefined : list.value[0]
+    const envset = first?.playwrightEnvsetId ?? playwrightEnvsetId
+    if (envset !== playwrightEnvsetId) { setPlaywrightEnvsetId(envset); return }
+    if (!targetRead.value || targetRead.value.envset !== envset) return
+    setInitialized(true)
+    seededEnvset.current = envset
+    if (first) {
+      setSelectedConfigId(first.id)
+      setName(first.name)
+      setPlaywrightEnvsetId(first.playwrightEnvsetId)
+      setTargetUrls(first.targetUrls)
+      seededUrls.current = {}
+    } else if (!touched.current) {
+      setTargetUrls(targetRead.value.index.targetUrls)
+      seededUrls.current = targetRead.value.index.targetUrls
+    }
+  }, [list.value, initialized, playwrightEnvsetId, targetRead.value])
 
-  // A `verification-config-changed` event (this config edited via MCP or another
-  // tab) bumps refreshKey. Re-list the saved configs so a new/renamed config shows
-  // live — but DELIBERATELY do not reset selectedConfigId / name / targetUrls, so
-  // the editing user's current selection and unsaved edits survive (cl_ws-driven-
-  // state + don't clobber local state). Skip the initial mount (the loader above
-  // already fetched).
-  const refreshMounted = useRef(false)
   useEffect(() => {
-    if (!refreshMounted.current) { refreshMounted.current = true; return }
-    let cancelled = false
-    api.listVerificationConfigs(feature)
-      .then((loaded) => { if (!cancelled) setConfigs(loaded) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey])
+    if (list.confirmed && selectedConfigId && !configs.some((config) => config.id === selectedConfigId)) {
+      // Preserve the user's fields as a new draft if another writer removed
+      // the saved configuration. Never submit an obsolete config ID.
+      setSelectedConfigId(null)
+    }
+  }, [list.confirmed, configs, selectedConfigId])
 
-  // `envs` arrives with the parent's async feature list, so the initial state is
-  // '' on first render. A `<select>` whose React value matches no option still
-  // DISPLAYS its first one, so the dialog claimed "local" while actually holding
-  // no envset — and the seeded URLs came from the server's no-envset fallback,
-  // which is not the same map. Adopt the first envset the moment the list lands.
   useEffect(() => {
     if (!playwrightEnvsetId && envs.length > 0) setPlaywrightEnvsetId(envs[0])
   }, [envs, playwrightEnvsetId])
 
   useEffect(() => {
-    if (!playwrightEnvsetId) return
-    let cancelled = false
-    api.getVerificationTargets(feature, playwrightEnvsetId)
-      .then((targetIndex) => {
-        if (cancelled) return
-        setTargets(targetIndex.targets)
-        setDefaultTargetUrls(targetIndex.targetUrls)
-        // Switching envset actually swaps its URLs in. The old merge kept every
-        // previous value (`{...next, ...prev}`), so after the first load the
-        // picker only ever changed the target LIST — picking `staging` left the
-        // localhost URLs sitting there.
-        //
-        // Read the outgoing seed into a local FIRST: `setTargetUrls`'s updater
-        // runs later, during render, so advancing the ref before the call would
-        // hand the updater the new seed as the "previous" one and match nothing.
-        const previousSeed = seededUrls.current
-        seededUrls.current = targetIndex.targetUrls
-        setTargetUrls((prev) => reseedTargetUrls(prev, previousSeed, targetIndex.targetUrls))
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [feature, playwrightEnvsetId])
+    const result = targetRead.value
+    if (!initialized || !result || result.envset !== playwrightEnvsetId) return
+    // A saved configuration owns its URL values. Only envset-derived values
+    // participate in reseeding; an accepted list refresh never resets edits.
+    if (seededEnvset.current === playwrightEnvsetId) return
+    seededEnvset.current = playwrightEnvsetId
+    const previous = seededUrls.current
+    seededUrls.current = result.index.targetUrls
+    setTargetUrls((current) => reseedTargetUrls(current, previous, result.index.targetUrls))
+  }, [targetRead.value, playwrightEnvsetId, initialized])
 
   const selectConfig = useCallback((config: VerificationConfig): void => {
+    touched.current = true
     setSelectedConfigId(config.id)
     setName(config.name)
     setPlaywrightEnvsetId(config.playwrightEnvsetId)
     setTargetUrls(config.targetUrls)
+    seededEnvset.current = config.playwrightEnvsetId
     // A saved config's URLs are somebody's deliberate values, not an envset's
     // seed — so a later envset switch must never overwrite them.
     seededUrls.current = {}
@@ -162,6 +146,7 @@ export function VerificationDialog({
   }, [])
 
   const startNewConfig = useCallback((): void => {
+    touched.current = true
     setSelectedConfigId(null)
     setName('')
     setTargetUrls(defaultTargetUrls)
@@ -183,25 +168,24 @@ export function VerificationDialog({
     try {
       const body = { name: name.trim(), targetUrls, playwrightEnvsetId }
       const saved = selectedConfigId
-        ? await api.updateVerificationConfig(feature, selectedConfigId, body)
-        : await api.createVerificationConfig(feature, body)
-      setConfigs((prev) => {
-        const idx = prev.findIndex((config) => config.id === saved.id)
-        if (idx === -1) return [...prev, saved]
-        const next = prev.slice()
-        next[idx] = saved
-        return next
-      })
-      setSelectedConfigId(saved.id)
-      setName(saved.name)
-      setPlaywrightEnvsetId(saved.playwrightEnvsetId)
-      setTargetUrls(saved.targetUrls)
+        ? await verificationApi.updateVerificationConfig(feature, selectedConfigId, body)
+        : await verificationApi.createVerificationConfig(feature, body)
+      if (!lifetime.active || !list.accept((previous) => {
+        const rows = previous ?? []
+        return rows.some((config) => config.id === saved.id)
+          ? rows.map((config) => config.id === saved.id ? saved : config) : [...rows, saved]
+      })) return
+      const current = formRef.current
+      if (current.selectedConfigId === selectedConfigId) setSelectedConfigId(saved.id)
+      if (current.name === name) setName(saved.name)
+      if (current.playwrightEnvsetId === playwrightEnvsetId) setPlaywrightEnvsetId(saved.playwrightEnvsetId)
+      if (current.targetUrls === targetUrls) setTargetUrls(saved.targetUrls)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed')
+      if (lifetime.active) setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
-      setSaving(false)
+      if (lifetime.active) setSaving(false)
     }
-  }, [feature, name, playwrightEnvsetId, selectedConfigId, targetUrls])
+  }, [feature, name, playwrightEnvsetId, selectedConfigId, targetUrls, lifetime, list.accept])
 
   const start = useCallback(async (): Promise<void> => {
     if (!playwrightEnvsetId) {
@@ -216,13 +200,13 @@ export function VerificationDialog({
         playwrightEnvsetId,
         targetUrls,
       })
-      onClose()
+      if (lifetime.active) onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed to start')
+      if (lifetime.active) setError(err instanceof Error ? err.message : 'Verification failed to start')
     } finally {
-      setStarting(false)
+      if (lifetime.active) setStarting(false)
     }
-  }, [onClose, onStart, playwrightEnvsetId, selectedConfigId, targetUrls])
+  }, [onClose, onStart, playwrightEnvsetId, selectedConfigId, targetUrls, lifetime])
 
   return (
     <Modal
@@ -322,7 +306,7 @@ export function VerificationDialog({
                     </span>
                     <input
                       value={targetUrls[target.id] ?? ''}
-                      onChange={(e) => setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value }))}
+                      onChange={(e) => { touched.current = true; setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value })) }}
                       placeholder="https://service.example.com/health"
                       aria-label={`Health-check URL for ${target.name}`}
                       spellCheck={false}
@@ -346,7 +330,7 @@ export function VerificationDialog({
             <select
               aria-label="Envset"
               value={playwrightEnvsetId}
-              onChange={(e) => setPlaywrightEnvsetId(e.target.value)}
+              onChange={(e) => { touched.current = true; setPlaywrightEnvsetId(e.target.value) }}
               className="themed-select cl-input mt-2 w-full px-2.5 py-1.5 pr-8 text-xs"
               disabled={envs.length === 0}
             >
@@ -365,7 +349,7 @@ export function VerificationDialog({
             <div className="mt-2 flex gap-2">
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { touched.current = true; setName(e.target.value) }}
                 placeholder="Beta, Staging, Production…"
                 aria-label="Configuration name"
                 className="cl-input min-w-0 flex-1 px-2.5 py-1.5 text-xs"

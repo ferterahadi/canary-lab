@@ -1,153 +1,18 @@
+import { testLogicalKey } from './test-identity'
+import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
 import path from 'path'
-import type { PathType } from '../../../../../../shared/coverage/types'
-import type { EnvironmentExclusion } from '../../../../../../shared/run-applicability'
-import { readManifest, type RunLifecycleEvent, type RunManifest } from './runtime/manifest'
+import { readManifest } from './runtime/manifest'
+import type { RunLifecycleEvent } from '../../../../../../shared/run-state'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
-import { PlaywrightArtifactGroup, indexPlaywrightArtifacts } from './run-artifacts'
-
-export interface RunSummaryFailedEntry {
-  id?: string
-  name: string
-  error?: { message: string; snippet?: string }
-  durationMs?: number
-  location?: string
-  /** Every frame of the failing step's location chain, innermost first. The
-   *  reporter writes this whenever the failure came from a step (see
-   *  `summary-reporter.ts`), and the UI prefers it over `location` to point at
-   *  the helper that actually threw. Declared here because it is on the wire:
-   *  the web mirror has always read it, while this read-side projection omitted
-   *  it — a one-directional gap that nothing could catch until `check:wire`. */
-  locations?: string[]
-  retry?: number
-  logFiles?: string[]
-  /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
-   *  error message + code-frame written by log enrichment. Persisted in the
-   *  summary JSON; surfaced as `errorPath` in the heal pointer bundle. */
-  errorFile?: string
-  /** Repo-relative path to the curated `failure-summary.md` extracted from this
-   *  test's Playwright trace.zip. Written by `summary-reporter.ts` in onEnd.
-   *
-   *  Declared here because readers need it: `coverage/logic/verification.ts`
-   *  reaches for it and, while this field was missing, could only do so through
-   *  an `as RunSummaryFailedEntry & { traceSummaryFile?: string }` widening cast
-   *  at both call sites. A cast is not a type — it silences the mismatch instead
-   *  of recording it, so the read shape drifted from what the reporter actually
-   *  persists without anything failing.
-   *
-   *  The producer of record for the on-disk `e2e-summary.json` entry is
-   *  `TestEntry` in `runtime/summary-types.ts`; this interface is the read-side
-   *  projection of it and must only ever be a subset. */
-  traceSummaryFile?: string
-}
-
-export interface RunSummaryRunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
-}
-
-export interface RunSummary {
-  environment?: string
-  environmentExclusions?: EnvironmentExclusion[]
-  complete: boolean
-  total: number
-  passed: number
-  /** Names of tests that have actually passed. Distinct from `passed` (count)
-   *  so the UI can mark only-run tests as passed without falsely turning
-   *  unrun tests green when the suite stops early (pause / max-failures). */
-  passedNames?: string[]
-  passedIds?: string[]
-  /** Names of tests Playwright reported as skipped. Kept separate from
-   *  `failed` so the UI and heal loop do not treat skipped tests as failures. */
-  skipped?: number
-  skippedNames?: string[]
-  skippedIds?: string[]
-  /** The summary was seeded from a prior execution (a targeted heal rerun
-   *  merged untouched results forward), so its outcomes span several partial
-   *  executions rather than one clean run. Written by the reporter; read by the
-   *  certificate and the coverage ledger's proven axis. */
-  mergedFromPriorExecution?: boolean
-  knownTests?: Array<{
-    id?: string
-    name: string
-    title?: string
-    titlePath?: string[]
-    location?: string
-    // Verified-coverage linkage. Optional / forward-compat: the Playwright
-    // reporter (a subprocess) builds knownTests from TestCase objects and does
-    // not parse comment annotations, so these are normally resolved at coverage-
-    // computation time by joining test identity (name + location) against the
-    // current spec's `@requirement`/`@path` annotations. Kept on the type so the
-    // join result can be attached and a future reporter could stamp them.
-    requirements?: string[]
-    pathTypes?: PathType[]
-  }>
-  /** Currently-running Playwright test, emitted by the reporter on
-   *  onTestBegin. Cleared when the matching onTestEnd lands. */
-  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
-  /** All currently-running Playwright tests. Present when Playwright workers
-   *  run multiple test cases concurrently. */
-  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
-  failed: RunSummaryFailedEntry[]
-}
-
-export type PlaywrightPlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { name: string; title: string }
-      step: RunSummaryRunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }
-
-export interface RunDetail {
-  runId: string
-  manifest: RunManifest
-  /** Read-side recovery hint for runs recorded before singleAttempt existed. */
-  newRunRequired?: true
-  summary?: RunSummary
-  playbackEvents?: PlaywrightPlaybackEvent[]
-  playwrightArtifacts?: PlaywrightArtifactGroup[]
-  lifecycleEvents?: RunLifecycleEvent[]
-}
+import { indexPlaywrightArtifacts } from './run-artifacts'
+import type { RunSummary, PlaywrightPlaybackEvent, RunDetail } from '../../../../../../shared/run-detail'
 
 export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
-  const p = buildRunPaths(runDir).lifecycleEventsPath
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  const out: RunLifecycleEvent[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const parsed = JSON.parse(trimmed) as RunLifecycleEvent
-      if (parsed && typeof parsed === 'object' && typeof parsed.phase === 'string') out.push(parsed)
-    } catch {
-      // Ignore corrupt partial lines; the manifest snapshot remains usable.
-    }
-  }
-  return out.length > 0 ? out : undefined
+  const out = readJsonLines(buildRunPaths(runDir).lifecycleEventsPath, (value): value is RunLifecycleEvent =>
+    value !== null && typeof value === 'object' && 'phase' in value && typeof value.phase === 'string',
+  )
+  return out?.length ? out : undefined
 }
 
 // Read e2e-summary.json if present. Returns undefined when absent or
@@ -219,7 +84,7 @@ export function normalizeRunSummary(summary: RunSummary): RunSummary {
 }
 
 export function knownTestLogicalKey(entry: NonNullable<RunSummary['knownTests']>[number]): string | undefined {
-  return entry.titlePath?.length ? [...entry.titlePath, entry.title ?? ''].join('\u001f') : undefined
+  return testLogicalKey({ title: entry.title ?? '', titlePath: entry.titlePath })
 }
 
 export function remapIds(ids: string[], idRemap: Map<string, string>): string[] {
@@ -233,24 +98,9 @@ export function remapSummaryEntryId<T extends { id?: string }>(entry: T, idRemap
 }
 
 export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlaybackEvent[] | undefined {
-  const p = buildRunPaths(runDir).playwrightEventsPath
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  const out: PlaywrightPlaybackEvent[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const parsed = JSON.parse(trimmed) as PlaywrightPlaybackEvent
-      if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') out.push(parsed)
-    } catch {
-      // Ignore corrupt partial lines; the terminal log remains authoritative.
-    }
-  }
+  const out = readJsonLines(buildRunPaths(runDir).playwrightEventsPath, (value): value is PlaywrightPlaybackEvent =>
+    value !== null && typeof value === 'object' && 'type' in value && typeof value.type === 'string',
+  )
   return out
 }
 

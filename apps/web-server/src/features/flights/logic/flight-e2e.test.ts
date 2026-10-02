@@ -3,11 +3,13 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { FlightRunStore } from './store'
-import { startFlight, respondToFlightCheckpoint, deleteFlight, FlightFrozenError, type FlightConductorDeps } from './conductor'
+import { startFlight, respondToFlightCheckpoint, type FlightConductorDeps } from './conductor'
+import { deleteFlight } from './flight-queue'
+import { FlightFrozenError } from './flight-errors'
 import { buildFlightStageAdapters } from './stages/index'
 import type { FlightStageDeps } from './stages/context'
 import { writeEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
-import type { FlightOptions } from './types'
+import type { FlightOptions } from '../../../../../../shared/flights/types'
 
 // Integration proof over the real fixture repo (tools/fixtures/first-flight-app):
 // the REAL conductor + REAL stage adapters (similarity scan, scout validation,

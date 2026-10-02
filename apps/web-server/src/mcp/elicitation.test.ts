@@ -1,3 +1,4 @@
+import { toolResultText } from './__fixtures__/tool-result'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { ServerContext, InputRequiredResult } from '@modelcontextprotocol/server'
@@ -14,6 +15,8 @@ describe('MCP 2.0 elicitation', () => {
     const apply = vi.fn(async () => asJsonResult({ applied: true }))
     const opened = await requestUserInput(context(), facts, spec, apply) as InputRequiredResult
     expect(opened).toMatchObject({ resultType: 'input_required', inputRequests: { answer: { method: 'elicitation/create', params: { requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } } })
+    expect(() => toolResultText(opened)).toThrow('Expected an MCP text result')
+    expect(() => toolResultText({ ...opened, content: [{ type: 'text', text: 'not a completed result' }] })).toThrow('Expected an MCP text result')
     expect(apply).not.toHaveBeenCalled()
     const accepted = context(opened.requestState, { action: 'accept', content: { isolation: 'queue' } })
     const results = await Promise.all([requestUserInput(accepted, facts, spec, apply), requestUserInput(accepted, facts, spec, apply)])
@@ -34,7 +37,7 @@ describe('MCP 2.0 elicitation', () => {
     // (Claude Desktop's Code tab does exactly this). Canary sees the same payload
     // either way, so it must report the CLIENT's answer and never bank a decision
     // as the human's — for a test-review approval that would be a fabricated one.
-    const { reason } = JSON.parse((result as { content: [{ text: string }] }).content[0].text)
+    const { reason } = JSON.parse(toolResultText(result))
     expect(reason).toContain(`The client answered "${action}"`)
     expect(reason).toMatch(/cannot tell whether a human saw this request/)
     expect(reason).not.toMatch(/the user chose|user declined|user cancelled|user canceled/i)

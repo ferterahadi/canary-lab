@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Section, TrashIcon } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import { IconButton, Section } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import { FieldRow } from '@/shared/ui/FormFields'
+import { FolderIcon, HintIcon, TrashIcon } from '@/shared/ui/Icons'
 import { AddSlotModal, inlineSelectStyle } from './AddSlotModal'
 import { NewEnvControl } from './NewEnvControl'
 import { SlotEditor } from './SlotEditor'
@@ -10,7 +13,7 @@ import { useCachedDoc } from './config-doc-cache'
 export function EnvsetsTab({ feature }: { feature: string }) {
   // Cached for the dialog's lifetime, so returning to this tab paints the env
   // list from memory instead of blanking to "Loading…" while it re-reads.
-  const cached = useCachedDoc(`envsets:${feature}`, () => api.getEnvsetsIndex(feature))
+  const cached = useCachedDoc(`envsets:${feature}`, () => configApi.getEnvsetsIndex(feature))
   const index = cached.doc
   const setIndex = cached.setDoc
   const [mutationError, setMutationError] = useState<string | null>(null)
@@ -26,17 +29,20 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   const [addSlotOpen, setAddSlotOpen] = useState(false)
 
   const refresh = (): Promise<void> =>
-    api.getEnvsetsIndex(feature)
+    configApi.getEnvsetsIndex(feature)
       .then((idx) => { setIndex(idx); setError(null) })
       .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Failed to load envsets') })
 
-  // Default the selection to the first env/slot once the index is known —
-  // whether it arrived from the network or straight out of the cache.
+  // Keep valid selections; deleted environments/slots fall back to available
+  // rows so an external removal cannot strand the open editor on a missing file.
   useEffect(() => {
-    if (env || !index || index.envs.length === 0) return
-    setEnv(index.envs[0].name)
-    setSlot(index.envs[0].slots[0] ?? null)
-  }, [env, index])
+    if (!index) return
+    const selectedEnv = index.envs.find((entry) => entry.name === env) ?? index.envs[0]
+    const nextEnv = selectedEnv?.name ?? null
+    const nextSlot = selectedEnv?.slots.find((name) => name === slot) ?? selectedEnv?.slots[0] ?? null
+    if (env !== nextEnv) setEnv(nextEnv)
+    if (slot !== nextSlot) setSlot(nextSlot)
+  }, [env, slot, index])
 
   const onAddEnv = async (): Promise<void> => {
     const name = newEnvName.trim()
@@ -44,12 +50,12 @@ export function EnvsetsTab({ feature }: { feature: string }) {
     setBusy(true)
     setError(null)
     try {
-      await api.createEnvset(feature, name)
+      await configApi.createEnvset(feature, name)
       setAdding(false)
       setNewEnvName('')
       await refresh()
       setEnv(name)
-      const fresh = await api.getEnvsetsIndex(feature)
+      const fresh = await configApi.getEnvsetsIndex(feature)
       const created = fresh.envs.find((e) => e.name === name)
       setSlot(created?.slots[0] ?? null)
     } catch (e: unknown) {
@@ -63,7 +69,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
     setBusy(true)
     setError(null)
     try {
-      await api.deleteEnvset(feature, name)
+      await configApi.deleteEnvset(feature, name)
       await refresh()
       setEnv(null)
       setSlot(null)
@@ -79,8 +85,8 @@ export function EnvsetsTab({ feature }: { feature: string }) {
     setBusy(true)
     setError(null)
     try {
-      await api.deleteEnvsetSlot(feature, slotName)
-      const fresh = await api.getEnvsetsIndex(feature)
+      await configApi.deleteEnvsetSlot(feature, slotName)
+      const fresh = await configApi.getEnvsetsIndex(feature)
       setIndex(fresh)
       const currentEnv = fresh.envs.find((e) => e.name === env) ?? fresh.envs[0]
       setSlot(currentEnv?.slots[0] ?? null)
@@ -93,7 +99,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   }
 
   const onSlotAdded = async (slotName: string): Promise<void> => {
-    const fresh = await api.getEnvsetsIndex(feature)
+    const fresh = await configApi.getEnvsetsIndex(feature)
     setIndex(fresh)
     setAddSlotOpen(false)
     setSlot(slotName)

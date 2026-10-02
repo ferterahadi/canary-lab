@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
+import { useMountedIdentity } from '../state/use-mounted-identity'
 import { connectReconnectingSocket, defaultWsBase } from '../api/reconnecting-socket'
 
 export function useDiscoveryRepair(feature: string | null) {
   const [snapshot, setSnapshot] = useState<{ feature: string; repairs: DiscoveryRepairView[] } | null>(null)
-  const [starting, setStarting] = useState(false)
+  const pending = useRef(new Map<string, symbol>())
+  const [, renderPending] = useState(0)
+  const current = useMountedIdentity(feature ?? '')
+  const mounted = useMountedIdentity('discovery-repair')
   // Only a failed `start` reaches here. A dropped socket used to set this too,
   // which put an amber line in the tests column for a transport blip on a
   // stream that is open for every suite, repair or no repair — and, because the
   // line was not gated on a run, over a run's recorded roster as well.
   const [startError, setStartError] = useState<string | null>(null)
-  const featureRef = useRef(feature)
-  featureRef.current = feature
   useEffect(() => {
+    setStartError(null)
     if (!feature) return
     let cancelled = false
     let receivedStream = false
-    setStartError(null)
     void listDiscoveryRepairs(feature).then((repairs) => {
       if (!cancelled && !receivedStream && Array.isArray(repairs)) setSnapshot({ feature, repairs })
     }).catch(() => { /* The task stream supplies the same snapshot when REST races a reconnect. */ })
@@ -33,19 +35,24 @@ export function useDiscoveryRepair(feature: string | null) {
     return () => { cancelled = true; connection.close() }
   }, [feature])
   const start = useCallback(async () => {
-    if (!feature) return
-    setStarting(true)
+    if (!feature || !current() || pending.current.has(feature)) return
+    const operation = Symbol(feature)
+    pending.current.set(feature, operation)
+    renderPending((version) => version + 1)
     setStartError(null)
     try {
       const repair = await startDiscoveryRepair(feature)
-      if (featureRef.current === feature) setSnapshot((previous) => {
+      if (current()) setSnapshot((previous) => {
         const repairs = previous?.feature === feature ? previous.repairs : []
         // A terminal stream snapshot can beat the POST response.
         if (repairs.some((r) => r.id === repair.id && r.updatedAt >= repair.updatedAt)) return previous
         return { feature, repairs: [repair, ...repairs.filter((r) => r.id !== repair.id)] }
       })
-    } catch (err) { if (featureRef.current === feature) setStartError(err instanceof Error ? err.message : String(err)) }
-    finally { setStarting(false) }
-  }, [feature])
-  return { repairs: snapshot?.feature === feature ? snapshot.repairs : [], start, starting, startError }
+    } catch (err) { if (current()) setStartError(err instanceof Error ? err.message : String(err)) }
+    finally {
+      if (pending.current.get(feature) === operation) pending.current.delete(feature)
+      if (mounted()) renderPending((version) => version + 1)
+    }
+  }, [feature, current, mounted])
+  return { repairs: snapshot?.feature === feature ? snapshot.repairs : [], start, starting: feature !== null && pending.current.has(feature), startError }
 }

@@ -69,8 +69,8 @@ describe('SPEC_TONE', () => {
 
 describe('pendingFileScope', () => {
   it('counts the affected tests of a spec', () => {
-    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a'] })).toBe('1 test')
-    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a', 'b'] })).toBe('2 tests')
-    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: [] })).toBe('0 tests')
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a'] })).toBe('1 affected test')
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a', 'b'] })).toBe('2 affected tests')
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: [] })).toBe('0 affected tests')
   })
 })

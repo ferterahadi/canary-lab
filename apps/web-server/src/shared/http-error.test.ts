@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { httpFailure } from './http-error'
+import type { FastifyReply } from 'fastify'
+import { httpFailure, notFound } from './http-error'
 
 // One suite for the wrapper that every route-layer rethrow goes through. The
 // non-Error arm is the reason this module exists: it was previously re-typed at
@@ -44,5 +45,18 @@ describe('httpFailure', () => {
     const inner = Object.assign(new Error('conflict'), { statusCode: 409 })
 
     expect(httpFailure(inner, 500).statusCode).toBe(500)
+  })
+})
+
+describe('notFound', () => {
+  it('sets 404 and returns the exact body clients match on', () => {
+    const codes: number[] = []
+    const reply = { code: (status: number) => { codes.push(status); return reply } } as unknown as FastifyReply
+
+    // Route tests assert these bodies verbatim, and the helper builds them from
+    // a noun, so a multi-word noun must come through unchanged.
+    expect(notFound(reply, 'run')).toEqual({ error: 'run not found' })
+    expect(notFound(reply, 'evaluation export task')).toEqual({ error: 'evaluation export task not found' })
+    expect(codes).toEqual([404, 404])
   })
 })

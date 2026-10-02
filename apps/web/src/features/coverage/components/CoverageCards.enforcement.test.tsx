@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RequirementCoverage, RequirementEnforcement } from '@/shared/api/types'
+import type { RequirementCoverage, RequirementEnforcement } from '@shared/coverage/types'
 import { RequirementCard, compareRequirements, verdictView } from './CoverageCards'
 
 // The time axis on a requirement row (D11). The four `EnforcementState` ids are the

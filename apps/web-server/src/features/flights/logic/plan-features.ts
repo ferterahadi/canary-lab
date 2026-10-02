@@ -1,3 +1,4 @@
+import { sameRepoSet } from '../../../shared/repo-identity'
 import crypto from 'crypto'
 import path from 'path'
 import {
@@ -110,10 +111,6 @@ export class PlanFeaturesStore {
   }
 }
 
-function sameRepoSet(a: string[], b: string[]): boolean {
-  const norm = (paths: string[]) => [...paths].map((p) => path.resolve(p)).sort().join('\n')
-  return norm(a) === norm(b)
-}
 
 /** Normalize + sanity-check the agent's JSON. Throws on a shape the launch
  *  step couldn't act on — the task then fails with the parse story intact. */

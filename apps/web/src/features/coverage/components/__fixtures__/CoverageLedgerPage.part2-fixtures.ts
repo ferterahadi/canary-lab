@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import type { CoverageLedger } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
 
 export const LEDGER: CoverageLedger = {
   freshness: { revision: 'stale-inputs', checkedAt: '2026-09-17T00:00:00Z', state: 'stale', reasons: ['Source requirements changed.'], changedTests: [], latestRunFailed: false,

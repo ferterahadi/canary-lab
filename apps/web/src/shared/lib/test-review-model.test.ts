@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest'
 import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
-import { assessmentsForRows, comparedTestRows, englishLines, englishSourceRange, rowsForTest, sourceRows, testSelections } from './test-review-model'
+import { assessmentsForRows, comparedTestRows } from './test-review-model'
+import { englishLines, englishSourceRange } from '@shared/readable-tests/source-lines'
+import { rowsForTest, sourceRows, testSelections } from '@shared/test-source-diff'
 it('isolates a real removal from the surviving or added test occupying its old lines', () => {
   const review = testFileReview()
   const old = review.before.tests[0]

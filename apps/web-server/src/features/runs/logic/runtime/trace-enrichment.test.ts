@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { execFile } from 'child_process'
-import { parseFailedActionIds, parseFirstFailedActionId, parseRequestIds, stripSnapshotsCliBlock } from './trace-enrichment'
+import {
+  parseFailedActionIds,
+  parseFirstFailedActionId,
+  parseRequestIds,
+  stripSnapshotsCliBlock,
+} from './trace-cli'
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),

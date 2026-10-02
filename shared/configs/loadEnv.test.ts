@@ -1,23 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { loadFeatureEnv } from './loadEnv'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-env-'))
-  tmpDirs.push(dir)
-  return dir
-}
+const mkTmp = trackTempDirs('cl-env-')
 
 const SENTINEL = 'CL_TEST_LOAD_ENV_SENTINEL'
 
 afterEach(() => {
-  while (tmpDirs.length) {
-    const d = tmpDirs.pop()!
-    fs.rmSync(d, { recursive: true, force: true })
-  }
   delete process.env[SENTINEL]
 })
 

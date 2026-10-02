@@ -1,9 +1,9 @@
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import type { RunContext } from './run-context'
-import { resolveSetTargets } from './env-switcher/switch'
+import { resolveSetTargets } from '../../../config/logic/envset-runtime'
 import { buildRunPaths } from './run-paths'
 
 interface ActiveRuntimeInputInventory {
@@ -48,7 +48,7 @@ function readInventory(ctx: RunContext): RuntimeInputInventory | null {
 }
 
 function writeInventory(ctx: RunContext, inventory: RuntimeInputInventory): void {
-  atomicWrite(ctx.paths.suiteRuntimeInputsInventoryPath, `${JSON.stringify(inventory, null, 2)}\n`)
+  atomicWriteJson(ctx.paths.suiteRuntimeInputsInventoryPath, inventory)
   fs.chmodSync(ctx.paths.suiteRuntimeInputsInventoryPath, 0o600)
 }
 
@@ -202,6 +202,6 @@ export function cleanupSuiteRuntimeInputsForRun(runDir: string): void {
     cleanedAt: new Date().toISOString(),
     entries: inventory.entries.map(({ relativeTarget }) => ({ relativeTarget })),
   }
-  atomicWrite(paths.suiteRuntimeInputsInventoryPath, `${JSON.stringify(cleaned, null, 2)}\n`)
+  atomicWriteJson(paths.suiteRuntimeInputsInventoryPath, cleaned)
   fs.chmodSync(paths.suiteRuntimeInputsInventoryPath, 0o600)
 }

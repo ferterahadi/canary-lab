@@ -3,9 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
 import { readableTest } from '@/shared/api/__fixtures__/readable-test'
-import type { CoverageLedger } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
 import { RAIL_PREF_KEY } from './CoverageHeader'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 
@@ -36,21 +38,24 @@ vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
 
 vi.mock('shiki/wasm', () => ({ default: {} }))
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getFeatureCoverage: vi.fn(),
-    listFeatureDocs: vi.fn(),
-    regeneratePrdSummary: vi.fn(),
-    startCoverageJob: vi.fn(),
-    getProjectConfig: vi.fn(),
-    getCoverageJob: vi.fn(),
-    listCoverageJobs: vi.fn(),
-    getFeatureTests: vi.fn(),
-    openEditor: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getFeatureCoverage: vi.fn(),
+  listFeatureDocs: vi.fn(),
+  regeneratePrdSummary: vi.fn(),
+  startCoverageJob: vi.fn(),
+  getCoverageJob: vi.fn(),
+  listCoverageJobs: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  openEditor: vi.fn(),
+}))
 
 const LEDGER: CoverageLedger = {
   feature: 'checkout',
@@ -102,17 +107,17 @@ let root: Root
 
 beforeEach(() => {
   // The Generate gate probes the config first — defaults keep it disarmed.
-  vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
-  vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
-  vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
-  vi.mocked(api.getFeatureTests).mockResolvedValue([
+  vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
+  vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
+  vi.mocked(coverageApi.listCoverageJobs).mockResolvedValue([]) // no running job by default
+  vi.mocked(configApi.getFeatureTests).mockResolvedValue([
     { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [], readable: readableTest('adds item') }] },
   ])
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
 })
 
 afterEach(() => {
@@ -174,8 +179,8 @@ const VARIANT_LEDGER: CoverageLedger = {
 
 describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
   it('shows the empty main + the docs rail (no setup-guide tab) (R22)', async () => {
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
     await mount()
     await act(async () => { await Promise.resolve() })
     expect(container.querySelector('[data-testid="coverage-empty-main"]')).toBeTruthy()
@@ -187,8 +192,8 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
   // The empty pane teaches the three-step exercise; with the rail open it can point
   // at it ("on the left"), so it offers no button of its own.
   it('reads as the three-step exercise and leaves the way in to the open rail', async () => {
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
     await mount()
     await act(async () => { await Promise.resolve() })
     const main = container.querySelector('[data-testid="coverage-empty-main"]') as HTMLElement
@@ -202,8 +207,8 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
   // real way in instead — never a dead-end (cl_ui-design-philosophy).
   it('offers a way into the collapsed rail, and opening it retires the button', async () => {
     localStorage.setItem(RAIL_PREF_KEY, 'closed')
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
     await mount()
     await act(async () => { await Promise.resolve() })
     const open = container.querySelector<HTMLButtonElement>('[data-testid="coverage-empty-open-rail"]')
@@ -215,23 +220,23 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
   })
 
   it('generates from the rail once a doc exists and starts the chained job', async () => {
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', absPath: '/repo/features/checkout/docs/spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: '' })
-    vi.mocked(api.getCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: 'done' })
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', absPath: '/repo/features/checkout/docs/spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
+    vi.mocked(coverageApi.startCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: '' })
+    vi.mocked(coverageApi.getCoverageJob).mockResolvedValue({ jobId: 'j', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'n', log: 'done' })
     await mount()
     await act(async () => { await Promise.resolve() })
     const gen = container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')
     expect(gen?.disabled).toBe(false)
     await act(async () => { gen?.click(); await Promise.resolve() })
-    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
+    expect(coverageApi.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
   })
 })
 
 describe('CoverageLedgerPage — variant axis (D1)', () => {
   beforeEach(() => {
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(VARIANT_LEDGER))
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(VARIANT_LEDGER))
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
   })
 
   // Channels live in the expanded detail as a GRID — channels down, paths across.
@@ -312,7 +317,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
   it('keeps a band that has prose, but leaves its marks to the grid', async () => {
     const withProse = structuredClone(VARIANT_LEDGER)
     withProse.requirements[0].requirement.happyPath = 'Every channel honours the scope.'
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(withProse)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(withProse)
     await mount()
     expandR6()
     const happy = container.querySelector('[data-testid="behaviour-happy-R6"]') as HTMLElement
@@ -353,7 +358,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
       { path: 'happy', variant: 'call', covered: false },
       { path: 'happy', variant: 'line', covered: false },
     ]
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(single)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(single)
     await mount()
     expandR6()
     const grid = container.querySelector('[data-testid="channel-grid-R6"]') as HTMLElement
@@ -382,7 +387,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     ]
     na.totals = { total: 1, covered: 1, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 }
     na.coveragePct = 100
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(na)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(na)
     await mount()
     // The row counts applicable cells only → 2/2 segments, both filled.
     expect(container.querySelector('[data-testid="cov-R6"]')?.textContent).toContain('2/2')

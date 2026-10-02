@@ -442,6 +442,11 @@ for (const relPath of installedPackagePaths) {
   }
 }
 
+// Contributor benchmark prompts share the prompt folder but must not ship.
+if (fs.existsSync(path.join(projectDir, 'node_modules/canary-lab/dist/apps/web-server/prompts/benchmark-study'))) {
+  throw new Error('Smoke test failed: contributor benchmark prompts shipped (prompts/benchmark-study)')
+}
+
 for (const relPath of [
   // Browser-only libraries are already compiled into dist/apps/web/dist; a
   // consumer install must not fetch a second copy and its dependency graph.

@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type {
-  PlaywrightArtifactGroup,
-  PlaywrightPlaybackEvent,
-  RepoBranchSnapshot,
-  ServiceManifestEntry,
-} from '@/shared/api/types'
+import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
+import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,

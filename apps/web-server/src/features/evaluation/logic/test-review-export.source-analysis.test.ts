@@ -3,7 +3,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import ts from 'typescript'
-import { buildTestReviewPacket, createAssertionHtml } from './test-review-export'
+import { createAssertionHtml } from './test-review-export'
+import { loadSourceTests } from './test-review/source-analysis'
+import { buildTestReviewPacket } from './test-review/packet'
 import { detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
 
 let tmpDir: string
@@ -411,4 +413,28 @@ function expectLocalOnly(page) {
     expect(html).toContain('expectLocalOnly')
     expect(html).not.toContain('<h3>External Imports</h3>')
   })
+})
+
+it('associates supported declarations with source without treating hooks or chains as tests', () => {
+  const spec = path.join(tmpDir, 'declarations.spec.ts')
+  const accepted = ['test', 'it', ...['test', 'it'].flatMap(root => ['only', 'skip', 'fixme', 'fail'].map(mod => `${root}.${mod}`))]
+  const rejected = ['test.beforeEach', 'test.afterEach', 'test.beforeAll', 'test.afterAll', 'test.use', 'test.setTimeout', 'test.step', 'test.only.skip', 'it.only.skip']
+  const source = [
+    'test.describe("suite", () => {',
+    ...accepted.map((callee, index) => `  ${callee}("case ${index}", { tag: "@coverage" }, async ({ page }) => { await expect(page).toHaveURL("/ok") })`),
+    ...rejected.map((callee, index) => `  ${callee}("rejected ${index}", async ({ page }) => { await expect(page).toHaveURL("/bad") })`),
+    '  it(`dynamic ${value}`, () => expect(value).toBeTruthy())',
+    '})',
+  ].join('\n')
+  fs.writeFileSync(spec, source)
+  const tests = [...loadSourceTests(tmpDir).values()]
+  expect(tests.map(test => test.title)).toEqual([...accepted.map((_, index) => `case ${index}`), 'dynamic ${value}'])
+  for (const [index, test] of tests.slice(0, accepted.length).entries()) {
+    expect(test.line).toBe(index + 2)
+    expect(test.bodySource).toContain('toHaveURL')
+    expect(test.assertions.length).toBeGreaterThan(0)
+  }
+  const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, eventLocation: `${spec}:3`, title: 'case 1' }))
+  expect(packet.tests).toHaveLength(1)
+  expect(packet.tests[0].testBody).toContain('toHaveURL')
 })

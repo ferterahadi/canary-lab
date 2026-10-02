@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
 import type { SingleAttemptPolicy } from '../../../../shared/launcher/types'
 
 /** The suite supplies the receipt location; Canary only checks whether the
@@ -31,9 +32,7 @@ export function policyForRunManifest(manifest: {
   const featureDir = manifest.featureDir
   if (!featureDir) return undefined
   if (path.basename(featureDir) !== manifest.feature) return undefined
-  const candidate = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-    .map((name) => path.join(featureDir, name))
-    .find((file) => fs.existsSync(file))
+  const candidate = findExistingConfig(featureDir, FEATURE_CONFIG_NAMES)?.path
   if (!candidate) return undefined
   try {
     delete require.cache[require.resolve(candidate)]

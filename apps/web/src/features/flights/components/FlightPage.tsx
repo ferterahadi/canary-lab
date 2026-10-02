@@ -1,13 +1,12 @@
-import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type { CoverageRecalculation } from '@/shared/state/use-coverage-recalculation'
+import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@shared/flights/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity, FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab, RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { type DerivedStage } from '../lib/derived-stages'
 import { FlightDetail } from './FlightDetail'
-
-export { configDigestFacts } from './FlightSummaryStrip'
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
  *  surface — the actual run detail, coverage ledger, or supporting config —
@@ -22,7 +21,11 @@ export interface FlightDrillThroughs {
 
 export function FlightPage({
   flightId,
+  recalculation,
+  onRetryRecalculation,
   liveFlight,
+  missing,
+  onFlightMissing,
   indexEntry,
   onSelectFlight,
   onClose,
@@ -37,9 +40,13 @@ export function FlightPage({
   onOpenCoverage,
   stage,
   onSelectStage,
+  log,
+  onOpenLog,
 }: {
   /** A real flight id, or a `feature:<name>` derived token (R81). */
   flightId: string
+  recalculation?: CoverageRecalculation | null
+  onRetryRecalculation?: () => void
   /** Back to the flights picker (null clears the selected flight). */
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
@@ -47,6 +54,8 @@ export function FlightPage({
    *  for an ACTIVE flight (the server snapshots those and pushes every write),
    *  absent for a settled one — which reads its record once and never changes. */
   liveFlight?: FlightManifest | null
+  missing?: boolean
+  onFlightMissing?: (id: string) => void
   /** The flight's `/ws/flights` index row — seeds the header/strip/rail on a
    *  cold open of a settled flight, before its one-time REST read resolves. */
   indexEntry?: FlightIndexEntry | null
@@ -74,6 +83,9 @@ export function FlightPage({
    *  the pick survives a drill-through and a refresh. Pass both or neither. */
   stage?: FlightStageKey | null
   onSelectStage?: (stage: FlightStageKey | null) => void
+  /** The routed Activity log entry (`?log=…`) and its setter. Pass both or neither. */
+  log?: string | null
+  onOpenLog?: (id: string | null) => void
 } & FlightDrillThroughs) {
   // The flight detail refetches on `flights-changed`; the setup digest on
   // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
@@ -82,7 +94,13 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
+      {recalculation && recalculation.status !== 'started' && (
+        <div role={recalculation.status === 'failed' ? 'alert' : 'status'} className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs">
+          <span>{recalculation.status === 'failed' ? recalculation.error : 'Starting coverage recalculation…'}</span>
+          {recalculation.status === 'failed' && <button type="button" className="cl-button" onClick={onRetryRecalculation}>Retry recalculation</button>}
+        </div>
+      )}
+      <FlightDetail activityRequest={recalculation?.request} flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} log={log} onOpenLog={onOpenLog} />
     </div>
   )
 }

@@ -1,8 +1,9 @@
+import { createExternalHealSession } from './external-heal-session'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunManifest,
-} from '../runtime/manifest'
+} from '../../../../../../../shared/run-manifest'
 import type { RunStoreEvent } from '../run-store'
 import { HEARTBEAT_STALE_MS } from '../../../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../../../shared/run-mode'
@@ -127,18 +128,7 @@ export class ExternalHealBroker {
             ? { clientVersion: input.clientVersion }
             : {}),
         }
-      : {
-          sessionId: input.sessionId,
-          clientKind: input.clientKind,
-          ...(input.clientVersion !== undefined ? { clientVersion: input.clientVersion } : {}),
-          ...(input.conversationName !== undefined
-            ? { conversationName: input.conversationName }
-            : {}),
-          claimedAt: nowIso,
-          lastHeartbeatAt: nowIso,
-          status: 'connected',
-          cycleCount: 0,
-        }
+      : createExternalHealSession(input, nowIso, 'defined')
 
     this.sessions.set(runId, session)
     this.deps.patchManifest(runId, {

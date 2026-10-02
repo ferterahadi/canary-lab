@@ -2,12 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import {
-  runCoverageEngine as runCoverageEngineReal,
-  regeneratePrdSummary as regeneratePrdSummaryReal,
-  computeFeatureCoverage,
-  flagMappingIssues,
-} from './service'
+import { computeFeatureCoverage } from './service'
+import { runCoverageEngine as runCoverageEngineReal, flagMappingIssues } from './coverage-engine'
+import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs'
 import type { ProposedMapping } from '../../../../../../../shared/coverage/types'
 import { CoverageJobRunStore } from './jobs/store'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'

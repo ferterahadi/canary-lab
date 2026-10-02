@@ -1,3 +1,5 @@
+import { serviceLogsFromManifest } from '../lib/service-log-paths'
+import { slugify as testNameSlug, summaryEntryName } from '../test-names'
 import { test as base, type Page, type TestInfo } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
@@ -12,11 +14,10 @@ export { resolveRunRepoPath } from './repo-path-overrides'
 const MANIFEST_PATH = process.env.CANARY_LAB_MANIFEST_PATH
   ?? path.join(getProjectRoot(), 'logs', 'manifest.json')
 
+// Keep the published declaration self-contained: internal helper declarations
+// are excluded from the package, so a re-export would break consumer types.
 export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
+  return testNameSlug(title)
 }
 
 export async function withLogMarkers(
@@ -32,17 +33,10 @@ export async function withLogMarkers(
   const manifest: { serviceLogs?: string[]; services?: Array<{ logPath?: string }> } = JSON.parse(
     fs.readFileSync(manifestPath, 'utf-8'),
   )
-  const serviceLogs = [
-    ...(Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []),
-    ...(Array.isArray(manifest.services)
-      ? manifest.services
-          .map((s) => s.logPath)
-          .filter((p): p is string => typeof p === 'string' && p.length > 0)
-      : []),
-  ]
-  const slug = slugify(title)
-  const openTag = `<test-case-${slug}>\n`
-  const closeTag = `</test-case-${slug}>\n`
+  const serviceLogs = serviceLogsFromManifest(manifest)
+  const name = summaryEntryName(title)
+  const openTag = `<${name}>\n`
+  const closeTag = `</${name}>\n`
 
   for (const logPath of serviceLogs) {
     fs.appendFileSync(logPath, openTag)

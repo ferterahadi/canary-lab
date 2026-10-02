@@ -10,13 +10,11 @@
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { type RunLifecyclePhase, type RunManifest, type StoppedEarlyReason } from './manifest'
+import type { RunManifest, StoppedEarlyReason } from '../../../../../../../shared/run-manifest'
+import type { RunLifecyclePhase } from '../../../../../../../shared/run-state'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
-
-export { computeNonPassedTargets, computeRerunTargetsOrdered, nonPassedSignatureFromPlan, normalizeRerunSelection, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
-export type { NonPassedTargetsResult, PlaywrightRerunSelection, RerunTargetsOrderedResult } from './rerun-targets'
 
 export interface SummaryShape extends ApplicabilitySummary {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>

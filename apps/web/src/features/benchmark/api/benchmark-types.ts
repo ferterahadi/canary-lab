@@ -1,19 +1,10 @@
+import type { SabotageLevel, BenchmarkStatus } from '@shared/benchmark-index'
 // Front-end mirror of the server-side benchmark wire shapes
 // (apps/web-server/lib/runtime/benchmark/{types,report}.ts), matching the way
 // api/types.ts mirrors the run shapes. Keep field-for-field in sync.
 
-export type SabotageLevel = 'min' | 'med' | 'max'
 export type BenchmarkArm = 'A' | 'B'
 export type ArmMode = 'harness' | 'baseline'
-export type BenchmarkStatus =
-  | 'sabotaging'
-  | 'ready'
-  | 'running'
-  | 'done'
-  | 'invalid' // frozen sabotage broke no test — re-run with a different break
-  | 'aborted'
-  | 'error'
-
 export interface ArmIterationResult {
   arm: BenchmarkArm
   iteration: number
@@ -69,15 +60,6 @@ export interface BenchmarkManifest {
   worktreesCleared?: boolean
   /** Disk reclaimed by the clear, for the post-clear receipt line. */
   worktreesClearedBytes?: number
-}
-
-export interface BenchmarkIndexEntry {
-  benchmarkId: string
-  feature: string
-  level: SabotageLevel
-  status: BenchmarkStatus
-  startedAt: string
-  endedAt?: string
 }
 
 /** Picker view of a sabotage skill (GET /api/benchmark-skills). */

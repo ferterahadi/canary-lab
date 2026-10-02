@@ -3,22 +3,19 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as wizardApi from '@/shared/api/wizard'
 import { WizardDraftProvider, isActiveWizardTask, isVisibleWizardTask, useWizardDrafts } from './WizardDraftContext'
 import { Probe, draft, workspaceSocket } from './__fixtures__/wizard-draft-context-fixtures'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listDrafts: vi.fn(),
-    getDraft: vi.fn(),
-    cancelDraftGeneration: vi.fn(),
-    deleteDraft: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/wizard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/wizard')>()),
+  listDrafts: vi.fn(),
+  getDraft: vi.fn(),
+  cancelDraftGeneration: vi.fn(),
+  deleteDraft: vi.fn(),
+}))
 
 export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -48,10 +45,10 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.listDrafts).mockReset().mockResolvedValue([])
-  vi.mocked(api.getDraft).mockReset()
-  vi.mocked(api.cancelDraftGeneration).mockReset()
-  vi.mocked(api.deleteDraft).mockReset()
+  vi.mocked(wizardApi.listDrafts).mockReset().mockResolvedValue([])
+  vi.mocked(wizardApi.getDraft).mockReset()
+  vi.mocked(wizardApi.cancelDraftGeneration).mockReset()
+  vi.mocked(wizardApi.deleteDraft).mockReset()
 })
 
 afterEach(() => {
@@ -66,7 +63,7 @@ afterEach(() => {
 // MCP client, so the surface is read + stop + delete: no start, no accept.
 describe('WizardDraftProvider', () => {
   it('loads visible drafts on startup, newest first, hiding accepted ones', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([
       draft({ draftId: 'planning-a', status: 'planning', createdAt: '2026-01-02T00:00:00.000Z' }),
       draft({ draftId: 'ready-b', status: 'plan-ready', createdAt: '2026-01-01T00:00:00.000Z' }),
       draft({ draftId: 'accepted-c', status: 'accepted', createdAt: '2026-01-03T00:00:00.000Z' }),
@@ -77,6 +74,23 @@ describe('WizardDraftProvider', () => {
 
     expect(captured.value?.drafts.map((item) => item.draftId)).toEqual(['planning-a', 'ready-b'])
     expect(captured.value?.records.map((item) => item.draftId)).toEqual(['accepted-c', 'planning-a', 'ready-b'])
+  })
+
+  it('recovers missed creation, completion and deletion on a server handshake', async () => {
+    vi.mocked(wizardApi.listDrafts).mockResolvedValueOnce([
+      draft({ draftId: 'finished', status: 'generating' }),
+      draft({ draftId: 'deleted', status: 'planning' }),
+    ]).mockResolvedValue([
+      draft({ draftId: 'finished', status: 'accepted' }),
+      draft({ draftId: 'created', status: 'spec-ready' }),
+    ])
+    const captured = renderProbe()
+    await settle()
+    act(() => workspaceSocket().fire({ type: 'connected' }))
+    await settle()
+    expect(captured.value?.drafts.map(item => item.draftId)).toEqual(['created'])
+    expect(captured.value?.records.map(item => item.draftId)).toEqual(['finished', 'created'])
+    expect(captured.value?.sync.stale).toBe(false)
   })
 
   it('discovers drafts created outside this page session', async () => {
@@ -91,7 +105,7 @@ describe('WizardDraftProvider', () => {
   })
 
   it('updates a draft in place from workspace events instead of polling', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
     const captured = renderProbe()
     await settle()
 
@@ -100,11 +114,11 @@ describe('WizardDraftProvider', () => {
     })
 
     expect(captured.value?.drafts[0]?.status).toBe('spec-ready')
-    expect(api.getDraft).not.toHaveBeenCalled()
+    expect(wizardApi.getDraft).not.toHaveBeenCalled()
   })
 
   it('drops a draft that an update marks accepted, and one a delete event removes', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([
       draft({ draftId: 'd-1', status: 'planning' }),
       draft({ draftId: 'd-2', status: 'planning' }),
     ])
@@ -126,49 +140,49 @@ describe('WizardDraftProvider', () => {
 
   it('ignores a startup list that resolves after unmount, and survives a list failure', async () => {
     let resolveList: (value: never[]) => void = () => {}
-    vi.mocked(api.listDrafts).mockReturnValue(new Promise((resolve) => { resolveList = resolve }))
+    vi.mocked(wizardApi.listDrafts).mockReturnValue(new Promise((resolve) => { resolveList = resolve }))
     renderProbe()
     act(() => { root.unmount() })
     await act(async () => { resolveList([]) })
 
     // A failing list leaves an empty board rather than throwing.
     root = createRoot(container)
-    vi.mocked(api.listDrafts).mockRejectedValue(new Error('offline'))
+    vi.mocked(wizardApi.listDrafts).mockRejectedValue(new Error('offline'))
     const captured = renderProbe()
     await settle()
     expect(captured.value?.drafts).toEqual([])
   })
 
   it('deleteTask stops an in-flight session first, then deletes', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
-    vi.mocked(api.cancelDraftGeneration).mockResolvedValue({ draftId: 'd-1', status: 'cancelled' })
-    vi.mocked(api.deleteDraft).mockResolvedValue(undefined)
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
+    vi.mocked(wizardApi.cancelDraftGeneration).mockResolvedValue({ draftId: 'd-1', status: 'cancelled' })
+    vi.mocked(wizardApi.deleteDraft).mockResolvedValue(undefined)
     const captured = renderProbe()
     await settle()
 
     await act(async () => { await captured.value?.deleteTask('d-1') })
 
-    expect(api.cancelDraftGeneration).toHaveBeenCalledWith('d-1')
-    expect(api.deleteDraft).toHaveBeenCalledWith('d-1')
+    expect(wizardApi.cancelDraftGeneration).toHaveBeenCalledWith('d-1')
+    expect(wizardApi.deleteDraft).toHaveBeenCalledWith('d-1')
     expect(captured.value?.drafts).toEqual([])
   })
 
   it('deleteTask skips the stop call for a settled draft', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'spec-ready' })])
-    vi.mocked(api.deleteDraft).mockResolvedValue(undefined)
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'spec-ready' })])
+    vi.mocked(wizardApi.deleteDraft).mockResolvedValue(undefined)
     const captured = renderProbe()
     await settle()
 
     await act(async () => { await captured.value?.deleteTask('d-1') })
 
-    expect(api.cancelDraftGeneration).not.toHaveBeenCalled()
+    expect(wizardApi.cancelDraftGeneration).not.toHaveBeenCalled()
     expect(captured.value?.drafts).toEqual([])
   })
 
   it('deleteTask forgets the record even when both server calls fail', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
-    vi.mocked(api.cancelDraftGeneration).mockRejectedValue(new Error('already stopped'))
-    vi.mocked(api.deleteDraft).mockRejectedValue(new Error('already gone'))
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
+    vi.mocked(wizardApi.cancelDraftGeneration).mockRejectedValue(new Error('already stopped'))
+    vi.mocked(wizardApi.deleteDraft).mockRejectedValue(new Error('already gone'))
     const captured = renderProbe()
     await settle()
 
@@ -178,17 +192,17 @@ describe('WizardDraftProvider', () => {
   })
 
   it('deleteTask on an id it never saw skips the stop call and still deletes', async () => {
-    vi.mocked(api.deleteDraft).mockResolvedValue(undefined)
+    vi.mocked(wizardApi.deleteDraft).mockResolvedValue(undefined)
     const captured = renderProbe()
     await settle()
 
     await act(async () => { await captured.value?.deleteTask('never-seen') })
-    expect(api.cancelDraftGeneration).not.toHaveBeenCalled()
-    expect(api.deleteDraft).toHaveBeenCalledWith('never-seen')
+    expect(wizardApi.cancelDraftGeneration).not.toHaveBeenCalled()
+    expect(wizardApi.deleteDraft).toHaveBeenCalledWith('never-seen')
   })
 
   it('ignores workspace events that are not about drafts', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
     const captured = renderProbe()
     await settle()
 
@@ -197,12 +211,12 @@ describe('WizardDraftProvider', () => {
     await act(async () => { workspaceSocket().fire({ type: 'version-changed' }) })
 
     expect(captured.value?.drafts.map((d) => d.draftId)).toEqual(['d-1'])
-    expect(api.listDrafts).toHaveBeenCalledTimes(1)
+    expect(wizardApi.listDrafts).toHaveBeenCalledTimes(1)
   })
 
   it('keeps working when the workspace socket cannot be opened', async () => {
     const Boom = function Boom() { throw new Error('no socket') } as unknown as typeof WebSocket
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
+    vi.mocked(wizardApi.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
     const captured: { value: ReturnType<typeof useWizardDrafts> | null } = { value: null }
     act(() => {
       root.render(

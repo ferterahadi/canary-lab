@@ -1,27 +1,19 @@
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
+import { findFeature, listSpecFiles } from '../../../../shared/feature-loader'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
-import type { PerAgentStageChoices } from '../../../agent-sessions/logic/agent-models'
+import type { PerAgentStageChoices } from '../../../../../../../shared/agent-models'
 import type { PrdSummary, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type CoverageAgentSession } from './annotate-engine'
 import { stripCoverageTags } from './tag-writer'
 import { COVERAGE_STATE_JSON } from './run-state'
 import { docsDirFor, isGeneratedDoc, readDocsCollection } from './docs-collection'
-import {
-  PRD_SUMMARY_JSON,
-  PRD_SUMMARY_MD,
-  assembleSummary,
-  buildPrdSummaryPrompt,
-  readPrdSummary,
-  summarizePrd,
-  writePrdSummary,
-  type ParsedRequirement,
-  type SummarizeAdapter,
-} from './prd-summary'
+import { buildPrdSummaryPrompt, summarizePrd, type SummarizeAdapter } from './prd-summary'
+import { PRD_SUMMARY_JSON, PRD_SUMMARY_MD, readPrdSummary, writePrdSummary } from './prd-summary-render'
+import { assembleSummary, type ParsedRequirement } from './prd-summary-parse'
 import { LEGACY_MAPPINGS_JSON, hasPrdSummary } from './coverage-engine'
 import { FeatureNotFoundError, isDrifted, resolveFeatureDir } from './service'
-
+import type { FeatureDoc, FeatureDocsListing } from '../../../../../../../shared/coverage/feature-docs'
 // ---------------------------------------------------------------------------
 // External (offloaded) PRD summary — the SAME summarization exercise, but the
 // calling MCP client reads the source docs and proposes the requirements itself
@@ -98,7 +90,7 @@ export interface ApplyExternalSummaryResult {
  *  assembler/writer. Mirrors the write-tail of `regeneratePrdSummary` but spawns
  *  NO agent — the summarization already happened on the client. */
 export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExternalSummaryResult {
-  const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
+  const found = findFeature(args.featuresDir, args.feature)
   if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
   const featureDir = found.featureDir
   const collection = readDocsCollection(featureDir)
@@ -113,32 +105,6 @@ export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExter
     summary: written,
     written: [path.join('docs', PRD_SUMMARY_JSON), path.join('docs', PRD_SUMMARY_MD)],
   }
-}
-
-export interface FeatureDoc {
-  relPath: string
-  /** Absolute path on disk — used to open the doc in the configured editor. */
-  absPath: string
-  /** A generated PRD artifact (`_prd-*`) vs a source doc the user added. */
-  generated: boolean
-  sizeBytes: number
-  /** A symlink to a doc that lives elsewhere (the user's original is the live
-   *  source). Absent for plain files. */
-  linked?: boolean
-  /** The symlink's target, when linked (shown in the docs UI tooltip). */
-  linkTarget?: string
-  /** A symlink whose target no longer exists — surfaced, never crashed on. */
-  broken?: boolean
-}
-
-export interface FeatureDocsListing {
-  feature: string
-  docs: FeatureDoc[]
-  hasPrdSummary: boolean
-  prdSummaryGeneratedAt?: string
-  /** Source-doc count (excludes generated artifacts). */
-  sourceDocCount: number
-  docsDrift: boolean
 }
 
 export function listFeatureDocs(featuresDir: string, feature: string): FeatureDocsListing {
@@ -238,7 +204,7 @@ export async function regeneratePrdSummary(
   args: RegeneratePrdSummaryArgs,
   deps: RegeneratePrdSummaryDeps = {},
 ): Promise<RegeneratePrdSummaryResult> {
-  const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
+  const found = findFeature(args.featuresDir, args.feature)
   if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
   const featureDir = found.featureDir
 

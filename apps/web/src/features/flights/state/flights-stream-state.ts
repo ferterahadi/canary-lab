@@ -1,5 +1,5 @@
-import type { FlightIndexEntry, FlightManifest } from '@/shared/api/client'
-import { stageHasEvidence } from '@shared/flights/types'
+import type { FlightIndexEntry, FlightManifest } from '@shared/flights/types'
+import { flightIndexEntry } from '@shared/flights/index-entry'
 
 // Pure reducer behind the `/ws/flights` push channel. Mirrors
 // portify-state.ts / runs-state.ts so it unit-tests in the node vitest config
@@ -32,36 +32,6 @@ export const EMPTY_FLIGHTS_STREAM: FlightsStreamState = {
   flights: [],
   details: {},
   hydrated: false,
-}
-
-/** The index row the list renders, derived from the manifest the server pushed.
- *  Keeping this in one place is what lets an `update` frame maintain the list
- *  without a refetch. */
-export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
-  // Field for field what the server's own index builder writes
-  // (flights/logic/store.ts), including `stages` — the pill's mini rail reads
-  // it, and a row rebuilt without it would blank the rail between the push and
-  // the next full list read.
-  return {
-    id: m.flightId,
-    createdAt: m.createdAt,
-    flightId: m.flightId,
-    feature: m.feature,
-    repoPaths: m.repoPaths,
-    group: m.opts.group,
-    status: m.status,
-    pauseReason: m.pauseReason,
-    checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
-    stageProducer: m.opts.stageProducer,
-    currentStage: m.currentStage,
-    stages: m.stages.map((s) => ({
-      key: s.key, status: s.status,
-      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
-      ...(stageHasEvidence(s.evidence) ? { hasEvidence: true } : {}),
-    })),
-    updatedAt: m.updatedAt,
-    endedAt: m.endedAt,
-  }
 }
 
 function byCreatedDesc(a: FlightIndexEntry, b: FlightIndexEntry): number {

@@ -1,12 +1,4 @@
 import path from 'path'
-export {
-  displayWord,
-  humanizeIdentifier,
-  identifierWords,
-  looksLikeIdentifier,
-  readableHelperName,
-  sentenceCase,
-} from '../../../../shared/readable-tests/language'
 
 export const ANNOTATION_TAG = /@[A-Za-z][\w]*-[\w.-]+/g
 
@@ -81,10 +73,6 @@ export function titleCaseFeatureName(input: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/\b[a-zA-Z]/g, (char) => char.toUpperCase())
-}
-
-export function slugFromTitle(title: string): string {
-  return `test-case-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
 }
 
 export function formatMs(ms: number): string {

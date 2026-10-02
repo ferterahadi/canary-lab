@@ -1,11 +1,10 @@
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import { deleteDraft, listDrafts, paths as draftPaths, readDraft } from '../logic/draft-store'
-import {
-  buildAgentSessionResponse,
-} from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isTransientGenerationStatus, transitionDraft } from './tests-draft-support'
+import { notFound } from '../../../shared/http-error'
 
 // Draft records are read/tracked here; they are AUTHORED entirely by external
 // MCP clients (start_external_draft / update_external_draft_stage /
@@ -32,10 +31,7 @@ export async function testsDraftRoutes(
 
   app.get<{ Params: { id: string } }>('/api/tests/draft/:id', async (req, reply) => {
     const rec = readDraft(deps.logsDir, req.params.id)
-    if (!rec) {
-      reply.code(404)
-      return { error: 'draft not found' }
-    }
+    if (!rec) return notFound(reply, 'draft')
     return rec
   })
 
@@ -45,10 +41,7 @@ export async function testsDraftRoutes(
   // — the agent lives in the user's own client window.
   app.post<{ Params: { id: string } }>('/api/tests/draft/:id/cancel-generation', async (req, reply) => {
     const rec = readDraft(deps.logsDir, req.params.id)
-    if (!rec) {
-      reply.code(404)
-      return { error: 'draft not found' }
-    }
+    if (!rec) return notFound(reply, 'draft')
     if (!isTransientGenerationStatus(rec.status)) {
       reply.code(409)
       return { error: `cannot cancel-generation from status ${rec.status}` }
@@ -62,10 +55,7 @@ export async function testsDraftRoutes(
 
   app.delete<{ Params: { id: string } }>('/api/tests/draft/:id', async (req, reply) => {
     const removed = deleteDraft(deps.logsDir, req.params.id)
-    if (!removed) {
-      reply.code(404)
-      return { error: 'draft not found' }
-    }
+    if (!removed) return notFound(reply, 'draft')
     reply.code(204)
     return null
   })

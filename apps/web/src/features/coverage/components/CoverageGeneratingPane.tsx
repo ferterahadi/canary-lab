@@ -1,10 +1,10 @@
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useState } from 'react'
-import type { CoverageJobManifest } from '@/shared/api/types'
+import type { CoverageJobManifest } from '@shared/coverage/types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { clientKindToDesktopAgent, clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
@@ -133,7 +133,6 @@ export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
   // it gave us one; otherwise launch the desktop app for a known client (same as
   // the heal panel). PTY/unknown clients have no app to open → no CTA.
   const desktopAgent = clientKindToDesktopAgent(clientKind)
-  const tint = clientTint(clientKind)
   return (
     <div data-testid="coverage-external-monitor">
       <ExternalAgentCard
@@ -149,15 +148,23 @@ export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
         }
         meta={
           job.externalSessionId && (
-            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-              <span style={{ fontFamily: 'var(--font-mono)' }} title={job.externalSessionId}>
-                {shortSession(job.externalSessionId)}
-              </span>
-            </span>
+            <ExternalMetaFact label="Session" title={job.externalSessionId}>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(job.externalSessionId)}</span>
+            </ExternalMetaFact>
           )
         }
         body="Mapping runs in your connected client — open it to follow the agent's reasoning. Canary tracks the job here and recomputes the ledger when the client submits."
+        action={job.externalSessionUrl ? (
+          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={job.externalSessionUrl} />
+        ) : (
+          desktopAgent && (
+            <ExternalClientCta
+              label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+              onClick={() => open(desktopAgent)}
+              busy={opening !== null}
+            />
+          )
+        )}
       >
         <pre
           data-testid="coverage-external-log"
@@ -169,22 +176,6 @@ export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
           {job.log || 'Waiting for the client to submit mappings…'}
         </pre>
 
-        {(job.externalSessionUrl || desktopAgent) && (
-          <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-            {job.externalSessionUrl ? (
-              <ExternalClientCta tint={tint} label={`Open ${clientLabel(clientKind)}`} href={job.externalSessionUrl} />
-            ) : (
-              desktopAgent && (
-                <ExternalClientCta
-                  tint={tint}
-                  label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-                  onClick={() => open(desktopAgent)}
-                  busy={opening !== null}
-                />
-              )
-            )}
-          </div>
-        )}
         {openError && (
           <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
             {openError}

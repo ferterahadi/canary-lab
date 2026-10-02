@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInvalidationKey } from './invalidation'
 import type { InvalidationTopic } from './invalidation-bus'
 
@@ -16,8 +16,8 @@ import type { InvalidationTopic } from './invalidation-bus'
 //
 // Nothing about that effect looks wrong in review, which is why the fix is a
 // shape rather than a rule: here the topic that refreshes the value is a
-// REQUIRED argument, so a fetch with no live trigger is not something you can
-// write by accident. The topic is bumped by the workspace-event handler
+// REQUIRED argument; polling-only readers must explicitly pass null, so a
+// fetch with no live trigger is not something you can write by accident. The topic is bumped by the workspace-event handler
 // (use-workspace-data.ts) when the server says that surface changed.
 //
 // This is the read-side half of the same idea the server applies to writes: the
@@ -42,11 +42,15 @@ export interface LiveResource<T> {
   /** A current successful read, not a remount cache or an expired lease. */
   confirmed: boolean
   refresh: () => void
+  /** Accept an authoritative observation and supersede outstanding reads.
+   * Captured callbacks expire on identity replacement or unmount, not refresh. */
+  accept: (next: T | null | ((current: T | null) => T | null)) => boolean
 }
 
 /**
  * Fetch `key`'s value and refetch it whenever `topic` (optionally scoped) is
- * invalidated.
+ * invalidated. A null topic explicitly opts out of bus invalidation for a
+ * polling/manual-refresh reader.
  *
  * `key` identifies the resource — a feature name, a run id — and doubles as the
  * gate: pass `null` when there is nothing to fetch yet and the hook stays idle
@@ -65,10 +69,15 @@ export interface LiveResource<T> {
 const lastResolved = new Map<string, unknown>()
 
 export function useLiveResource<T>(
-  topic: InvalidationTopic,
+  topic: InvalidationTopic | null,
   key: string | null,
   fetcher: (key: string, opts?: { readRevision: string }) => Promise<T | null>,
   opts: {
+    /** Keep accepted data across manual refreshes and failures without polling. */
+    retainOnError?: boolean
+    /** Domain retry policy; delays belong to the current read and are cancelled
+     * by a newer observation, refresh, identity change, or teardown. */
+    retryDelayMs?: (value: T | null, error?: unknown) => number | undefined
     scope?: string
     /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
      *  fetched (e.g. `'ledger'`). Explicit because the topic alone cannot key
@@ -80,17 +89,31 @@ export function useLiveResource<T>(
     /** Reconcile an active task when a workspace event is missed. Failed reads
      *  retain the last snapshot and retry; terminal values stop the reads. */
     pollWhile?: (value: T | null) => boolean
+    /** Active-task cadence; unrelated reconciliation keeps its own interval. */
+    pollIntervalMs?: number
+    /** Creation response for this key, used only before an accepted read.
+     * Changing the seed alone does not refresh or overwrite the resource. */
+    seed?: { key: string; value: T }
     /** Event delivery is not durable. Accuracy-sensitive reads reconcile even
      * when settled, and stop certifying old values when the read lease expires. */
     reconcileMs?: number
     leaseMs?: number
     refreshKey?: string | number
+    /** Demand-driven readers stop periodic work while the tab is hidden. */
+    pauseWhenHidden?: boolean
   } = {},
 ): LiveResource<T> {
   const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
-  const [value, setValue] = useState<T | null>(() => (
-    cacheKey !== null ? (lastResolved.get(cacheKey) as T | undefined) ?? null : null
-  ))
+  const retained = useRef<{ key: string; value: T | null } | null>(null)
+  const acceptedKeys = useRef(new Set<string>())
+  const resourceSeed = opts.seed
+  const initialValue = (): T | null => {
+    if (key === null) return null
+    if ((opts.reconcileMs || opts.retainOnError || resourceSeed) && retained.current?.key === key) return retained.current.value
+    if (cacheKey !== null && lastResolved.has(cacheKey)) return lastResolved.get(cacheKey) as T | null
+    return resourceSeed?.key === key && !acceptedKeys.current.has(key) ? resourceSeed.value : null
+  }
+  const [value, setValue] = useState<T | null>(initialValue)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
@@ -100,15 +123,27 @@ export function useLiveResource<T>(
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
   const cacheTag = opts.cache
+  const retryRef = useRef(opts.retryDelayMs)
+  retryRef.current = opts.retryDelayMs
   const pollWhileRef = useRef(opts.pollWhile)
   pollWhileRef.current = opts.pollWhile
   const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
-  const { reconcileMs, leaseMs, refreshKey } = opts
+  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden, pollIntervalMs, retainOnError } = opts
   const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
   const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
   const [valueKey, setValueKey] = useState(key)
-  const retained = useRef<{ key: string; value: T | null } | null>(null)
-
+  const lifetime = useMemo(() => ({ key, active: false }), [key])
+  const renderedLifetime = useRef(lifetime)
+  renderedLifetime.current = lifetime
+  const observer = useRef<{ lifetime: typeof lifetime; accept: LiveResource<T>['accept'] } | null>(null)
+  useEffect(() => {
+    lifetime.active = true
+    return () => { lifetime.active = false }
+  }, [lifetime])
+  const accept = useCallback<LiveResource<T>['accept']>((next) => {
+    if (!lifetime.active || renderedLifetime.current !== lifetime || observer.current?.lifetime !== lifetime) return false
+    return observer.current.accept(next)
+  }, [lifetime])
   useEffect(() => {
     setValueKey(key)
     if (key === null) {
@@ -122,58 +157,91 @@ export function useLiveResource<T>(
     // A key CHANGE (not a remount) paints the new key's cached value — or
     // nothing — immediately, so the pane never shows one stage's figures under
     // another stage's labels while the fetch is in flight.
-    let current = reconcileMs && retained.current?.key === key ? retained.current.value
-      : cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null
+    let current = initialValue()
     setValue(current)
     setLoading(true)
     setConfirmed(false)
     setError(null)
     let requested = 0
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     let lease: ReturnType<typeof setTimeout> | undefined
+    const publish = (next: T | null) => {
+      acceptedKeys.current.add(key)
+      current = next
+      retained.current = { key, value: current }
+      if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, current)
+      setValue(current)
+      setError(null)
+      setConfirmed(true)
+      setConfirmedReadKey(readKey)
+      clearTimeout(lease)
+      if (leaseMs) lease = setTimeout(() => { if (alive) setConfirmed(false) }, leaseMs)
+    }
+    observer.current = { lifetime, accept: (next) => {
+      if (!alive) return false
+      requested++
+      clearTimeout(retryTimer)
+      publish(typeof next === 'function' ? (next as (current: T | null) => T | null)(current) : next)
+      setLoading(false)
+      return true
+    } }
     const fetch = (event?: Event) => {
+      if (pauseWhenHidden && document.visibilityState === 'hidden') return
+      clearTimeout(retryTimer)
       const request = ++requested
+      const retry = (next: T | null, error?: unknown) => {
+        const delay = retryRef.current?.(next, error)
+        if (delay !== undefined) retryTimer = setTimeout(() => { if (alive && request === requested) fetch() }, delay)
+      }
       // Join sibling readers, never a previous reconciliation round or a read
       // started before reconnect/focus. A hung HTTP request cannot stall recovery.
       const readRevision = JSON.stringify([readKey, reconcileMs ? Math.floor(Date.now() / reconcileMs) : 0, event?.type, event?.timeStamp])
       Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
         .then((next) => {
           if (!alive || request !== requested) return
-          current = next ?? null
-          retained.current = { key, value: current }
-          if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
-          setValue(current)
-          setError(null)
-          setConfirmed(true)
-          setConfirmedReadKey(readKey)
-          clearTimeout(lease)
-          if (leaseMs) lease = setTimeout(() => { if (alive) setConfirmed(false) }, leaseMs)
+          publish(next ?? null)
+          retry(next ?? null)
         })
         .catch((error: unknown) => {
           // A failed task read is not evidence that the task disappeared.
           if (!alive || request !== requested) return
-          if (!polling) setValue(null)
+          if (!polling && !retainOnError) setValue(null)
           setConfirmed(false)
           setError(error instanceof Error ? error.message : String(error))
+          retry(current, error)
         })
         .finally(() => { if (alive && request === requested) setLoading(false) })
     }
     fetch()
-    const timer = polling ? setInterval(() => {
-      if (reconcileMs || pollWhileRef.current?.(current)) fetch()
-    }, reconcileMs ?? 2500) : undefined
+    let timer: ReturnType<typeof setInterval> | undefined
+    const schedule = () => {
+      clearInterval(timer)
+      if (polling && !(pauseWhenHidden && document.visibilityState === 'hidden')) {
+        timer = setInterval(() => {
+          if (reconcileMs || pollWhileRef.current?.(current)) fetch()
+        }, reconcileMs ?? pollIntervalMs ?? 2500)
+      }
+    }
+    schedule()
     const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
     const visible = (event: Event) => {
+      if (pauseWhenHidden) {
+        schedule()
+        clearTimeout(retryTimer)
+      }
       if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
+      else if (pauseWhenHidden) { requested++; setConfirmed(false) }
     }
     if (reconcileMs) {
       window.addEventListener('focus', fetch)
       window.addEventListener('online', fetch)
       window.addEventListener('offline', offline)
-      document.addEventListener('visibilitychange', visible)
     }
+    if (reconcileMs || pauseWhenHidden) document.addEventListener('visibilitychange', visible)
     return () => {
       alive = false
       clearInterval(timer)
+      clearTimeout(retryTimer)
       clearTimeout(lease)
       window.removeEventListener('focus', fetch)
       window.removeEventListener('online', fetch)
@@ -182,9 +250,9 @@ export function useLiveResource<T>(
     }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs, retainOnError, lifetime])
 
   // Withdraw trust during the render receiving an invalidation/key change,
   // not one paint later when its replacement request starts.
-  return { value: valueKey === key ? value : null, loading, error, confirmed: confirmed && confirmedReadKey === readKey, refresh }
+  return { value: valueKey === key ? value : null, loading, error, confirmed: confirmed && confirmedReadKey === readKey, refresh, accept }
 }

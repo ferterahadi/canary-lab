@@ -18,7 +18,12 @@ vi.mock('../../runs/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(),
 
 vi.mock('../../runs/logic/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
 
-vi.mock('../../../shared/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+vi.mock('../../../shared/feature-loader', () => {
+  const loadFeatures = vi.fn((_dir: string): { name: string }[] => [])
+  // findFeature reads through the mocked list, so each test's loadFeatures
+  // return value still decides which feature a lookup finds.
+  return { loadFeatures, findFeature: (dir: string, name: string) => loadFeatures(dir)?.find((f) => f.name === name) }
+})
 
 vi.mock('../../../shared/git-repo', async (orig) => ({
   ...(await orig<typeof import('../../../shared/git-repo')>()),
@@ -99,6 +104,14 @@ describe('benchmarkRoutes', () => {
       const res = await app.inject(clear({ confirm: true }))
       expect(res.statusCode).toBe(409)
       expect(res.json()).toEqual({ error: 'cannot clear worktrees while the benchmark is still running' })
+      await app.close()
+    })
+
+    it('keeps invalid benchmarks ineligible even though their lifecycle is terminal', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'invalid' }) }) })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(409)
+      expect(removeWorktree).not.toHaveBeenCalled()
       await app.close()
     })
 

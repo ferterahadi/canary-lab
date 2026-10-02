@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
-import { PlusIcon, Section, TrashIcon } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import { Section } from '@/shared/ui/atoms'
+import { PlusIcon, TrashIcon } from '@/shared/ui/Icons'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
@@ -19,12 +20,12 @@ export function SlotEditor({
   siblingEnvs: string[]
 }) {
   const [copyOpen, setCopyOpen] = useState(false)
-  const ed = useEditableSlice<api.EnvsetSlotDoc, KvEntry[]>({
+  const ed = useEditableSlice<configApi.EnvsetSlotDoc, KvEntry[]>({
     cacheKey: `envset-slot:${feature}:${env}:${slot}`,
-    load: () => api.getEnvsetSlot(feature, env, slot),
+    load: () => configApi.getEnvsetSlot(feature, env, slot),
     extract: (doc) => doc.entries,
     merge: (_doc, slice) => slice,
-    save: (payload) => api.putEnvsetSlot(feature, env, slot, payload as KvEntry[]),
+    save: (payload) => configApi.putEnvsetSlot(feature, env, slot, payload as KvEntry[]),
   })
 
   if (ed.error && !ed.doc) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>

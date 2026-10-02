@@ -1,22 +1,34 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import { isAgentSessionAbsence } from '@/shared/api/client'
-import type { AgentSessionAbsence, AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
+import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import * as discoveryRepairApi from '@/shared/api/discovery-repair'
+import * as agentSessionsApi from '@/shared/api/agent-sessions'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import * as portifyApi from '@/shared/api/portify'
+import * as coverageApi from '@/shared/api/coverage'
+import * as flightsApi from '@/shared/api/flights'
+import { isAgentSessionAbsence } from '@/shared/api/agent-sessions'
+import type {
+  AgentSessionAbsence,
+  AgentSessionEvent,
+  AgentSessionResponse,
+  SubagentThread,
+} from '@/shared/api/agent-sessions'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { formatElapsedSeconds } from '@/shared/lib/format'
-import { clientKindToDesktopAgent, clientLabel, type ExternalClientKind } from './external-client-branding'
-import { useOpenAgentApp } from './ExternalAgentCard'
-import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
+import { clientLabel } from './external-client-branding'
+import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
+import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
+import {
+  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, textKey, type ExternalSessionActivity, type LogLine,
+} from './activity-log'
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
+import { chronologicalActivity, activityDate, type ActivityIdentity } from './agent-activity-timeline'
 import { TIMELINE_CSS } from './agent-session-css'
 
-export { Markdown, SubagentThreadRow, SystemRow, formatJson, groupSystemLines, summarizeInput, threadDuration } from './AgentSessionRows'
-export type { SystemGroup } from './AgentSessionRows'
-
-// Single agent viewer for the wizard (draft planning/generating) and the run
-// detail page. Renders the agent CLI's JSONL as a chat-style timeline:
-// `MessageCard` / `ThinkingCard` / `ToolCallCard` / `ToolResultCard`.
+// Single agent viewer for every agent surface. Renders the agent CLI's JSONL as
+// one chronological rail of single-line rows (`LogRow`) under a divider per
+// session; clicking a row opens its full content in `ActivityLogModal`.
 //
 // Two transports:
 //   - REST snapshot via `getAgentSession` and its per-subsystem siblings for the
@@ -27,32 +39,12 @@ export type { SystemGroup } from './AgentSessionRows'
 // The pre-existing `pollUntilFound` mode is gone; the live WS handles
 // "session not yet on disk" by retrying internally on the server.
 
-export type AgentSessionSource =
-  | { kind: 'discovery-repair'; taskId: string; live?: boolean }
-  | { kind: 'run'; runId: string; live?: boolean }
-  | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
-  | { kind: 'portify'; workflowId: string; live?: boolean }
-  | { kind: 'coverage'; jobId: string; live?: boolean }
-  | { kind: 'evaluation'; taskId: string; live?: boolean }
-  | { kind: 'flight'; flightId: string; stage: string; live?: boolean }
-  | { kind: 'flight-plan'; taskId: string; live?: boolean }
-
-export interface ExternalSessionActivity {
-  clientKind: ExternalClientKind
-  sessionId?: string
-  status: 'running' | 'ready' | 'done' | 'failed' | 'aborted'
-  message: string
-  startedAt?: string
-  endedAt?: string
-  conversationName?: string
-  sessionUrl?: string
-}
+export type AgentSessionSource = AgentSessionIdentity & { live?: boolean }
 
 /** One independently fetched/tail-able session in a stage's ordered Activity
  *  history. `label` names why this session exists (for example, pass 2 mapping)
  *  while the session header keeps the actual agent/model/id provenance.
- *  `startedAt` positions compact conductor rows around the sessions; agent
- *  events themselves still come only from the CLI JSONL source. */
+ *  `startedAt` dates the session header; each event retains its CLI timestamp. */
 export interface AgentSessionSegmentSource {
   source: AgentSessionSource
   label?: string
@@ -68,37 +60,19 @@ interface Props {
    *  only the entry marked live opens a WebSocket tail. When present this takes
    *  precedence over the legacy single `source`. */
   sessionSources?: AgentSessionSegmentSource[]
-  /** Flight activity band (R66): the conductor's tagged `[TAG]` log lines,
-   *  rendered as distinct *system* rows at the head (`pre`) and tail (`post`)
-   *  of the same rail, so the conductor's system output and the agent's own
-   *  timeline read as one consolidated block. Other hosts omit it. When a
-   *  stage has system rows but no agent session, the block still renders them
-   *  instead of the empty "no session log" state. */
+  /** Legacy partitions remain accepted from callers; every individual line is
+   * merged with session events by its timestamp before rendering. */
   systemRows?: { pre: string[]; between?: string[][]; post: string[] }
-  /** Tasks whose transcripts live in the user's own Claude/Codex window. Each
-   *  occupies one real chronological row on this rail instead of a second
-   *  branded card; the dedicated task screens own their full monitors. They
-   *  render at the TAIL of the rail: the hand-off is the newest thing that
-   *  happened, so it reads after the conductor lines that announced it — at the
-   *  head it claimed the work started before the log that led to it. */
+  /** External work contributes dated start and terminal lifecycle events. */
   externalSessions?: ExternalSessionActivity[]
   /** Host-supplied copy for the "there is no session" state. A host usually
    *  knows WHY there's no transcript ("this run passed, so no repair agent was
    *  ever spawned") — far more use than the generic fallback below. */
   empty?: EmptyCopy & { detail?: ReactNode }
-}
-
-interface SingleSessionProps extends Omit<Props, 'sessionSources'> {
-  /** Render inside the history view's one shared scroller. */
-  embedded?: boolean
-  segmentLabel?: string
-  onTimelineChange?: () => void
-  /** A stack states its agent + model ONCE (see `AgentSessionHistoryView`).
-   *  Each segment reports the pair it actually loaded under `segmentKey`, so a
-   *  segment that diverges from the stack's first one can still show its own. */
-  segmentKey?: string
-  showProvenance?: boolean
-  onProvenance?: (key: string, fingerprint: string) => void
+  /** The entry whose full log is open in the modal. A host that routes it
+   *  passes both props; without them the view keeps it locally. */
+  openLogId?: string | null
+  onOpenLogChange?: (id: string | null) => void
 }
 
 const NO_SYSTEM_ROWS = { pre: [] as string[], between: [] as string[][], post: [] as string[] }
@@ -150,142 +124,40 @@ export function indexSubagents(threads: SubagentThread[] | undefined): Map<strin
  *  past that, the log really is absent. */
 const HISTORY_RETRY_DELAYS_MS = [1500, 3000, 5000]
 
-export function AgentSessionView({ sessionSources, ...props }: Props) {
-  if (sessionSources && sessionSources.length > 0) {
-    return <AgentSessionHistoryView sessionSources={sessionSources} {...props} />
-  }
-  // Session identity, not live/history mode, owns component state. A source
-  // swap gets a clean viewer; the same session becoming historical keeps its
-  // loaded transcript while the non-live snapshot refreshes.
-  const identity = props.source ? sourceIdentityKey(props.source) : 'system-only'
-  return <SingleAgentSessionView key={identity} {...props} />
+export function AgentSessionView(props: Props) {
+  const identity = props.sessionSources?.length ? 'history'
+    : props.source ? sourceIdentityKey(props.source) : 'system-only'
+  return <ChronologicalSessionView key={identity} {...props} />
 }
 
-function AgentSessionHistoryView({
-  sessionSources,
-  systemRows,
-  externalSessions = [],
-  empty,
-}: Omit<Props, 'source'> & { sessionSources: AgentSessionSegmentSource[] }) {
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const followingLatestRef = useRef(true)
-  const [showJumpLatest, setShowJumpLatest] = useState(false)
-  const [timelineRevision, setTimelineRevision] = useState(0)
-  const onTimelineChange = useCallback(() => setTimelineRevision((revision) => revision + 1), [])
-  const sessionKey = sessionSources.map(({ source }) => sourceCacheKey(source)).join('|')
-  const sys = systemRows ?? NO_SYSTEM_ROWS
-  const betweenRowCount = sys.between?.reduce((count, rows) => count + rows.length, 0) ?? 0
-
-  // Every pass of a stage is spawned by the same conductor with the same agent
-  // and model, so repeating that pair on each segment header states one fact N
-  // times — the noisiest thing in a three-segment stack. The first header states
-  // it; a later one restates it only when it genuinely differs. Segments report
-  // what they loaded rather than the parent guessing, so a divergent model can
-  // never be silently hidden.
-  const [provenance, setProvenance] = useState<Record<string, string>>({})
-  const reportProvenance = useCallback((key: string, fingerprint: string) => {
-    setProvenance((prev) => (prev[key] === fingerprint ? prev : { ...prev, [key]: fingerprint }))
-  }, [])
-  const baseline = provenance[sourceIdentityKey(sessionSources[0].source)]
-
-  useEffect(() => {
-    const el = scrollerRef.current
-    if (el && followingLatestRef.current) el.scrollTop = el.scrollHeight
-  }, [betweenRowCount, sessionKey, timelineRevision, externalSessions.length, sys.pre.length, sys.post.length])
-
-  const onScroll = (): void => {
-    const el = scrollerRef.current
-    if (!el) return
-    const atBottom = el.scrollHeight - (el.scrollTop + el.clientHeight) <= 16
-    followingLatestRef.current = atBottom
-    setShowJumpLatest(!atBottom)
-  }
-
-  const jumpLatest = (): void => {
-    const el = scrollerRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    followingLatestRef.current = true
-    setShowJumpLatest(false)
-  }
-
-  return (
-    <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
-      <style>{TIMELINE_CSS}</style>
-      <div ref={scrollerRef} onScroll={onScroll} className="h-full min-h-0 flex-1 overflow-y-auto">
-        {sys.pre.length > 0 && (
-          <ol className="agentts-rail">
-            {groupSystemLines(sys.pre).map((group, index) => <SystemRow key={`sys-pre-${index}`} group={group} />)}
-          </ol>
-        )}
-        {sessionSources.map(({ source, label }, sessionIndex) => {
-          const segmentKey = sourceIdentityKey(source)
-          const reported = provenance[segmentKey]
-          // Unknown stays hidden rather than shown-then-hidden: a segment still
-          // loading must not flash a model id that is about to be deduped away.
-          const showProvenance = sessionIndex === 0
-            || (baseline !== undefined && reported !== undefined && reported !== baseline)
-          return (
-          <Fragment key={segmentKey}>
-            <SingleAgentSessionView
-              source={source}
-              segmentLabel={label}
-              embedded
-              empty={empty}
-              onTimelineChange={onTimelineChange}
-              segmentKey={segmentKey}
-              showProvenance={showProvenance}
-              onProvenance={reportProvenance}
-            />
-            {(sys.between?.[sessionIndex]?.length ?? 0) > 0 && (
-              <ol className="agentts-rail">
-                {groupSystemLines(sys.between?.[sessionIndex] ?? []).map((group, index) => (
-                  <SystemRow key={`sys-between-${sessionIndex}-${index}`} group={group} />
-                ))}
-              </ol>
-            )}
-          </Fragment>
-          )
-        })}
-        {(sys.post.length > 0 || externalSessions.length > 0) && (
-          <ol className="agentts-rail">
-            {groupSystemLines(sys.post).map((group, index) => <SystemRow key={`sys-post-${index}`} group={group} />)}
-            {externalSessions.map((session, index) => (
-              <ExternalSessionRow
-                key={`${session.startedAt ?? 'unknown'}:${session.endedAt ?? 'live'}:${session.clientKind}:${index}`}
-                session={session}
-              />
-            ))}
-          </ol>
-        )}
-      </div>
-      {showJumpLatest && <JumpLatestButton onClick={jumpLatest} />}
-    </div>
-  )
+interface LoadedSession {
+  absence: AgentSessionAbsence | null
+  state: ViewState | null
+  loading: boolean
+  error: string | null
 }
 
-function SingleAgentSessionView({ source, systemRows, externalSessions = [], empty, embedded = false, segmentLabel, onTimelineChange, segmentKey, showProvenance = true, onProvenance }: SingleSessionProps) {
+/** The same loader serves standalone and interleaved history views. */
+function useAgentSession(source: AgentSessionSource): LoadedSession {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [absence, setAbsence] = useState<AgentSessionAbsence | null>(null)
   const [loading, setLoading] = useState(true)
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const followingLatestRef = useRef(true)
-  const [showJumpLatest, setShowJumpLatest] = useState(false)
   // Stable key for the effect dependencies — destructured rather than the
   // whole object so a new prop reference each render doesn't restart the WS.
-  const sourceKey = useMemo(() => (source ? sourceCacheKey(source) : null), [source])
+  const sourceKey = useMemo(() => sourceCacheKey(source), [source])
 
   useEffect(() => {
     let cancelled = false
     let conn: { close(): void } | null = null
     setError(null)
-    // No agent session for this stage — the block is system rows only.
-    if (!source) { setLoading(false); return }
+    setAbsence(null)
     setLoading(true)
 
     const applySnapshot = (snapshot: AgentSessionResponse | AgentSessionAbsence | null): void => {
       if (cancelled) return
       if (!snapshot || isAgentSessionAbsence(snapshot)) {
+        setAbsence(snapshot ?? { absent: true, reason: null })
         // No log yet on disk, or a definitive "never recorded". Keep waiting if
         // live; otherwise show the empty state.
         setState((previous) => previous && (previous.sessionId || previous.events.length > 0)
@@ -293,6 +165,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
           : { agent: null, sessionId: '', events: [], subagents: new Map() })
         return
       }
+      setAbsence(null)
       setState({
         agent: snapshot.agent,
         sessionId: snapshot.sessionId,
@@ -304,14 +177,16 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
     }
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
-      if (source.kind === 'discovery-repair') return api.getDiscoveryRepairAgentSession(source.taskId)
-      if (source.kind === 'run') return api.getAgentSession(source.runId)
-      if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
-      if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
-      if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
-      if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
-      if (source.kind === 'flight') return api.getFlightAgentSession(source.flightId, source.stage)
-      return api.getFlightPlanAgentSession(source.taskId)
+      switch (source.kind) {
+        case 'discovery-repair': return discoveryRepairApi.getDiscoveryRepairAgentSession(source.taskId)
+        case 'run': return agentSessionsApi.getAgentSession(source.runId)
+        case 'benchmark': return benchmarkApi.getBenchmarkAgentSession(source.benchmarkId)
+        case 'portify': return portifyApi.getPortifyAgentSession(source.workflowId)
+        case 'coverage': return coverageApi.getCoverageAgentSession(source.jobId)
+        case 'evaluation': return coverageApi.getEvaluationAgentSession(source.taskId)
+        case 'flight': return flightsApi.getFlightAgentSession(source.flightId, source.stage)
+        case 'flight-plan': return flightsApi.getFlightPlanAgentSession(source.taskId)
+      }
     }
 
     // A run whose status has just gone terminal can beat the agent CLI's final
@@ -356,26 +231,17 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
         if (!source.live) return
         // Open the live WS. The server replays events from the start of the
         // file, so dedupe by index relative to the snapshot length.
-        let snapshotLen = snapshot && !isAgentSessionAbsence(snapshot) ? snapshot.events.length : 0
+        let receivedCount = snapshot && !isAgentSessionAbsence(snapshot) ? snapshot.events.length : 0
+        let snapshotLen = receivedCount
         let seenFromWs = 0
         conn = connectAgentSessionStream({
-          source: source.kind === 'discovery-repair'
-            ? { kind: 'discovery-repair', taskId: source.taskId }
-            : source.kind === 'run'
-            ? { kind: 'run', runId: source.runId }
-            : source.kind === 'benchmark'
-              ? { kind: 'benchmark', benchmarkId: source.benchmarkId }
-              : source.kind === 'portify'
-                ? { kind: 'portify', workflowId: source.workflowId }
-                : source.kind === 'coverage'
-                  ? { kind: 'coverage', jobId: source.jobId }
-                  : source.kind === 'evaluation'
-                    ? { kind: 'evaluation', taskId: source.taskId }
-                    : source.kind === 'flight'
-                      ? { kind: 'flight', flightId: source.flightId, stage: source.stage }
-                      : { kind: 'flight-plan', taskId: source.taskId },
+          source,
           onSession: (session) => {
             if (cancelled) return
+            setError(null)
+            setAbsence(null)
+            snapshotLen = receivedCount
+            seenFromWs = 0
             setState((prev) => prev
               ? { ...prev, agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort }
               : { agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort, events: [], subagents: new Map() })
@@ -392,6 +258,9 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
             // we already have. Drop them; append the rest.
             seenFromWs += 1
             if (seenFromWs <= snapshotLen) return
+            receivedCount += 1
+            setError(null)
+            setAbsence(null)
             setState((prev) => {
               if (!prev) return { agent: null, sessionId: '', events: [event], subagents: new Map() }
               return { ...prev, events: [...prev.events, event] }
@@ -420,133 +289,309 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceKey])
 
-  // Auto-scroll-to-bottom while the user is following the latest. Re-evaluate
-  // after every event append.
-  useEffect(() => {
-    if (embedded) return
-    const el = scrollerRef.current
-    if (!el) return
-    if (followingLatestRef.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [embedded, state?.events.length])
+  return useMemo(() => ({ state, loading, error, absence }), [state, loading, error, absence])
+}
 
-  useEffect(() => {
-    onTimelineChange?.()
-  }, [error, loading, onTimelineChange, state?.events.length, state?.sessionId])
+function SessionLoader({ source, report }: {
+  source: AgentSessionSource
+  report: (key: string, loaded: LoadedSession) => void
+}) {
+  const loaded = useAgentSession(source)
+  const key = sourceIdentityKey(source)
+  useEffect(() => { report(key, loaded) }, [key, loaded, report])
+  return null
+}
 
-  // Report the agent + model this segment actually loaded, so the stack that
-  // owns several segments can state the pair once and still surface a segment
-  // that diverges from it.
-  const provenanceFingerprint = state?.agent
-    ? `${state.agent}|${state.model ?? ''}|${state.effort ?? ''}`
-    : null
-  useEffect(() => {
-    if (segmentKey && provenanceFingerprint) onProvenance?.(segmentKey, provenanceFingerprint)
-  }, [onProvenance, provenanceFingerprint, segmentKey])
+type TimelineRow = ActivityIdentity & (
+  | { kind: 'event'; event: AgentSessionEvent; state: ViewState; label?: string }
+  | { kind: 'system'; line: string }
+  | { kind: 'notice'; label: string; message: string; tone: NoticeTone; error?: string; underHeader: boolean }
+  | { kind: 'external'; session: ExternalSessionActivity; phase: 'start' | 'end' }
+  | { kind: 'external-header'; session: ExternalSessionActivity }
+  | { kind: 'header'; state: ViewState; segment: AgentSessionSegmentSource; showProvenance: boolean }
+)
 
-  const onScroll = (): void => {
-    const el = scrollerRef.current
-    if (!el) return
-    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
-    const atBottom = distanceFromBottom <= 16
-    followingLatestRef.current = atBottom
-    setShowJumpLatest(!atBottom)
-  }
-
-  const jumpLatest = (): void => {
-    const el = scrollerRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    followingLatestRef.current = true
-    setShowJumpLatest(false)
-  }
-
-  // System rows keep the consolidated block alive even before (or without) an
-  // agent session — a stage with only conductor output still renders its rail.
+function ChronologicalSessionView({ source, sessionSources, systemRows, externalSessions = [], empty, openLogId, onOpenLogChange }: Props) {
+  const segments = sessionSources?.length ? sessionSources : source ? [{ source }] : []
+  const [loaded, setLoaded] = useState<Record<string, LoadedSession>>({})
+  const report = useCallback((key: string, value: LoadedSession) => {
+    setLoaded((previous) => previous[key] === value ? previous : { ...previous, [key]: value })
+  }, [])
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const followingLatestRef = useRef(true)
+  const anchorRef = useRef<{ id: string; top: number } | null>(null)
+  const [showJumpLatest, setShowJumpLatest] = useState(false)
+  // Which entry's full log is open. A host that routes it (a flight stage's
+  // `?log=`) controls it; every other host leaves it local. The highlight is a
+  // separate fact: it outlives the modal, so closing it leaves the reader's
+  // place marked on the rail.
+  const [ownOpenId, setOwnOpenId] = useState<string | null>(null)
+  const openId = onOpenLogChange ? openLogId ?? null : ownOpenId
+  const setOpenId = onOpenLogChange ?? setOwnOpenId
+  const [selectedId, setSelectedId] = useState<string | null>(openId)
+  useEffect(() => { if (openId) setSelectedId(openId) }, [openId])
+  const openEntry = useCallback((id: string) => {
+    setSelectedId(id)
+    setOpenId(id)
+  }, [setOpenId])
   const sys = systemRows ?? NO_SYSTEM_ROWS
-  const hasSystem = sys.pre.length > 0 || sys.post.length > 0 || externalSessions.length > 0
-  const live = source?.live === true
-  const embeddedState = (content: ReactNode): ReactNode => embedded
-    ? (
-        <section className="agentts-history-segment" data-testid="agent-session-segment" data-session-label={segmentLabel}>
-          {content}
-        </section>
-      )
-    : content
-
-  if (error && !state && !hasSystem) {
-    return embeddedState(
-      <EmptyState
-        {...EMPTY_COPY.agentUnreadable}
-        detail={<code style={{ fontFamily: 'var(--font-mono)' }}>{error}</code>}
-      />
-    )
+  const items: TimelineRow[] = []
+  let baseline: string | undefined
+  const headed = new Set<string>()
+  for (const segment of segments) {
+    const key = sourceIdentityKey(segment.source)
+    const state = loaded[key]?.state
+    if (!state) continue
+    const fingerprint = `${state.agent}|${state.model ?? ''}|${state.effort ?? ''}`
+    const showProvenance = baseline === undefined || baseline !== fingerprint
+    baseline ??= fingerprint
+    if (state.agent && state.sessionId) headed.add(key)
+    if (state.agent && state.sessionId) items.push({
+      kind: 'header', id: `${key}:header`, source: key, sequence: -1,
+      timestamp: segment.startedAt ?? state.events[0]?.timestamp, state, segment, showProvenance,
+    })
+    state.events.forEach((event, index) => items.push({
+      kind: 'event', id: `${key}:event:${index}`, source: key, sequence: index,
+      timestamp: event.timestamp, event, state, label: segment.label,
+    }))
   }
-  if (loading && !state && !hasSystem) {
-    return embeddedState(<EmptyState {...EMPTY_COPY.agentLoading} />)
+  const occurrences = new Map<string, number>()
+  for (const line of [...sys.pre, ...(sys.between ?? []).flat(), ...sys.post]) {
+    const occurrence = occurrences.get(line) ?? 0
+    occurrences.set(line, occurrence + 1)
+    // Hashed: the id rides the `?log=` deep link, and a line can be any length.
+    items.push({ kind: 'system', id: `system:${textKey(line)}:${occurrence}`, source: 'system', sequence: items.length,
+      timestamp: parseSystemLine(line).timestamp, line })
   }
-  if ((!state || (!state.sessionId && state.events.length === 0)) && !hasSystem) {
-    if (source?.live) {
-      const waiting = (
-        <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
-          {!embedded && <style>{TIMELINE_CSS}</style>}
-          <div className="flex min-h-0 flex-1 flex-col">
-            <EmptyState {...EMPTY_COPY.agentWaiting} />
-          </div>
-          <ol className="agentts-rail agentts-waitrail">
-            <LiveTail label="Starting" />
-          </ol>
-        </div>
-      )
-      return embeddedState(waiting)
+  externalSessions.forEach((session, index) => {
+    const key = session.taskId ? `external:${session.taskId}` : `external:${session.sessionId ?? session.clientKind}:${session.startedAt ?? index}`
+    // An external session is a session too: it opens with its own divider, the
+    // way a spawned agent's transcript does, and its lifecycle rows sit under it.
+    items.push({ kind: 'external-header', id: `${key}:header`, source: key, sequence: -1,
+      timestamp: session.startedAt, session })
+    items.push({ kind: 'external', id: `${key}:start`, source: key, sequence: 0,
+      timestamp: session.startedAt, session, phase: 'start' })
+    if (session.status !== 'running') items.push({ kind: 'external', id: `${key}:end`, source: key, sequence: 1,
+      timestamp: session.endedAt, session, phase: 'end' })
+  })
+  // Empty illustrations belong to the whole rail. A missing source inside a
+  // populated rail remains visible without claiming that the task itself failed.
+  if (items.length > 0) {
+    for (const segment of segments) {
+      const key = sourceIdentityKey(segment.source)
+      const session = loaded[key]
+      const notice = transcriptNotice(session, segment.source.live === true)
+      if (notice) items.push({
+        kind: 'notice', id: `${key}:notice`, source: key, sequence: -0.5,
+        timestamp: segment.startedAt ?? session?.state?.events[0]?.timestamp,
+        label: segment.label ?? 'Agent transcript', ...notice, underHeader: headed.has(key),
+      })
     }
-    return embeddedState(
-      <EmptyState {...(empty ?? EMPTY_COPY.agentNone)} />
-    )
   }
-
-  const timeline = (
-    <>
-      {state?.agent && state.sessionId && (
-        <SessionHeader state={state} live={live} label={segmentLabel} embedded={embedded} showProvenance={showProvenance} />
-      )}
-      <ol className="agentts-rail">
-        {groupSystemLines(sys.pre).map((group, idx) => (
-          <SystemRow key={`sys-pre-${idx}`} group={group} />
-        ))}
-        {(state?.events ?? []).map((event: AgentSessionEvent, idx: number) => (
-          <EventRow key={idx} event={event} subagents={state?.subagents} />
-        ))}
-        {groupSystemLines(sys.post).map((group, idx) => (
-          <SystemRow key={`sys-post-${idx}`} group={group} />
-        ))}
-        {externalSessions.map((session, index) => (
-          <ExternalSessionRow
-            key={`${session.startedAt ?? 'unknown'}:${session.endedAt ?? 'live'}:${session.clientKind}:${index}`}
-            session={session}
-          />
-        ))}
-        {live && <LiveTail {...pendingWork(state?.events ?? [])} />}
-      </ol>
-    </>
-  )
-
-  if (embedded) return embeddedState(timeline)
-
+  const rows = chronologicalActivity(items)
+  const dates = new Set(rows.map((row) => activityDate(row.timestamp)))
+  const captureAnchor = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    const first = [...el.querySelectorAll<HTMLElement>('[data-activity-id]')]
+      .find((row) => row.getBoundingClientRect().bottom > top)
+    anchorRef.current = first ? { id: first.dataset.activityId!, top: first.getBoundingClientRect().top - top } : null
+  }, [])
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    if (followingLatestRef.current) el.scrollTop = el.scrollHeight
+    else if (anchorRef.current) {
+      const anchor = anchorRef.current
+      const row = [...el.querySelectorAll<HTMLElement>('[data-activity-id]')].find((node) => node.dataset.activityId === anchor.id)
+      if (row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.top
+    }
+    captureAnchor()
+  })
+  const onScroll = () => {
+    const el = scrollerRef.current
+    if (!el) return
+    followingLatestRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 16
+    setShowJumpLatest(!followingLatestRef.current)
+    captureAnchor()
+  }
+  // A routed id for a one-line row (a stale link, a row that became whole)
+  // opens nothing — there is nothing beyond the row to show.
+  const openRow = openId ? rows.find((row) => row.id === openId && !rowLine(row)?.whole) : undefined
+  const openLog = openRow ? logEntryFor(openRow, rows) : null
+  // An entry opened from the URL (a refresh, a shared link, a pair link) may sit
+  // anywhere in the history: bring its row into view once, so closing the modal
+  // leaves the reader at the highlighted row rather than at the latest one.
+  const revealedRef = useRef<string | null>(null)
+  const revealId = openRow ? openRow.id : null
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!revealId || !el || revealedRef.current === revealId) return
+    revealedRef.current = revealId
+    const node = [...el.querySelectorAll<HTMLElement>('[data-activity-id]')].find((row) => row.dataset.activityId === revealId)
+    if (!node) return
+    const box = el.getBoundingClientRect()
+    const at = node.getBoundingClientRect()
+    if (at.top >= box.top && at.bottom <= box.bottom) return
+    followingLatestRef.current = false
+    setShowJumpLatest(true)
+    el.scrollTop += at.top - box.top - (box.height - at.height) / 2
+    captureAnchor()
+  }, [revealId, captureAnchor])
+  const liveSegment = segments.find((segment) => segment.source.live)
+  const failure = segments.map((segment) => loaded[sourceIdentityKey(segment.source)]?.error).find(Boolean)
+  const loading = segments.some((segment) => !loaded[sourceIdentityKey(segment.source)] || loaded[sourceIdentityKey(segment.source)].loading)
+  let previousDate: string | undefined
   return (
     <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
       <style>{TIMELINE_CSS}</style>
-      <div
-        ref={scrollerRef}
-        onScroll={onScroll}
-        className="h-full min-h-0 flex-1 overflow-y-auto"
-      >
-        {timeline}
+      {segments.map((segment) => <SessionLoader key={sourceIdentityKey(segment.source)} source={segment.source} report={report} />)}
+      <div ref={scrollerRef} onScroll={onScroll} className="h-full min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
+        {rows.length === 0 && <EmptyState {...(failure ? EMPTY_COPY.agentUnreadable : loading ? EMPTY_COPY.agentLoading : liveSegment ? EMPTY_COPY.agentWaiting : empty ?? EMPTY_COPY.agentNone)} detail={failure ?? empty?.detail} />}
+        <ol className="agentts-rail">
+          {rows.map((row) => {
+            const date = activityDate(row.timestamp)
+            const dateHeading = date !== previousDate && (dates.size > 1 || date === 'Time unavailable')
+            previousDate = date
+            return <Fragment key={row.id}>
+              {dateHeading && <li className="agentts-date" data-testid="activity-date" role="presentation">{date}</li>}
+              <TimelineItem row={row} selected={row.id === selectedId} onOpen={openEntry} sticky={segments.length + externalSessions.length <= 1} />
+            </Fragment>
+          })}
+          {liveSegment && <LiveTail {...pendingWork(loaded[sourceIdentityKey(liveSegment.source)]?.state?.events ?? [])} />}
+        </ol>
       </div>
-      {showJumpLatest && <JumpLatestButton onClick={jumpLatest} />}
+      {showJumpLatest && <JumpLatestButton onClick={() => {
+        const el = scrollerRef.current
+        if (el) el.scrollTop = el.scrollHeight
+        followingLatestRef.current = true
+        setShowJumpLatest(false)
+      }} />}
+      {openLog && <ActivityLogModal entry={openLog} onClose={() => setOpenId(null)} onOpenEntry={openEntry} />}
     </div>
   )
+}
+
+function TimelineItem({ row, selected, onOpen, sticky }: {
+  row: TimelineRow
+  selected: boolean
+  onOpen: (id: string) => void
+  /** A lone session's divider pins while its rows scroll; in a stack each
+   *  divider stays where its session starts. */
+  sticky: boolean
+}) {
+  const open = useCallback(() => onOpen(row.id), [onOpen, row.id])
+  switch (row.kind) {
+    case 'header':
+      return <li data-activity-id={row.id} data-testid="agent-session-segment" data-session-label={row.segment.label} className="agentts-divrow">
+        <SessionDivider state={row.state} live={row.segment.source.live === true} label={row.segment.label} startedAt={row.segment.startedAt} sticky={sticky} showProvenance={row.showProvenance} />
+      </li>
+    case 'external-header':
+      return <li data-activity-id={row.id} data-testid="external-session-segment" className="agentts-divrow">
+        <ExternalSessionDivider session={row.session} sticky={sticky} />
+      </li>
+    case 'notice':
+      // Under its session's divider the notice is just a line. An attempt with
+      // no readable transcript has no divider of its own, so the notice stands
+      // in for one: same band, its label, and why there are no rows.
+      return row.underHeader ? (
+        <li className="agentts-notice" data-activity-id={row.id} data-testid="transcript-notice">
+          <span className="agentts-noticetext" role={row.error ? 'alert' : 'status'}>{row.message}</span>
+          {row.error && <TranscriptError text={row.error} />}
+        </li>
+      ) : (
+        <li className="agentts-divrow" data-activity-id={row.id} data-testid="transcript-notice">
+          <div className="agentts-divider" data-sticky="false" data-tone={row.tone}>
+            <DividerMark tone={row.tone} />
+            <span className="agentts-divlabel">{row.label}</span>
+            <span className="agentts-divnote" role={row.error ? 'alert' : 'status'}>{row.message}</span>
+          </div>
+          {row.error && <div className="agentts-notice"><TranscriptError text={row.error} /></div>}
+        </li>
+      )
+    case 'event': {
+      const threads = row.event.kind === 'tool-call' ? row.state.subagents.get(row.event.toolId) : undefined
+      return <LogRow activityId={row.id} line={rowLine(row)!} glyph={eventGlyph(row.event, Boolean(threads?.length))}
+        timestamp={row.event.timestamp} selected={selected} onOpen={open} />
+    }
+    case 'system':
+      return <LogRow activityId={row.id} line={rowLine(row)!} glyph={SYSTEM_GLYPH}
+        timestamp={parseSystemLine(row.line).timestamp ?? ''} selected={selected} onOpen={open} testId="system-row" />
+    case 'external': {
+      const { session, phase } = row
+      return <LogRow activityId={row.id} line={rowLine(row)!}
+        glyph={externalGlyph(phase, session.status)} timestamp={(phase === 'start' ? session.startedAt : session.endedAt) ?? ''}
+        selected={selected} onOpen={open} testId={phase === 'start' ? 'external-session-start' : 'external-session-end'} />
+    }
+  }
+}
+
+/** What a log row says at rest; null for the dividers and notices. One home,
+ *  so the row and the guard on what may open in the modal read the same line. */
+function rowLine(row: TimelineRow): LogLine | null {
+  switch (row.kind) {
+    case 'event':
+      return describeEvent(row.event, row.event.kind === 'tool-call' ? row.state.subagents.get(row.event.toolId) : undefined)
+    case 'system': {
+      // A conductor line usually fits the row and opens nothing; a long one —
+      // raw output a producer forwarded — is cut to one line and opens.
+      const line = parseSystemLine(row.line)
+      const summary = firstLineOf(line.text)
+      return { kind: 'system', verb: systemVerb(line.tag), summary, ...(line.text.trim() === summary ? { whole: true } : {}) }
+    }
+    case 'external': {
+      const { session, phase } = row
+      const message = phase === 'start' && session.status !== 'running' ? `${session.actionLabel ?? 'External agent session'} started.` : session.message
+      return {
+        kind: 'system', verb: externalLifecycle(session.status, phase), summary: firstLineOf(message),
+        ...(phase === 'end' && session.status === 'failed' ? { danger: true } : {}),
+        ...(message.trim() === firstLineOf(message) ? { whole: true } : {}),
+      }
+    }
+    default:
+      return null
+  }
+}
+
+/** The modal's view of a row: the row plus what it needs from its neighbours —
+ *  the other half of a tool use, the subagents a call spawned. */
+function logEntryFor(row: TimelineRow, rows: readonly TimelineRow[]): LogEntry | null {
+  if (row.kind === 'external') return { kind: 'external', id: row.id, session: row.session, phase: row.phase }
+  if (row.kind === 'system') return { kind: 'system', id: row.id, line: parseSystemLine(row.line) }
+  if (row.kind !== 'event') return null
+  const { event, state } = row
+  const toolId = event.kind === 'tool-call' || event.kind === 'tool-result' ? event.toolId : undefined
+  const pairKind = event.kind === 'tool-call' ? 'tool-result' : 'tool-call'
+  const pair = toolId === undefined ? undefined : rows.find((other) => other.kind === 'event' && other.source === row.source
+    && other.event.kind === pairKind && other.event.toolId === toolId)
+  return {
+    kind: 'event', id: row.id, event,
+    session: { label: row.label, agent: state.agent, model: state.model, sessionId: state.sessionId },
+    ...(event.kind === 'tool-call' && state.subagents.get(event.toolId)?.length ? { threads: state.subagents.get(event.toolId) } : {}),
+    ...(pair?.kind === 'event' ? { pair: { id: pair.id, event: pair.event } } : {}),
+  }
+}
+
+type NoticeTone = 'live' | 'danger' | 'absent'
+
+function transcriptNotice(session: LoadedSession | undefined, live: boolean): { message: string; tone: NoticeTone; error?: string } | null {
+  if (session?.error) return { message: 'Transcript could not be read.', tone: 'danger', error: session.error }
+  if (session?.state?.events.length) return null
+  if (!session || session.loading) return { message: 'Loading transcript…', tone: 'live' }
+  if (live) return { message: 'Waiting for transcript…', tone: 'live' }
+  if (session.absence?.reason === 'session-log-missing') return { message: 'Transcript file unavailable for this attempt.', tone: 'absent' }
+  return { message: 'No transcript recorded for this attempt.', tone: 'absent' }
+}
+
+function TranscriptError({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return <>
+    <button type="button" className="agentts-morebtn" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+      {expanded ? 'Hide read error' : 'Show read error'}
+    </button>
+    {expanded && <pre className="agentts-plain">{text}</pre>}
+  </>
 }
 
 /** A model id already names its vendor (`claude-opus-5`, `gpt-5-codex`), so
@@ -557,35 +602,73 @@ function agentNeedsNaming(agent: string, model?: string): boolean {
   return !model.toLowerCase().includes(agent.toLowerCase())
 }
 
-function SessionHeader({ state, live, label, embedded, showProvenance }: {
+/** Where one session starts. The name is the loudest thing on it; who ran it
+ *  (agent, model, session id, event count) sits right beside the name rather
+ *  than across the rail, so the rows below no longer repeat it one by one. */
+function SessionDivider({ state, live, label, startedAt, sticky, showProvenance }: {
   state: ViewState
   live: boolean
   label?: string
-  embedded: boolean
+  startedAt?: string
+  sticky: boolean
   /** False for a later segment in a stack that already stated this agent and
-   *  model on its first header — see `AgentSessionHistoryView`. */
+   *  model on its first divider. */
   showProvenance: boolean
 }) {
+  const elapsed = useElapsed(live ? startedAt ?? state.events[0]?.timestamp : undefined)
+  const terminated = state.events.at(-1)?.kind === 'assistant-message' && (state.events.at(-1) as { apiError?: boolean }).apiError === true
+  const span = eventSpan(state.events)
+  const status = live ? `Live${elapsed ? ` · ${elapsed}` : ''}` : terminated ? 'Terminated' : `Ended${span ? ` · ${span}` : ''}`
+  const tone = live ? 'live' : terminated ? 'danger' : 'settled'
   return (
-    <div className="agentts-head" data-sticky={embedded ? 'false' : 'true'} data-testid="agent-session-header">
-      {label && <span className="agentts-session-label" data-testid="agent-session-label">{label}</span>}
-      <span className="agentts-mode" data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">
-        <span className="agentts-statusdot" aria-hidden="true" />
-        {live ? 'Live' : 'History'}
-      </span>
-      <span className="agentts-headrule" aria-hidden="true" />
+    <div className="agentts-divider" data-sticky={sticky ? 'true' : 'false'} data-tone={tone} data-testid="agent-session-header">
+      <DividerMark tone={tone} />
+      <span className="agentts-divlabel" data-testid="agent-session-label">{label ?? (state.agent ? `${state.agent} session` : 'Agent session')}</span>
       <span className="agentts-provenance">
-        {showProvenance && state.agent && agentNeedsNaming(state.agent, state.model) && (
-          <span className="agentts-agent">{state.agent}</span>
-        )}
+        {showProvenance && state.agent && agentNeedsNaming(state.agent, state.model) && <span className="agentts-agent">{state.agent}</span>}
         {showProvenance && state.model && <span className="agentts-model">{state.model}</span>}
-        {showProvenance && state.effort && <span className="agentts-model">{state.effort}</span>}
-        {/* No "session" caption — a short mono id is not something a user has
-            to be told the name of. */}
+        {showProvenance && state.effort && <span>{state.effort}</span>}
         <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
         <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
       </span>
+      <span className="agentts-divspace" />
+      <span className="agentts-divchip" data-tone={tone} data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">{status}</span>
     </div>
+  )
+}
+
+/** An external client's session: the same divider, naming the client, with the
+ *  one way to read the conversation — open it where it lives. */
+function ExternalSessionDivider({ session, sticky }: { session: ExternalSessionActivity; sticky: boolean }) {
+  const running = session.status === 'running'
+  const elapsed = useElapsed(running ? session.startedAt : undefined)
+  const duration = isoSpan(session.startedAt, session.endedAt)
+  const status = running ? `Live${elapsed ? ` · ${elapsed}` : ''}` : `${externalLifecycle(session.status, 'end')}${duration ? ` · ${duration}` : ''}`
+  const tone = running ? 'live' : session.status === 'failed' ? 'danger' : session.status === 'aborted' ? 'settled' : 'success'
+  return (
+    <div className="agentts-divider" data-sticky={sticky ? 'true' : 'false'} data-tone={tone} data-testid="external-session-header">
+      <DividerMark tone={tone} />
+      <span className="agentts-divlabel">{session.actionLabel ?? 'External agent session'}</span>
+      <span className="agentts-provenance">
+        <span className="agentts-agent">External</span>
+        {session.clientKind !== 'other' && <span data-testid="external-session-client">{clientLabel(session.clientKind)}</span>}
+        {session.sessionId && <span title={session.sessionId} data-testid="external-session-id">{shortSession(session.sessionId)}</span>}
+      </span>
+      <span className="agentts-divspace" />
+      <ExternalOpenAction session={session} />
+      <span className="agentts-divchip" data-tone={tone} data-live={running ? 'true' : 'false'} data-testid="external-session-status">{status}</span>
+    </div>
+  )
+}
+
+function DividerMark({ tone }: { tone: 'live' | 'danger' | 'settled' | 'success' | 'absent' }) {
+  if (tone === 'live') return <span className="agentts-divmark agentts-statusdot" data-live="true" aria-hidden="true" />
+  return (
+    <span className="agentts-divmark" data-tone={tone} aria-hidden="true">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        {tone === 'danger' ? <path d="M5 5l6 6M11 5l-6 6" /> : tone === 'absent' ? <path d="M4.5 8h7" /> : <path d="M3.5 8.5l3 3 6-6.5" />}
+      </svg>
+    </span>
   )
 }
 
@@ -611,104 +694,6 @@ function JumpLatestButton({ onClick }: { onClick: () => void }) {
       </svg>
     </button>
   )
-}
-
-function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
-  const { opening, error, open } = useOpenAgentApp()
-  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
-  const runningElapsed = useElapsed(session.status === 'running' ? session.startedAt : undefined)
-  const fixedElapsed = session.status === 'running'
-    ? null
-    : durationBetween(session.startedAt, session.endedAt)
-  const elapsed = runningElapsed ?? fixedElapsed
-  const agent = clientLabel(session.clientKind, 'External agent')
-  const label = 'External agent session'
-  const tone = externalSessionTone(session.status)
-  const running = session.status === 'running'
-  const actionLabel = `Open ${agent}`
-  const aria = [label, agent, session.sessionId ? `session ${session.sessionId}` : null, session.message, elapsed ? `${elapsed} elapsed` : null]
-    .filter(Boolean)
-    .join('. ')
-
-  return (
-    <li
-      className="agentts-sysrow agentts-extrow"
-      data-status={session.status}
-      data-testid="external-session-activity"
-      role={running ? 'status' : undefined}
-      aria-label={aria}
-    >
-      {running ? (
-        <span className="agentts-worknode" aria-hidden="true" />
-      ) : (
-        <span
-          className="agentts-node agentts-extnode"
-          aria-hidden="true"
-          style={{ color: tone, borderColor: `color-mix(in srgb, ${tone} 48%, var(--border-default))` }}
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-            {session.status === 'done' || session.status === 'ready'
-              ? <path d="M3.5 8.5l3 3 6-6.5" />
-              : session.status === 'failed'
-                ? <path d="M5 5l6 6M11 5l-6 6" />
-                : <path d="M4.5 8h7" />}
-          </svg>
-        </span>
-      )}
-      <div className="agentts-extbody">
-        <div className="agentts-exthead">
-          <span className="agentts-label agentts-extlabel" style={{ color: tone }}>{label}</span>
-          <span className="agentts-extagent" data-testid="external-session-client">{agent}</span>
-          {session.sessionId && (
-            <span className="agentts-sid" data-testid="external-session-id" title={session.sessionId}>
-              {shortSession(session.sessionId)}
-            </span>
-          )}
-          {elapsed && <span className="agentts-worktime" data-testid="external-session-elapsed">{elapsed}</span>}
-        </div>
-        <div className="agentts-extline">
-          <span className="agentts-extmessage" title={session.conversationName}>{session.message}</span>
-          {session.sessionUrl ? (
-            <a
-              href={session.sessionUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="agentts-extaction"
-              aria-label={`${actionLabel} session`}
-            >
-              {actionLabel} <span aria-hidden>→</span>
-            </a>
-          ) : desktopAgent ? (
-            <button
-              type="button"
-              className="agentts-extaction"
-              title={`No exact session link was provided; opens the ${agent} app.`}
-              disabled={opening !== null}
-              onClick={() => open(desktopAgent)}
-            >
-              {opening ? 'Opening…' : `Open ${agent} app`} {!opening && <span aria-hidden>→</span>}
-            </button>
-          ) : null}
-        </div>
-        {error && <span className="agentts-exterror">{error}</span>}
-      </div>
-    </li>
-  )
-}
-
-function externalSessionTone(status: ExternalSessionActivity['status']): string {
-  if (status === 'done' || status === 'ready') return 'var(--success)'
-  if (status === 'failed') return 'var(--danger)'
-  if (status === 'aborted') return 'var(--text-muted)'
-  return 'var(--running)'
-}
-
-function durationBetween(startIso: string | undefined, endIso: string | undefined): string | null {
-  if (!startIso || !endIso) return null
-  const startedAt = Date.parse(startIso)
-  const endedAt = Date.parse(endIso)
-  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt < startedAt) return null
-  return formatElapsedSeconds((endedAt - startedAt) / 1000)
 }
 
 /** What the rail's live tip should say, read off the transcript rather than
@@ -771,26 +756,4 @@ function LiveTail({ label, since }: { label: string; since?: string }) {
       {elapsed && <span className="agentts-worktime" data-testid="agent-session-live-elapsed">{elapsed}</span>}
     </li>
   )
-}
-
-function sourceCacheKey(source: AgentSessionSource): string {
-  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}:${source.live ? '1' : '0'}`
-  return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
-}
-
-function sourceIdentityKey(source: AgentSessionSource): string {
-  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}`
-  if (source.kind === 'run') return `run:${source.runId}`
-  if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}`
-  if (source.kind === 'portify') return `portify:${source.workflowId}`
-  if (source.kind === 'coverage') return `coverage:${source.jobId}`
-  if (source.kind === 'evaluation') return `evaluation:${source.taskId}`
-  if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}`
-  return `flight-plan:${source.taskId}`
 }

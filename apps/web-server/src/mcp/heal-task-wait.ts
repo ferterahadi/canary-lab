@@ -1,6 +1,18 @@
-import type { RunDetail, RunStoreEvent } from '../features/runs/logic/run-store'
+import type { RunStoreEvent } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { ClientKind } from '../../../../shared/run-mode'
-import { buildExternalHealContext, buildSpecEditsWarning, hasPendingHealSignal, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts, type SpecEditsWarning } from '../features/runs/logic/heal/external-heal-surface'
+import {
+  buildExternalHealContext,
+  buildSpecEditsWarning,
+  hasPendingHealSignal,
+  slimRepeatHealContext,
+  type ExternalHealContext,
+  type SpecEditsWarning,
+} from '../features/runs/logic/heal/external-heal-surface'
+import {
+  normalizeRunCounts,
+  type NormalizedRunCounts,
+} from '../features/runs/logic/heal/external-heal-counts'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'

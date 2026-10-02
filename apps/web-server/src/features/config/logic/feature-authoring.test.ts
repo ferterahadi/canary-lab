@@ -9,16 +9,14 @@ import {
   checkoutFeatureRepoBranch,
   createFeatureSkeleton,
   deleteFeature,
-  deleteFeatureDoc,
   envsetSchema,
   externalTestFileRules,
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
-  linkFeatureDoc,
   parseRedactedEntries,
   updateFeatureRepoBranch,
-  writeFeatureDoc,
 } from './feature-authoring'
+import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 it('shows a workspace-owned suite envset with a distinct materialized consumer target', () => {
   expect(envsetSchema('checkout')).toEqual({
@@ -188,7 +186,8 @@ describe('feature-authoring', () => {
         ],
       }],
     })
-    expect(require(path.join(featureDir, 'feature.config.cjs')).config.envs).toEqual(['local', 'staging'])
+    // The declared local env has no folder; capture synchronizes from disk.
+    expect(require(path.join(featureDir, 'feature.config.cjs')).config.envs).toEqual(['staging'])
 
     const overwrite = captureFeatureEnvFiles(ctx(), {
       feature: 'checkout',
@@ -445,6 +444,8 @@ module.exports = { config }
     fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), '{bad json', 'utf8')
     fs.writeFileSync(path.join(envsetsDir, 'local', 'checkout.env'), 'TOKEN=secret\n', 'utf8')
 
+    expect(() => getFeatureEnvsetSummary(ctx(), 'checkout')).toThrow('envsets.config.json must contain a valid JSON object')
+    fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), '{}')
     expect(getFeatureEnvsetSummary(ctx(), 'checkout')).toMatchObject({
       configPath: path.join(envsetsDir, 'envsets.config.json'),
       envs: [{ name: 'local', slots: [{ slot: 'checkout.env', preview: [{ key: 'TOKEN', value: '********' }] }] }],
@@ -480,7 +481,7 @@ module.exports = { config }
     const nullConfigDir = writeFeatureConfig('null_config')
     fs.mkdirSync(path.join(nullConfigDir, 'envsets'), { recursive: true })
     fs.writeFileSync(path.join(nullConfigDir, 'envsets', 'envsets.config.json'), 'null', 'utf8')
-    expect(getFeatureEnvsetSummary(ctx(), 'null_config')).toMatchObject({ configPath: path.join(nullConfigDir, 'envsets', 'envsets.config.json') })
+    expect(() => getFeatureEnvsetSummary(ctx(), 'null_config')).toThrow('envsets.config.json must contain a valid JSON object')
 
     const raceDir = writeFeatureConfig('missing_env_dir')
     fs.mkdirSync(path.join(raceDir, 'envsets', 'local'), { recursive: true })
@@ -573,4 +574,73 @@ module.exports = { config }
     expect(summary).not.toBeNull()
     expect(summary!.repos).toEqual([])
   })
+})
+
+it('capture owns the full ordered announcement even for unchanged overwrites', () => {
+  createFeatureSkeleton({ ...ctx(), feature: 'checkout' })
+  const sourcePath = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(sourcePath, 'TOKEN=synthetic\n')
+  const publish = vi.fn()
+  const input = { feature: 'checkout', sources: [{ sourcePath, slot: 'app.env', confirmOverwrite: true }] }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    publish.mockClear()
+    expect(captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, input).ok).toBe(true)
+    expect(publish.mock.calls).toEqual([
+      [{ type: 'envsets-changed', feature: 'checkout' }], [{ type: 'features-changed' }],
+    ])
+  }
+  publish.mockClear()
+  expect(captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, {
+    ...input, sources: [{ sourcePath, slot: 'app.env' }],
+  }).ok).toBe(false)
+  expect(publish).not.toHaveBeenCalled()
+})
+
+it.each(['missing source', 'filesystem failure'])('does not announce partial capture after a later %s', (failure) => {
+  createFeatureSkeleton({ ...ctx(), feature: 'checkout' })
+  const sourcePath = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(sourcePath, 'TOKEN=synthetic\n')
+  const envDir = path.join(featuresDir, 'checkout', 'envsets', 'local')
+  // A directory at the second slot forces a real write failure after the first
+  // file was persisted. Capture is deliberately not a filesystem transaction.
+  fs.mkdirSync(path.join(envDir, 'blocked.env'))
+  const publish = vi.fn()
+  const capture = () => captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, {
+    feature: 'checkout', sources: [
+      { sourcePath, slot: 'first.env' },
+      { sourcePath: failure === 'missing source' ? path.join(tmpDir, 'missing.env') : sourcePath, slot: 'blocked.env', confirmOverwrite: true },
+    ],
+  })
+  if (failure === 'missing source') expect(capture().ok).toBe(false)
+  else expect(capture).toThrow()
+  expect(fs.readFileSync(path.join(envDir, 'first.env'), 'utf8')).toBe('TOKEN=synthetic\n')
+  expect(publish).not.toHaveBeenCalled()
+})
+
+it.each([
+  { envs: ['local', 'staging/eu'] },
+  { envs: ['local'], repos: [{ name: 'api', localPath: '/repo', envs: ['staging/eu'] }] },
+])('rejects invalid environment lists before any writes or event (%j)', (input) => {
+  const publish = vi.fn()
+  expect(() => createFeatureSkeleton({ ...ctx(), feature: 'invalid_env', workspaceEvents: { publish }, ...input })).toThrow('invalid env name: staging/eu')
+  expect(fs.existsSync(path.join(featuresDir, 'invalid_env'))).toBe(false)
+  expect(fs.readdirSync(featuresDir)).toEqual([])
+  expect(publish).not.toHaveBeenCalled()
+})
+
+it('uses normalized names consistently in generated configuration and directories', () => {
+  const publish = vi.fn()
+  const result = createFeatureSkeleton({ ...ctx(), feature: 'normalized', envs: [' staging ', '', 'staging', 'dev_2'], workspaceEvents: { publish } })
+  expect(result.ok).toBe(true)
+  const dir = path.join(featuresDir, 'normalized')
+  expect(require(path.join(dir, 'feature.config.cjs')).config.envs).toEqual(['staging', 'dev_2'])
+  expect(fs.readdirSync(path.join(dir, 'envsets'))).toEqual(['dev_2', 'envsets.config.json', 'local', 'staging'])
+  expect(publish).toHaveBeenCalledWith({ type: 'feature-created', feature: 'normalized' })
+})
+
+it('defaults blank list entries to local but still rejects blank capture environments', () => {
+  expect(createFeatureSkeleton({ ...ctx(), feature: 'blank_envs', envs: [' ', ''] }).ok).toBe(true)
+  const source = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(source, 'KEY=value\n')
+  expect(() => captureFeatureEnvFiles(ctx(), { feature: 'blank_envs', sources: [{ sourcePath: source, env: ' ', slot: 'api.env' }] })).toThrow('invalid env name:  ')
 })

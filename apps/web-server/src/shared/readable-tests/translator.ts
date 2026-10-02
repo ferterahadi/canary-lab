@@ -1,3 +1,4 @@
+import { authoredStep, callFromStatement } from './call-syntax'
 import { createHash } from 'node:crypto'
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
@@ -144,45 +145,6 @@ function containsIncomplete(node: ReadableNode): boolean {
     )
   }
   return false
-}
-
-function callFromStatement(statement: ts.Statement): ts.CallExpression | undefined {
-  const statementExpression = ts.isExpressionStatement(statement)
-    ? statement.expression
-    : ts.isReturnStatement(statement)
-      ? statement.expression
-      : ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1
-        ? statement.declarationList.declarations[0].initializer
-        : undefined
-  if (!statementExpression) return undefined
-  let expression = statementExpression
-  while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression
-  return ts.isCallExpression(expression) ? expression : undefined
-}
-
-function authoredStep(statement: ts.Statement): { label: string; body: ts.Block } | undefined {
-  const call = callFromStatement(statement)
-  if (
-    !call
-    || !ts.isPropertyAccessExpression(call.expression)
-    || !ts.isIdentifier(call.expression.expression)
-    || call.expression.expression.text !== 'test'
-    || call.expression.name.text !== 'step'
-  ) {
-    return undefined
-  }
-  const label = call.arguments[0]
-  const callback = call.arguments[1]
-  if (
-    !label
-    || !ts.isStringLiteralLike(label)
-    || !callback
-    || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
-    || !ts.isBlock(callback.body)
-  ) {
-    return undefined
-  }
-  return { label: label.text, body: callback.body }
 }
 
 function namedHelperCall(statement: ts.Statement): string | undefined {

@@ -1,3 +1,4 @@
+import { runManifest as makeRunManifest } from '../runs/logic/__fixtures__/run-manifest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -5,9 +6,9 @@ import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
-import { notificationRoutes } from './index'
+import { notificationRoutes } from './routes/notifications'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
-import type { RunManifest } from '../runs/logic/runtime/manifest'
+import type { RunManifest } from '../../../../../shared/run-manifest'
 import { suiteReviewRevision } from '../runs/logic/runtime/suite-review'
 import { WorkspaceEventBus } from '../../shared/workspace-events'
 
@@ -64,8 +65,8 @@ it('resolves a review as soon as its live suite config disappears, before a dele
   git('init', '-q')
   git('add', 'features')
   git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
-  const manifest = { runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
-    suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   const app = Fastify()
   await register(app, {
     logsDir: dir, featuresDir, workspaceEvents: events,
@@ -115,7 +116,7 @@ it('resolves a review when Canary explicitly deletes its suite', async () => {
 describe('durable notifications', () => {
   it('keeps a retired review resolved across reload and allows a recreated suite to start a new episode', () => {
     const review: NotificationSource = { key: 'test-review:shop', signature: 'attention', message: {
-      title: 'shop: tests changed', target: { kind: 'test-review', feature: 'shop', runId: 'r1' },
+      title: 'shop: tests changed', body: 'Review the changed tests.', target: { kind: 'test-review', feature: 'shop', runId: 'r1' },
     } }
     const store = new NotificationStore(dir, events)
     store.reconcile([review])
@@ -376,7 +377,7 @@ it('persists terminal blockers before a start attempt and resolves exact approva
   }
   fs.writeFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(2).toBe(2))")
   // No pendingSpecEdits: abort won the race with the dirty-file watcher.
-  const manifest = { runId: 'ended-run', feature: 'shop', status: 'aborted', featureDir: live, suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'ended-run', feature: 'shop', status: 'aborted', featureDir: live, suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   const listeners = new Set<() => void>()
   const app = Fastify()
   await register(app, {
@@ -416,7 +417,7 @@ it.each(['snapshot', 'live'] as const)('distinguishes a missing %s from another 
       fs.writeFileSync(path.join(root, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(1).toBe(1))")
     }
     fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(2).toBe(2))")
-    return { runId: `${feature}-run`, feature, featureDir: live, status: 'aborted', suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+    return makeRunManifest({ runId: `${feature}-run`, feature, featureDir: live, status: 'aborted', suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   })
   const app = Fastify()
   await register(app, {
@@ -470,8 +471,8 @@ it.each([0, 1])('archives a legacy missing-suite alert with %i pending historica
   fs.mkdirSync(path.join(snapshot, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(snapshot, 'feature.config.cjs'), 'module.exports = { name: "archived-suite" }')
   fs.writeFileSync(path.join(snapshot, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(1).toBe(1))")
-  const manifest = { runId: 'historical-run', feature: 'archived-suite', status: 'aborted', featureDir: live,
-    suiteSnapshot: { kind: 'taken', dir: snapshot }, specEdits: { pending: pendingCount ? [{ file: 'e2e/contract.spec.ts', change: 'modified' }] : [], adopted: [], checkedAt: 'then' } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'historical-run', feature: 'archived-suite', status: 'aborted', featureDir: live,
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' }, specEdits: { pending: pendingCount ? [{ file: 'e2e/contract.spec.ts', change: 'modified', affectedTests: [] }] : [], adopted: [], checkedAt: 'then' } })
   const originalManifest = JSON.stringify(manifest)
   const store = new NotificationStore(dir, events)
   store.reconcile([{ key: 'test-review:archived-suite', signature: 'attention', message: {
@@ -523,4 +524,58 @@ it('settles stale dirty and pending metadata when only the suite config disappea
     expect(after).toEqual([expect.objectContaining({ id: before.id, resolvedAt: expect.any(String) })])
     expect((await app.inject('/api/notifications/feature/shop')).json().attentionCount).toBe(0)
   } finally { await app.close() }
+})
+
+it('reconciles only the named sources, including availability and absence', () => {
+  const store = new NotificationStore(dir, events)
+  const other = { ...source, key: 'flight:f2', message: { ...source.message!, title: 'other' } }
+  store.reconcile([source, other])
+  const original = store.list().find((item) => item.title === 'other')!
+  store.markUnavailable(new Set([other.key]))
+  store.reconcile([], new Set(), new Set([source.key]))
+  expect(store.list().find((item) => item.id === original.id)).toMatchObject({ unavailable: true })
+  expect(store.list().find((item) => item.id === original.id)?.resolvedAt).toBeUndefined()
+  expect(store.list().find((item) => item.title === source.message!.title)?.resolvedAt).toEqual(expect.any(String))
+})
+
+it('records attention during a check but waits for verification before settling it', () => {
+  const store = new NotificationStore(dir, events)
+  const keys = new Set([source.key])
+  store.reconcile([source], new Set(), keys, keys)
+  const original = store.list()[0]
+  expect(original.unavailable).toBe(true)
+  store.markRead(original.id)
+  store.reconcile([{ key: source.key, signature: 'quiet' }], new Set(), keys, keys)
+  store.reconcile([], new Set(), keys, keys)
+  expect(store.list()[0]).toMatchObject({ id: original.id, unavailable: true, readAt: expect.any(String) })
+  expect(store.list()[0].resolvedAt).toBeUndefined()
+  store.reconcile([{ ...source, message: { ...source.message!, severity: 'danger' } }], new Set(), keys, keys)
+  expect(store.list()[0].readAt).toBeUndefined()
+  store.reconcile([], new Set(), keys)
+  expect(store.list()[0]).toMatchObject({ id: original.id, resolvedAt: expect.any(String) })
+  expect(store.list()[0].unavailable).toBeUndefined()
+})
+
+it('rejects unreadable database versions instead of resetting history', () => {
+  const store = new NotificationStore(dir, events)
+  store.reconcile([source])
+  fs.writeFileSync(path.join(dir, 'notifications/state.json'), JSON.stringify({ version: 9, items: [], sources: {} }))
+  expect(() => store.list()).toThrow('Cannot read the notification database')
+})
+
+it('keeps retirement idempotent and ignores supplied sources outside the scope', () => {
+  const store = new NotificationStore(dir, events)
+  store.retire('shop')
+  events.publish.mockClear()
+  store.retire('shop')
+  store.reconcile([source], new Set(), new Set(['test-review:shop']))
+  expect(store.list()).toEqual([])
+  expect(events.publish).not.toHaveBeenCalled()
+})
+
+it('surfaces an unreadable inbox file instead of replacing it', () => {
+  const store = new NotificationStore(dir, events)
+  fs.mkdirSync(path.join(dir, 'notifications/state.json'), { recursive: true })
+  expect(() => store.list()).toThrow()
+  expect(fs.statSync(path.join(dir, 'notifications/state.json')).isDirectory()).toBe(true)
 })

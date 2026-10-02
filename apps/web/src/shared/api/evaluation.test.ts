@@ -91,6 +91,7 @@ describe('evaluation api', () => {
           runId: 'run-amb',
           feature: 'ambient',
           mode: 'raw',
+          producer: 'internal',
           status: 'completed',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
@@ -105,7 +106,7 @@ describe('evaluation api', () => {
     expect(ambientURL.createObjectURL).toHaveBeenCalled()
   })
 
-  it('downloads evaluation export zip files with safe filenames', async () => {
+  it.each([undefined, 'canary-lab-evaluation-checkout-flow-export'])('downloads using the persisted name %s, with canonical fallback for older servers', async (archiveBase) => {
     const link = {
       href: '',
       download: '',
@@ -126,9 +127,11 @@ describe('evaluation api', () => {
     await downloadEvaluationExportTask(
       {
         taskId: 'task/1',
+        archiveBase,
         runId: '///',
         feature: 'checkout flow',
         mode: 'raw',
+        producer: 'internal',
         status: 'completed',
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -139,7 +142,7 @@ describe('evaluation api', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports/task%2F1/download', { method: 'GET' })
     expect(link.href).toBe('blob:export')
-    expect(link.download).toBe('canary-lab-evaluation-checkout-flow-run.zip')
+    expect(link.download).toBe(`${archiveBase ?? 'canary-lab-evaluation-checkout-flow-run'}.zip`)
     expect(link.click).toHaveBeenCalled()
     expect(link.remove).toHaveBeenCalled()
     expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:export')

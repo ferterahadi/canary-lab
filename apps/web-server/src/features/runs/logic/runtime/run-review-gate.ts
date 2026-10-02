@@ -1,5 +1,5 @@
 import type { RunStore } from '../run-store'
-import { suiteExecutionRevision, suiteReviewFiles, suiteReviewRevision } from './suite-review'
+import { suiteReviewAssessment } from './suite-review'
 import { suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
 import { testReviewUrl, type RunTestReviewApproval, type TestReviewRequiredInfo } from '../../../../../../../shared/test-review'
 
@@ -14,15 +14,15 @@ function runReviewGate(store: Pick<RunStore, 'list' | 'get'>, feature: string, l
   if (manifest.status === 'passed' && !manifest.specEdits?.pending.length) return
   const snapshot = manifest.suiteSnapshot.dir
   const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot)
-  if (suiteExecutionRevision(snapshot, liveDir, runtimeInputs) === suiteExecutionRevision(snapshot, snapshot, runtimeInputs)) return undefined
-  const revision = suiteReviewRevision(snapshot, liveDir, runtimeInputs)
+  const { executionChanged, revision, files } = suiteReviewAssessment(snapshot, liveDir, runtimeInputs)
+  if (!executionChanged) return undefined
   const approval = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) =>
     item.revision === revision && item.decision === 'approved-for-new-run',
   )
   if (approval) return { sourceRunId: manifest.runId, revision, approvedAt: approval.at }
   return {
     type: 'test_review_required', feature, runId: manifest.runId, review_revision: revision,
-    changedFileCount: suiteReviewFiles(snapshot, liveDir, runtimeInputs).files.length,
+    changedFileCount: files.length,
     reviewUrl: testReviewUrl(feature, manifest.runId),
     error: 'Review the test changes before this run can start. Your run request will continue in its original client after you decide.',
   }

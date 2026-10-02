@@ -2,18 +2,22 @@
 // load entry options and drive a plan-features task, and the submit handlers.
 // Lifted out of the component verbatim so the dialog file is its markup; the
 // hook hands each binding back under its original name.
-import { useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as flightsApi from '@/shared/api/flights'
+import * as internalApi from '@/shared/api/internal'
+import * as typesApi from '@shared/flights/types'
+import { useProjectConfig } from '@/shared/state/use-project-config'
+import type { AgentStagePlans } from '@shared/agent-models'
 import type {
-  AgentStagePlans,
   FlightEntryOptions,
   FlightStageEntryOption,
   FlightStageKey,
   FlightStageStatus,
   PlanFeaturesTask,
   PlannedFeature,
-} from '@/shared/api/client'
+} from '@shared/flights/types'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
+import { usePlanFeaturesTask } from './use-plan-features-task'
 
 type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
@@ -65,20 +69,18 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   // R79: which CLI conducts the flight's stage agents. Preselected from the
   // workspace's default-agent setting; claude is the wire default, so only a
   // codex pick rides the body. Sticky server-side once the flight exists.
-  const [agent, setAgent] = useState<'claude' | 'codex'>('claude')
+  const [agent, updateAgent] = useState<'claude' | 'codex'>('claude')
+  const agentPicked = useRef(false)
+  const setAgent = (value: 'claude' | 'codex') => { agentPicked.current = true; updateAgent(value) }
   const agentBody = agent === 'codex' ? { agent: 'codex' as const } : {}
   // The whole config is kept (not just the default-agent bit): the models gate
   // below needs askModelsOnLaunch + agentModels. Unreachable → null, and the
   // gate never arms (launching beats blocking on a settings probe).
-  const [projectConfig, setProjectConfig] = useState<api.ProjectConfig | null>(null)
+  const { value: projectConfig } = useProjectConfig()
+  const configuredAgent = projectConfig ? (projectConfig.healAgent === 'codex' ? 'codex' : 'claude') : null
   useEffect(() => {
-    api.getProjectConfig()
-      .then((c) => {
-        setProjectConfig(c)
-        if (c.healAgent === 'codex') setAgent('codex')
-      })
-      .catch(() => {})
-  }, [])
+    if (configuredAgent && !agentPicked.current) updateAgent(configuredAgent)
+  }, [configuredAgent])
 
   // The models gate (2.2.0): when the workspace armed askModelsOnLaunch, the
   // three explicit launch actions park on "use defaults or customize?" first.
@@ -91,37 +93,66 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   // the planning view (the resume effect attaches the task; the settle effect
   // then promotes it to the proposal or into the launched flight).
   const [phase, setPhase] = useState<NewFlightPhase>(resumePlanTaskId ? 'planning' : 'form')
-  const [planTask, setPlanTask] = useState<PlanFeaturesTask | null>(null)
+  // A creation response only seeds the shared reader; accepted remote state
+  // has one owner. Resumed tasks are keyed directly by navigation.
+  const [createdTask, setCreatedTask] = useState<PlanFeaturesTask>()
+  const planTaskId = resumePlanTaskId ?? createdTask?.taskId ?? null
+  const { task: planTask, error: planReadError } = usePlanFeaturesTask(planTaskId, createdTask)
   const [proposal, setProposal] = useState<PlannedFeature[]>([])
   const [sharedGroup, setSharedGroup] = useState('')
   const [conflicts, setConflicts] = useState<string[]>([])
-  const autoLaunched = useRef(false)
-  const resumeAttached = useRef(false)
+  const autoLaunched = useRef<string | null>(null)
+  const navigated = useRef<string | null>(null)
+  const resumeAttached = useRef<string | null>(null)
+  const mounted = useRef(false)
+  const currentTaskId = useRef(planTaskId)
+  currentTaskId.current = planTaskId
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const taskIsCurrent = useCallback((id: string): boolean => mounted.current && currentTaskId.current === id, [])
+  const openTaskFlight = useCallback((id: string, flightId: string): void => {
+    if (!taskIsCurrent(id) || navigated.current === id) return
+    navigated.current = id
+    onOpenFlight(flightId)
+  }, [onOpenFlight, taskIsCurrent])
+  const closeTask = useCallback((id: string): void => {
+    if (!taskIsCurrent(id) || navigated.current === id) return
+    navigated.current = id
+    onClose()
+  }, [onClose, taskIsCurrent])
   // Seed the editable proposal from the settled plan exactly once. Without this,
   // a bare parent re-render (poll/WS) re-fires the settle effect below and
   // clobbers the user's in-progress name/group/intent edits.
-  const proposalSeeded = useRef(false)
+  const proposalSeeded = useRef<string | null>(null)
 
   const newFlight = resolvedFeature === null
 
-  // Resume: fetch the backgrounded task and hand it to the plan flow.
   useEffect(() => {
-    if (!resumePlanTaskId || resumeAttached.current) return
-    resumeAttached.current = true
-    api.getPlanFeaturesTask(resumePlanTaskId)
-      .then((task) => {
-        setPlanTask(task)
-        setDescription(task.description)
-        setRepoPaths(task.repoPaths)
-        setPhase('planning')
-      })
-      .catch((err: unknown) => setStartError(err instanceof Error ? err.message : String(err)))
-  }, [resumePlanTaskId])
+    autoLaunched.current = null
+    navigated.current = null
+    resumeAttached.current = null
+    proposalSeeded.current = null
+    setProposal([])
+    setSharedGroup('')
+    setConflicts([])
+    setStartError(null)
+    setModelsGate(null)
+    setBusy(false)
+    setPhase(planTaskId ? 'planning' : 'form')
+  }, [planTaskId])
+
+  useEffect(() => {
+    if (!planTask || resumeAttached.current === planTask.taskId) return
+    resumeAttached.current = planTask.taskId
+    if (resumePlanTaskId) {
+      setDescription(planTask.description)
+      setRepoPaths(planTask.repoPaths)
+    }
+  }, [planTask, resumePlanTaskId])
 
   useEffect(() => {
     if (newFlight) return
     let alive = true
-    api.getFlightEntryOptions(resolvedFeature)
+    flightsApi.getFlightEntryOptions(resolvedFeature)
       .then((options) => {
         if (!alive) return
         setEntry(options)
@@ -144,29 +175,19 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     return () => { alive = false }
   }, [resolvedFeature, newFlight, intent, fromStage, entryNonce])
 
-  // Planning: poll the task until the agent settles. Attach-or-start means the
-  // task may already be done on the first poll.
-  useEffect(() => {
-    if (planTask?.status !== 'running') return
-    const id = setInterval(() => {
-      api.getPlanFeaturesTask(planTask.taskId).then(setPlanTask).catch(() => {})
-    }, 1500)
-    return () => clearInterval(id)
-  }, [planTask?.taskId, planTask?.status])
-
   // A settled plan advances the phase. Single-feature launching is the
   // SERVER's job (so a backgrounded plan starts even with the dialog closed) —
   // once it flips the task to `launched`, jump straight into the new flight.
   useEffect(() => {
     if (!planTask) return
     if (planTask.status === 'cancelled') {
-      onClose()
+      closeTask(planTask.taskId)
       return
     }
     if (planTask.status === 'launched' && planTask.launchedFlightIds && planTask.launchedFlightIds.length > 0) {
-      if (autoLaunched.current) return
-      autoLaunched.current = true
-      onOpenFlight(planTask.launchedFlightIds[0])
+      if (autoLaunched.current === planTask.taskId) return
+      autoLaunched.current = planTask.taskId
+      openTaskFlight(planTask.taskId, planTask.launchedFlightIds[0])
       return
     }
     if (planTask.status !== 'done' || !planTask.result) return
@@ -175,8 +196,8 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     // Several features, or a single one whose name clashed → the human decides
     // (confirm the split / rename). Show the proposal.
     if (features.length > 1 || conflicted) {
-      if (proposalSeeded.current) return
-      proposalSeeded.current = true
+      if (proposalSeeded.current === planTask.taskId) return
+      proposalSeeded.current = planTask.taskId
       setProposal(features)
       setSharedGroup(features.find((f) => f.group)?.group ?? '')
       if (conflicted) setConflicts(planTask.conflicts ?? [])
@@ -186,23 +207,24 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     // Single feature, no conflict. The server has already launched it in the
     // live flow (we catch `launched` above via the poll); this direct launch
     // is the fallback for a server without auto-launch, guarded to fire once.
-    if (autoLaunched.current) return
-    autoLaunched.current = true
-    api.launchPlannedFeatures(planTask.taskId, { features })
-      .then(({ flightIds }) => onOpenFlight(flightIds[0]))
+    if (autoLaunched.current === planTask.taskId) return
+    autoLaunched.current = planTask.taskId
+    flightsApi.launchPlannedFeatures(planTask.taskId, { features })
+      .then(({ flightIds }) => openTaskFlight(planTask.taskId, flightIds[0]))
       .catch((err: unknown) => {
-        autoLaunched.current = false
+        if (!taskIsCurrent(planTask.taskId)) return
+        autoLaunched.current = null
         applyLaunchFailure(err)
-        if (proposalSeeded.current) return
-        proposalSeeded.current = true
+        if (proposalSeeded.current === planTask.taskId) return
+        proposalSeeded.current = planTask.taskId
         setProposal(features)
         setSharedGroup(features[0]?.group ?? '')
         setPhase('proposal')
       })
-  }, [planTask, onOpenFlight, onClose])
+  }, [planTask, openTaskFlight, closeTask, taskIsCurrent])
 
   const applyLaunchFailure = (err: unknown): void => {
-    const body = err instanceof api.ApiError
+    const body = err instanceof internalApi.ApiError
       ? (err.body as { error?: string; type?: string; conflicts?: string[] } | null)
       : null
     if (body?.type === 'feature_name_conflicts') setConflicts(body.conflicts ?? [])
@@ -221,7 +243,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     return map
   }, [entry])
 
-  const derivedFeature = newFlight && repoPaths.length > 0 ? api.deriveFeatureSlug(repoPaths[0]) : null
+  const derivedFeature = newFlight && repoPaths.length > 0 ? typesApi.deriveFeatureSlug(repoPaths[0]) : null
   // R75: repos + intent are frozen against PARTIAL re-entry only — a full
   // restart ("Start fresh — from the beginning", mode redo) discards every
   // stage's evidence, so the inputs unlock exactly there and nowhere else.
@@ -240,7 +262,8 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       && (!inputsRequired || (description.trim() !== '' && repoPaths.length > 0))
 
   const openFlightFail = (err: unknown): void => {
-    const body = err instanceof api.ApiError
+    if (!mounted.current) return
+    const body = err instanceof internalApi.ApiError
       ? (err.body as { error?: string; type?: string; flightId?: string } | null)
       : null
     // The derived feature already has a flight record → flip the dialog into
@@ -261,9 +284,10 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (busy) return
     setBusy(true)
     setStartError(null)
-    api.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody, ...agentBody })
+    flightsApi.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody, ...agentBody })
       .then((task) => {
-        setPlanTask(task)
+        if (!mounted.current) return
+        setCreatedTask(task)
         setPhase('planning')
         setBusy(false)
       })
@@ -274,7 +298,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   const beginSingleFlight = (models: AgentStagePlans | null): void => {
     setBusy(true)
     setStartError(null)
-    api.startFlight({
+    flightsApi.startFlight({
       feature: derivedFeature ?? 'feature',
       repoPaths,
       description: description.trim(),
@@ -282,7 +306,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...agentBody,
       ...(models ? { models } : {}),
     })
-      .then((manifest) => onOpenFlight(manifest.flightId))
+      .then((manifest) => { if (mounted.current) onOpenFlight(manifest.flightId) })
       .catch(openFlightFail)
   }
   const startSingleFlight = (): void => {
@@ -295,11 +319,13 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
    *  waits for the whole agent tree, then lets every UI surface drop the now-
    *  terminal pre-flight through the store's live event. */
   const cancelPlanning = (taskId: string): void => {
+    if (busy || !planTask || planTask.taskId !== taskId) return
     setBusy(true)
     setStartError(null)
-    api.cancelPlanFeatures(taskId)
-      .then(() => onClose())
+    flightsApi.cancelPlanFeatures(taskId)
+      .then(() => closeTask(taskId))
       .catch((err: unknown) => {
+        if (!taskIsCurrent(taskId)) return
         setStartError(err instanceof Error ? err.message : String(err))
         setBusy(false)
       })
@@ -315,9 +341,9 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...f,
       ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
     }))
-    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody, ...(models ? { models } : {}) })
-      .then(({ flightIds }) => onOpenFlight(flightIds[0]))
-      .catch(applyLaunchFailure)
+    flightsApi.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody, ...(models ? { models } : {}) })
+      .then(({ flightIds }) => openTaskFlight(planTask.taskId, flightIds[0]))
+      .catch((error: unknown) => { if (taskIsCurrent(planTask.taskId)) applyLaunchFailure(error) })
   }
   const launchProposal = (): void => {
     if (busy || !planTask) return
@@ -333,12 +359,14 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (busy || !entry?.flight) return
     setBusy(true)
     setStartError(null)
-    api.abortFlight(entry.flight.flightId)
+    flightsApi.abortFlight(entry.flight.flightId)
       .then(() => {
+        if (!mounted.current) return
         setBusy(false)
         setEntryNonce((n) => n + 1)
       })
       .catch((err: unknown) => {
+        if (!mounted.current) return
         setStartError(err instanceof Error ? err.message : String(err))
         setBusy(false)
       })
@@ -348,7 +376,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     if (!entry || picked === null) return
     setBusy(true)
     setStartError(null)
-    const body: api.StartFlightBody = {
+    const body: flightsApi.StartFlightBody = {
       feature: resolvedFeature!,
       // Frozen args (R57/R75): with a record, repos + intent ride the body
       // ONLY on a full restart (mode redo accepts new values); mid-pipeline
@@ -366,8 +394,8 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...agentBody,
       ...(models ? { models } : {}),
     }
-    api.startFlight(body)
-      .then((manifest) => onOpenFlight(manifest.flightId))
+    flightsApi.startFlight(body)
+      .then((manifest) => { if (mounted.current) onOpenFlight(manifest.flightId) })
       .catch(openFlightFail)
   }
   const start = (): void => {
@@ -388,5 +416,5 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     else if (kind === 'proposal') beginLaunchProposal(models)
   }
 
-  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, cancelPlanning, launchProposal, stopAndStartFresh, start }
+  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError: startError ?? planReadError, taskUnavailable: planTaskId !== null && planTask === null, showSteps, setShowSteps, autopilot, setAutopilot, agent, setAgent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, cancelPlanning, launchProposal, stopAndStartFresh, start }
 }

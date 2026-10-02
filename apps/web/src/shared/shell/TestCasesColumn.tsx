@@ -1,44 +1,32 @@
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../api/client'
+import { useEffect, useMemo, useState } from 'react'
+import { useFeatureTestRoster } from '../state/use-feature-test-roster'
 import { useInvalidationKey } from '../state/invalidation'
-import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
-import {
-  colorClassForStatus,
-  executionLineHighlightForTest,
-  runningTestForTest,
-  sameSourceFile,
-  sourceLineForBodyLine,
-  statusForTest,
-  type StepStatus,
-  type TestExecutionLineHighlight,
-  type TestStatusIdentity,
-  summaryEntryName,
-} from '@/features/runs'
-import type { RunManifest, RunSummary, RunSummaryRunningStep } from '../api/types'
+import type { DirtySpecSummary, FeatureSpecFile } from '../api/types'
+import type { ExtractedTest } from '@shared/extracted-test'
+import type { RunStatus } from '@shared/run-state'
+import { colorClassForStatus, executionLineHighlightForTest, runningTestForTest, sameSourceFile, statusForTest, type StepStatus, type TestExecutionLineHighlight, type TestStatusIdentity } from '@/features/runs/utils/test-step-status'
+import { summaryEntryName } from '@shared/test-names'
+import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
+import type { RunManifest } from '@shared/run-manifest'
+import type { RunSummary, RunSummaryRunningStep } from '@shared/run-detail'
 import { StepStatusBadge } from '../ui/TestCodeBlock'
 import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
-import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
-import { sourceFileInRun } from '@/features/runs'
-import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
+import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
+import { sourceFileInRun } from '@/features/runs/utils/run-source-file'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 import { useTestVersions } from './use-test-versions'
-import type { TestChangeKind } from '../lib/test-versions'
+import type { TestChangeKind } from '@shared/test-review'
 import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { TestListUnavailableCard } from './TestListUnavailableCard'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
-type TestLoadFailure = { kind: 'discovery' | 'config' | 'removed' | 'request'; message: string }
-
-interface ExpandedTestSelection {
-  sourceKey: string
-  key: string | null
-  autoExpandPending: boolean
-}
 
 type TestRunEvidence = {
   manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
@@ -84,116 +72,29 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const latestRepair = repairState.repairs[0]
   const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
-  const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[]; revision?: string } | null>(null)
-  const [preview, setPreview] = useState<{ sourceKey: string; specs: FeatureSpecFile[] } | null>(null)
-  const [loadError, setLoadError] = useState<TestLoadFailure | null>(null)
-  const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
-  const resolvedSpecs = loadError?.kind === 'removed' ? null
-    : loaded?.sourceKey === sourceKey ? loaded.specs : previousLists.current.get(sourceKey) ?? null
-  const isPreview = !resolvedSpecs && !loadError && preview?.sourceKey === sourceKey
-  const specs = resolvedSpecs ?? (isPreview ? preview?.specs ?? null : null)
-  const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [manualRetryAfter, setManualRetryAfter] = useState('')
   const loadRevision = `${refreshKey}:${retryKey}`
   useEffect(() => { if (repairCompletion) setRetryKey((key) => key + 1) }, [repairCompletion])
-  const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
+  const [expandedBySource, setExpandedBySource] = useState<Map<string, string | null>>(() => new Map())
+  const expandedKey = expandedBySource.get(sourceKey) ?? null
 
+  const roster = useFeatureTestRoster({ feature, runId, recover: true,
+    refreshKey: JSON.stringify([retryKey, recordedRosterKey, workspaceAuthoring]),
+  })
+  const loadError = roster.failure
+  const resolvedSpecs = roster.specs
+  const specs = resolvedSpecs
   useEffect(() => {
-    if (!feature) {
-      setLoaded(null)
-      setPreview(null)
-      setLoadError(null)
-      setExpandedTest(null)
-      return
-    }
-    let cancelled = false
-    let retryTimer: ReturnType<typeof setTimeout> | undefined
-    let attempts = 0
-    let fullFinished = false
-    setExpandedTest((current) => current?.sourceKey === sourceKey
-      ? current
-      : { sourceKey, key: null, autoExpandPending: true })
-    setLoadError(null)
-    setDiscovery(null)
-    setPreview(null)
-    setLoaded(previousLists.current.has(sourceKey) ? { sourceKey, specs: previousLists.current.get(sourceKey)! } : null)
-    const failed = (failure: TestLoadFailure): void => {
-      if (cancelled) return
-      setLoadError(failure)
-      setPreview(null)
-      if (failure.kind === 'removed') {
-        previousLists.current.delete(sourceKey)
-        setLoaded(null)
-        setDiscovery(null)
-      }
-      // A file-save event can arrive while the author is still writing the
-      // suite. Retry briefly, keeping the last resolved list visible.
-      if (failure.kind !== 'removed' && attempts < 3) retryTimer = setTimeout(load, 1000)
-    }
-    const load = (): void => {
-      attempts += 1
-      api.getFeatureTests(feature, undefined, runId)
-        .then((data) => {
-          if (cancelled) return
-          fullFinished = true
-          const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
-          if (discoveryError) { setDiscovery({ feature, specs: data }); failed({ kind: 'discovery', message: discoveryError }); return }
-          const availableKeys = new Set(
-            data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
-          )
-          previousLists.current.set(sourceKey, data)
-          setDiscovery(null)
-          setLoaded({ sourceKey, specs: data, revision: loadRevision })
-          setLoadError(null)
-          setExpandedTest((current) => {
-            if (current?.sourceKey !== sourceKey || current.autoExpandPending) {
-              return {
-                sourceKey,
-                key: availableKeys.values().next().value ?? null,
-                autoExpandPending: false,
-              }
-            }
-            if (current.key !== null && !availableKeys.has(current.key)) {
-              return { sourceKey, key: null, autoExpandPending: false }
-            }
-            return current
-          })
-        })
-        .catch((err) => { fullFinished = true; failed(classifyLoadError(err)) })
-    }
-    load()
-    if (!runId && !workspaceAuthoring && !previousLists.current.has(sourceKey)) {
-      api.getFeatureTestsPreview(feature).then((data) => {
-        const firstSpec = data.find((spec) => spec.tests.length)
-        if (cancelled || fullFinished || !firstSpec
-          || data.some((spec) => spec.parseError || spec.tests.some((test) => test.name.includes('${')))) return
-        setPreview({ sourceKey, specs: data })
-        setExpandedTest((current) => current?.sourceKey === sourceKey
-          ? { ...current, key: current.key ?? workspaceTestKey(firstSpec.file, firstSpec.tests[0]) }
-          : current)
-      }).catch(() => { /* Full discovery remains the authoritative read. */ })
-    }
-    return () => { cancelled = true; clearTimeout(retryTimer) }
-  }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey, workspaceAuthoring])
-
-  useEffect(() => {
-    if (!feature || runId || (loadError?.kind !== 'removed' && loadError?.kind !== 'config')) return
-    let checking = false
-    let cancelled = false
-    const timer = setInterval(() => {
-      if (checking) return
-      checking = true
-      api.getFeatureTests(feature).then(() => {
-        if (!cancelled) setRetryKey((key) => key + 1)
-      }).catch((error) => {
-        if (cancelled) return
-        const next = classifyLoadError(error)
-        if (next.kind !== loadError.kind || next.message !== loadError.message) setRetryKey((key) => key + 1)
-      }).finally(() => { checking = false })
-    }, 10_000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [feature, runId, loadError?.kind, loadError?.message])
+    if (!roster.confirmed || !specs) return
+    const availableKeys = new Set(specs.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))))
+    setExpandedBySource((current) => {
+      const selected = current.has(sourceKey) ? current.get(sourceKey)! : availableKeys.values().next().value ?? null
+      const next = new Map(current)
+      next.set(sourceKey, selected !== null && !availableKeys.has(selected) ? null : selected)
+      return next
+    })
+  }, [roster.confirmed, specs, sourceKey])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
@@ -203,8 +104,8 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const versions = useTestVersions({
     feature, baseline: baselineRun, displayed: specs, recordedView: Boolean(runId),
     revision: `${loadRevision}:${workspaceAuthoring}:${dirtyRevision}:${JSON.stringify(baselineRunSummary?.knownTests ?? [])}`,
-    ready: loaded?.revision === loadRevision && !loadError && !discovery && !workspaceAuthoring,
-    displayFailed: Boolean(loadError || discovery),
+    ready: roster.confirmed && !workspaceAuthoring,
+    displayFailed: Boolean(loadError),
   })
   const runDifferences = versions.comparison.differences
 
@@ -229,7 +130,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   }
 
   const displaySpecs = specs
-  const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
+  const incompleteSpecs = roster.incomplete
   const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
   const discoveryError = loadError?.message || repairFailure
   // What the card shows as the failure itself: Playwright's own diagnostics
@@ -261,7 +162,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
         skipped={recordedStatuses.filter((status) => status === 'skipped').length}
         running={recordedStatus === 'running'}
         runId={baselineRunId}
-        comparison={versions.comparison}
+        comparison={versions.comparisonForHeader}
         onReviewTest={onReviewTest}
         fallback={<>
           {currentTests && <span className="shrink-0 text-[10px] text-secondary">Current source</span>}
@@ -271,9 +172,6 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
         </>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3" style={{ scrollbarGutter: 'stable' }}>
-        {isPreview && <div role="status" data-testid="tests-source-preview" className="mb-3 text-[11px] text-muted">
-          Showing source tests while Playwright resolves the exact list…
-        </div>}
         {workspaceAuthoring ? (
           <div data-testid="tests-authoring-placeholder">
             <div role="status" className="mb-3 flex items-center gap-2 text-xs text-running">
@@ -338,7 +236,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
           // The list is arriving, so the placeholder is the list: the same cards
           // the fetch resolves into, rather than a one-line "Loading..." that
           // the first spec then shoves off the pane. See `TestCardSkeleton`.
-          !loadError && <div data-testid="tests-loading-placeholder">
+          !loadError && <div className="cl-tests-loading" data-testid="tests-loading-placeholder">
             <span role="status" className="sr-only">Loading test cases…</span>
             <div className="space-y-1.5">
               {SKELETON_NAME_WIDTHS.map((width, i) => <TestCardSkeleton key={width} width={width} row={i} />)}
@@ -365,7 +263,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                 .some((dir) => dir && spec.file === `${dir}/${difference.file}`) || spec.file === difference.file)
               return spec.tests.map((t) => {
                 const diff = baselineRunId ? undefined : t.sourceChanges
-                const modified = isPreview ? false : baselineRunId
+                const modified = baselineRunId
                   ? runDifference?.affectedTests.includes(t.name) ?? false
                   : diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
                 const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
@@ -375,7 +273,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                 // the mirror declared a field the server does not send.
                 const sourceFile = t.sourceFile ?? spec.file
                 const key = workspaceTestKey(spec.file, t)
-                const isExpanded = expandedTest?.sourceKey === sourceKey && expandedTest.key === key
+                const isExpanded = expandedKey === key
                 const testIdentity = summaryIdentityForWorkspaceTest(
                   t.name,
                   t.line,
@@ -407,13 +305,13 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                   : undefined
                 return (
                   <TestCard
-                    key={key}
+                    key={`${sourceKey}:${key}`}
                     sourceFile={sourceFile}
                     testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
                     sourceUnavailable={spec.recordedSourceUnavailable}
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
-                    showStatus={!isPreview && !currentTests && Boolean(runId || activeRunSummary)}
+                    showStatus={!currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
@@ -422,11 +320,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     modified={modified}
                     modifiedLabel={baselineRunId ? 'Changed since this run' : 'Modified since the committed test'}
                     changedLines={changedLines}
-                    onToggle={() => setExpandedTest({
-                      sourceKey,
-                      key: isExpanded ? null : key,
-                      autoExpandPending: false,
-                    })}
+                    onToggle={() => setExpandedBySource((current) => new Map(current).set(sourceKey, isExpanded ? null : key))}
                   />
                 )
               })
@@ -451,13 +345,6 @@ function workspaceTestKey(specFile: string, test: ExtractedTest): string {
   return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
 }
 
-function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {
-  if (!location) return null
-  const match = /^(.*):(\d+)(?::\d+)?$/.exec(location)
-  if (!match) return { file: location, line: 0 }
-  return { file: match[1], line: Number(match[2]) }
-}
-
 function summaryIdentityForWorkspaceTest(
   name: string,
   line: number,
@@ -474,12 +361,12 @@ function summaryIdentityForWorkspaceTest(
   // roster last saw it. The line decides only when one file declares the same
   // title more than once.
   const sameTest = (summary?.knownTests ?? []).filter((entry) => {
-    const parsed = parseSummaryLocation(entry.location)
+    const parsed = parseLocation(entry.location)
     return Boolean(parsed && sameSourceFile(parsed.file, file) && matchesName(entry))
   })
   const known = sameTest.length === 1
     ? sameTest[0]
-    : sameTest.find((entry) => parseSummaryLocation(entry.location)?.line === line)
+    : sameTest.find((entry) => parseLocation(entry.location)?.line === line)
   if (known?.id) return { name, id: known.id }
   const hasExplicitLegacyResult = summary?.passedNames !== undefined
     || summary?.skippedNames?.includes(summaryEntryName(name))
@@ -487,30 +374,6 @@ function summaryIdentityForWorkspaceTest(
   return summary?.knownTests?.length || (recorded && !hasExplicitLegacyResult)
     ? { name, allowNameFallback: false }
     : { name }
-}
-
-function formatLoadError(err: unknown): string {
-  if (err instanceof api.ApiError) {
-    const context = `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
-    if (err.body && typeof err.body === 'object') {
-      const body = err.body as { message?: unknown; error?: unknown }
-      const message = typeof body.message === 'string' ? body.message : body.error
-      if (typeof message === 'string') return `${context} ${message}`
-    }
-    return context
-  }
-  return 'Unable to load tests for this suite.'
-}
-
-function classifyLoadError(err: unknown): TestLoadFailure {
-  const body = err instanceof api.ApiError && err.body && typeof err.body === 'object'
-    ? err.body as { code?: unknown; error?: unknown } : undefined
-  const code = body?.code
-  return {
-    kind: code === 'suite-removed' ? 'removed' : code === 'discovery-failed' ? 'config' : 'request',
-    message: (code === 'suite-removed' || code === 'discovery-failed') && typeof body?.error === 'string'
-      ? body.error : formatLoadError(err),
-  }
 }
 
 /** The placeholder is the card it becomes — R83's rule from the flight stage
@@ -559,7 +422,7 @@ function TestCard({
   showNotRun,
   isRunningTest,
   runningStep,
-  executionHighlight,
+  executionHighlight: nextExecutionHighlight,
   expanded,
   modified,
   modifiedLabel,
@@ -584,6 +447,36 @@ function TestCard({
   changedLines?: Set<number>
   onToggle: () => void
 }) {
+  const [lastRunningHighlight, setLastRunningHighlight] = useState<{
+    bodySource: string
+    bodyLine: number
+    highlight: TestCardExecutionHighlight
+  } | null>(null)
+  const bodyLine = test.bodyLine ?? test.line
+  const retainedHighlight = isRunningTest
+    && lastRunningHighlight?.bodySource === test.bodySource
+    && lastRunningHighlight.bodyLine === bodyLine
+      ? lastRunningHighlight.highlight
+      : undefined
+  // Helper steps may have no location in this test. Replace the visible row
+  // only once the new location resolves, keeping both presentation modes aligned.
+  const executionHighlight = nextExecutionHighlight ?? retainedHighlight
+  const nextKind = nextExecutionHighlight?.kind
+  const nextBodyLine = nextExecutionHighlight?.bodyLine
+  const nextSourceLine = nextExecutionHighlight?.sourceLine
+  useEffect(() => {
+    if (!isRunningTest) {
+      setLastRunningHighlight(null)
+    } else if (nextKind === 'running' && nextBodyLine != null && nextSourceLine != null) {
+      setLastRunningHighlight({
+        bodySource: test.bodySource,
+        bodyLine,
+        highlight: { kind: 'running', bodyLine: nextBodyLine, sourceLine: nextSourceLine },
+      })
+    } else {
+      setLastRunningHighlight((previous) => previous?.bodySource === test.bodySource && previous.bodyLine === bodyLine ? previous : null)
+    }
+  }, [isRunningTest, nextKind, nextBodyLine, nextSourceLine, test.bodySource, bodyLine])
   const lineMessage = executionHighlight?.kind === 'running'
     ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
     : isRunningTest

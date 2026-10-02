@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -15,10 +14,7 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
+import { git } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -91,11 +87,11 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('flags only the changed test, with its changed line, against the HEAD body', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, ['init', '-q'])
-    git(dir, ['config', 'user.email', 't@t.dev'])
-    git(dir, ['config', 'user.name', 'test'])
-    git(dir, ['add', '-A'])
-    git(dir, ['commit', '-q', '-m', 'baseline'])
+    git(dir, 'init', '-q')
+    git(dir, 'config', 'user.email', 't@t.dev')
+    git(dir, 'config', 'user.name', 'test')
+    git(dir, 'add', '-A')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), EDITED)
 
     const app = await build()
@@ -117,7 +113,7 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('returns no tests when the file has never been committed', async () => {
     const dir = writeFeature('uncommitted', { spec: COMMITTED })
-    git(dir, ['init', '-q'])
+    git(dir, 'init', '-q')
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/features/uncommitted/dirty-diff?file=e2e/a.spec.ts' })
     expect(res.statusCode).toBe(200)
@@ -126,11 +122,11 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('flags every line of a test added since the last commit', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, ['init', '-q'])
-    git(dir, ['config', 'user.email', 't@t.dev'])
-    git(dir, ['config', 'user.name', 'test'])
-    git(dir, ['add', '-A'])
-    git(dir, ['commit', '-q', '-m', 'baseline'])
+    git(dir, 'init', '-q')
+    git(dir, 'config', 'user.email', 't@t.dev')
+    git(dir, 'config', 'user.name', 'test')
+    git(dir, 'add', '-A')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     fs.writeFileSync(
       path.join(dir, 'e2e', 'a.spec.ts'),
       `${COMMITTED}test('brand new', async () => { expect(3).toBe(3) })\n`,
@@ -145,11 +141,11 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('omits an empty-body test added since the last commit (no lines to flag)', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, ['init', '-q'])
-    git(dir, ['config', 'user.email', 't@t.dev'])
-    git(dir, ['config', 'user.name', 'test'])
-    git(dir, ['add', '-A'])
-    git(dir, ['commit', '-q', '-m', 'baseline'])
+    git(dir, 'init', '-q')
+    git(dir, 'config', 'user.email', 't@t.dev')
+    git(dir, 'config', 'user.name', 'test')
+    git(dir, 'add', '-A')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     fs.writeFileSync(
       path.join(dir, 'e2e', 'a.spec.ts'),
       `${COMMITTED}test('brand new empty')\n`,

@@ -1,8 +1,15 @@
-import type { FlightStageKey, FlightStageStatus, PrdSourceCheckpointData } from '@/shared/api/client'
-import { STAGE_LABEL, stageLabel } from './stage-meta'
+import {
+  FLIGHT_STAGE_LABEL as STAGE_LABEL,
+  flightStageLabel as stageLabel,
+} from '@shared/flights/stage-labels'
 import { presentedStageStatus } from './stage-metrics'
 import { flightRailLabel } from '@shared/flights/stage-labels'
-import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  type FlightStageKey,
+  type FlightStageStatus,
+  type PrdSourceCheckpointData,
+} from '@shared/flights/types'
 import { FLIGHT_SECTION_ROW_KEYS } from './flight-sections'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────

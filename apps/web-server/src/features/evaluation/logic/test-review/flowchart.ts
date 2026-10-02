@@ -10,9 +10,6 @@ import { flattenHelpers } from './source-analysis'
 import { cleanSnippet } from './text'
 import type { EvaluationRewrite, EvaluationRewriteFlowStep, FlowNode, TestFlowchart, TestReviewCase, TestReviewPacket } from './types'
 
-export { calledNameFromText, setupLikeStatement } from '../../../../shared/readable-tests/language'
-export { isMeaningfulFlowStatement }
-
 export function createFlowcharts(packet: TestReviewPacket, rewrite: EvaluationRewrite): TestFlowchart[] {
   return packet.tests.map((test, idx) => {
     // One case per test is an invariant of both producers: `normalizeEvaluationRewrite`

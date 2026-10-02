@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -99,4 +99,24 @@ describe('PlanFeaturesStore listener forwarding', () => {
     store.save(task('pf-2'))
     expect(seen).toEqual(['changed'])
   })
+})
+
+it('attaches to a running plan through a repository symlink without spawning again', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-alias-'))
+  try {
+    const repo = path.join(dir, 'repo')
+    const alias = path.join(dir, 'alias')
+    fs.mkdirSync(repo)
+    fs.symlinkSync(repo, alias, 'dir')
+    const store = new PlanFeaturesStore(path.join(dir, 'logs'))
+    const task = { taskId: 'existing', repoPaths: [repo], description: 'checkout', status: 'running' as const, createdAt: 'now', updatedAt: 'now' }
+    store.save(task)
+    const spawnAgent = vi.fn()
+    const result = startPlanFeatures({ repoPaths: [alias], description: 'checkout' }, store, { logsDir: path.join(dir, 'logs'), spawnAgent })
+    expect(result.taskId).toBe(task.taskId)
+    expect(store.list()).toHaveLength(1)
+    expect(spawnAgent).not.toHaveBeenCalled()
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

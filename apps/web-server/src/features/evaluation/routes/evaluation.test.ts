@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -10,7 +11,8 @@ import Fastify from 'fastify'
 
 import { evaluationRoutes } from './evaluation'
 
-import { createRegistry, RunStore } from '../../runs/logic/run-store'
+import { RunStore } from '../../runs/logic/run-store'
+import { createRegistry } from '../../runs/logic/run-registry'
 
 import { createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
 
@@ -18,7 +20,7 @@ import { writeManifest } from '../../runs/logic/runtime/manifest'
 
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 import { resolveManifestSessionRef, loadAgentSession } from '../../agent-sessions/logic/agent-session-log'
 
@@ -369,6 +371,7 @@ test('records checkout', async ({ page }) => {
     const task = await waitForEvaluationTask(app, started.json().taskId)
     expect(task.status).toBe('completed')
     expect(task.downloadReady).toBe(true)
+    expect(task.archiveBase).toBe('canary-lab-evaluation-checkout-r-task-raw')
     expect(generateEvaluationRewrite).not.toHaveBeenCalled()
 
     const download = await app.inject({

@@ -1,4 +1,4 @@
-import type { DraftRecord } from '@/shared/api/types'
+import type { DraftRecord } from '@shared/draft-types'
 import { WizardDraftProvider, useWizardDrafts } from '../WizardDraftContext'
 import { FakeWebSocket } from '../WizardDraftContext.test'
 

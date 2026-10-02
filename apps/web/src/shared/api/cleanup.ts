@@ -1,7 +1,8 @@
 // Disk reclamation: run logs, worktrees, portify records, run artifacts.
 // Split out of client.ts; see that barrel for the shared surface.
 
-import type { CleanupListing, CleanupWorktree, PortifyCleanupListing } from './types'
+import type { CleanupWorktree } from './types-cleanup'
+import type { CleanupListing, PortifyCleanupListing } from '@shared/cleanup-listing'
 import { defaultOpts, request, type ClientOptions } from './internal'
 
 // Disk-usage listing for the Log Cleanup page: every run + orphan dir with

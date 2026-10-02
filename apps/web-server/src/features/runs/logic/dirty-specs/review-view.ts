@@ -8,7 +8,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { TestChange } from '../../../../../../../shared/verification-strength/types'
-import type { DirtySpec, SpecStrength } from './detect'
+import type { DirtySpec, SpecStrength } from '../../../../../../../shared/run-manifest'
 import { testRequirementsReader } from './test-requirements'
 
 export interface DirtySpecView {

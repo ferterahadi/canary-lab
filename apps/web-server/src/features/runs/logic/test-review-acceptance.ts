@@ -1,8 +1,8 @@
-import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import type { TestReviewGitReceipt } from '../../../../../../shared/test-review'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
+import { compareReviewFiles } from './test-review-comparison'
 
 export interface GitReviewPlan {
   revision: string
@@ -13,18 +13,6 @@ export interface GitReviewPlan {
 
 function validReviewFile(file: string): boolean {
   return !!file && !path.isAbsolute(file) && !file.split(/[\\/]/).includes('..')
-}
-
-function digest(files: Map<string, Buffer>): string {
-  const hash = createHash('sha256')
-  for (const name of [...files.keys()].sort()) {
-    hash.update(JSON.stringify([name, createHash('sha256').update(files.get(name)!).digest('hex')]))
-  }
-  return hash.digest('hex')
-}
-
-function reviewRevision(before: Map<string, Buffer>, after: Map<string, Buffer>): string {
-  return createHash('sha256').update(`${digest(before)}:${digest(after)}`).digest('hex')
 }
 
 function readFile(file: string): Buffer | undefined {
@@ -50,7 +38,6 @@ export async function buildGitReview(featureDir: string, reviewedFiles: string[]
   const { root, realDir } = await gitLocation(featureDir)
   const before = new Map<string, Buffer>()
   const after = new Map<string, Buffer>()
-  const changes: GitReviewPlan['files'] = []
   for (const file of files) {
     const absolute = path.join(realDir, file)
     const current = readFile(absolute)
@@ -59,10 +46,8 @@ export async function buildGitReview(featureDir: string, reviewedFiles: string[]
     const head = await runGit(root, ['show', `HEAD:${repoRelative}`])
     const recorded = head.code === 0 ? Buffer.from(head.stdout) : undefined
     if (recorded) before.set(file, recorded)
-    if (recorded?.equals(current ?? Buffer.alloc(0)) && current !== undefined) continue
-    changes.push({ file, change: !recorded ? 'added' : !current ? 'deleted' : 'modified' })
   }
-  return { revision: reviewRevision(before, after), files: changes, before, after }
+  return { ...compareReviewFiles(before, after, files), before, after }
 }
 
 function reviewedRepoPaths(root: string, featureDir: string, files: string[]): string[] {

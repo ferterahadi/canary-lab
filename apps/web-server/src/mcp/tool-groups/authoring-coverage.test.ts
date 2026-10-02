@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { slugify } from '../../features/runs/logic/runtime/summary-types'
+import { summaryEntryName } from '../../../../../shared/test-names'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
 import { readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
 import { documentHash, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
@@ -96,7 +96,7 @@ function recordPassingRun(feature: string, testTitles: string[]): void {
   )
   fs.writeFileSync(
     path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
-    JSON.stringify({ passedNames: testTitles.map((t) => `test-case-${slugify(t)}`), failed: [] }),
+    JSON.stringify({ passedNames: testTitles.map((t) => summaryEntryName(t)), failed: [] }),
   )
 }
 

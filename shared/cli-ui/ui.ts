@@ -6,7 +6,7 @@
  *   - Top-level messages (banners, sections, standalone status) are flush-left.
  *   - List items, steps, and box contents indent by 2 spaces.
  */
-import { c, style, colorEnabled } from './colors'
+import { c, style } from './colors'
 
 const INDENT = '  '
 
@@ -94,5 +94,3 @@ export function dim(text: string): string {
 export function path(text: string): string {
   return c('cyan', text)
 }
-
-export { colorEnabled, c, style }

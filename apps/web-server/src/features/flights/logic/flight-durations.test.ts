@@ -9,14 +9,15 @@ import {
   respondToFlightCheckpoint,
   redoFlight,
   pauseFlight,
-  enqueueFlight,
-  drainQueuedFlights,
   type FlightConductorDeps,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
 } from './conductor'
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import { enqueueFlight, drainQueuedFlights } from './flight-queue'
+import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 
 // The work clock (FlightStage.activeMs / activeSince, FlightManifest.startedAt).
 // Every test drives a real conductor over a tick-able clock, because the whole

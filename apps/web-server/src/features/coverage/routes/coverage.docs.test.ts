@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -33,7 +34,7 @@ vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
 import { coverageRoutes } from './coverage'
 import { readDocsCollection } from '../logic/coverage/docs-collection'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 

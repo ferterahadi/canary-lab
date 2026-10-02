@@ -2,19 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { isValidSlotName, shortenHome } from './feature-config-support'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
+import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
+import { buildAppRoots } from '../logic/envset-runtime'
 import {
-  FEATURE_CONFIG_NAMES,
-  PLAYWRIGHT_CONFIG_NAMES,
-  buildAppRoots,
-  findExistingConfig,
-  isValidSlotName,
-  isWithin,
   listEnvFolders,
   readEnvsetsConfig,
-  shortenHome,
   syncEnvsInConfig,
   writeEnvsetsConfig,
-} from './feature-config-support'
+} from '../logic/envset-config'
 
 let tmpDir: string
 
@@ -121,29 +118,16 @@ describe('isValidSlotName', () => {
   })
 })
 
-describe('isWithin', () => {
-  it('is true for the root itself and for descendants', () => {
-    expect(isWithin('/a/b', '/a/b')).toBe(true)
-    expect(isWithin('/a/b', '/a/b/c/d')).toBe(true)
-  })
-
-  it('is false for a sibling, an ancestor, or an unrelated absolute path', () => {
-    expect(isWithin('/a/b', '/a/bb')).toBe(false)
-    expect(isWithin('/a/b', '/a')).toBe(false)
-    expect(isWithin('/a/b', '/x/y')).toBe(false)
-  })
-})
-
 describe('readEnvsetsConfig / writeEnvsetsConfig', () => {
   it('returns {} when the file is absent', () => {
     expect(readEnvsetsConfig(path.join(tmpDir, 'envsets'))).toEqual({})
   })
 
-  it('returns {} when the file is unparseable rather than throwing', () => {
+  it('rejects unparseable metadata rather than replacing it with an empty config', () => {
     const dir = path.join(tmpDir, 'envsets')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'envsets.config.json'), '{ not json')
-    expect(readEnvsetsConfig(dir)).toEqual({})
+    expect(() => readEnvsetsConfig(dir)).toThrow('envsets.config.json must contain a valid JSON object')
   })
 
   it('round-trips through write, creating the dir if needed', () => {

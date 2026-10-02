@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { ModelAgentKind, ProjectConfig } from '@/shared/api/client'
-import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
-import { HintIcon, Modal, Section, SlidersIcon } from '@/shared/ui/atoms'
+import { useProjectConfig } from '@/shared/state/use-project-config'
+import { CHANGED_ELSEWHERE, useEditableDraft } from '@/shared/state/use-editable-draft'
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
+import * as configApi from '@/shared/api/config'
+import type { ProjectConfig } from '@/shared/api/config'
+import { EMPTY_AGENT_MODELS, type ModelAgentKind } from '@shared/agent-models'
+import { Section } from '@/shared/ui/atoms'
+import { HintIcon, SlidersIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CLASS, OPTION_ROW_COMPACT_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 import { FolderPicker } from './FolderPicker'
 import { GitHubSection } from './GitHubSection'
@@ -175,13 +180,20 @@ function AgentChoiceRow({ value, label, checked, summary, divider, onChange, onC
 }
 
 export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: Props) {
-  const [config, setConfig] = useState<ProjectConfig | null>(null)
-  const [draft, setDraft] = useState<ProjectConfig | null>(null)
+  const resource = useProjectConfig()
+  const config = resource.value
+  const editable = useEditableDraft({ key: 'project-settings', doc: config, fields: true,
+    extract: (value: ProjectConfig) => ({ ...value, personalWikiPath: value.personalWikiPath ?? null,
+      autoProposePr: value.autoProposePr !== false, showDemo: value.showDemo !== false, askModelsOnLaunch: value.askModelsOnLaunch === true }),
+    initialize: (value) => ({ ...value, healAgent: migrateLegacyHealAgent(value.healAgent), editor: migrateLegacyEditor(value.editor) }),
+  })
+  const { draft, setDraft } = editable
+  const mounted = useMountedIdentity('project-settings')
   // Controlled when App routes it; uncontrolled otherwise (unit tests).
   const [modelsForInternal, setModelsForInternal] = useState<ModelAgentKind | null>(null)
   const matrixAgent = modelsFor !== undefined ? modelsFor : modelsForInternal
   const setMatrixAgent = onModelsFor ?? setModelsForInternal
-  const [error, setError] = useState<string | null>(null)
+  const [saveError, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [portInput, setPortInput] = useState('')
   const [portBusy, setPortBusy] = useState(false)
@@ -192,52 +204,32 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
   const [restartOrigin, setRestartOrigin] = useState('')
   const restarting = restartPhase != null
 
+  const portBaseline = useRef<string | null>(null)
+  const configuredPort = config ? String(config.port ?? DEFAULT_PORT) : null
   useEffect(() => {
-    let cancelled = false
-    api.getProjectConfig()
-      .then((c) => {
-        if (cancelled) return
-        // Stash the as-loaded config for dirty comparison, but project retired
-        // choices onto their live UI values so every radio group has a valid
-        // selection. Saving through an older server persists the migration.
-        setConfig(c)
-        setDraft({
-          ...c,
-          healAgent: migrateLegacyHealAgent(c.healAgent),
-          editor: migrateLegacyEditor(c.editor),
-        })
-        setPortInput(String(c.port ?? DEFAULT_PORT))
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Failed to load settings')
-      })
-    return () => { cancelled = true }
-  }, [])
-
-  const dirty = draft != null && config != null
-    && (
-      draft.healAgent !== config.healAgent
-      || draft.editor !== config.editor
-      || (draft.personalWikiPath ?? '') !== (config.personalWikiPath ?? '')
-      || (draft.autoProposePr !== false) !== (config.autoProposePr !== false)
-      || (draft.showDemo !== false) !== (config.showDemo !== false)
-      || (draft.askModelsOnLaunch === true) !== (config.askModelsOnLaunch === true)
-    )
+    if (configuredPort === null) return
+    const next = configuredPort
+    const previous = portBaseline.current
+    setPortInput((current) => previous === null || current === previous ? next : current)
+    portBaseline.current = next
+  }, [configuredPort])
+  const editableFields = ['healAgent', 'editor', 'personalWikiPath', 'autoProposePr', 'showDemo', 'askModelsOnLaunch'] as const
+  const patch = Object.fromEntries(editableFields.filter((key) => key in editable.patch).map((key) => [key, editable.patch[key]])) as Partial<ProjectConfig>
+  const dirty = Object.keys(patch).length > 0
+  const error = saveError ?? resource.error ?? (editable.changedElsewhere ? CHANGED_ELSEWHERE : null)
 
   const onSave = async (): Promise<void> => {
-    if (!draft) return
+    if (!draft || saving || !mounted()) return
     setSaving(true)
     setError(null)
     try {
-      const next = await api.putProjectConfig(draft)
-      setConfig(next)
-      setDraft(next)
-      onClose()
+      const next = await configApi.putProjectConfig(patch)
+      if (!resource.accept(next)) return
+      if (editable.acceptSaved(next, draft)) onClose()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed')
+      if (mounted()) setError(e instanceof Error ? e.message : 'Save failed')
     } finally {
-      setSaving(false)
+      if (mounted()) setSaving(false)
     }
   }
 
@@ -251,7 +243,8 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
     setPortBusy(true)
     setPortError(null)
     try {
-      const res = await api.changeProjectPort(port, confirm)
+      const res = await configApi.changeProjectPort(port, confirm)
+      if (!mounted()) return
       if (res.needsConfirm) {
         setPendingConfirm(res.activeRuns ?? 0)
         return
@@ -262,14 +255,15 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
         setRestartAttempt(0)
         setRestartPhase('stopping')
         redirect(res.newOrigin, (phase, attempt) => {
+          if (!mounted()) return
           setRestartPhase(phase)
           setRestartAttempt(attempt)
         })
       }
     } catch (e: unknown) {
-      setPortError(e instanceof Error ? e.message : 'Port change failed')
+      if (mounted()) setPortError(e instanceof Error ? e.message : 'Port change failed')
     } finally {
-      setPortBusy(false)
+      if (mounted()) setPortBusy(false)
     }
   }
 
@@ -513,11 +507,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
         agentModels={draft.agentModels ?? EMPTY_AGENT_MODELS}
         onClose={() => setMatrixAgent(null)}
         onSaved={(next) => {
-          // The server always echoes the block; the guard is the optional-field
-          // type (an older server omits it), not a real runtime case.
-          const saved = next.agentModels ?? EMPTY_AGENT_MODELS
-          setConfig((prev) => (prev ? { ...prev, agentModels: saved } : prev))
-          setDraft((prev) => (prev ? { ...prev, agentModels: saved } : prev))
+          resource.accept(next)
         }}
       />
     )}

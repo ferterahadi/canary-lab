@@ -3,9 +3,9 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-**Give Claude or Codex an app repo. Get a Playwright evaluation backed by a run the agent cannot mark green itself.**
+**Turn an app repo into a Playwright evaluation with Claude or Codex.**
 
-Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. You get a report that links requirements, tests, captured evidence, and the actual pass or fail result.
+Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. The evaluation report connects requirements to tests, captured evidence, and the recorded pass or fail result.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
@@ -27,7 +27,7 @@ You need Node.js 22.12 or newer and npm 9 or newer.
    /canary-lab /absolute/path/to/your-app "checkout flow"
    ```
 
-3. Follow the Flight (the end-to-end evaluation) in your agent or open the Canary Lab interface. When the report is ready, open its evaluation archive to review the test results and captured evidence. A failed run keeps its failed verdict in the report.
+3. Follow the Flight (the end-to-end evaluation) in your agent or open the Canary Lab interface. When the report is ready, open its evaluation archive to review the test results and captured evidence.
 
 The connection starts the local Canary Lab service when needed. To open the interface yourself:
 
@@ -44,27 +44,27 @@ If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab s
 
 scan repo → create suite → collect requirements → author and map tests → run and repair → export evaluation → check readiness for parallel runs
 
-The skill keeps the reasoning work in your current Claude or Codex session. Canary Lab performs the mechanical checks and calculates every stage result from saved evidence.
+The skill keeps the reasoning work in your current Claude or Codex session. Canary Lab runs the checks and calculates each stage result from saved evidence.
 
 - **Requirements stay reviewable.** Add a product requirements document, link a local file, gather relevant repo documents, or infer requirements from the branch diff.
-- **Coverage is explicit.** Tests map to requirements and paths instead of producing a guessed percentage.
+- **Coverage is traceable.** The coverage percentage comes from test mappings to requirements and paths.
 - **Repairs are usually isolated.** Runs use separate Git checkouts when available. Before a suite is prepared for parallel runs, worktree creation failure can make a run use the app's working copy; Canary Lab warns you.
 - **Progress survives interruption.** Run `/canary-lab` again with the same repo to continue the existing Flight.
-- **The evaluation is the deliverable.** The archive preserves the real verdict, test evidence, any captured browser media, and per-test reasoning. It is available before the separate Parallel setup stage finishes.
+- **The evaluation is the deliverable.** The archive preserves the recorded verdict, including failed or aborted runs, test evidence, any captured browser media, and per-test reasoning. It is available before the separate Parallel setup stage finishes.
 
 ## Why the Verdict Is Independent
 
-An agent can propose a fix and say it works. Canary Lab checks that claim with its own Playwright run. The agent can read the evidence and request a rerun, but its statement alone cannot turn a failed run into a pass.
+Canary Lab determines pass or fail from its own Playwright run. The agent uses the resulting evidence to diagnose failures, fix application code, and request a rerun. Repairs must preserve the tests; the agent's completion report does not determine the run verdict.
 
 Canary Lab adds:
 
-- **Results the agent does not own.** The harness runs the tests and holds the pass/fail result.
+- **Reviewable run evidence.** Test results and captured artifacts support the recorded verdict.
 - **Controlled concurrency.** After Canary Lab verifies that the app accepts assigned ports, runs can use separate ports and Git worktrees. Conflicting work waits in a queue.
 - **Safe environment switching.** Environment files are backed up before changes and restored when the run ends.
 
 ## Choose the Right Skill
 
-Use `/canary-lab` for the complete journey. Use a focused skill when you need only one part:
+Use `/canary-lab` for the complete evaluation. Use a focused skill when you need only one part:
 
 | Goal | Skill |
 | --- | --- |
@@ -104,6 +104,23 @@ New workspaces include demonstrations for a prepared repair loop, a bare repo Fl
 
 Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary Lab start application services with their normal development commands. This keeps hot reload available during repair.
 
+## Measured Repair Speed
+
+In the latest-result view of the bundled storefront demo, median repair time was 71 seconds with Canary Lab and 132 seconds without it. Median output-token use was 63% lower.
+
+We tested Claude Code and Codex on two scenarios with seeded bugs. The table uses five pairs per agent/scenario, with one requested fresh Claude three-service pair replacing the original slower pair. This selected replacement is disclosed in the [benchmark report](docs/BENCHMARK.md#requested-rerun); the original evidence remains preserved.
+
+| Agent and bug | Median time: Canary → plain | Median output tokens |
+| --- | --- | --- |
+| Claude, one-service bug | 34s → 113s | 1.6k → 7.1k |
+| Codex, one-service bug | 67s → 156s | 1.8k → 3.7k |
+| Codex, three-service bug | 106s → 188s | 3.3k → 5.7k |
+| Claude, three-service bug | 75s → 127s | 4.1k → 8.5k |
+
+All 42 executed attempts passed the independent evaluator, including the original and fresh pairs. The 40 selected attempts above show lower elapsed time and token use; dollar cost was not measured. The original campaign's activity breakdown attributes most of its time difference to fewer agent steps for service startup and test execution.
+
+This is a small sample on Canary Lab's own demo, with one pair replaced after observing its result. The refreshed numbers are descriptive, and no new confidence interval is claimed for that group. See [Benchmark](docs/BENCHMARK.md) for the method, limits, and every selected pair.
+
 ## How It Compares
 
 | | Plain Playwright | Docker Compose with watch | Hosted dashboard | Canary Lab |
@@ -115,7 +132,7 @@ Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary 
 | Switches environment files with backup and restore | Manual | Manual | No | Yes |
 | Keeps harness data on your machine | Yes | Yes | No | Yes |
 
-Use Canary Lab when failures depend on service startup, environment files, backend logs, requirement coverage, or evidence the agent should not control. Plain `npx playwright test` is enough when you do not need orchestration or independent repair evidence. Harness data stays local; repair agents may still need network access.
+Use Canary Lab when you need service orchestration, environment switching, backend logs, requirement coverage, or a saved evaluation report. Plain `npx playwright test` is enough when you only need to run a suite. Harness data stays local; repair agents may still need network access.
 
 ## Updating a Workspace
 
@@ -150,6 +167,7 @@ Restart Canary Lab and connected agent apps afterwards so they load the refreshe
 | --- | --- |
 | [Changelog](docs/CHANGELOG.md) | Release history. |
 | [Roadmap](docs/ROADMAP.md) | Planned product milestones and their evidence bars. |
+| [Benchmark](docs/BENCHMARK.md) | Repair speed and token use with and without Canary Lab, and how they were measured. |
 | [Guide](docs/GUIDE.md) | Environment switching, run output, repairs, and evaluation reports. |
 | [Commands](docs/COMMANDS.md) | Full CLI and trigger-surface reference. |
 | [Suite Folders](docs/FEATURES.md) | Suite structure, configuration, and Playwright tests. |

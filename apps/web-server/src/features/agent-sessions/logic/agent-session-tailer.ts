@@ -1,16 +1,9 @@
 import fs from 'fs'
 import path from 'path'
-import {
-  type AgentEvent,
-  type AgentKind,
-  type AgentSessionRef,
-  type SubagentThread,
-  claudeSessionLogPath,
-  loadSubagentThread,
-  locateLatestSessionLogForAgent,
-  parseAgentSessionLine,
-  subagentDirFor,
-} from './agent-session-log'
+import { type AgentEvent, type AgentKind, type AgentSessionRef } from './agent-session-log'
+import { type SubagentThread, loadSubagentThread, subagentDirFor } from './agent-session-subagents'
+import { claudeSessionLogPath, locateLatestSessionLogForAgent } from './agent-session-paths'
+import { parseAgentSessionLine } from './agent-session-parse'
 
 // Tails an agent CLI's JSONL session log and emits normalized events as new
 // lines are appended.

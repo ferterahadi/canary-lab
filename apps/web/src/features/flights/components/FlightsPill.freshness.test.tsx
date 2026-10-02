@@ -4,16 +4,15 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageStateSummary } from '@/shared/api/coverage'
-import type { FlightIndexEntry } from '@/shared/api/client'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightIndexEntry } from '@shared/flights/types'
 import { FlightsPill } from './FlightsPill'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
   listCoverageStates,
 }))
 

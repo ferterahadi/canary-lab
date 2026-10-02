@@ -1,17 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import {
-  shortRunRef,
-  formatCount,
-  formatDuration,
-  formatElapsedSeconds,
-  durationBetween,
-  shortTime,
-  formatBytes,
-  timeAgo,
-  evaluationArchiveFilename,
-  safeFilename,
-  capitalizeFirst,
-} from './format'
+import { shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
   it('raises only the first character, leaving later words alone', () => {
@@ -74,6 +63,19 @@ describe('durationBetween', () => {
   })
   it('returns null when timestamps are unparseable', () => {
     expect(durationBetween('not-a-date', 'also-bad')).toBeNull()
+  })
+})
+
+describe('shortDateTime', () => {
+  it('formats a local month, day, and 24-hour time', () => {
+    const d = new Date(2026, 9, 1, 14, 2, 30)
+    const out = shortDateTime(d.toISOString())
+    expect(out).toMatch(/Oct/)
+    expect(out).toMatch(/\b1\b/)
+    expect(out).toMatch(/14:02/)
+  })
+  it('falls back to the raw input when it cannot parse', () => {
+    expect(shortDateTime('garbage')).toBe('garbage')
   })
 })
 

@@ -1,7 +1,8 @@
 import fs from 'fs'
+import * as childProcess from 'child_process'
 import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runGit } from '../../../../shared/git-repo'
 import {
   portifyBranchName,
@@ -11,6 +12,12 @@ import {
   discardWorktree,
   editFingerprint,
 } from './git-ops'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return { ...actual, execFile: vi.fn(actual.execFile) }
+})
 
 const roots: string[] = []
 afterEach(() => {
@@ -18,15 +25,11 @@ afterEach(() => {
   roots.length = 0
 })
 
-async function tmpRepo(): Promise<string> {
+function tmpRepo(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-git-'))
   roots.push(root)
   fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = 3007\n')
-  await runGit(root, ['init', '-q'])
-  await runGit(root, ['config', 'user.email', 't@t'])
-  await runGit(root, ['config', 'user.name', 'test'])
-  await runGit(root, ['add', '-A'])
-  await runGit(root, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(root)
   return root
 }
 
@@ -111,13 +114,48 @@ describe('editFingerprint', () => {
     expect(first.digest).not.toBe(before.digest)
 
     // A name-list fingerprint would freeze here — the file set is unchanged. The
-    // digest folds in the porcelain body, so continued work on one file still reads
+    // digest folds in the file mtime, so continued work on one file still reads
     // as progress. That is the whole point: a long single-file edit must not look
     // idle and get the workflow abandoned.
     fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = process.env.PORT ?? 3000\n')
     const second = await editFingerprint([{ worktreePath: root }])
     expect(second.files).toBe(1)
     expect(second.digest).not.toBe(first.digest)
+  })
+
+  it.each(['with space.txt', 'tab\tfile.txt', 'café.txt', 'quote"file.txt', 'back\\slash.txt', 'left -> right.txt', ' padded '])('detects repeated edits of %j with a stable count', async (name) => {
+    const root = await tmpRepo()
+    await runGit(root, ['config', 'core.quotePath', 'true'])
+    const file = path.join(root, name)
+    fs.writeFileSync(file, 'first edit')
+    fs.utimesSync(file, 1700000000, 1700000000)
+    const first = await editFingerprint([{ worktreePath: root }])
+    expect(first.files).toBe(1)
+    expect(await editFingerprint([{ worktreePath: root }])).toEqual(first)
+    fs.writeFileSync(file, 'second edit')
+    fs.utimesSync(file, 1700000002, 1700000002)
+    const second = await editFingerprint([{ worktreePath: root }])
+    expect(second.files).toBe(1)
+    expect(second.digest).not.toBe(first.digest)
+  })
+
+  it('preserves ordinary-path digest bytes and inspects once without refreshing the index', async () => {
+    const root = await tmpRepo()
+    const index = path.join(root, '.git', 'index')
+    const bytes = fs.readFileSync(index)
+    const mtime = fs.statSync(index, { bigint: true }).mtimeNs
+    const file = path.join(root, 'app.js')
+    fs.utimesSync(file, 1700000000, 1700000000)
+    const exec = vi.mocked(childProcess.execFile).mockClear()
+    try {
+      expect(await editFingerprint([{ worktreePath: root }])).toEqual({ digest: '1:3t0v', files: 0 })
+      expect(exec).toHaveBeenCalledExactlyOnceWith('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: root }, expect.any(Function))
+      expect(fs.readFileSync(index)).toEqual(bytes)
+      expect(fs.statSync(index, { bigint: true }).mtimeNs).toBe(mtime)
+      fs.writeFileSync(file, 'edited')
+      fs.utimesSync(file, 1700000000, 1700000000)
+      expect(await editFingerprint([{ worktreePath: root }])).toEqual({ digest: '31:85gfbq', files: 1 })
+    } finally { exec.mockRestore() }
   })
 
   it('counts UNTRACKED files too — adding a file is progress', async () => {
@@ -171,11 +209,19 @@ describe('editFingerprint', () => {
     expect(fp.digest).not.toBe('unreadable')
   })
 
+  it('does not report a partial file count when one worktree is unreadable', async () => {
+    const root = await tmpRepo()
+    fs.writeFileSync(path.join(root, 'app.js'), 'changed')
+    const fp = await editFingerprint([{ worktreePath: path.join(root, 'missing') }, { worktreePath: root }])
+    expect(fp.files).toBeNull()
+    expect(fp.digest.split('|')).toHaveLength(2)
+  })
+
   it('reports an unreadable worktree as a marker, never as "no progress"', async () => {
     // A git failure resolving to an empty/stable fingerprint would resurrect the
     // abandonment this guards against, so it must be distinguishable.
     const fp = await editFingerprint([{ worktreePath: path.join(os.tmpdir(), 'definitely-not-a-repo-xyz') }])
     expect(fp.digest).toBe('unreadable')
-    expect(fp.files).toBe(0)
+    expect(fp.files).toBeNull()
   })
 })

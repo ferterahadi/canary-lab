@@ -2,14 +2,21 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as coverageApi from '@/shared/api/coverage'
+import * as configApi from '@/shared/api/config'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { COVERAGE_FRESHNESS_LEASE_MS, COVERAGE_RECONCILE_MS } from '@shared/coverage/freshness'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 import { LEDGER } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
 
-vi.mock('@/shared/api/client', async (load) => ({
-  ...await load<typeof api>(), getFeatureCoverage: vi.fn(), listFeatureDocs: vi.fn(),
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getFeatureCoverage: vi.fn(),
+  listFeatureDocs: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
 }))
 let host: HTMLDivElement
 let root: Root
@@ -19,8 +26,9 @@ beforeEach(() => {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
-  vi.mocked(api.getFeatureCoverage).mockResolvedValue(fresh())
-  vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
+  vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(fresh())
+  vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
 })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.resetAllMocks() })
 const text = (id: string) => host.querySelector(`[data-testid="${id}"]`)?.textContent
@@ -40,7 +48,7 @@ describe('an already-open coverage page', () => {
     expect(text('coverage-pct')).toBe('Mapped 33%')
     const stale = structuredClone(LEDGER)
     stale.tests.push({ name: 'new test', requirements: [], pathTypes: [], strength: 'shallow' })
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(stale)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(stale)
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="change"]')!.click())
     expect(text('coverage-pct')).toBe('Mapped 33%')
     expect(warning()).toContain('Coverage out of date')
@@ -50,7 +58,29 @@ describe('an already-open coverage page', () => {
     const button = host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!
     expect(button.parentElement?.textContent).toContain('Redo from the start')
     await act(async () => button.click())
-    expect(recover).toHaveBeenCalledWith('prd-summary')
+    expect(recover).toHaveBeenCalledWith('prd-summary', undefined)
+  })
+
+  it('parks Recalculate Coverage on the models gate and launches only on confirm', async () => {
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'codex', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true })
+    const stale = structuredClone(LEDGER)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(stale)
+    const recover = vi.fn()
+    await mount(recover)
+    const recalculate = () => host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!.click()
+    await act(async () => recalculate())
+    expect(host.querySelector('[data-testid="model-launch-gate"]')?.textContent).toContain('Models for this coverage recalculation')
+    expect(recover).not.toHaveBeenCalled()
+    const cancel = [...host.querySelectorAll<HTMLButtonElement>('[data-testid="model-launch-gate"] button')].find((b) => b.textContent === 'Cancel')!
+    await act(async () => cancel.click())
+    expect(host.querySelector('[data-testid="model-launch-gate"]')).toBeNull()
+    expect(recover).not.toHaveBeenCalled()
+    await act(async () => recalculate())
+    const confirm = host.querySelector<HTMLButtonElement>('[data-testid="gate-confirm"]')!
+    expect(confirm.textContent).toBe('Recalculate')
+    await act(async () => confirm.click())
+    // Unchanged saved models send no override, so the server resolves config.
+    expect(recover).toHaveBeenCalledExactlyOnceWith('prd-summary', undefined)
   })
 
   it('recovers dropped events through reconciliation and exposes a newer failed result', async () => {
@@ -59,7 +89,7 @@ describe('an already-open coverage page', () => {
     failed.provenRunId = 'new-failure'
     failed.tests[0].lastRun = { runId: 'new-failure', passed: false }
     failed.freshness.latestRunFailed = true
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(failed)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(failed)
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_RECONCILE_MS))
     expect(warning()).toContain('Latest run has failures')
     expect(text('coverage-latest-run')).toContain('1 failed')
@@ -67,15 +97,15 @@ describe('an already-open coverage page', () => {
 
   it('keeps previous figures explicitly historical on errors, expires hung reads, and recovers automatically', async () => {
     await mount()
-    vi.mocked(api.getFeatureCoverage).mockRejectedValue(new Error('offline'))
+    vi.mocked(coverageApi.getFeatureCoverage).mockRejectedValue(new Error('offline'))
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_RECONCILE_MS))
     expect(text('coverage-pct')).toBe('Mapped 33%')
     expect(warning()).toContain('Coverage freshness unconfirmed')
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(fresh())
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(fresh())
     await act(async () => window.dispatchEvent(new Event('online')))
     expect(text('coverage-pct')).toBe('Mapped 33%')
     expect(warning()).toBeUndefined()
-    vi.mocked(api.getFeatureCoverage).mockImplementation(() => new Promise(() => {}))
+    vi.mocked(coverageApi.getFeatureCoverage).mockImplementation(() => new Promise(() => {}))
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_FRESHNESS_LEASE_MS + 1))
     expect(text('coverage-pct')).toBe('Mapped 33%')
     expect(warning()).toContain('Coverage freshness unconfirmed')
@@ -83,9 +113,9 @@ describe('an already-open coverage page', () => {
 
   it('ignores a delayed old response after a newer change has been rendered', async () => {
     let old!: (value: ReturnType<typeof fresh>) => void
-    vi.mocked(api.getFeatureCoverage).mockImplementationOnce(() => new Promise((resolve) => { old = resolve }))
+    vi.mocked(coverageApi.getFeatureCoverage).mockImplementationOnce(() => new Promise((resolve) => { old = resolve }))
     await mount()
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="change"]')!.click())
     await act(async () => old(fresh()))
     expect(text('coverage-pct')).toBe('Mapped 33%')

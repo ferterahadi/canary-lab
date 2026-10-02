@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildSuiteReview, suiteReviewRevision } from './suite-review'
+import { buildSuiteReview, suiteExecutionRevision, suiteReviewAssessment, suiteReviewRevision } from './suite-review'
 import { adoptSpecEdits, snapshotSuite } from './run-suite-snapshot'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 
@@ -24,6 +24,48 @@ function fixture(opts: Parameters<typeof makeHealLoopContext>[0]['opts'] = {}) {
 }
 
 describe('exact suite review', () => {
+  it('derives full review and execution changes from the same inventories with runtime exclusions', () => {
+    const { before, live } = fixture()
+    write(live, 'e2e/a.spec.ts', fs.readFileSync(path.join(before, 'e2e/a.spec.ts')))
+    const excluded = ['runtime/settings.json']
+    const original = suiteReviewAssessment(before, live, excluded)
+    expect(original).toMatchObject({ executionChanged: false, files: [] })
+    for (const file of ['docs/summary.ts', 'feature.config.cjs', 'notes.txt']) write(live, file, 'reviewable, not executable')
+    write(live, excluded[0], 'SECRET')
+    const documentation = suiteReviewAssessment(before, live, excluded)
+    expect(documentation.executionChanged).toBe(false)
+    expect(documentation.files.map(({ file }) => file)).toEqual(['docs/summary.ts', 'feature.config.cjs', 'notes.txt'])
+    expect(documentation.revision).not.toBe(original.revision)
+    expect(documentation.revision).toBe(suiteReviewRevision(before, live, excluded))
+    expect(suiteExecutionRevision(before, live, excluded)).toBe(suiteExecutionRevision(before, before, excluded))
+    write(live, 'helper.ts', 'new executable input')
+    const changed = suiteReviewAssessment(before, live, excluded)
+    expect(changed.executionChanged).toBe(true)
+    expect(changed.files).toContainEqual({ file: 'helper.ts', change: 'modified' })
+    expect(suiteExecutionRevision(before, live, excluded)).not.toBe(suiteExecutionRevision(before, before, excluded))
+    expect(suiteReviewAssessment(before, live).files).toContainEqual({ file: excluded[0], change: 'added' })
+  })
+
+  it.each(['e2e/fixture.txt', 'helper.mjs', 'helper.cts', 'view.jsx', 'data.json', 'feature.config.js', 'feature.config.ts'])(
+    'retains %s as an execution input', (file) => {
+      const { before, live } = fixture()
+      write(live, 'e2e/a.spec.ts', fs.readFileSync(path.join(before, 'e2e/a.spec.ts')))
+      write(live, file, 'new input')
+      expect(suiteReviewAssessment(before, live)).toMatchObject({ executionChanged: true, files: [{ file, change: 'added' }] })
+    },
+  )
+
+  it('propagates missing-tree and content-read failures without an empty successful assessment', () => {
+    const { before, live } = fixture()
+    expect(() => suiteReviewAssessment(path.join(root, 'missing'), live)).toThrow(/ENOENT/)
+    const read = fs.readFileSync
+    vi.spyOn(fs, 'readFileSync').mockImplementation((file, ...args) => {
+      if (String(file) === path.join(live, 'helper.ts')) throw new Error('read refused')
+      return read(file, ...args)
+    })
+    expect(() => suiteReviewAssessment(before, live)).toThrow('read refused')
+  })
+
   it('compares the snapshot, includes helpers/additions/deletions, and preserves EOF changes', async () => {
     const { before, live } = fixture()
     write(before, 'deleted.txt', 'old\n')

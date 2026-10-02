@@ -23,6 +23,3 @@ export function canStop(status: RunStatus): boolean {
 export function canDelete(status: RunStatus): boolean {
   return isTerminalRunStatus(status)
 }
-
-export { deriveDisplayStatus } from '@shared/run-state'
-export type { DisplayStatus, TransientAction } from '@shared/run-state'

@@ -1,10 +1,16 @@
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 
 export interface RunWaitingState {
   kind: 'test-review' | 'agent' | 'queued'
   label: string
-  shortLabel: string
   detail: string
+}
+
+export const AGENT_WAITING_STATE: RunWaitingState = {
+  kind: 'agent',
+  label: 'Awaiting Agent',
+  detail: 'The external repair session is waiting or disconnected. Resume the agent to continue, or stop the heal.',
 }
 
 /** Healing is the resumable run phase, not proof that an agent is working.
@@ -15,7 +21,7 @@ export function runWaitingState(input: RunDetail | RunIndexEntry | null | undefi
   const detail = 'manifest' in input ? input : undefined
   const run = detail ? detail.manifest : input as RunIndexEntry
   if (run.status === 'queued') return {
-    kind: 'queued', label: 'Queued', shortLabel: 'queued',
+    kind: 'queued', label: 'Queued',
     detail: 'Services and tests have not started. Open the run to see why it is waiting.',
   }
   if (run.status !== 'healing') return undefined
@@ -28,14 +34,12 @@ export function runWaitingState(input: RunDetail | RunIndexEntry | null | undefi
   if (pending > 0) return {
     kind: 'test-review',
     label: 'Awaiting test review',
-    shortLabel: 'to review',
     detail: 'Review the unexecuted test edits under Tests changed, then adopt or restore them. Saved results describe the previous execution.',
   }
-  if (session?.status === 'waiting' || session?.status === 'disconnected') return {
-    kind: 'agent',
-    label: 'Waiting for agent',
-    shortLabel: 'waiting',
-    detail: 'The external repair session is waiting or disconnected. Resume the agent to continue, or stop the heal.',
+  if (session?.status === 'waiting' || session?.status === 'disconnected') return AGENT_WAITING_STATE
+  if (run.healMode === 'external' && !session && phase === 'waiting-for-signal') return {
+    ...AGENT_WAITING_STATE,
+    detail: 'No external repair agent has claimed this run yet. Open an agent session to continue, or stop the heal.',
   }
   return undefined
 }

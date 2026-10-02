@@ -3,16 +3,15 @@
 import { z } from 'zod'
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { applyExternalDraftFiles } from '../../features/config/logic/feature-authoring'
 import {
   createDraft,
   paths as draftPaths,
   readDraft,
   writeDraft,
-  type DraftRecord,
-  type ExternalDraftStage,
 } from '../../features/wizard/logic/draft-store'
+import type { DraftRecord, ExternalDraftStage } from '../../../../../shared/draft-types'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, EXTERNAL_DRAFT_STAGE, asJsonResult, errorResult, externalDraftAuthoringNextSteps, externalDraftView, gettingStartedBusyResult, newDraftId, statusForExternalStage } from '../tool-support'
 
@@ -30,7 +29,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       external_session_url: z.string().optional(),
     },
   }, async ({ feature, stage, session_id, client_kind, conversation_name, external_session_url }) => {
-    const featureConfig = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)
+    const featureConfig = findFeature(deps.featuresDir, feature)
     if (!featureConfig) return errorResult(`feature not found: ${feature}`)
     // Getting Started demo tracking: claim BEFORE the record exists so a second
     // demo can't slip in between; attach right after the write links the claim.
@@ -104,7 +103,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
     if (!current) return errorResult(`draft not found: ${draftId}`)
     if ((current.producer ?? 'internal') !== 'external') return errorResult('draft is not external-owned')
     if (!current.featureName) return errorResult('external draft has no featureName')
-    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === current.featureName)
+    const feature = findFeature(deps.featuresDir, current.featureName)
     if (!feature?.featureDir) return errorResult(`feature not found: ${current.featureName}`)
     const applied = await applyExternalDraftFiles({
       featureDir: feature.featureDir,

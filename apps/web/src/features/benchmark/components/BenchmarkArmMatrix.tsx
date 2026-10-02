@@ -1,7 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Feature } from '@/shared/api/types'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
-import { RunDetailColumn } from '@/features/runs'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
+import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
 import { ConfigScreen } from './BenchmarkConfigScreen'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →

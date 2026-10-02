@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -5,7 +6,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { coverageRoutes } from './coverage'
 import { applyExternalSummary } from '../logic/coverage/feature-docs'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 let tmp: string
 let featuresDir: string

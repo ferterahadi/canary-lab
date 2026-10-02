@@ -1,7 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getGitRoot, resolveRepoPath, runGit } from '../../../../shared/git-repo'
+import { getGitRoot, runGit } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 
 /**
  * Per-run git worktree isolation. Created only when the user opts in after a

@@ -1,20 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { FeatureTestReview, RunTestReview, TestReviewReceipt } from '@shared/test-review'
-import * as api from '@/shared/api/client'
-import { ApiError } from '@/shared/api/internal'
+import type { DirtySpecSummary, Feature } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type {
+  FeatureTestReview,
+  RunTestReview,
+  TestReviewReceipt,
+  TestChangeKind,
+  VersionTest,
+} from '@shared/test-review'
+import * as runsApi from '@/shared/api/runs'
+import * as featuresApi from '@/shared/api/features'
+import * as workspaceApi from '@/shared/api/workspace'
+import { useTestSourceComparison } from '@/shared/state/use-test-source-comparison'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { shortRunRef } from '@/shared/lib/format'
-import { TEST_CHANGE_KINDS, type TestChangeKind, type TestVersionChanges, type VersionTest } from '@/shared/lib/test-versions'
-import { ChevronLeftIcon, ChevronRightIcon, Modal, StatusDot } from '@/shared/ui/atoms'
+import { TEST_CHANGE_KINDS } from '@/shared/lib/test-versions'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronLeftIcon, ChevronRightIcon } from '@/shared/ui/Icons'
+import { Modal } from '@/shared/ui/Overlays'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '@/shared/ui/TestChangeMark'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { useRun } from '../state/RunsContext'
 import { featureTone, pendingFileScope, specTone } from '../utils/spec-integrity'
 import { SpecToneChip } from './SpecToneChip'
-import { FullTestReview, type ReviewFocus } from './FullTestReview'
+import { FullTestReview } from './FullTestReview'
+import type { ReviewFocus } from '../../../shared/lib/workspace-view-state'
 
 interface Props {
   features: Feature[]
@@ -51,7 +64,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   useEffect(() => { setFocus(routedFocus) }, [routedFocus])
   const updateFocus = (next: ReviewFocus): void => { setFocus(next); onFocus?.(next) }
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null)
-  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string; missingSuite?: boolean } | null>(null)
   const pendingByFeature = new Map<string, RunIndexEntry>()
   for (const run of pendingRuns) {
     if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
@@ -72,19 +84,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const { detail: loadedDetail, error: runError } = useRun(selected?.run?.runId ?? null)
   const detail = loadedDetail ?? focusRunDetail
   const linkedSpec: DirtySpecSummary | undefined = focus?.file ? { file: focus.file, affectedTests: [] } : undefined
-  // A completed-run comparison can have a linked file without pending edits.
-  // The sidebar and comparison must resolve that file from the same list.
-  const filesFor = (card: ReviewSuite): DirtySpecSummary[] => {
-    const files = specsFor(card, card === selected ? detail : focusRunDetail)
-    if (linkedSpec && card.name === linkedFeature && !files.some((file) => file.file === linkedSpec.file)) files.push(linkedSpec)
-    if (runFiles?.feature === card.name && runFiles.runId === (card.name === focusFeature && focus?.baseline === 'run' ? focusRunId : card.run?.runId)) {
-      for (const file of runFiles.files) if (!files.some((item) => item.file === file)) files.push({ file, affectedTests: [] })
-    }
-    return files.sort((a, b) => a.file.localeCompare(b.file))
-  }
-  const specs = selected ? filesFor(selected) : []
-  const assessedFiles = selected ? specsFor(selected, detail) : []
-  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file) ?? specs[0]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const testChanges = useInvalidationKey('tests')
@@ -102,10 +101,44 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     setPicked({ feature, file })
     if (feature !== focusFeature) onChooseFeature?.(feature)
     setError(null)
-    updateFocus({ file, mode: focus?.mode, ...(againstRun ? { baseline: 'run' } : {}) })
+    updateFocus({ file, mode: focus?.mode, ...(useRunBaseline ? { baseline: 'run' } : {}) })
   }
-  const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
+  const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
+    : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
+  const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
+    : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
+  const comparisonDir = comparisonManifest?.featureDir
+  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
+  const sourceComparison = useTestSourceComparison({
+    feature: selected?.name, runId: comparisonRunId, featureDir: comparisonDir, snapshotDir, refreshKey: testChanges,
+  })
+  const comparison = sourceComparison.comparison
+  const runFiles = selected && comparisonRunId && snapshotDir ? {
+    feature: selected.name, runId: comparisonRunId, files: comparison.files,
+    changedFiles: comparison.differences.map((item) => item.file),
+    changes: comparison.state === 'ready' ? comparison.changes : undefined,
+    error: sourceComparison.error,
+    missingSuite: sourceComparison.missingSuite,
+    missingSnapshot: sourceComparison.missingSnapshot,
+  } : null
+  const currentRunFiles = runFiles
+  // A completed-run comparison can have a linked file without pending edits.
+  // The sidebar and comparison must resolve that file from the same list.
+  const filesFor = (card: ReviewSuite): DirtySpecSummary[] => {
+    const files = specsFor(card, card === selected ? detail : focusRunDetail)
+    if (linkedSpec && card.name === linkedFeature && !files.some((file) => file.file === linkedSpec.file)) files.push(linkedSpec)
+    if (runFiles?.feature === card.name && runFiles.runId === (card.name === focusFeature && focus?.baseline === 'run' ? focusRunId : card.run?.runId)) {
+      for (const file of runFiles.files) if (!files.some((item) => item.file === file)) files.push({ file, affectedTests: [] })
+    }
+    return files.sort((a, b) => a.file.localeCompare(b.file))
+  }
+  const specs = selected ? filesFor(selected) : []
+  const assessedFiles = selected ? specsFor(selected, detail) : []
+  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
+    ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
+  const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
+  const missingSnapshot = !!comparisonRunId && ((!!comparisonManifest && !snapshotDir) || !!currentRunFiles?.missingSnapshot)
   // RunStore decisions arrive through the run WebSocket as a new manifest.
   // Use that pushed revision to refetch the REST-only review immediately;
   // bounded reconciliation below remains the missed-event recovery path.
@@ -113,20 +146,19 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     detail?.manifest.specEdits?.checkedAt,
     detail?.manifest.specEdits?.reviewDecisions,
   ])
-  const runReview = useLiveResource<RunTestReview>('tests', run?.runId ?? null, api.getRunTestReview, {
+  const runReview = useLiveResource<RunTestReview>('tests', missingSnapshot ? null : run?.runId ?? null, runsApi.getRunTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
     refreshKey: reviewRefreshKey,
   })
   const reviewState = runReview.value?.reviewState ?? (runReview.value?.canAdopt && run && ['running', 'healing'].includes(run.status) ? 'pending-active' : undefined)
   const pendingRunReview = reviewState === 'pending-active' || reviewState === 'pending-terminal'
-  const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
-    : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
   // A decision must display the same recorded-run boundary its exact revision
   // will settle. Otherwise a cold pending-review link can show Git changes
   // while Accept & commit targets a different run-scoped file set.
-  const useRunBaseline = !!comparisonRunId && (againstRun || !selected?.feature || pendingRunReview)
-  const featureReview = useLiveResource<FeatureTestReview>('tests', !run && selected?.feature ? selected.name : null, api.getFeatureTestReview, {
+  const useRunBaseline = !!comparisonRunId && !missingSnapshot && (againstRun || !selected?.feature || pendingRunReview)
+  const suiteReviewAvailable = !run || (focus?.baseline !== 'run' && (missingSnapshot || (runReview.confirmed && !pendingRunReview)))
+  const featureReview = useLiveResource<FeatureTestReview>('tests', suiteReviewAvailable && selected?.feature ? selected.name : null, featuresApi.getFeatureTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
   })
@@ -140,9 +172,10 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     && (runReview.value.allowedActions ?? (runReview.value.canAdopt ? ['adopt-and-rerun', 'restore'] : []))
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
-  const reviewRevision = reviewRun ? runReview.value?.review_revision : undefined
-  const featureReviewRevision = !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
-  const displayedRunRevision = useRef<string>()
+  const comparisonAllowsAction = !comparisonRunId || !snapshotDir || sourceComparison.confirmed
+  const reviewRevision = comparisonAllowsAction && runReview.confirmed && reviewRun ? runReview.value?.review_revision : undefined
+  const featureReviewRevision = comparisonAllowsAction && featureReview.confirmed && suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
+  const displayedRunRevision = useRef<string | undefined>(undefined)
   const displayedFeatureReview = useRef(false)
   if (reviewRevision) displayedRunRevision.current = reviewRevision
   if (featureReviewRevision) displayedFeatureReview.current = true
@@ -151,44 +184,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     if (revision && detail?.manifest.specEdits?.reviewDecisions?.some((decision) => decision.revision === revision && decision.receipt)) onClose()
   }, [detail?.manifest.specEdits?.reviewDecisions, onClose])
   useEffect(() => {
-    if (!run && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
-  }, [featureReview.confirmed, featureReview.value?.files.length, onClose, run])
+    if (suiteReviewAvailable && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
+  }, [featureReview.confirmed, featureReview.value?.files.length, onClose, suiteReviewAvailable])
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
-  const comparisonFeature = selected?.name
-  const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
-    : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
-  const comparisonDir = comparisonManifest?.featureDir
-  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
-  const rootsKey = JSON.stringify([comparisonDir, snapshotDir])
-  useEffect(() => {
-    if (!comparisonFeature || !comparisonRunId) return
-    let cancelled = false
-    let requested = 0
-    const load = (): void => {
-      const request = ++requested
-      api.getTestSourceComparison(comparisonFeature, comparisonRunId).then((comparison) => {
-        if (cancelled || request !== requested) return
-        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey,
-          files: comparison.files, changedFiles: comparison.differences.map((item) => item.file),
-          ...(comparison.state === 'ready' ? { changes: comparison.changes }
-            : { error: 'Test change counts are unavailable because source or snapshot information is incomplete.' }),
-        })
-      }).catch((err: unknown) => {
-        if (cancelled || request !== requested) return
-        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey, files: [], changedFiles: [],
-          ...(err instanceof ApiError && err.status === 404 && err.message === 'Suite not found'
-            ? { missingSuite: true }
-            : { error: 'Could not list all comparison files. Showing the available files.' }),
-        })
-      })
-    }
-    load()
-    // Direct Git or filesystem deletion may not deliver a feature event. An
-    // open comparison still needs to notice that its live side disappeared.
-    const interval = setInterval(load, 10_000)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [comparisonFeature, comparisonRunId, comparisonDir, snapshotDir, rootsKey, testChanges])
-  const currentRunFiles = runFiles && runFiles.feature === selected?.name && runFiles.runId === comparisonRunId && runFiles.revision === testChanges && runFiles.rootsKey === rootsKey ? runFiles : null
   const suiteUnavailable = !!currentRunFiles?.missingSuite
   const changedFiles = new Set(useRunBaseline
     ? currentRunFiles?.changedFiles ?? []
@@ -214,8 +212,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
 
   const acceptChanges = async (): Promise<void> => {
     if (!selected) return
-    const receipt = reviewRun && reviewRevision ? await api.acceptRunTestReview(reviewRun.runId, reviewRevision)
-      : featureReviewRevision ? await api.acceptFeatureTestReview(selected.name, featureReviewRevision) : undefined
+    const receipt = reviewRun && reviewRevision ? await runsApi.acceptRunTestReview(reviewRun.runId, reviewRevision)
+      : featureReviewRevision ? await featuresApi.acceptFeatureTestReview(selected.name, featureReviewRevision) : undefined
     if (!receipt) return
     onFeaturesChanged?.()
     onClose()
@@ -224,8 +222,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
 
   const restoreChanges = async (): Promise<void> => {
     if (!selected) return
-    if (reviewRun && reviewRevision) await api.restoreSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
-    else if (featureReviewRevision) await api.restoreFeatureTestReview(selected.name, featureReviewRevision)
+    if (reviewRun && reviewRevision) await runsApi.restoreSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
+    else if (featureReviewRevision) await featuresApi.restoreFeatureTestReview(selected.name, featureReviewRevision)
     else return
     onFeaturesChanged?.()
     onClose()
@@ -266,8 +264,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
               <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || (reviewRun ? !runReview.confirmed : !featureReview.confirmed)} onClick={() => { void act(acceptChanges) }}>Accept &amp; commit</button>
             </>}
           </div>
-          {run && !suiteUnavailable && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
-          {!run && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
+          {run && !suiteUnavailable && !missingSnapshot && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
+          {suiteReviewAvailable && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
       >
@@ -286,14 +284,15 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                   <span className="flex min-w-0 items-center gap-1.5"><span className="inline-flex shrink-0" title={changed ? `Changed compared with ${baselineLabel}` : undefined}><StatusDot state="warning" className={changed ? '' : 'invisible'} /></span><span className="block min-w-0 truncate font-mono text-[11px]">{file.file.replace(/^e2e\//, '')}</span></span>
                   {assessedFiles.some((item) => item.file === file.file) && <span className="mt-1 flex flex-wrap items-center gap-2"><SpecToneChip tone={specTone(file)} /><span className="text-[10px] text-secondary">{pendingFileScope(file)}</span></span>}
                 </button><button type="button" className="cl-icon-button cl-review-file-editor" disabled={busy} aria-label={`Edit ${file.file} in editor`} title="Open in editor" onClick={() => { void act(async () => {
-                  const review = await api.getTestFileReview(selected.name, file.file, useRunBaseline ? comparisonRunId : undefined)
-                  const result = await api.openEditor({ file: review.currentPath, line: file.file === spec?.file ? focus?.line ?? 1 : 1 })
+                  const review = await featuresApi.getTestFileReview(selected.name, file.file, useRunBaseline ? comparisonRunId : undefined)
+                  const result = await workspaceApi.openEditor({ file: review.currentPath, line: file.file === spec?.file ? focus?.line ?? 1 : 1 })
                   if (!result.opened) throw new Error('Could not open the editor. Open this file in your workspace.')
                 }) }}>↗</button></div>
                 }) : <p className="px-2 text-xs text-secondary">No test files available</p>}
             </div>
           </nav>
           <section className="cl-review-content" data-testid={`dirty-review-card-${selected.name}`} data-pending={run ? 'true' : undefined} data-tone={tone ?? undefined}>
+            {missingSnapshot && <p role="status" className="border-b border-line px-4 py-2 text-xs text-warning">This run has no saved test snapshot. The comparison below uses Git HEAD, not the tests this run executed. Review the related suite edits, then start a new run to verify them.</p>}
             {spec ? <FullTestReview key={`${reviewKey}:${useRunBaseline}`} feature={selected.name} file={spec.file} runId={useRunBaseline ? comparisonRunId : undefined} focus={reviewFocus} onFocus={updateFocus} selectedTest={selectedTest} comparisonReady={Boolean(changes)} revision={JSON.stringify(spec)} navigationTarget={useRunBaseline ? null : navigationTarget} baselineControl={<label className="cl-review-baseline">
               <span>Compare current test with</span>
               <select aria-label="Compare current test with" className="cl-input px-2 py-1 text-xs" value={useRunBaseline ? 'run' : 'head'} onChange={(event) => {
@@ -302,7 +301,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                 updateFocus({ ...focus, file: spec.file, change: undefined, test: undefined, baseline: next ? 'run' : undefined })
               }}>
                 <option value="head" disabled={!selected.feature || pendingRunReview}>Git HEAD</option>
-                <option value="run" disabled={!comparisonRunId}>{comparisonRunId ? `Run ${shortRunRef(comparisonRunId)}` : 'No run selected'}</option>
+                <option value="run" disabled={!comparisonRunId || missingSnapshot}>{comparisonRunId ? `Run ${shortRunRef(comparisonRunId)}` : 'No run selected'}</option>
               </select>
             </label>} /> : <p role={runError ? 'alert' : 'status'} className="p-4 text-sm">{runError ?? 'No test file selected. Close this dialog and open a comparison from the Tests panel.'}</p>}
           </section>

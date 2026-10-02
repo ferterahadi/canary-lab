@@ -1,46 +1,17 @@
+import type { WorkspaceStreamFrame } from '@shared/workspace-events'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { DraftRecord, EvaluationExportTask } from '@/shared/api/types'
-
-export type WorkspaceEvent =
-  | { type: 'connected' }
-  | { type: 'feature-created'; feature: string }
-  | { type: 'feature-deleted'; feature: string }
-  | { type: 'feature-renamed'; from: string; to: string }
-  | { type: 'features-changed' }
-  | { type: 'tests-changed'; feature: string }
-  | { type: 'discovery-repair-changed'; feature: string }
-  | { type: 'envsets-changed'; feature: string }
-  | { type: 'coverage-changed'; feature: string; revision?: string }
-  | { type: 'tests-dirty-changed'; feature: string }
-  | { type: 'verification-config-changed'; feature: string }
-  | { type: 'journal-changed'; runId: string }
-  | { type: 'draft-created'; draft: DraftRecord }
-  | { type: 'draft-updated'; draft: DraftRecord }
-  | { type: 'draft-deleted'; draftId: string }
-  | { type: 'evaluation-export-created'; task: EvaluationExportTask }
-  | { type: 'evaluation-export-updated'; task: EvaluationExportTask }
-  | { type: 'evaluation-export-deleted'; taskId: string }
-  | { type: 'version-changed' }
-  | { type: 'flights-changed' }
-  | { type: 'notifications-changed' }
-  // A spawned-agent record changed — started, ended, stopped, or reconciled to
-  // `orphaned` on boot. Bumps the `agent-jobs` slot so a stage band's stop control
-  // appears and disappears with the agent instead of on a poll.
-  | { type: 'agent-jobs-changed'; jobId: string }
-  | { type: 'pre-flight-changed' }
-  | { type: 'project-config-changed' }
-  | { type: 'getting-started-changed' }
 
 export interface ConnectWorkspaceEventsOptions {
   wsBase?: string
   WebSocketImpl?: typeof WebSocket
-  onEvent: (event: WorkspaceEvent) => void
+  onEvent: (event: WorkspaceStreamFrame) => void
   onError?: (error: string) => void
   // Fired on every RE-open after the first connect. The workspace bus is
   // push-only with no server-side replay, so any event emitted while the
   // socket was down is lost — consumers MUST refetch their state here to close
   // the gap (see cl_live-state-sync). Not fired on the initial connect.
   onReconnect?: () => void
+  onDisconnect?: () => void
 }
 
 export interface WorkspaceEventsConnection {
@@ -59,13 +30,14 @@ export function connectWorkspaceEvents(opts: ConnectWorkspaceEventsOptions): Wor
     maxReconnects: Infinity,
     reconnectDelayMs: 1500,
     onError: opts.onError ? () => opts.onError?.('unknown error') : undefined,
+    onReconnect: () => opts.onDisconnect?.(),
     onOpen: () => {
       if (opened) opts.onReconnect?.()
       opened = true
     },
     onMessage: (data) => {
       try {
-        opts.onEvent(JSON.parse(data) as WorkspaceEvent)
+        opts.onEvent(JSON.parse(data) as WorkspaceStreamFrame)
       } catch {
         // Ignore malformed frames; the next valid workspace event can still recover state.
       }

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { discoveryRepairStore } from './discovery-repair-store'
 import type { DiscoveryRepair, DiscoveryRepairOwner } from '../../../../../../shared/discovery-repair'
 
@@ -46,6 +46,27 @@ afterEach(() => fs.rmSync(path.dirname(logsDir), { recursive: true, force: true 
 describe('discoveryRepairStore', () => {
   it('hands the same instance back for the same logs directory, so every caller shares one listener set', () => {
     expect(discoveryRepairStore(logsDir)).toBe(discoveryRepairStore(path.join(logsDir, '.', '')))
+  })
+
+  it('delivers writes through a separate accessor to an existing listener, and keeps other directories isolated', () => {
+    const store = discoveryRepairStore(logsDir)
+    const changed = vi.fn()
+    store.onEvent(changed)
+    const alias = discoveryRepairStore(`${logsDir}/../logs`)
+    alias.save(record('dr_shared'))
+    expect(changed).toHaveBeenCalledExactlyOnceWith({ kind: 'changed', id: 'dr_shared' })
+    expect(store.get('dr_shared')?.feature).toBe('checkout')
+
+    const other = discoveryRepairStore(path.join(logsDir, 'other'))
+    expect(other).not.toBe(store)
+    expect(other.get('dr_shared')).toBeNull()
+    other.save(record('dr_other'))
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(store.get('dr_other')).toBeNull()
+
+    store.offEvent(changed)
+    alias.save(record('dr_after_close'))
+    expect(changed).toHaveBeenCalledTimes(1)
   })
 
   it('writes off a restart-orphaned repair — Canary\'s own agent is gone, and a claim with no instructions was never handed over', () => {

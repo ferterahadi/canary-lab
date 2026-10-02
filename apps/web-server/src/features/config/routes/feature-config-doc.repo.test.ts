@@ -1,5 +1,5 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -7,7 +7,8 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 import * as gitRepo from '../../../shared/git-repo'
 import * as configAst from '../../../shared/config-ast'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -48,15 +49,9 @@ function buildFeature(name: string, opts: {
 function buildGitRepo(name: string): string {
   const dir = path.join(tmpDir, name)
   fs.mkdirSync(dir, { recursive: true })
-  const git = (args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
-  git(['init', '-b', 'main'])
-  git(['config', 'user.email', 'test@example.com'])
-  git(['config', 'user.name', 'Test User'])
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
-  git(['add', 'README.md'])
-  git(['commit', '-m', 'init'])
-  git(['checkout', '-b', 'feature/demo'])
-  git(['checkout', 'main'])
+  initGitRepo(dir, { branch: 'main' })
+  git(dir, 'branch', 'feature/demo')
   return dir
 }
 

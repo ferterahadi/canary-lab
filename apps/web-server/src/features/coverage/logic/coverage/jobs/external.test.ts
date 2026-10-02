@@ -1,14 +1,15 @@
+import type { WorkspaceEvent } from '../../../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { startExternalCoverage, submitExternalCoverage, startExternalSummary, submitExternalSummary } from './external'
-import { readPrdSummary } from '../prd-summary'
+import { readPrdSummary } from '../prd-summary-render'
 import { CoverageJobConflictError } from './runner'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
-import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../service'
+import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../feature-docs'
 import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
-import type { WorkspaceEvent, WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
+import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Coverage generation is LLM-only; inject the fake summarizer via the dep seam.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>

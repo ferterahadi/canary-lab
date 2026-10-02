@@ -35,9 +35,14 @@ import { scoutStage } from './scout'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 import { stageContextStub } from './__fixtures__/stage-context'
 
 let tmpDir: string
@@ -147,8 +152,11 @@ const VALID_CONFIG = (name = 'checkout') => configCjs(name, '/tmp/x', 'checkout 
 
 describe('similarity stage', () => {
   it('is done when no feature targets the repos', async () => {
-    const outcome = await similarityStage(deps()).run(ctxFor(manifest()).ctx)
+    const adapter = similarityStage(deps())
+    const { ctx } = ctxFor(manifest())
+    const outcome = await adapter.run(ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { match: null } })
+    expect(adapter.teardown(ctx)).toBeNull()
   })
 
   it('parks on the three-way choice when a feature already covers the repo', async () => {
@@ -456,4 +464,23 @@ describe('scout stage', () => {
       expect(outcome.kind).toBe('done')
     })
   })
+})
+
+
+it('matches a symlink to the first existing suite while keeping sibling directories distinct', async () => {
+  const alias = path.join(tmpDir, 'alias')
+  fs.symlinkSync(repoDir, alias, 'dir')
+  writeFeatureConfigCjs('a-existing', alias)
+  writeFeatureConfigCjs('b-existing', repoDir)
+  const result = await similarityStage(deps()).run(ctxFor(manifest()).ctx)
+  expect(result).toMatchObject({ kind: 'checkpoint', checkpoint: { data: { match: { feature: 'a-existing', repo: alias } } } })
+  const sibling = await similarityStage(deps()).run(ctxFor(manifest({ repoPaths: [tmpDir] })).ctx)
+  expect(sibling).toMatchObject({ kind: 'done', evidence: { match: null } })
+})
+
+it('treats a tilde-prefixed directory name literally during best-effort similarity lookup', async () => {
+  const literal = '~cache/missing-repo'
+  writeFeatureConfigCjs('literal', literal)
+  const result = await similarityStage(deps()).run(ctxFor(manifest({ repoPaths: [path.resolve(literal)] })).ctx)
+  expect(result).toMatchObject({ kind: 'checkpoint', checkpoint: { data: { match: { feature: 'literal' } } } })
 })

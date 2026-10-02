@@ -3,10 +3,12 @@ import { EventEmitter } from 'events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { createRegistry, RunStore, type OrchestratorRegistry } from './logic/run-store'
+import { RunStore } from './logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from './logic/run-registry'
 import { DirtySpecStore } from './logic/dirty-specs/store'
 import { PaneBroker, type PaneMessage } from './logic/pane-broker'
-import { writeManifest, type RunManifest } from './logic/runtime/manifest'
+import { writeManifest } from './logic/runtime/manifest'
+import type { RunManifest } from '../../../../../shared/run-manifest'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunnerLog } from './logic/runtime/runner-log'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
@@ -554,6 +556,17 @@ describe('makeRestartExternalRun — restart', () => {
     expect(restartCalls).toEqual(['the checkout total is wrong'])
     // Settled through the shared completion path: the run leaves the registry.
     await until(() => registry.get('r-1') === undefined)
+  })
+
+  it('omits empty metadata from restarted sessions and the broker claim', async () => {
+    writeFeature('foo', { envs: ['local'] })
+    writeRunManifest({ runId: 'r-1' })
+    await build()('r-1', healReq({ clientVersion: '', conversationName: '', claimable: true }))
+    const session = orchHarness.options[0].externalHealSession as import('../../../../../shared/run-manifest').ExternalHealSession
+    expect(session).not.toHaveProperty('clientVersion')
+    expect(session).not.toHaveProperty('conversationName')
+    expect(session.claimedAt).toBe(session.lastHeartbeatAt)
+    expect(claims[0].input).toEqual({ sessionId: 's-1', clientKind: 'claude-desktop' })
   })
 
   it('re-enters external mode without a session when the caller may not own the heal loop', async () => {

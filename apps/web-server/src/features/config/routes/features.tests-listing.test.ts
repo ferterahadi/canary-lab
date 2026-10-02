@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -15,10 +14,7 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
+import { git } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -86,15 +82,27 @@ async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: D
 }
 
 describe('GET /api/features/:name/tests', () => {
-  it('returns source cards without waiting for Playwright discovery', async () => {
-    const dir = writeFeature('preview', { spec: "test('opens checkout', async () => { await page.goto('/checkout') })\n" })
-    const spawner = vi.fn(failingSpawner)
+  it('starts Playwright discovery while source change markers are still loading', async () => {
+    const dir = writeFeature('overlap', { spec: "test('opens checkout', async () => { await page.goto('/checkout') })\n" })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const read = vi.spyOn(fs, 'readFileSync')
+    let sourceReadAtSpawn = true
+    const spawnJson = jsonSpawner((featureDir) => ({ config: { rootDir: featureDir }, suites: [] }))
+    const spawner = vi.fn((featureDir: string) => {
+      sourceReadAtSpawn = read.mock.calls.some(([file]) => file === specFile)
+      return spawnJson(featureDir)
+    })
     const app = await build({ spawner })
-    const res = await app.inject('/api/features/preview/tests?preview=1')
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual([{ file: path.join(dir, 'e2e', 'a.spec.ts'), tests: [expect.objectContaining({ name: 'opens checkout' })] }])
-    expect(spawner).not.toHaveBeenCalled()
-    await app.close()
+    try {
+      const response = await app.inject('/api/features/overlap/tests')
+      expect(response.statusCode).toBe(200)
+      expect(spawner).toHaveBeenCalledOnce()
+      expect(sourceReadAtSpawn).toBe(false)
+      expect(read.mock.calls.some(([file]) => file === specFile)).toBe(true)
+    } finally {
+      read.mockRestore()
+      await app.close()
+    }
   })
 
   it('reports a removed suite without claiming Playwright discovery failed', async () => {
@@ -156,16 +164,16 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
-  it('shows an AST parse error in preview before Playwright discovery runs', async () => {
+  it('keeps an AST parse error attached to the authoritative response', async () => {
     writeFeature('deep-preview', { spec: deepNestedSpec() })
     const spawner = vi.fn(failingSpawner)
     const app = await build({ spawner })
 
-    const res = await app.inject('/api/features/deep-preview/tests?preview=1')
+    const res = await app.inject('/api/features/deep-preview/tests')
 
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([expect.objectContaining({ tests: [], parseError: expect.any(String) })])
-    expect(spawner).not.toHaveBeenCalled()
+    expect(spawner).toHaveBeenCalledOnce()
     await app.close()
   })
 
@@ -458,8 +466,8 @@ test('configured client', async () => {
     ].join('\n'))
     // A real repo, so the markers are genuinely attempted: `getGitRoot` runs
     // for real and only the `git show` that reads the committed side fails.
-    git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
-    git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+    git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
+    git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
     const previous = vi.mocked(runGit).getMockImplementation()!
     vi.mocked(runGit).mockRejectedValue(new Error('git: command not found'))
     try {
@@ -481,8 +489,8 @@ test('configured client', async () => {
 it('ships matching source and markers for each expanded Playwright test', async () => {
   const source = 'for (const channel of ["line", "whatsapp"]) {\n  test(`reads ${channel}`, () => {\n    expect(1).toBe(1)\n  })\n}'
   const dir = writeFeature('markers', { spec: source })
-  git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
-  git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+  git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
+  git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
   fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), source.replace('    expect(1)', '    console.log("this")\n    expect(1)'))
   const app = await build({ spawner: jsonSpawner((featureDir) => ({
     config: { rootDir: featureDir },
@@ -496,4 +504,15 @@ it('ships matching source and markers for each expanded Playwright test', async 
     expect(test.sourceChanges).toEqual({ changedLines: [3], count: 1 })
   }
   await app.close()
+})
+
+
+it.each([new Error('discovery unavailable'), 'discovery unavailable'])('reports a rejected discovery invocation and preserves source diagnostics', async (error) => {
+  writeFeature('rejecting', { spec: "test('case', async () => {})" })
+  const app = await build({ spawner: () => { throw error } })
+  try {
+    const response = await app.inject({ method: 'GET', url: '/api/features/rejecting/tests' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()[0].discoveryDiagnostics).toContain('discovery unavailable')
+  } finally { await app.close() }
 })

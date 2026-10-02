@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
+import * as workspaceApi from '@/shared/api/workspace'
 import { BrandMark, clientTint, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 
 // The shared shell for every "an external MCP client is driving this in its own
@@ -27,56 +27,42 @@ export function pillPalette(color: string): PillPalette {
 }
 
 export function ExternalStatusPill({ label, palette }: { label: string; palette: PillPalette }) {
+  // The run-detail status chip's shape, in the caller's palette: a tint fill
+  // with its own ink, no outline — the same register as READY / FAILED.
   return (
-    <span
-      className="rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
-      style={{ color: palette.fg, background: palette.bg, border: `1px solid ${palette.border}` }}
-    >
+    <span className="cl-status-chip" style={{ color: palette.fg, background: palette.bg }}>
       {label}
     </span>
   )
 }
 
-// The "Open Claude/Codex →" CTA. Two variants share one set of tinted styles: a
-// link (href, e.g. portify/draft sessionUrl) or a button (onClick, e.g. heal's
-// openAgentApp, which is stateful and reports its own busy/error).
+// The "Open Claude/Codex →" action on the card's footer strip — a neutral
+// `.cl-button`, as every other card action. Two variants: a link (href, e.g.
+// portify/draft sessionUrl) or a button (onClick, e.g. heal's openAgentApp,
+// which is stateful and reports its own busy/error).
 export function ExternalClientCta(
   props:
-    | { tint: string; label: string; href: string }
-    | { tint: string; label: string; onClick: () => void; busy?: boolean; busyLabel?: string },
+    | { label: string; href: string }
+    | { label: string; onClick: () => void; busy?: boolean; busyLabel?: string },
 ) {
-  const className =
-    'inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider @[320px]:rounded-lg @[320px]:px-3.5 @[320px]:py-2 @[320px]:text-[11px] @[480px]:w-auto @[480px]:justify-start'
-  const baseStyle = {
-    color: props.tint,
-    background: `color-mix(in srgb, ${props.tint} 14%, transparent)`,
-    border: `1px solid color-mix(in srgb, ${props.tint} 38%, transparent)`,
-  }
+  const className = 'cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]'
+  const face = (
+    <>
+      <span>{props.label}</span>
+      <span aria-hidden>→</span>
+    </>
+  )
   if ('href' in props) {
     return (
-      <a href={props.href} target="_blank" rel="noreferrer" className={className} style={baseStyle}>
-        <span>{props.label}</span>
-        <span aria-hidden>→</span>
+      <a href={props.href} target="_blank" rel="noreferrer" className={className}>
+        {face}
       </a>
     )
   }
   const busy = props.busy ?? false
   return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      disabled={busy}
-      className={className}
-      style={{ ...baseStyle, opacity: busy ? 0.6 : 1 }}
-    >
-      {busy ? (
-        (props.busyLabel ?? 'Opening…')
-      ) : (
-        <>
-          <span>{props.label}</span>
-          <span aria-hidden>→</span>
-        </>
-      )}
+    <button type="button" onClick={props.onClick} disabled={busy} className={className}>
+      {busy ? (props.busyLabel ?? 'Opening…') : face}
     </button>
   )
 }
@@ -91,7 +77,7 @@ export function useOpenAgentApp() {
     setOpening(agent)
     setError(null)
     try {
-      await api.openAgentApp(agent)
+      await workspaceApi.openAgentApp(agent)
     } catch (err) {
       setError(err instanceof Error ? err.message : `Could not open ${agent}`)
     } finally {
@@ -107,21 +93,31 @@ interface ExternalAgentCardProps {
   headline: string
   // Optional secondary line under the headline (e.g. conversation name).
   subtitle?: string
-  // The status pill — typically <ExternalStatusPill label={…} palette={…} />.
+  // The status chip on the title strip — typically <ExternalStatusPill …/>.
   statusPill?: ReactNode
-  // Trailing items in the pill row (session id, heartbeat, cycle count).
+  // The body's first line: labelled facts (session id, heartbeat, cycle count).
   meta?: ReactNode
   body?: ReactNode
   // Extra blocks rendered after the body, in caller order (worktree paths,
-  // failure detail, tracked log) — including the CTA, so callers control where
-  // it sits relative to their extras.
+  // failure detail, tracked log).
   children?: ReactNode
-  // Passed through to BrandMark; heal renders the elevated monogram.
-  brandElevated?: boolean
+  // The footer strip — the "Open Claude/Codex" CTA. Omitted, the card ends on
+  // its body.
+  action?: ReactNode
   // Wrap the card in the full-pane scroll container (heal/draft/portify fill
   // their pane). Embedded callers (coverage) leave this false and get the bare
   // card inside a minimal @container so the container queries still resolve.
   fill?: boolean
+}
+
+/** One labelled fact on the card's meta line: a rubric label, then the value. */
+export function ExternalMetaFact({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-baseline gap-1.5" title={title}>
+      <span className="cl-rubric">{label}</span>
+      <span className="min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{children}</span>
+    </span>
+  )
 }
 
 export function ExternalAgentCard({
@@ -133,68 +129,59 @@ export function ExternalAgentCard({
   meta,
   body,
   children,
-  brandElevated,
+  action,
   fill = false,
 }: ExternalAgentCardProps) {
-  const tint = clientTint(clientKind)
+  // The run-detail card anatomy — title strip, body, action strip — so an
+  // external session reads as one more card in the pane, not a hero banner.
+  // The brand mark carries the client's identity; the surfaces stay neutral.
   const card = (
-    <div
-      className="relative overflow-hidden rounded-xl p-3.5 @[320px]:rounded-2xl @[320px]:p-4 @[480px]:p-6"
-      style={{
-        background: `radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, ${tint} 14%, transparent) 0%, transparent 55%), var(--bg-elevated)`,
-        border: `1px solid color-mix(in srgb, ${tint} 24%, var(--border-default))`,
-      }}
-    >
-      <div className="flex items-start gap-3 @[480px]:gap-4">
-        <BrandMark clientKind={clientKind} tint={tint} elevated={brandElevated} />
-        <div className="min-w-0 flex-1 pt-0.5">
-          <div
-            className="text-[9px] font-medium uppercase @[320px]:text-[10px]"
-            style={{ color: 'var(--text-muted)', letterSpacing: '0.14em' }}
-          >
-            {eyebrow}
-          </div>
+    <div className="cl-card overflow-hidden">
+      <div className="cl-card-head" style={{ gap: 10, paddingBlock: 10 }}>
+        <BrandMark clientKind={clientKind} tint={clientTint(clientKind)} />
+        <div className="min-w-0 flex-1">
+          <div className="cl-rubric truncate">{eyebrow}</div>
           <h2
-            className="mt-0.5 text-sm font-semibold @[320px]:mt-1 @[320px]:text-base @[480px]:mt-1.5 @[480px]:text-xl"
-            style={{ color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1.2 }}
+            className="m-0 mt-0.5 truncate text-[13px] font-semibold"
+            style={{ color: 'var(--text-primary)', lineHeight: 1.25 }}
           >
             {headline}
           </h2>
           {subtitle && (
-            <div
-              className="mt-1 truncate text-[11px] @[320px]:text-xs"
-              style={{ color: 'var(--text-secondary)' }}
-              title={subtitle}
-            >
+            <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-secondary)' }} title={subtitle}>
               {subtitle}
             </div>
           )}
         </div>
+        {statusPill}
       </div>
 
-      {(statusPill || meta) && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[10px] @[320px]:mt-3 @[320px]:gap-x-2.5 @[320px]:text-[11px] @[480px]:mt-3.5">
-          {statusPill}
-          {meta}
+      {(meta || body || children) && (
+        <div className="cl-card-body">
+          {meta && (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+              {meta}
+            </div>
+          )}
+          {body && (
+            <p
+              className={`m-0 text-xs leading-relaxed ${meta ? 'mt-2' : ''}`}
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {body}
+            </p>
+          )}
+          {children}
         </div>
       )}
 
-      {body && (
-        <p
-          className="mt-3 text-[11px] leading-relaxed @[320px]:mt-4 @[320px]:text-xs @[480px]:mt-5 @[480px]:text-[13px]"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {body}
-        </p>
-      )}
-
-      {children}
+      {action && <div className="cl-card-foot">{action}</div>}
     </div>
   )
 
   if (fill) {
     return (
-      <div className="@container flex h-full min-h-0 flex-col overflow-y-auto p-3 @[400px]:p-4">
+      <div className="@container flex h-full min-h-0 flex-col overflow-y-auto p-4">
         {card}
       </div>
     )

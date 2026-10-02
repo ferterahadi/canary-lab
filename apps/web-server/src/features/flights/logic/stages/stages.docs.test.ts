@@ -33,14 +33,19 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
 import { prdSummaryStage } from './prd-summary'
-import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
+import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary-render'
 import { readRequirementsDraft } from './requirements-draft'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
@@ -162,7 +167,7 @@ describe('docs stage', () => {
       expect(prompt).toContain(outPath)
       return { text: writeResult() }
     })
-    const regenerate = vi.fn<NonNullable<FlightStageDeps['coverage']>['regenerate']>()
+    const regenerate = vi.fn<NonNullable<NonNullable<FlightStageDeps['coverage']>['regenerate']>>()
     const d = deps({ spawnAgent, coverage: { regenerate } })
     const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: producer } }))
     const adapter = docsStage(d)

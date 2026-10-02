@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { computeVerificationPlan, type SummaryShape } from './run-verdict'
 import { classifyJournalOutcome } from './heal-journal'
 import { normalizeRunCounts } from '../heal/external-heal-counts'
-import type { RunSummary } from '../run-detail'
+import type { RunSummary } from '../../../../../../../shared/run-detail'
 
 // Recorded after the 17 September repair: all failures cleared, but four
 // environment gates remained skipped. Identities and paths are anonymized;

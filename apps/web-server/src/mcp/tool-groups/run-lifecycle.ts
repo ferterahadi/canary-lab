@@ -5,14 +5,27 @@
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
-import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
+import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
+import {
+  type ToolGroupContext,
+  CLAIM_SUPPRESSED_MESSAGE,
+  asJsonResult,
+  claimRun,
+  errorResult,
+  failureResult,
+  findContinuingRunForFeature,
+  resolveRunRef,
+  runCandidate,
+} from '../tool-support'
+import { bootSessionValue, healWaitNext, isActiveBootRun } from '../heal-task-wait'
 import { readCoverageUpdate } from '../coverage-catchup'
 import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
 import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE, NEW_RUN_REQUIRED_NEXT_STEPS } from '../../shared/single-attempt'
+import { findFeature } from '../../shared/feature-loader'
+import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -37,6 +50,10 @@ const coverageChangeResponse = z.object({
 })
 
 type CoverageChange = z.infer<typeof coverageChangeResponse>['change']
+type RemoteTarget = { env: string; targetOrigins: Record<string, string> }
+
+const VERIFY_CHOICE = 'Verify the deployed target'
+const RUN_CHOICE = 'Run with repair anyway'
 type CoverageDecision =
   | { revision: string; allowStale: false; change?: CoverageChange }
   | { revision: string; allowStale: true; change: CoverageChange }
@@ -48,7 +65,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Start or continue a run. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
+      'Start or continue a run. A run boots this suite\'s services from its repos and repairs that code; for a deployed, staging or live target with nothing to boot, use execute_verification instead — a repair cycle cannot change a remote deployment, so a fresh start whose suite boots nothing and targets deployed hosts asks the user to choose first. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       request_id: z.string().optional().describe('Resume the exact blocked request returned by test_review_required. Reuse its original session_id; approval in another surface never transfers this request to that client.'),
@@ -62,6 +79,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
+      remote_target: z.enum(['run']).optional().describe('Only after start_run returns remote_target_requires_choice AND the user chose to run with repair anyway against those deployed hosts. Never set it on your own; the default is Verify.'),
       update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
     },
   }, async (args, request) => {
@@ -110,6 +128,49 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       mode: 'form' as const,
       schema: coverageChoiceSchema,
     })
+    const remoteScope = ['run-remote-target', deps.projectRoot, args]
+    const remoteChoiceSchema = z.object({ choice: z.enum([VERIFY_CHOICE, RUN_CHOICE]) })
+    const readRemoteTarget = (): RemoteTarget | null => {
+      const config = findFeature(deps.featuresDir, feature)
+      // With no env there is no envset to name a deployed host.
+      const selected = env ?? config?.envs?.[0]
+      if (!config || !selected) return null
+      const targetOrigins = remoteOnlyTargets(config, selected)
+      return targetOrigins ? { env: selected, targetOrigins } : null
+    }
+    const remoteQuestion = (target: RemoteTarget | null) => ({
+      scope: remoteScope,
+      revision: target,
+      mode: 'form' as const,
+      schema: remoteChoiceSchema,
+    })
+    const verifyInstead = (target: RemoteTarget): CallToolResult => asJsonResult({
+      type: 'verify_instead',
+      runStarted: false,
+      feature,
+      env: target.env,
+      targetOrigins: target.targetOrigins,
+      message: 'Run not started. Verify applies the envset and checks the deployed hosts without booting services or a repair loop.',
+      nextSteps: ['list_verification_configs', 'execute_verification with a saved configId; with none saved, create_verification_config first and take its target URLs from the user, never invent them'],
+    })
+    const askRemote = (target: RemoteTarget): CallToolResult | InputRequiredResult => {
+      const hosts = Object.values(target.targetOrigins).join(', ')
+      const spec = {
+        ...remoteQuestion(target),
+        message: `${feature} boots no services in "${target.env}" and targets deployed hosts (${hosts}). A run's repair cycle edits local code those hosts never read. Check them with Verify, or run with repair anyway?`,
+        fallback: () => asJsonResult({
+          type: 'remote_target_requires_choice',
+          runStarted: false,
+          feature,
+          env: target.env,
+          targetOrigins: target.targetOrigins,
+          options: [VERIFY_CHOICE, RUN_CHOICE],
+          message: `Ask the user whether to verify the deployed target or run with repair anyway. Do not start a run until they choose. "${VERIFY_CHOICE}" → list_verification_configs, then execute_verification. "${RUN_CHOICE}" → re-call start_run with remote_target:"run".`,
+          nextSteps: ['ask_user_verify_or_run'],
+        }),
+      }
+      return openFormUserInput(request, ctx.clientFacts(), spec)
+    }
     const isolationScope = (decision: CoverageDecision) => [
       decision.allowStale ? 'run-isolation-after-stale-coverage' : 'run-isolation-after-coverage-check',
       deps.projectRoot,
@@ -148,6 +209,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const begin = async (
       isolation = args.isolation,
       approvedCoverage?: CoverageDecision,
+      remoteDecided = args.remote_target === 'run',
     ): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const requestedRef = runId ?? run_ref
@@ -262,6 +324,10 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
+        if (!remoteDecided) {
+          const remote = readRemoteTarget()
+          if (remote) return askRemote(remote)
+        }
         const coverage = await readCoverage()
         const revision = coverageRevision(coverage)
         if (requiresCoverageChoice(coverage) && !approvedCoverage?.allowStale) {
@@ -363,9 +429,19 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const state = request?.mcpReq.requestState?.()
     if (state === undefined) return begin()
 
-    // start_run can ask coverage first and repository isolation second. Route
-    // the opaque handle to its exact question; never interpret one answer as
-    // the other or let a stale approval authorize a changed coverage revision.
+    // start_run can ask about a remote-only target first, coverage second and
+    // repository isolation third. Route the opaque handle to its exact question;
+    // never interpret one answer as the other or let a stale approval authorize
+    // a changed coverage revision. The later two questions open only after the
+    // remote one was settled, so answering them never asks it again.
+    if (matchesUserInput(request, remoteScope)) {
+      const remote = readRemoteTarget()
+      // The question was opened with a concrete target as its revision. If the
+      // suite now boots services or lost its deployed host, that revision fails
+      // applyUserInput's checkpoint before this callback can run.
+      return applyUserInput(request, remoteQuestion(remote), async (answer) =>
+        answer.choice === VERIFY_CHOICE ? verifyInstead(remote!) : begin(args.isolation, undefined, true))
+    }
     const coverage = await readCoverage()
     if (matchesUserInput(request, coverageScope)) {
       const spec = coverageQuestion(coverage)
@@ -373,7 +449,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (!requiresCoverageChoice(coverage)) return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
         return answer.choice === 'Update coverage first'
           ? coverageRecovery(coverage)
-          : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage })
+          : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage }, true)
       })
     }
     for (const allowStale of [false, true] as const) {
@@ -385,7 +461,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         ? { revision: coverageRevision(coverage), allowStale: true, change: coverage! }
         : { revision: coverageRevision(coverage), allowStale: false, change: coverage }
       if (!matchesUserInput(request, isolationScope(decision))) continue
-      return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision))
+      return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision, true))
     }
     return inputPending('The input request belongs to a different operation. Nothing was applied.')
   })

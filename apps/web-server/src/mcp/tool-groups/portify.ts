@@ -201,7 +201,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('remove_portification', {
-    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot, so the revert is exact. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
+    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot. Settings are restored from that snapshot, then the environment list is synchronized from current envset folders. If synchronization fails, the overlay backup is retained for retry. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
     inputSchema: {
       feature: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against discarding a saved overlay + reverting config.'),
@@ -211,7 +211,6 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     if (!deps.removePortification) return errorResult('removePortification dependency is not configured')
     try {
       const result = deps.removePortification(feature)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
       return failureResult(err)
@@ -242,7 +241,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
 
   registerTool('get_failure_detail', {
     description:
-      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate AND draft a proposed patch in parallel; the claim owner then applies the patches serially and signals once.',
+      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Follow the run diagnosis policy in context.nextSteps or its heal prompt. Under the default per-failure policy, hand each failureId to its own read-only sub-agent to investigate AND draft a proposed patch in parallel; the claim owner then applies the patches serially and signals once.',
     inputSchema: {
       runId: z.string(),
       failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),

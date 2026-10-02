@@ -3,25 +3,27 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, getFeatureDirtyDiff, getFeatureTests, getFeatureTestsPreview } from '../api/client'
+import { ApiError } from '../api/internal'
+import { getFeatureDirtyDiff } from '../api/features'
+import { getFeatureTests } from '../api/config'
 import { readableTest } from '../api/__fixtures__/readable-test'
 import fixture from '@/features/runs/utils/__fixtures__/run-snapshot-review.json'
-import type { RunManifest, RunSummary } from '../api/types'
+import type { RunManifest } from '@shared/run-manifest'
+import type { RunSummary } from '@shared/run-detail'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: async () => {}, starting: false, startError: null }) }))
 
-vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return {
-    ...actual,
-    getFeatureTests: vi.fn(),
-    getFeatureTestsPreview: vi.fn(),
-    getFeatureDirtyDiff: vi.fn(),
-    getTestSourceComparison: vi.fn().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } }),
-  }
-})
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  getFeatureDirtyDiff: vi.fn(),
+  getTestSourceComparison: vi.fn().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } }),
+}))
 
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
@@ -52,7 +54,6 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
-  vi.mocked(getFeatureTestsPreview).mockReset().mockResolvedValue([])
   vi.mocked(getFeatureDirtyDiff).mockReset().mockResolvedValue({ tests: [] })
 })
 

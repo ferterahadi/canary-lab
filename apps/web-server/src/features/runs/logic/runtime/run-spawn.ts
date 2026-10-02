@@ -11,7 +11,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyHandle } from './pty-spawner'
 import type { RunPaths } from './run-paths'
-import type { PlaywrightRerunSelection } from './run-verdict'
+import type { PlaywrightRerunSelection } from './rerun-targets'
 import { canSignalProcessGroup, signalProcessTree } from '../../../../shared/process-tree'
 
 export interface PlaywrightInvocation {

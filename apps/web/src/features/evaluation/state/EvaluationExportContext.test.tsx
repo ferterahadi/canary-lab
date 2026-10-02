@@ -3,24 +3,21 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { EvaluationExportTask } from '@/shared/api/types'
+import * as evaluationApi from '@/shared/api/evaluation'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExports } from './EvaluationExportContext'
 import { Probe, exportSockets, task, taskSocket, workspaceSocket } from './__fixtures__/evaluation-export-context-fixtures'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    startEvaluationExport: vi.fn(),
-    listEvaluationExportTasks: vi.fn(),
-    getEvaluationExportTask: vi.fn(),
-    downloadEvaluationExportTask: vi.fn(),
-    cancelEvaluationExportTask: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/evaluation')>()),
+  startEvaluationExport: vi.fn(),
+  listEvaluationExportTasks: vi.fn(),
+  getEvaluationExportTask: vi.fn(),
+  downloadEvaluationExportTask: vi.fn(),
+  cancelEvaluationExportTask: vi.fn(),
+}))
 
 export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -58,11 +55,11 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.startEvaluationExport).mockReset()
-  vi.mocked(api.listEvaluationExportTasks).mockReset().mockResolvedValue([])
-  vi.mocked(api.getEvaluationExportTask).mockReset()
-  vi.mocked(api.downloadEvaluationExportTask).mockReset()
-  vi.mocked(api.cancelEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.startEvaluationExport).mockReset()
+  vi.mocked(evaluationApi.listEvaluationExportTasks).mockReset().mockResolvedValue([])
+  vi.mocked(evaluationApi.getEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.downloadEvaluationExportTask).mockReset()
+  vi.mocked(evaluationApi.cancelEvaluationExportTask).mockReset()
 })
 
 afterEach(() => {
@@ -91,7 +88,7 @@ describe('EvaluationExportProvider', () => {
     const logs = { first: '', second: '' }
     const first = task({ taskId: 'first', runId: 'run-first', status: 'running' })
     const second = task({ taskId: 'second', runId: 'run-second', status: 'running' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([first, second])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([first, second])
 
     function LogProbe({ taskId }: { taskId: keyof typeof renders }) {
       const { log } = useEvaluationExportLog(taskId)
@@ -132,14 +129,14 @@ describe('EvaluationExportProvider', () => {
       downloadReady: true,
       createdAt: '2026-01-02T00:00:00.000Z',
     })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValue([completed, running])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValue([completed, running])
 
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
     })
 
-    expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
+    expect(evaluationApi.listEvaluationExportTasks).toHaveBeenCalledWith()
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
     expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
     // Only the live task gets a stream on mount. A finished export's log is
@@ -166,14 +163,14 @@ describe('EvaluationExportProvider', () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-1', runId: 'run-1', mode: 'localized', status: 'running' })
     const completed = task({ ...running, status: 'completed', downloadReady: true })
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockResolvedValue(completed)
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(evaluationApi.getEvaluationExportTask).mockResolvedValue(completed)
 
     await act(async () => {
       await captured.value?.startExport('run-1', 'localized')
     })
 
-    expect(api.startEvaluationExport).toHaveBeenCalledWith('run-1', 'localized')
+    expect(evaluationApi.startEvaluationExport).toHaveBeenCalledWith('run-1', 'localized')
     expect(taskSocket('task-1').url).toBe('ws://test/ws/evaluation-exports/task-1')
     expect(captured.value?.tasks[0]?.taskId).toBe('task-1')
     expect(captured.value?.taskById('task-1')?.taskId).toBe('task-1')
@@ -203,14 +200,14 @@ describe('EvaluationExportProvider', () => {
       await captured.value?.downloadTask('task-1')
       await captured.value?.downloadTask('unknown-task')
     })
-    expect(api.downloadEvaluationExportTask).toHaveBeenCalledWith(completed)
+    expect(evaluationApi.downloadEvaluationExportTask).toHaveBeenCalledWith(completed)
   })
 
   it('records refresh failures when a task log stream exits before task refresh succeeds', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-2', status: 'running' })
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockRejectedValue(new Error('offline'))
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(evaluationApi.getEvaluationExportTask).mockRejectedValue(new Error('offline'))
 
     await act(async () => {
       await captured.value?.startExport('run-2', 'raw')
@@ -220,15 +217,15 @@ describe('EvaluationExportProvider', () => {
       await Promise.resolve()
     })
 
-    expect(api.getEvaluationExportTask).toHaveBeenCalledWith('task-2')
+    expect(evaluationApi.getEvaluationExportTask).toHaveBeenCalledWith('task-2')
     expect(captured.value?.logsByTaskId['task-2']).toContain('unable to refresh task: offline')
   })
 
   it('records non-error refresh failures from task log streams', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-string-failure', status: 'running' })
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockRejectedValue('offline string')
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(evaluationApi.getEvaluationExportTask).mockRejectedValue('offline string')
 
     await act(async () => {
       await captured.value?.startExport('run-string-failure', 'raw')
@@ -245,10 +242,10 @@ describe('EvaluationExportProvider', () => {
     const captured = renderProbe()
     const older = task({ taskId: 'older-task', runId: 'run-old', createdAt: '2026-01-01T00:00:00.000Z' })
     const newer = task({ taskId: 'newer-task', runId: 'run-new', createdAt: '2026-01-02T00:00:00.000Z' })
-    vi.mocked(api.startEvaluationExport)
+    vi.mocked(evaluationApi.startEvaluationExport)
       .mockResolvedValueOnce(older)
       .mockResolvedValueOnce(newer)
-    vi.mocked(api.cancelEvaluationExportTask).mockResolvedValue(undefined)
+    vi.mocked(evaluationApi.cancelEvaluationExportTask).mockResolvedValue(undefined)
 
     await act(async () => {
       await captured.value?.startExport('run-old', 'raw')
@@ -265,7 +262,7 @@ describe('EvaluationExportProvider', () => {
 
   it('watchTask attaches a log stream for a task it did not start (R29 panels)', async () => {
     const existing = task({ taskId: 'cold-task', runId: 'run-cold', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([existing])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([existing])
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
@@ -287,7 +284,7 @@ describe('EvaluationExportProvider', () => {
 
   it('replays a finished export log once a panel watches it', async () => {
     const done = task({ taskId: 'cold-task', runId: 'run-cold', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([done])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([done])
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
@@ -311,7 +308,7 @@ describe('EvaluationExportProvider', () => {
     }
     const captured = renderProbe(ThrowingStringWebSocket as unknown as typeof WebSocket)
     const running = task({ taskId: 'same-task', status: 'running' })
-    vi.mocked(api.startEvaluationExport)
+    vi.mocked(evaluationApi.startEvaluationExport)
       .mockResolvedValueOnce(running)
       .mockResolvedValueOnce(running)
 
@@ -330,8 +327,8 @@ describe('EvaluationExportProvider', () => {
       }
     }
     const captured = renderProbe(ThrowingWebSocket as unknown as typeof WebSocket)
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(task({ taskId: 'task-3', status: 'running' }))
-    vi.mocked(api.cancelEvaluationExportTask).mockRejectedValue(new Error('already gone'))
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(task({ taskId: 'task-3', status: 'running' }))
+    vi.mocked(evaluationApi.cancelEvaluationExportTask).mockRejectedValue(new Error('already gone'))
 
     await act(async () => {
       await captured.value?.startExport('run-3', 'raw')
@@ -341,13 +338,13 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await captured.value?.dismissTask('task-3')
     })
-    expect(api.cancelEvaluationExportTask).toHaveBeenCalledWith('task-3')
+    expect(evaluationApi.cancelEvaluationExportTask).toHaveBeenCalledWith('task-3')
     expect(captured.value?.tasks).toEqual([])
     expect(captured.value?.taskById('task-3')).toBeNull()
     expect(captured.value?.logsByTaskId['task-3']).toBeUndefined()
 
     const socketCaptured = renderProbe()
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(task({ taskId: 'task-4', status: 'running' }))
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(task({ taskId: 'task-4', status: 'running' }))
     await act(async () => {
       await socketCaptured.value?.startExport('run-4', 'raw')
     })
@@ -365,7 +362,7 @@ describe('EvaluationExportProvider', () => {
   it('skips re-subscribing a task that already has an active connection', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'dup-task', runId: 'run-dup', status: 'running' })
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValue(running)
 
     await act(async () => {
       await captured.value?.startExport('run-dup', 'raw')
@@ -380,9 +377,9 @@ describe('EvaluationExportProvider', () => {
   })
 
   it('ignores rehydrated tasks when the provider unmounts before tasks resolve', async () => {
-    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
-    vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
-      new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
+    let resolveTasks: (tasks: EvaluationExportTaskView[]) => void = () => {}
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockReturnValueOnce(
+      new Promise<EvaluationExportTaskView[]>((resolve) => { resolveTasks = resolve }),
     )
     renderProbe()
 
@@ -400,7 +397,7 @@ describe('EvaluationExportProvider', () => {
   })
 
   it('keeps an empty task list when listEvaluationExportTasks rejects on startup', async () => {
-    vi.mocked(api.listEvaluationExportTasks).mockRejectedValueOnce(new Error('boom'))
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockRejectedValueOnce(new Error('boom'))
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
@@ -412,12 +409,13 @@ describe('EvaluationExportProvider', () => {
   it('discovers externally created export tasks without a refresh', async () => {
     const external = task({
       taskId: 'external-task',
+      archiveBase: 'historical-export-name',
       runId: 'run-external',
       producer: 'external',
       status: 'running',
       createdAt: '2026-01-02T00:00:00.000Z',
     })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([])
 
     const captured = renderProbe()
     await act(async () => {
@@ -429,8 +427,9 @@ describe('EvaluationExportProvider', () => {
       workspaceSocket().fire({ type: 'evaluation-export-created', task: external })
     })
 
-    expect(api.listEvaluationExportTasks).toHaveBeenCalledTimes(1)
+    expect(evaluationApi.listEvaluationExportTasks).toHaveBeenCalledTimes(1)
     expect(captured.value?.tasks[0]?.taskId).toBe('external-task')
+    expect(captured.value?.tasks[0]?.archiveBase).toBe('historical-export-name')
     expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
   })
@@ -438,7 +437,7 @@ describe('EvaluationExportProvider', () => {
   it('updates export tasks from workspace events without subscribing completed tasks', async () => {
     const completed = task({ taskId: 'external-completed', runId: 'run-external', status: 'completed' })
     const running = task({ taskId: 'external-running', runId: 'run-external', status: 'running' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([])
 
     const captured = renderProbe()
     await act(async () => {
@@ -456,12 +455,13 @@ describe('EvaluationExportProvider', () => {
   })
 
   it('does not resubscribe known completed tasks during startup reconciliation', async () => {
-    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    vi.useFakeTimers()
+    let resolveTasks: (tasks: EvaluationExportTaskView[]) => void = () => {}
     const known = task({ taskId: 'known-completed', runId: 'run-known', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
-      new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
-    )
-    vi.mocked(api.startEvaluationExport).mockResolvedValueOnce(task({ ...known, status: 'running' }))
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockReturnValueOnce(
+      new Promise<EvaluationExportTaskView[]>((resolve) => { resolveTasks = resolve }),
+    ).mockResolvedValue([known])
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValueOnce(task({ ...known, status: 'running' }))
     const captured = renderProbe()
 
     await act(async () => {
@@ -474,13 +474,17 @@ describe('EvaluationExportProvider', () => {
       await Promise.resolve()
     })
 
+    // The startup read predates startExport. Only the follow-up read can
+    // authoritatively complete the newly observed running task.
+    expect(captured.value?.tasks[0]?.status).toBe('running')
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     expect(captured.value?.tasks[0]?.status).toBe('completed')
     expect(exportSockets()).toHaveLength(1)
   })
 
   it('removes export tasks deleted by workspace events', async () => {
     const existing = task({ taskId: 'delete-me', runId: 'run-delete', status: 'running' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([existing])
+    vi.mocked(evaluationApi.listEvaluationExportTasks).mockResolvedValueOnce([existing])
     const captured = renderProbe()
     await act(async () => {
       await Promise.resolve()
@@ -498,7 +502,7 @@ describe('EvaluationExportProvider', () => {
   it('keeps known tasks when periodic discovery fails', async () => {
     vi.useFakeTimers()
     const completed = task({ taskId: 'known-task', runId: 'run-known', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks)
+    vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([completed])
       .mockRejectedValueOnce(new Error('offline'))
 
@@ -519,7 +523,7 @@ describe('EvaluationExportProvider', () => {
   it('does not re-subscribe unchanged completed tasks during periodic discovery', async () => {
     vi.useFakeTimers()
     const completed = task({ taskId: 'stable-task', runId: 'run-stable', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks)
+    vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([completed])
       .mockResolvedValueOnce([completed])
 
@@ -541,8 +545,8 @@ describe('EvaluationExportProvider', () => {
 
   it('re-lists on a workspace reconnect, since the bus has no replay', async () => {
     vi.useFakeTimers()
-    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks)
+    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed', archiveBase: 'missed-historical-name' })
+    vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([])
       .mockResolvedValue([created])
 
@@ -566,12 +570,13 @@ describe('EvaluationExportProvider', () => {
     })
 
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['missed-task'])
+    expect(captured.value?.tasks[0]?.archiveBase).toBe('missed-historical-name')
   })
 
   it('survives a re-list that fails on reconnect', async () => {
     vi.useFakeTimers()
     const known = task({ taskId: 'known-task', runId: 'run-known', status: 'completed' })
-    vi.mocked(api.listEvaluationExportTasks)
+    vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([known])
       .mockRejectedValue(new Error('offline'))
 

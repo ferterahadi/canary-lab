@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { RunDetail, RunManifest } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunManifest } from '@shared/run-manifest'
 import fixture from './__fixtures__/run-snapshot-review.json'
 import { runWaitingState } from './run-waiting-state'
 import { deriveRunViewModel } from './run-view-model'
@@ -19,7 +20,7 @@ describe('runWaitingState', () => {
     expect(deriveRunViewModel(recorded, 'cancelling-heal').waiting).toBeUndefined()
   })
   it('has an index fallback before detail hydration, and does not relabel terminal/running runs', () => {
-    expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '', pendingSpecEdits: 1 })?.shortLabel).toBe('to review')
+    expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '', pendingSpecEdits: 1 })?.label).toBe('Awaiting test review')
     expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '' })).toBeUndefined()
     for (const status of ['passed', 'failed', 'running', 'aborted'] as const) expect(runWaitingState(detail({ status }))).toBeUndefined()
     expect(runWaitingState(null)).toBeUndefined()
@@ -34,8 +35,11 @@ describe('runWaitingState', () => {
     expect(runWaitingState(detail({ externalHealSession: { ...session, status: 'healing' } }))).toBeUndefined()
     expect(runWaitingState(detail({ externalHealSession: undefined, lifecycle: { phase: 'agent-healing', headline: 'Repairing', updatedAt: '' } }))).toBeUndefined()
     for (const status of ['waiting', 'disconnected'] as const) {
-      expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: { ...session, status } }))?.label).toBe('Waiting for agent')
+      expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: { ...session, status } }))?.label).toBe('Awaiting Agent')
     }
     expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: undefined }))).toBeUndefined()
+    expect(runWaitingState(detail({ specEdits: undefined, healMode: 'external', externalHealSession: undefined, lifecycle: {
+      phase: 'waiting-for-signal', headline: 'Waiting for heal signal', updatedAt: '',
+    } }))?.label).toBe('Awaiting Agent')
   })
 })

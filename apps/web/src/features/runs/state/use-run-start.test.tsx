@@ -14,14 +14,20 @@ const mocks = vi.hoisted(() => ({
   getProjectConfig: vi.fn(),
   asTestReviewRequired: vi.fn(),
 }))
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/runs', () => ({
   asRepoCollision: mocks.asRepoCollision,
   asBranchMismatch: mocks.asBranchMismatch,
-  benchmarkPreflight: mocks.benchmarkPreflight,
-  checkoutRepoBranch: mocks.checkoutRepoBranch,
   pinFeatureBranchesToCurrent: mocks.pinFeatureBranchesToCurrent,
-  getProjectConfig: mocks.getProjectConfig,
   asTestReviewRequired: mocks.asTestReviewRequired,
+}))
+vi.mock('@/shared/api/benchmark', () => ({
+  benchmarkPreflight: mocks.benchmarkPreflight,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  checkoutRepoBranch: mocks.checkoutRepoBranch,
+}))
+vi.mock('@/shared/api/config', () => ({
+  getProjectConfig: mocks.getProjectConfig,
 }))
 
 let hook: UseRunStart

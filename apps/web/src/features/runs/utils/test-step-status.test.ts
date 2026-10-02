@@ -1,17 +1,9 @@
 import { describe, it, expect } from 'vitest'
 
-import {
-  activeBodyLineForTest,
-  slugify,
-  summaryEntryName,
-  statusForTest,
-  statusFromPlaybackResult,
-  colorClassForStatus,
-  statusLabel,
-  statusPillClassForStatus,
-} from './test-step-status'
+import { activeBodyLineForTest, statusForTest, statusFromPlaybackResult, colorClassForStatus, statusLabel, statusPillClassForStatus } from './test-step-status'
+import { slugify, summaryEntryName } from '@shared/test-names'
 
-import type { RunSummary } from '@/shared/api/types'
+import type { RunSummary } from '@shared/run-detail'
 
 const completeWithFailure = (msg: string): RunSummary => ({
   complete: true,

@@ -1,11 +1,10 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
-import * as api from '@/shared/api/client'
-import type { FeatureDocsListing } from '@/shared/api/types'
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentProps, type DragEvent, type JSX } from 'react'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { FeatureDoc, FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { DocPill, EmptyDropzone } from './DocPill'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
-
-export { DocPill, EmptyDropzone } from './DocPill'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -128,7 +127,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // `keepError` lets a refetch that follows a partially-failed batch import
   // preserve the combined error message instead of clearing it on success.
   const load = useCallback((keepError = false) => {
-    api.listFeatureDocs(feature)
+    coverageApi.listFeatureDocs(feature)
       .then((data) => { setListing(data); if (!keepError) setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature])
@@ -151,7 +150,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     for (const file of list) {
       try {
         const base64 = await readAsBase64(file)
-        await api.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
+        await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
         imported += 1
       } catch (e: unknown) {
         failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
@@ -169,7 +168,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
 
   const removeDoc = useCallback((relPath: string) => {
     setBusy(true)
-    api.deleteFeatureDoc(feature, relPath)
+    coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onDocsChanged() })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
@@ -178,7 +177,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // Open a doc in the user's configured editor (same launcher the run/test views
   // use). Best-effort — surface a failure in the docs error slot.
   const openDoc = useCallback((absPath: string) => {
-    api.openEditor({ file: absPath })
+    workspaceApi.openEditor({ file: absPath })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to open in editor'))
   }, [])
 
@@ -192,10 +191,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setError(null)
     const failures: string[] = []
     try {
-      try { await api.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
+      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
       for (const d of listing?.docs ?? []) {
         if (d.generated) continue // already removed by clearPrdSummary
-        try { await api.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
+        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
       }
     } finally {
       if (failures.length) setError(`Reset incomplete: ${failures.join(', ')}`)
@@ -223,6 +222,35 @@ export function CoverageDocsRail(props: Props): JSX.Element {
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
+
+  // The generated summary is distilled from the source docs, so once it exists
+  // they nest under it as a collapsible group. Before that the docs are still
+  // being edited and stay a flat list. A broken source stays visible — its
+  // Relink affordance must never hide behind a collapsed caret.
+  const sourceDocs = listing?.docs.filter((d) => !d.generated) ?? []
+  const nestSources = !summaryAbsent && sourceDocs.length > 0
+  const [summaryDoc, ...otherGeneratedDocs] = nestSources ? listing?.docs.filter((d) => d.generated) ?? [] : []
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const sourcesExpanded = sourcesOpen || sourceDocs.some((d) => d.broken)
+
+  const renderPill = (d: FeatureDoc, disclosure?: ComponentProps<typeof DocPill>['disclosure']) => (
+    <DocPill
+      key={d.relPath}
+      relPath={d.relPath}
+      dirPrefix={dirPrefix}
+      generated={d.generated}
+      sizeBytes={d.sizeBytes}
+      linked={d.linked}
+      linkTarget={d.linkTarget}
+      broken={d.broken}
+      onRelink={(targetPath) => relinkDoc(d.relPath, targetPath)}
+      busy={locked}
+      onOpen={() => openDoc(d.absPath)}
+      onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
+      removeTitle="Remove source doc"
+      disclosure={disclosure}
+    />
+  )
 
   // ── Collapsed: a thin full-height strip that toggles open ──────────────────
   if (!open) {
@@ -309,7 +337,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       </div>
 
       {/* Scrollable body */}
-      <div className="min-h-0 flex-1 overflow-auto" style={{ padding: '12px 14px' }}>
+      <div className="min-h-0 flex-1 overflow-auto" style={{ padding: '12px 14px', scrollbarGutter: 'stable' }}>
         {/* Status line */}
         {summaryAbsent && (
           <div
@@ -357,23 +385,23 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             <EmptyDropzone onPick={() => fileInputRef.current?.click()} dragging={dragging} busy={locked} />
           ) : (
             <div className="flex flex-col" style={{ gap: 8 }}>
-              {listing.docs.map((d) => (
-                <DocPill
-                  key={d.relPath}
-                  relPath={d.relPath}
-                  dirPrefix={dirPrefix}
-                  generated={d.generated}
-                  sizeBytes={d.sizeBytes}
-                  linked={d.linked}
-                  linkTarget={d.linkTarget}
-                  broken={d.broken}
-                  onRelink={(targetPath) => relinkDoc(d.relPath, targetPath)}
-                  busy={locked}
-                  onOpen={() => openDoc(d.absPath)}
-                  onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
-                  removeTitle="Remove source doc"
-                />
-              ))}
+              {summaryDoc ? (
+                <>
+                  {renderPill(summaryDoc, { expanded: sourcesExpanded, onToggle: () => setSourcesOpen(!sourcesExpanded), sourceCount: sourceDocs.length })}
+                  {sourcesExpanded && (
+                    <div
+                      data-testid="summary-source-docs"
+                      className="flex flex-col"
+                      style={{ gap: 8, marginLeft: 13, paddingLeft: 10, borderLeft: '1px solid var(--border-default)' }}
+                    >
+                      {sourceDocs.map((d) => renderPill(d))}
+                    </div>
+                  )}
+                  {otherGeneratedDocs.map((d) => renderPill(d))}
+                </>
+              ) : (
+                listing.docs.map((d) => renderPill(d))
+              )}
               {!docsReadOnly && (
                 <AddDocsTile onPick={() => fileInputRef.current?.click()} disabled={locked} />
               )}
@@ -390,8 +418,8 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         {props.recovery && !confirmingRedo && (
           <DisabledControlTooltip wrapperClassName="flex">
             <button type="button" data-testid="recalculate-coverage" onClick={props.recovery.onClick}
-              disabled={locked || Boolean(props.recovery.disabledReason)}
-              title={props.recovery.disabledReason ?? 'Open Flight to recalculate coverage from the affected step'}
+              disabled={Boolean(props.recovery.disabledReason)}
+              title={props.recovery.disabledReason ?? 'Recalculate coverage and open Requirements'}
               className="cl-button w-full px-3 py-1.5">
               Recalculate Coverage
             </button>

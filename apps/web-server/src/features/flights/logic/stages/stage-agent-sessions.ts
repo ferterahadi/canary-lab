@@ -1,8 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
-import type { StageContext } from '../conductor'
-import type { FlightStageAgentSession, FlightStageKey } from '../types'
+import type { StageContext } from '../flight-stages'
+import type { FlightStageAgentSession, FlightStageKey } from '../../../../../../../shared/flights/types'
 
 /** Preserve one immutable ref before a stage's mutable live sidecar is reused.
  *  The existing REST + WebSocket readers can then replay every session without

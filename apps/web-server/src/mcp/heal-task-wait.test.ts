@@ -2,7 +2,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail, RunStoreEvent, RunStoreEventListener } from '../features/runs/logic/run-store'
+import type { RunStoreEvent, RunStoreEventListener } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import {
   BOOT_SESSION_MESSAGE,

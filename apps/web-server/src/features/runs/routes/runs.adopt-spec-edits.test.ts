@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 // POST /api/runs/:runId/adopt-spec-edits — the human-only lever that lets a
 // mid-run spec edit into a run (D9/D13). Beside /approve-dirty: no
 // unrestricted MCP tool wraps it; elicited review passes an exact revision.
@@ -8,8 +9,9 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike } from '../logic/run-store'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import { RunStore } from '../logic/run-store'
+import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
+
 import { writeManifest, readManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteReviewRevision } from '../logic/runtime/suite-review'

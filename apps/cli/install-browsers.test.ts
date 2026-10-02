@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const execFileSync = vi.fn(() => Buffer.from(''))
 vi.mock('child_process', () => ({ execFileSync: (...args: unknown[]) => execFileSync(...(args as [])) }))
@@ -10,9 +10,7 @@ const { main } = await import('./install-browsers')
 
 let messages: string[]
 
-function mkTmp(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'cl-install-browsers-'))
-}
+const mkTmp = trackTempDirs('cl-install-browsers-')
 
 beforeEach(() => {
   execFileSync.mockClear()

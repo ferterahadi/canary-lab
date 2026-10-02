@@ -34,12 +34,18 @@ import { portifyStage } from './portify'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -585,11 +591,7 @@ describe('portify stage', () => {
     const worktree = path.join(tmpDir, 'scratch-wt')
     fs.mkdirSync(worktree, { recursive: true })
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
-    await runGit(worktree, ['init', '-q'])
-    await runGit(worktree, ['config', 'user.email', 't@t'])
-    await runGit(worktree, ['config', 'user.name', 'test'])
-    await runGit(worktree, ['add', '-A'])
-    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(worktree)
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = process.env.PORT\n')
 
     let reads = 0
@@ -622,11 +624,7 @@ describe('portify stage', () => {
     const worktree = path.join(tmpDir, 'scratch-wt2')
     fs.mkdirSync(worktree, { recursive: true })
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
-    await runGit(worktree, ['init', '-q'])
-    await runGit(worktree, ['config', 'user.email', 't@t'])
-    await runGit(worktree, ['config', 'user.name', 'test'])
-    await runGit(worktree, ['add', '-A'])
-    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(worktree)
 
     let reads = 0
     const inject = makeInject((call) => {
@@ -656,6 +654,42 @@ describe('portify stage', () => {
     expect(counts).toEqual([1, 2])
     // Three polls at the stage's 3s interval — past the default 5s test budget.
   }, 20_000)
+
+  it('renews idle time for another edit of the same quoted path, then expires when edits stop', async () => {
+    const worktree = path.join(tmpDir, 'quoted-worktree')
+    fs.mkdirSync(worktree)
+    await runGit(worktree, ['init', '-q'])
+    const file = path.join(worktree, 'café -> port.ts')
+    let reads = 0
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0)
+    const realTimeout = globalThis.setTimeout
+    // Drive the existing three-second timer immediately; the explicit clock
+    // advances across the 30-minute idle boundary without delaying the suite.
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...[callback, delay, ...args]: Parameters<typeof setTimeout>) =>
+      realTimeout(callback, delay === 3000 ? 0 : delay, ...args)) as typeof setTimeout)
+    const minutes = [0, 29, 31, 59]
+    const inject = makeInject((call) => {
+      if (call.method === 'POST') return { statusCode: 201, body: { workflowId: 'quoted-edit' } }
+      if (call.url !== '/api/portify/quoted-edit') return undefined
+      clock.mockReturnValue(minutes[reads] * 60_000)
+      reads += 1
+      if (reads <= 2) {
+        fs.writeFileSync(file, `edit ${reads}`)
+        fs.utimesSync(file, 1700000000 + reads, 1700000000 + reads)
+      }
+      return { statusCode: 200, body: { status: 'editing', producer: 'external', attempt: 1, repos: [{ worktreePath: worktree }] } }
+    })
+    const ctxObj = ctxFor(manifest())
+    try {
+      await expect(runPastGate(portifyStage(deps({ inject })), ctxObj)).rejects.toThrow('portify quoted-edit made no progress within 1800s')
+      expect(reads).toBe(4) // the unchanged read at minute 31 survived the original deadline
+      expect(ctxObj.progressLog.filter((p) => (p as { editedFiles?: number }).editedFiles !== undefined)).toEqual([
+        { workflowId: 'quoted-edit', status: 'editing', attempt: 1, editedFiles: 1 },
+        { workflowId: 'quoted-edit', status: 'editing', attempt: 1, editedFiles: 1 },
+      ])
+      expect(timer.mock.calls.filter((call) => call[1] === 3000)).toHaveLength(3)
+    } finally { timer.mockRestore(); clock.mockRestore() }
+  })
 
   it('does not fingerprint an INTERNAL editing window — status/attempt already move there', async () => {
     const inject = makeInject((call) => {

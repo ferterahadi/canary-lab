@@ -1,5 +1,5 @@
-import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'

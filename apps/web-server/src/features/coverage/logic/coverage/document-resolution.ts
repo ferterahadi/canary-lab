@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
 import { z } from 'zod'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 const sourceInput = z.object({
   path: z.string().min(1).max(4096),
@@ -52,8 +53,5 @@ export function readDocumentSelection(featureDir: string): DocumentSelection | n
 }
 
 export function writeDocumentSelection(featureDir: string, selection: DocumentSelection): void {
-  const dest = selectionPath(featureDir)
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  fs.writeFileSync(`${dest}.tmp`, JSON.stringify(selection, null, 2) + '\n')
-  fs.renameSync(`${dest}.tmp`, dest)
+  atomicWriteJson(selectionPath(featureDir), selection)
 }

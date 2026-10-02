@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import type { FastifyReply, FastifyRequest } from 'fastify'
 
-import type { FlightManifest, FlightStatus } from '../logic/types'
+import type { FlightManifest, FlightStatus } from '../../../../../../shared/flights/types'
 
 import { MCP_ORIGIN_HEADER, isExternallyDriven, rejectForeignFlightDecision } from './flight-decision-origin'
 

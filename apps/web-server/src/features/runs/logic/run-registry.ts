@@ -1,4 +1,4 @@
-import { type RunManifest } from './runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { getRunDetail, readRunSummary } from './run-detail'
 import { RunStore, listRuns } from './run-store'

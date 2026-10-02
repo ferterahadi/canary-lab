@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import type {
-  ExternalHealSession,
-  ExternalHealSessionStatus,
-  RunStatus,
-} from '@/shared/api/types'
-import { isTerminalRunStatus } from '@shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
+import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
+import { clientKindToDesktopAgent, clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { presentRunStatus } from '../utils/run-presentation'
+import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
 interface Props {
   runId: string
@@ -49,12 +47,9 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const clientKind = session?.clientKind ?? 'other'
   const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
-  const tint = clientTint(clientKind)
-
   return (
     <ExternalAgentCard
       clientKind={clientKind}
-      brandElevated
       fill
       eyebrow="External agent session"
       headline={headlineFor(clientKind, Boolean(session))}
@@ -65,22 +60,21 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       }
       meta={
         <>
-          <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background: heartbeatColor,
-                boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
-              }}
-              aria-hidden
-            />
-            {heartbeatLabel}
-          </span>
-          {session && session.cycleCount > 0 && (
-            <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-              <span aria-hidden style={{ opacity: 0.55 }}>·</span>
-              {session.cycleCount} {session.cycleCount === 1 ? 'cycle' : 'cycles'}
+          <ExternalMetaFact label="Heartbeat">
+            <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: heartbeatColor,
+                  boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
+                }}
+                aria-hidden
+              />
+              {heartbeatLabel}
             </span>
+          </ExternalMetaFact>
+          {session && session.cycleCount > 0 && (
+            <ExternalMetaFact label="Cycles">{session.cycleCount}</ExternalMetaFact>
           )}
         </>
       }
@@ -93,19 +87,16 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
           : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
       }
-    >
-      {desktopAgent && (
-        <div className="mt-3 @[320px]:mt-4 @[480px]:mt-5">
-          <ExternalClientCta
-            tint={tint}
-            label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-            onClick={() => onOpenAgent(desktopAgent)}
-            busy={opening !== null}
-          />
-        </div>
+      action={desktopAgent && (
+        <ExternalClientCta
+          label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
+          onClick={() => onOpenAgent(desktopAgent)}
+          busy={opening !== null}
+        />
       )}
+    >
       {openError && (
-        <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
+        <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>
           {openError}
         </div>
       )}
@@ -116,32 +107,37 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
 type PanelStatus = ExternalHealSessionStatus | Extract<RunStatus, 'passed' | 'failed' | 'aborted'>
 
 function statusLabel(status: PanelStatus): string {
+  const runStatus = sharedRunPresentation(status)
+  if (runStatus) return runStatus.label
   switch (status) {
-    case 'passed': return 'Passed'
-    case 'failed': return 'Failed'
-    case 'aborted': return 'Aborted'
     case 'connected': return 'Connected'
-    case 'waiting': return 'Waiting'
-    case 'healing': return 'Healing'
     case 'running-tests': return 'Running tests'
     case 'paused': return 'Paused'
     case 'disconnected': return 'Disconnected'
+    default: return status
   }
 }
 
+function sharedRunPresentation(status: PanelStatus) {
+  if (status === 'waiting') return presentRunStatus({ status: 'healing', waiting: AGENT_WAITING_STATE })
+  if (status === 'healing' || status === 'passed' || status === 'failed' || status === 'aborted') {
+    return presentRunStatus({ status })
+  }
+  return null
+}
+
 function statusPalette(status: PanelStatus): { fg: string; bg: string; border: string } {
-  if (status === 'failed' || status === 'disconnected') {
+  const runStatus = sharedRunPresentation(status)
+  if (runStatus) return {
+    fg: runStatus.tone,
+    bg: runStatus.background,
+    border: `color-mix(in srgb, ${runStatus.tone} 40%, transparent)`,
+  }
+  if (status === 'disconnected') {
     return {
       fg: 'var(--danger)',
       bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
       border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-    }
-  }
-  if (status === 'aborted') {
-    return {
-      fg: 'var(--text-muted)',
-      bg: 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--text-muted) 34%, transparent)',
     }
   }
   if (status === 'paused') {
@@ -151,7 +147,7 @@ function statusPalette(status: PanelStatus): { fg: string; bg: string; border: s
       border: 'color-mix(in srgb, var(--warning) 40%, transparent)',
     }
   }
-  if (status === 'healing' || status === 'running-tests') {
+  if (status === 'running-tests') {
     return {
       fg: 'var(--border-focus)',
       bg: 'color-mix(in srgb, var(--border-focus) 12%, transparent)',

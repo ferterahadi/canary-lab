@@ -1,11 +1,12 @@
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, TestCoverage } from '@/shared/api/types'
-import { BootCheckPanel, CoverageCompositionPanel, DoubleBootPanel, OverlayPanel } from './StageEvidencePanels'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { CoverageLedger, TestCoverage } from '@shared/coverage/types'
+import { BootCheckPanel, CoverageCompositionPanel, DoubleBootPanel, OverlayPanel, EvaluationDeliverablePanel } from './StageEvidencePanels'
 
 // The overlay card's job is ATTRIBUTION. Its paths are repo-relative, so a
 // two-repo stack that gained a port-injection line in each `build.gradle` used to
@@ -289,4 +290,22 @@ describe('row-list cards hold their row geometry while awaited', () => {
     await act(async () => { root.render(<DoubleBootPanel portify={null} />) })
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
   })
+})
+
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExports: () => ({ downloadTask: vi.fn().mockResolvedValue(undefined) }),
+}))
+
+it('keeps the visible archive name aligned with persisted history when the open panel updates', () => {
+  const task: EvaluationExportTaskView = {
+    taskId: 'historical', runId: '///', feature: 'checkout', mode: 'raw', producer: 'external',
+    status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    downloadReady: true, archiveBase: 'canary-lab-evaluation-checkout-export',
+  }
+  act(() => root.render(<EvaluationDeliverablePanel task={task} />))
+  expect(container.textContent).toContain('canary-lab-evaluation-checkout-export.zip')
+  expect(container.querySelector('button[title]')?.getAttribute('title')).toBe('Download canary-lab-evaluation-checkout-export.zip')
+  act(() => root.render(<EvaluationDeliverablePanel task={{ ...task, archiveBase: 'canary-lab-evaluation-checkout-run' }} />))
+  expect(container.textContent).toContain('canary-lab-evaluation-checkout-run.zip')
+  expect(container.textContent).not.toContain('checkout-export.zip')
 })

@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightEntryOptions } from '@/shared/api/client'
+import type { FlightEntryOptions } from '@shared/flights/types'
 
 const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
@@ -17,19 +17,24 @@ const mocks = vi.hoisted(() => ({
   abortFlight: vi.fn(),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  // Keep ApiError (the dialog branches on it for the server's error body).
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightEntryOptions: mocks.getFlightEntryOptions,
   startFlight: mocks.startFlight,
   planFeatures: mocks.planFeatures,
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
   cancelPlanFeatures: mocks.cancelPlanFeatures,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
-  getProjectConfig: mocks.getProjectConfig,
   abortFlight: mocks.abortFlight,
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: mocks.getProjectConfig,
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
   // The repo picker reuses FolderPickerModal, which lists dirs via this.
-  listWorkspaceDirs: mocks.listWorkspaceDirs,
+    listWorkspaceDirs: mocks.listWorkspaceDirs,
 }))
 
 // The planning view embeds the live agent timeline — its transports are its
@@ -40,11 +45,10 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
   ),
 }))
 
-import { ApiError } from '@/shared/api/client'
-import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
-import { STAGE_BLURB, STAGE_LABEL } from './stage-meta'
-
-;
+let { ApiError } = await import('@/shared/api/internal')
+let { FlightStartDialog, START_FRESH_LABEL } = await import('./FlightStartDialog')
+import { STAGE_BLURB } from './stage-meta'
+import { FLIGHT_STAGE_LABEL as STAGE_LABEL } from '@shared/flights/stage-labels'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -52,8 +56,15 @@ let container: HTMLDivElement
 
 let root: Root
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each test represents a fresh workspace; do not reuse another task's cache.
+  vi.resetModules()
+  ;({ FlightStartDialog, START_FRESH_LABEL } = await import('./FlightStartDialog'))
+  ;({ ApiError } = await import('@/shared/api/internal'))
   vi.clearAllMocks()
+  // Newly created tasks now reconcile immediately. Hold that read unless a
+  // scenario supplies its server response, preserving the creation snapshot.
+  mocks.getPlanFeaturesTask.mockReset().mockImplementation(() => new Promise(() => {}))
   mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)

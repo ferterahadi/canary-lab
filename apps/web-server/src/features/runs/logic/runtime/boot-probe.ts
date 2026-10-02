@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { compressLogByTemplate } from './log-template'

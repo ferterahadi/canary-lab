@@ -1,8 +1,8 @@
 // MCP tools — envset capture/inspection, feature deletion, and the feature repo
-// branch surface. Split out of authoring.ts; bodies are unchanged.
+// branch surface.
 import { z } from 'zod'
-import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
-import { publishWorkspaceEvent } from '../../shared/workspace-events'
+import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
+import { deleteSuite } from '../../features/config/logic/feature-deletion'
 import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, failureResult, isToolErrorPayload } from '../tool-support'
 
 export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
@@ -12,9 +12,13 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     description: 'List a feature envset layout, slot targets, redacted key previews, and the feature\'s declared repos (name/localPath/branch — pass repo name to get_feature_repo_status / checkout_feature_repo_branch). Secret values are never returned.',
     inputSchema: { feature: z.string() },
   }, async ({ feature }) => {
-    const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
-    if (!summary) return errorResult(`feature not found: ${feature}`)
-    return asJsonResult(summary)
+    try {
+      const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
+      if (!summary) return errorResult(`feature not found: ${feature}`)
+      return asJsonResult(summary)
+    } catch (err) {
+      return failureResult(err)
+    }
   })
 
   registerTool('capture_feature_env_files', {
@@ -34,7 +38,6 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     try {
       const result = captureFeatureEnvFiles(authoringCtx(deps), { feature, sources: sources as EnvFileSource[] })
       if (!result.ok) return errorResult(result.error)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
       return failureResult(err)
@@ -55,7 +58,6 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     if (!deps.writeEnvsetSlot) return errorResult('writeEnvsetSlot dependency is not configured')
     try {
       const result = await deps.writeEnvsetSlot(feature, env, slot, entries)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({ feature, env, slot, path: result.path, entries: result.entries, unparsedLines: result.unparsedLines })
     } catch (err) {
       return failureResult(err)
@@ -70,15 +72,12 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, confirmName }) => {
-    // Validate the confirm BEFORE the flight-history hook removes anything.
+    // Keep MCP's confirmation-first error even when the suite is missing.
     if (confirmName !== feature) return errorResult('confirmName must match the feature name')
-    // R76 guard — an active flight blocks the whole deletion before anything
-    // is removed.
-    const flights = deps.removeFlightRecordsFor?.(feature)
-    if (flights?.error) return errorResult(flights.error)
-    const result = deleteFeature(authoringCtx(deps), { feature, confirmName })
+    const result = deleteSuite({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents,
+      removeFlightRecordsFor: deps.removeFlightRecordsFor }, { feature, confirmName })
     if (!result.ok) return errorResult(result.error)
-    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: flights?.removed ?? 0 })
+    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: result.flightRecordsRemoved })
   })
 
   registerTool('get_feature_repo_status', {
@@ -89,13 +88,13 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
       fetch: z.boolean().default(true).describe('Contact the remote first so the counts describe its current tip (default). false reads the last fetch only; a failed fetch is reported as fetchError beside the stale counts.'),
     },
   }, async ({ feature, repo, fetch }) => {
-    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature, repo, { fetch })
+    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, repositoryObserver: deps.repositoryObserver }, feature, repo, { fetch })
     if (!status) return errorResult(`repo not found: ${feature}/${repo}`)
     return asJsonResult(status)
   })
 
   registerTool('update_feature_repo_branch', {
-    description: 'Fast-forward a declared repo\'s checkout to its upstream tip (git fetch + merge --ff-only) so the next run boots the branch\'s latest commit. Targets the feature\'s pinned branch (else the checked-out one). Refused — nothing changes — when the checkout is dirty, detached, on another branch, has diverged from upstream, or the fetch fails; local commits ahead of upstream are left alone. Confirm-gated because it changes the user repo checkout.',
+    description: 'Fast-forward a declared repo\'s checkout to its upstream tip (git fetch + merge --ff-only) so the next run boots the branch\'s latest commit. Targets the feature\'s pinned branch (else the checked-out one). Refused — nothing changes — while the suite has an active run or discovery repair, or when the checkout is dirty, detached, on another branch, has diverged from upstream, or the fetch fails; local commits ahead of upstream are left alone. Confirm-gated because it changes the user repo checkout.',
     inputSchema: {
       feature: z.string(),
       repo: z.string(),
@@ -104,7 +103,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     annotations: { destructiveHint: true, idempotentHint: true },
   }, async ({ feature, repo, confirm }) => {
     const result = await updateFeatureRepoBranch(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents, isRepoActive: deps.isRepoActive },
       { feature, repo, confirm },
     )
     if (isToolErrorPayload(result)) return errorResult(result.error)
@@ -112,7 +111,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('checkout_feature_repo_branch', {
-    description: 'Checkout a branch in a repo declared in feature.config.cjs. Confirm-gated because it changes the user repo checkout. To bring an already-checked-out branch to its upstream tip use update_feature_repo_branch instead.',
+    description: 'Checkout a branch in a repo declared in feature.config.cjs. Refused while the suite has an active run or discovery repair. Confirm-gated because it changes the user repo checkout. To bring an already-checked-out branch to its upstream tip use update_feature_repo_branch instead.',
     inputSchema: {
       feature: z.string(),
       repo: z.string(),
@@ -122,12 +121,10 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, repo, branch, confirm }) => {
     const result = await checkoutFeatureRepoBranch(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents, isRepoActive: deps.isRepoActive },
       { feature, repo, branch, confirm },
     )
     if (isToolErrorPayload(result)) return errorResult(result.error)
-    // Branch moved; refresh the feature list + Repos tab git-status row live.
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
     return asJsonResult(result)
   })
 }

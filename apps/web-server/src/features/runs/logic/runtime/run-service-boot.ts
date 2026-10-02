@@ -9,8 +9,11 @@ import fs from 'fs'
 import path from 'path'
 import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/types'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
-import { type RunBootFailure } from './manifest'
-import { COMPILER_FAILURE_NEXT_ACTION, type RunBootEvidence } from '../../../../../../../shared/run-state'
+import {
+  COMPILER_FAILURE_NEXT_ACTION,
+  type RunBootEvidence,
+  type RunBootFailure,
+} from '../../../../../../../shared/run-state'
 import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
 import type { PtyHandle } from './pty-spawner'
 import os from 'os'
@@ -362,6 +365,10 @@ export async function pollUntilReady(ctx: RunContext,
     ? (probe as { http: HttpProbe }).http.deadlineMs
     : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? ctx.healthDeadlineMs
   const deadline = Date.now() + deadlineMs
+  // Fast local services should not pay a full one-second polling interval.
+  // Back off for slower boots, respecting callers' tighter polling bounds.
+  const maxPollMs = Math.max(1, ctx.healthPollIntervalMs)
+  let pollMs = Math.min(100, maxPollMs)
 
   // `health-timeout` unless we observe the process die first (below), in
   // which case there's no point polling a dead port until the deadline.
@@ -392,7 +399,10 @@ export async function pollUntilReady(ctx: RunContext,
       failureReason = 'process-exited'
       break
     }
-    await ctx.delay(ctx.healthPollIntervalMs)
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) break
+    await ctx.delay(Math.min(pollMs, remainingMs))
+    pollMs = Math.min(pollMs * 2, maxPollMs)
   }
   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'timeout')
   ctx.emit('health-check', { service: svc, healthy: false, transport })

@@ -3,6 +3,7 @@ import path from 'path'
 import { DIAGNOSIS_JOURNAL_PATH, HEAL_INDEX_PATH, ROOT, getSummaryPath } from './paths'
 import { readJournalTail, readPreviousFailingSlugsFromJournal } from './heal-journal'
 import { EnrichedSummary, Manifest, healIndexPathForSummary, journalPathForSummary, manifestPathForSummary, readManifest, renderSliceLines, stripAnsi, truncateOneLine } from './log-enrichment'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 export function normalizeErrorKey(raw: string): string {
   const cleaned = stripAnsi(raw).replace(/\s+/g, ' ').trim()
@@ -241,8 +242,5 @@ export function writeHealIndex(parsed?: {
     lines.push('')
   }
 
-  fs.mkdirSync(path.dirname(healIndexPath), { recursive: true })
-  const tmp = `${healIndexPath}.tmp`
-  fs.writeFileSync(tmp, lines.join('\n'))
-  fs.renameSync(tmp, healIndexPath)
+  atomicWrite(healIndexPath, lines.join('\n'))
 }

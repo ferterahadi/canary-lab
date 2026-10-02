@@ -1,47 +1,13 @@
-import { useEffect, useState, type CSSProperties } from 'react'
-import * as api from '@/shared/api/client'
+import { useState, type CSSProperties } from 'react'
+import type { GitRepoStatus } from '@/shared/api/workspace'
 
 // One home for the branch-picking UI: the Advanced setup Service tab
 // (BranchControl) and the flight Suite setup panel render the SAME input +
 // local/remote suggestion dropdown, differing only in commit semantics
 // (draft-buffered SAVE there, write-on-commit in the flight panel) and skin.
 
-/** Load a repo's git status (current branch, local + remote branches).
- *  Re-pulls when refreshKey bumps (features-changed → a checkout done
- *  elsewhere shows live). Pass enabled:false to skip (read-only surfaces). */
-export function useRepoGitStatus(
-  feature: string,
-  repoName: string | undefined,
-  opts: { enabled?: boolean; refreshKey?: number } = {},
-): { status: api.GitRepoStatus | null; error: string | null } {
-  const { enabled = true, refreshKey } = opts
-  const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    if (!enabled || !repoName) {
-      setStatus(null)
-      setError(null)
-      return
-    }
-    api.getRepoGitStatus(feature, repoName)
-      .then((next) => {
-        if (cancelled) return
-        setStatus(next)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setStatus(null)
-        setError(e instanceof Error ? e.message : 'Failed to load git status')
-      })
-    return () => { cancelled = true }
-  }, [feature, repoName, enabled, refreshKey])
-  return { status, error }
-}
-
 /** Local + remote branches, deduped, in that order. */
-export function branchSuggestions(status: api.GitRepoStatus | null): string[] {
+export function branchSuggestions(status: GitRepoStatus | null): string[] {
   return [
     ...(status?.localBranches ?? []),
     ...(status?.remoteBranches ?? []),

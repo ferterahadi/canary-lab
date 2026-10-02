@@ -1,23 +1,23 @@
 import fs from 'fs'
+import { diagnosisPolicy, type DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
+import { renderDiagnosisPolicy } from '../runtime/heal-diagnosis-policy'
 import path from 'path'
-import type { RunDetail } from '../run-store'
-import { buildHealPromptMap, type HealPromptMap } from '../runtime/auto-heal'
+import type { RunDetail } from '../../../../../../../shared/run-detail'
+import { buildHealPromptMap, type HealPromptMap } from '../runtime/heal-prompt-map'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
-import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
+import { stuckSlugsFromJournal } from '../runtime/heal-journal'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind, RunBootFailure, RunServiceFailure } from '../../../../../../../shared/run-state'
 import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
-import type { PendingSpecEdit } from '../dirty-specs/detect'
-import type { RunManifest } from '../runtime/manifest'
-import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
+import type { PendingSpecEdit } from '../../../../../../../shared/run-manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
+import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
 import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
 import { loadPromptTemplate, promptPath } from '../../../../shared/prompts'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../../shared/single-attempt'
-
-export { normalizeRunCounts } from './external-heal-counts'
-export type { CompactRunCounts, NormalizedRunCounts } from './external-heal-counts'
 
 export interface ExternalHealFailedTest {
   /** Stable per-failure id — equals the on-disk `failed/<failureId>/` dir name
@@ -70,6 +70,7 @@ export function buildDependencyBlockers(manifest: RunManifest): DependencyBlocke
 const DEPENDENCY_RECOVERY_GUIDANCE = loadPromptTemplate(promptPath('dependency-recovery.md'))
 
 export interface ExternalHealContext {
+  diagnosisPolicy?: DiagnosisPolicy
   runId: string
   feature: string
   env: string | null
@@ -251,7 +252,7 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'Fix app/service code, not tests, unless a test is provably wrong. Never delete, skip, weaken, or loosen an assertion to turn the run green — a run that goes green because the test stopped checking is the exact failure Canary Lab exists to catch.',
   'Read context.healPrompt.startHere first. The packet is slim: context.healIndex / context.journal are PATHS (Read them when needed), and each context.failedTests[] entry carries a failureId plus pointer dirs (errorPath, traceDir, playwrightMcpDir).',
   'When SEVERAL tests fail, fan out the diagnosis AND the fix-drafting: spawn one read-only sub-agent per failure in a single parallel round (up to 5 at once), hand each the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis PLUS a concrete proposed patch (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must NOT touch the working tree or call signal_run; they only investigate and draft. A sub-agent that comes back empty has NOT cleared its failure — say so in the hypothesis or investigate that one yourself, rather than signalling as though its test were addressed.',
-  'Apply the drafted patches YOURSELF, serially — if two patches touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — only investigation + drafting fan out; applying and signalling stay single-threaded.',
+  'Apply every fix YOURSELF, serially — if two edits touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — whatever the diagnosis policy, applying and signalling stay single-threaded.',
   RUNNER_VERIFICATION_RULE,
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
   // Same reasoning as the repair rule above: this invariant lives at offset ~3549
@@ -365,11 +366,12 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
       failedDir: paths.failedDir,
     })
     : undefined
+  const policy = diagnosisPolicy(input.detail.manifest.diagnosisPolicy)
   const procedure = snapshot.bootFailure
     ? bootFailureNextSteps(snapshot.bootFailure)
     : snapshot.serviceFailure
       ? serviceFailureNextSteps(snapshot.serviceFailure)
-      : EXTERNAL_HEAL_NEXT_STEPS
+      : EXTERNAL_HEAL_NEXT_STEPS.map((step, index) => index === 2 && policy !== 'per-failure' ? renderDiagnosisPolicy(policy) : step)
   const attemptSteps = attemptClaimed
     ? [
         ...procedure.slice(0, 3),
@@ -385,6 +387,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     env: snapshot.env,
     status: snapshot.status,
     healCycles: snapshot.healCycles,
+    ...(input.detail.manifest.diagnosisPolicy ? { diagnosisPolicy: policy } : {}),
     repoBranches: snapshot.repoBranches,
     ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
     // Only the records an agent can act on: a `compatible` verdict says the

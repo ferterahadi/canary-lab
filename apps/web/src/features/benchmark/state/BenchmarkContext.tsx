@@ -1,30 +1,18 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  type ReactNode,
-} from 'react'
-import * as api from '@/shared/api/client'
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react'
+import * as benchmarkApi from '@/shared/api/benchmark'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { BenchmarkManifest, SabotageLevel } from '../api/benchmark-types'
-import {
-  benchmarkReducer,
-  initialBenchmarkState,
-  frameToAction,
-  type BenchmarkState,
-  type BenchmarkStreamFrame,
-} from './benchmark-state'
+import { useRecordDetail, useRecordIndexStore } from '@/shared/state/record-index-store'
+import type { BenchmarkManifest } from '../api/benchmark-types'
+import type { BenchmarkIndexEntry, SabotageLevel } from '@shared/benchmark-index'
+import { benchmarkIndex } from './benchmark-state'
 
 // Benchmark store mirrors RunsContext: a `/ws/benchmark`-fed reducer for the
 // index + per-benchmark manifests, plus a one-shot `startBenchmark` action.
 // Per-arm run detail flows through RunsContext (arms are real runs).
 
-interface BenchmarkContextValue {
-  state: BenchmarkState
+type BenchmarkStore = ReturnType<typeof useRecordIndexStore<BenchmarkIndexEntry, BenchmarkManifest, 'benchmarks', 'benchmarkId'>>
+
+interface BenchmarkContextValue extends BenchmarkStore {
   startBenchmark: (input: {
     feature: string
     skill: string
@@ -41,9 +29,6 @@ interface BenchmarkContextValue {
 
 const BenchmarkContext = createContext<BenchmarkContextValue | null>(null)
 
-const RECONNECT_INITIAL_MS = 500
-const RECONNECT_MAX_MS = 10_000
-
 export function BenchmarkProvider({
   children,
   wsUrl,
@@ -53,97 +38,31 @@ export function BenchmarkProvider({
   wsUrl?: string
   WebSocketImpl?: typeof WebSocket
 }) {
-  const [state, dispatch] = useReducer(benchmarkReducer, initialBenchmarkState)
-  const dispatchRef = useRef(dispatch)
-  dispatchRef.current = dispatch
-
-  useEffect(() => {
-    const url = wsUrl ?? defaultWsUrl()
-    const Ctor = WebSocketImpl ?? WebSocket
-    let socket: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let backoff = RECONNECT_INITIAL_MS
-    let cancelled = false
-
-    // No `cancelled` guard of its own: its only callers are the initial call
-    // below and the reconnect timer, and cleanup clears that timer before its
-    // callback can fire. Same shape as RunsContext's socket lifecycle.
-    const connect = (): void => {
-      try {
-        socket = new Ctor(url)
-      } catch {
-        scheduleReconnect()
-        return
-      }
-      socket.onopen = () => {
-        backoff = RECONNECT_INITIAL_MS
-        dispatchRef.current({ type: 'connection', status: 'live' })
-      }
-      socket.onmessage = (e) => {
-        let frame: BenchmarkStreamFrame
-        try {
-          frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
-        } catch {
-          return
-        }
-        const action = frameToAction(frame)
-        if (action) dispatchRef.current(action)
-      }
-      socket.onclose = () => {
-        if (cancelled) return
-        dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-        scheduleReconnect()
-      }
-    }
-
-    // Same reasoning: the constructor's catch runs inside `connect`, and
-    // `onclose` checks `cancelled` before it gets here.
-    const scheduleReconnect = (): void => {
-      reconnectTimer = setTimeout(() => {
-        if (backoff >= RECONNECT_MAX_MS) {
-          dispatchRef.current({ type: 'connection', status: 'disconnected' })
-        }
-        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS)
-        connect()
-      }, backoff)
-    }
-
-    connect()
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      try {
-        socket?.close()
-      } catch {
-        /* already closed */
-      }
-    }
-  }, [wsUrl, WebSocketImpl])
+  const { state, hydration } = useRecordIndexStore({
+    index: benchmarkIndex,
+    url: wsUrl ?? defaultWsUrl(),
+    WebSocketImpl,
+    read: benchmarkApi.getBenchmark,
+    errorMessage: 'Could not load benchmark',
+  })
 
   const startBenchmark = useCallback(
     async (input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' }) => {
-      const { benchmarkId } = await api.startBenchmark(input)
+      const { benchmarkId } = await benchmarkApi.startBenchmark(input)
       return benchmarkId
     },
     [],
   )
 
   const abortBenchmark = useCallback(async (id: string) => {
-    await api.abortBenchmark(id)
+    await benchmarkApi.abortBenchmark(id)
   }, [])
 
-  const loadBenchmark = useCallback(async (id: string) => {
-    try {
-      const manifest = await api.getBenchmark(id)
-      if (manifest) dispatchRef.current({ type: 'update', benchmarkId: id, manifest })
-    } catch {
-      /* leave it unhydrated — the caller shows a loading/empty state */
-    }
-  }, [])
+  const loadBenchmark = hydration.load
 
   const value = useMemo<BenchmarkContextValue>(
-    () => ({ state, startBenchmark, abortBenchmark, loadBenchmark }),
-    [state, startBenchmark, abortBenchmark, loadBenchmark],
+    () => ({ state, hydration, startBenchmark, abortBenchmark, loadBenchmark }),
+    [state, hydration, startBenchmark, abortBenchmark, loadBenchmark],
   )
   return <BenchmarkContext.Provider value={value}>{children}</BenchmarkContext.Provider>
 }
@@ -168,6 +87,12 @@ export function useBenchmarks() {
 export function useBenchmark(id: string | null | undefined): BenchmarkManifest | undefined {
   const ctx = useBenchmarkContext()
   return id ? ctx.state.details[id] : undefined
+}
+
+/** Mounted consumers share detail demand and recovery with the provider. */
+export function useBenchmarkDetail(id: string | null | undefined) {
+  const { state, hydration } = useBenchmarkContext()
+  return useRecordDetail(state.details, hydration, id)
 }
 
 function defaultWsUrl(): string {

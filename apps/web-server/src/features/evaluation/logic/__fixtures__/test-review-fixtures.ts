@@ -1,7 +1,8 @@
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import path from 'path'
 import ts from 'typescript'
-import type { RunDetail, PlaywrightPlaybackEvent } from '../../../runs/logic/run-store'
+import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 
 export function coverageLedgerFor(testTitle: string): CoverageLedger {
@@ -40,13 +41,13 @@ export function detail(opts: {
       healCycles: 0,
       services: [],
     },
-    summary: { complete: true, total: 1, passed: 1, passedNames: opts.passedNames ?? [slugFromTitle(title)], failed: [] },
+    summary: { complete: true, total: 1, passed: 1, passedNames: opts.passedNames ?? [summaryEntryName(title)], failed: [] },
     playbackEvents: [
       {
         type: 'test-end',
         time: '2026-01-01T00:00:05.000Z',
         test: {
-          name: slugFromTitle(title),
+          name: summaryEntryName(title),
           title,
           location: opts.eventLocation ?? path.join(opts.featureDir, 'missing.spec.ts:1'),
         },
@@ -74,8 +75,4 @@ export function lineOf(source: string, needle: string): number {
   const idx = source.indexOf(needle)
   expect(idx).toBeGreaterThanOrEqual(0)
   return source.slice(0, idx).split('\n').length
-}
-
-export function slugFromTitle(title: string): string {
-  return `test-case-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
 }

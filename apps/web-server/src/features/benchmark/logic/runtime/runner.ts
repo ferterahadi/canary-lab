@@ -1,15 +1,20 @@
+import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { runGit, resolveRepoPath } from '../../../../shared/git-repo'
-import { claudeSessionLogPath, writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
+import { runGit, readWorkingTree } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
+import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
-import { addWorktree, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
+import { addWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { RunOrchestrator } from '../../../runs/logic/runtime/orchestrator'
 import { defaultPlaywrightSpawner } from '../../../runs/logic/runtime/run-spawn'
-import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import { buildOrchestratorHealPrompt } from '../../../runs/logic/runtime/auto-heal'
+import { makeAgentSpawnCommandBuilder } from '../../../runs/logic/runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from '../../../runs/logic/runtime/run-paths'
 import { RunnerLog } from '../../../runs/logic/runtime/runner-log'
@@ -95,14 +100,14 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     // nonexistent dir and git would (wrongly) report "not a git repository".
     // addWorktree() already resolves the same way (resolveRepoPath).
     const repoPath = resolveRepoPath(repo.localPath)
-    const repoStatus = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-    if (repoStatus.code !== 0) {
+    const repoStatus = await readWorkingTree(repoPath, 'directory')
+    if (!repoStatus.ok) {
       throw Object.assign(
         new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository (worktrees require git)`),
         { statusCode: 409 },
       )
     }
-    if (repoStatus.stdout.trim()) {
+    if (repoStatus.lines.length > 0) {
       throw Object.assign(
         new Error(
           `suite "${feature.name}" has uncommitted changes — commit or stash them before benchmarking (worktrees only see committed files)`,
@@ -436,7 +441,7 @@ function runAgentHeadless(
   // for liveness; the diff is the arbiter, so we don't capture/parse the output.
   const args = session.agent === 'claude'
     ? buildClaudeAgenticArgs(prompt, { sessionId: session.sessionId })
-    : ['exec', '--full-auto', prompt]
+    : buildCodexAgenticArgs(prompt)
   let out: number | null = null
   try { out = fs.openSync(logPath, 'a') } catch { out = null }
   const handle = runAgentProcess({
@@ -456,17 +461,4 @@ function runAgentHeadless(
   // Sabotage swallows a failed/non-zero agent (it may still have edited code;
   // the diff is the arbiter), so resolve void on close OR spawn error.
   return handle.done.then(cleanup, cleanup)
-}
-
-// Git worktrees don't include gitignored deps, so the arm/staging worktrees have
-// no node_modules — services (`npx tsx ...`) and Playwright can't run. Symlink
-// the source repo's node_modules into the worktree root so resolution works.
-function linkNodeModules(handle: WorktreeHandle): void {
-  const src = path.join(handle.sourceRoot, 'node_modules')
-  const dst = path.join(handle.worktreeRoot, 'node_modules')
-  try {
-    if (fs.existsSync(src) && !fs.existsSync(dst)) fs.symlinkSync(src, dst, 'dir')
-  } catch {
-    /* best-effort — boot will surface a clearer error if deps are truly missing */
-  }
 }

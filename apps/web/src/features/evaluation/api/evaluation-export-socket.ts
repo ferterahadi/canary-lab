@@ -1,3 +1,4 @@
+import { dispatchOutputFrame } from '@/shared/api/output-frame'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 
 export interface EvaluationExportSocketMessage {
@@ -32,22 +33,7 @@ export function connectEvaluationExport(opts: ConnectEvaluationExportOptions): E
     onSetupError: opts.onUnavailable
       ? (error) => opts.onUnavailable?.(error instanceof Error ? error.message : String(error))
       : undefined,
-    onMessage: (data) => {
-      let msg: EvaluationExportSocketMessage
-      try {
-        msg = JSON.parse(data) as EvaluationExportSocketMessage
-      } catch {
-        return
-      }
-      if (msg.type === 'data' && typeof msg.chunk === 'string') {
-        opts.onData(msg.chunk)
-      } else if (msg.type === 'exit' && typeof msg.code === 'number') {
-        conn.markDone()
-        opts.onExit?.(msg.code)
-      } else if (msg.type === 'error') {
-        opts.onError?.(msg.error ?? 'unknown error')
-      }
-    },
+    onMessage: (data) => dispatchOutputFrame(data, opts, () => conn.markDone()),
   })
   return { close: () => conn.close() }
 }

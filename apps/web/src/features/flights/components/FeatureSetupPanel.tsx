@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config'
+import { Fragment, useState } from 'react'
+import { useImmediateConfig } from '@/features/config/state/use-immediate-config'
+import { BranchSuggestInput, branchSuggestions } from '@/features/config/components/BranchSuggestInput'
+import { useRepoGitStatus } from '@/features/config/state/use-repo-git-status'
+import { RepoGitStatusNotice } from '@/features/config/components/RepoGitStatusNotice'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import {
@@ -62,35 +64,10 @@ export function FeatureSetupPanel({
    *  skeleton so the stage pane keeps the shape it will settle into. */
   awaiting?: AwaitingState
 }) {
-  const [config, setConfig] = useState<unknown>(null)
-  const [playwright, setPlaywright] = useState<unknown>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    Promise.all([
-      api.getFeatureConfigDoc(feature).catch(() => null),
-      api.getPlaywrightConfig(feature).catch(() => null),
-    ]).then(([configDoc, playwrightDoc]) => {
-      if (!alive) return
-      setConfig(configDoc?.parsed.value ?? null)
-      setPlaywright(playwrightDoc?.parsed.value ?? null)
-    })
-    return () => { alive = false }
-  }, [feature, refreshKey])
-
-  const saveConfig = (next: unknown): void => {
-    setConfig(next) // optimistic; features-changed refetches the truth
-    api.putFeatureConfigDoc(feature, next as never)
-      .then(() => setError(null))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }
-  const savePlaywright = (next: unknown): void => {
-    setPlaywright(next)
-    api.putPlaywrightConfig(feature, next as never)
-      .then(() => setError(null))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }
+  const configEditor = useImmediateConfig(feature, 'feature', refreshKey)
+  const playwrightEditor = useImmediateConfig(feature, 'playwright', refreshKey)
+  const config = configEditor.value
+  const playwright = playwrightEditor.value
 
   const cfg = asRecord(config)
   const repos = Array.isArray(cfg?.repos) ? (cfg!.repos as unknown[]) : []
@@ -132,11 +109,11 @@ export function FeatureSetupPanel({
   // setup editor works on — that shared doc IS the sync.
   const mutateRepo = (repoIdx: number, fn: (repo: Record<string, unknown>) => void): void => {
     if (!cfg) return
-    const next = structuredClone(cfg) as Record<string, unknown>
-    const repo = asRecord((next.repos as unknown[])[repoIdx])
-    if (!repo) return
-    fn(repo)
-    saveConfig(next)
+    configEditor.update((value) => {
+      const root = asRecord(value)
+      const repo = Array.isArray(root?.repos) ? asRecord(root.repos[repoIdx]) : null
+      if (repo) fn(repo)
+    })
   }
   const setRepoName = (block: RepoBlock, name: string): void => mutateRepo(block.repoIdx, (repo) => { repo.name = name })
   const setBranch = (block: RepoBlock, branch: string): void => mutateRepo(block.repoIdx, (repo) => { repo.branch = branch })
@@ -151,28 +128,29 @@ export function FeatureSetupPanel({
   const healThreshold = typeof cfg?.healOnFailureThreshold === 'number' ? cfg.healOnFailureThreshold : undefined
   const setHeal = (threshold: number): void => {
     if (!cfg) return
-    const next = structuredClone(cfg) as Record<string, unknown>
-    // Always a concrete number, `0` included — same as the General tab, so the
-    // saved config states the choice instead of leaning on the load-time default.
-    next.healOnFailureThreshold = threshold
-    saveConfig(next)
+    configEditor.update((value) => {
+      const root = asRecord(value)
+      if (root) root.healOnFailureThreshold = threshold
+    })
   }
 
   const pw = asRecord(playwright)
   const pwUse = asRecord(pw?.use)
   const setPw = (patch: { workers?: number; retries?: number; video?: string; trace?: string; screenshot?: string }): void => {
     if (!pw) return
-    const next = structuredClone(pw) as Record<string, unknown>
-    if (patch.workers !== undefined) next.workers = patch.workers
-    if (patch.retries !== undefined) next.retries = patch.retries
-    if (patch.video !== undefined || patch.trace !== undefined || patch.screenshot !== undefined) {
-      const use = asRecord(next.use) ?? {}
-      if (patch.video !== undefined) use.video = patch.video
-      if (patch.trace !== undefined) use.trace = patch.trace
-      if (patch.screenshot !== undefined) use.screenshot = patch.screenshot
-      next.use = use
-    }
-    savePlaywright(next)
+    playwrightEditor.update((value) => {
+      const next = asRecord(value)
+      if (!next) return
+      if (patch.workers !== undefined) next.workers = patch.workers
+      if (patch.retries !== undefined) next.retries = patch.retries
+      if (patch.video !== undefined || patch.trace !== undefined || patch.screenshot !== undefined) {
+        const use = asRecord(next.use) ?? {}
+        if (patch.video !== undefined) use.video = patch.video
+        if (patch.trace !== undefined) use.trace = patch.trace
+        if (patch.screenshot !== undefined) use.screenshot = patch.screenshot
+        next.use = use
+      }
+    })
   }
 
   if (!cfg && !pw) {
@@ -183,7 +161,7 @@ export function FeatureSetupPanel({
         <SkeletonPanel kicker="Services" awaiting={awaiting} testId="setup-services-skeleton" variant="rows" rows={2} />
         <SkeletonPanel kicker="Playwright" awaiting={awaiting} testId="setup-playwright-skeleton" rows={3} />
       </section>
-    ) : null
+    ) : (configEditor.error || playwrightEditor.error) ? <div role="alert" className="cl-type-meta text-danger">{configEditor.error ?? playwrightEditor.error}</div> : null
   }
 
   return (
@@ -258,7 +236,9 @@ export function FeatureSetupPanel({
           re-announcing a control sitting a few pixels above it — and the fact it
           stated (edits write the same on-disk config both ways) is what the
           panel DOES, not something the user has to be told before editing. */}
-      {error && <div className="cl-type-meta text-danger">{error}</div>}
+      {[configEditor, playwrightEditor].map((editor, index) => editor.error && <div key={index} role="alert" className="cl-type-meta text-danger">
+        {editor.error} {editor.dirty && <button className="cl-button" disabled={editor.saving || !editable} onClick={() => { void editor.retry() }}>Retry</button>}
+      </div>)}
     </section>
   )
 }
@@ -400,8 +380,7 @@ export function NameInput({ value, onSave, testId }: {
   onSave: (value: string) => void
   testId: string
 }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => { setDraft(value) }, [value])
+  const [draft, setDraft] = useFieldDraft(value)
   return (
     <input
       type="text"
@@ -428,9 +407,8 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
   onSave: (value: string) => void
   testId: string
 }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => { setDraft(value) }, [value])
-  const { status } = useRepoGitStatus(feature, repoName, { refreshKey })
+  const [draft, setDraft] = useFieldDraft(value)
+  const { status, confirmed, error } = useRepoGitStatus(feature, repoName, { refreshKey })
   const commit = (next: string): void => {
     const v = next.trim()
     if (v !== '' && v !== value) onSave(v)
@@ -438,17 +416,20 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
   return (
     <>
       <RowLabel label="Branch" />
-      <BranchSuggestInput
-        value={draft}
-        branches={branchSuggestions(status)}
-        placeholder={status?.currentBranch ?? undefined}
-        testId={testId}
-        inputClassName="cl-input w-full px-2 py-1 cl-type-data"
-        inputStyle={{ fontFamily: 'var(--font-mono)' }}
-        onChange={setDraft}
-        onSelect={commit}
-        onBlur={() => commit(draft)}
-      />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <BranchSuggestInput
+          value={draft}
+          branches={branchSuggestions(status)}
+          placeholder={status?.currentBranch ?? undefined}
+          testId={testId}
+          inputClassName="cl-input w-full px-2 py-1 cl-type-data"
+          inputStyle={{ fontFamily: 'var(--font-mono)' }}
+          onChange={setDraft}
+          onSelect={commit}
+          onBlur={() => commit(draft)}
+        />
+        <RepoGitStatusNotice status={status} confirmed={confirmed} error={error} />
+      </div>
     </>
   )
 }
@@ -461,8 +442,7 @@ export function SetupField({ label, value, editable, onSave, testId }: {
   onSave: (value: string) => void
   testId: string
 }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => { setDraft(value) }, [value])
+  const [draft, setDraft] = useFieldDraft(value)
   if (!editable) return <ReadRow label={label} value={value} mono />
   return (
     <>
@@ -481,6 +461,13 @@ export function SetupField({ label, value, editable, onSave, testId }: {
   )
 }
 
+/** Refresh clean fields while keeping text that has not reached its blur commit. */
+function useFieldDraft(value: string) {
+  const [state, setState] = useState({ base: value, draft: value })
+  if (state.base !== value) setState({ base: value, draft: state.draft === state.base ? value : state.draft })
+  return [state.draft, (draft: string) => setState((previous) => ({ ...previous, draft }))] as const
+}
+
 export function NumberRow({ label, value, editable, lockedTitle, onSave, testId }: {
   label: string
   value: number | null
@@ -489,6 +476,7 @@ export function NumberRow({ label, value, editable, lockedTitle, onSave, testId 
   onSave: (value: number) => void
   testId: string
 }) {
+  const [draft, setDraft] = useFieldDraft(value === null ? '' : String(value))
   if (value === null) return null
   return (
     <>
@@ -497,7 +485,8 @@ export function NumberRow({ label, value, editable, lockedTitle, onSave, testId 
         <input
           type="number"
           data-testid={testId}
-          defaultValue={value}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
           min={0}
           disabled={!editable}
           title={!editable ? lockedTitle : undefined}

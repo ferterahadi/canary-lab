@@ -5,13 +5,11 @@ import { portifyStreamRoutes } from './ws/portify-stream'
 import { createPortifyRunner } from './logic/runtime/runner'
 import { portifyDir } from './logic/runtime/paths'
 import { loadFeatures } from '../../shared/feature-loader'
-import { pickAvailableHealAgent } from '../runs/logic/runtime/auto-heal'
+import { pickAvailableHealAgent } from '../runs/logic/runtime/heal-agent-spawn'
 import { loadProjectConfig } from '../runs/logic/runtime/launcher/project-config'
-import { normalizeStageChoice, resolveStageChoice } from '../agent-sessions/logic/agent-models'
-import {
-  resolveWorkflowAgentRef,
-  buildAgentSessionResponse,
-} from '../agent-sessions/logic/agent-session-log'
+import { normalizeStageChoice, resolveStageChoice } from '../../../../../shared/agent-models'
+import { resolveWorkflowAgentRef } from '../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../agent-sessions/logic/agent-session-subagents'
 
 /**
  * Port-ification workflow: rewrite a feature's apps to use injectable ports,

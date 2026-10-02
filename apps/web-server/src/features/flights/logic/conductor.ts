@@ -1,15 +1,21 @@
 import type { FlightStore } from './store'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, STAGE_DEPENDS_ON, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  FLIGHT_STAGE_KEYS,
+  STAGE_DEPENDS_ON,
+  isActiveFlightStatus,
+  type ExternalWorkCheckpointData,
+  type FlightCheckpointResponse,
+  type FlightExternalAgentSession,
+  type FlightManifest,
+  type FlightOptions,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
 import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, abortFlightWork, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump, stagesResetByEntry } from './flight-stages'
-
-export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
-
-export { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
-
-export type { FlightEntryMode, StageAdapter, StageAdapters, StageContext, StageJob, StageOutcome } from './flight-stages'
 
 export interface StartFlightArgs {
   feature: string

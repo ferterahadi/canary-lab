@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { healFixOutcome } from './heal-task-wait'
-import type { RunDetail } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 
 // The `passed` result is the only thing a skill-less external agent reads once
 // its repair lands. If it doesn't say a pull request already exists, the agent

@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { HEAL_MODELS, effortArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { HEAL_MODELS, effortArgs } from '../../../agent-sessions/logic/agent-models'
+import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
 import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
 

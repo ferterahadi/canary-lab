@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { FeatureTests, TestCoverage } from '@/shared/api/types'
+import type { FeatureTests } from '@/shared/api/types'
+import type { TestCoverage } from '@shared/coverage/types'
 import { readableTest } from '@/shared/api/__fixtures__/readable-test'
 import { coverageTestSources } from './coverage-test-sources'
 

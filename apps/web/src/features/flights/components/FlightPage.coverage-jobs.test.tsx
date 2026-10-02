@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
-import type { CoverageJobManifest } from '@/shared/api/types'
+import type { CoverageJobManifest } from '@shared/coverage/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 import { FlightPage } from './FlightPage'
 
@@ -14,20 +14,32 @@ const mocks = vi.hoisted(() => ({
   getFlightAgentSession: vi.fn(async () => null),
   connect: vi.fn(() => ({ close: vi.fn() })),
 }))
-vi.mock('@/shared/api/client', async (original) => ({
-  ...(await original<typeof import('@/shared/api/client')>()),
-  ...mocks,
-  listFeatureDocs: vi.fn(async () => ({ docs: [], sourceDocCount: 0, hasPrdSummary: false, docsDrift: false })),
-  getFeatureCoverage: vi.fn(async () => null),
-  getFeatureConfigDoc: vi.fn(async () => null),
-  getEnvsetsIndex: vi.fn(async () => null),
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  getFlight: mocks.getFlight,
+  getFlightAgentSession: mocks.getFlightAgentSession,
   getFlightRemedy: vi.fn(async () => ({ remedy: null })),
 }))
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getCoverageJob: mocks.getCoverageJob,
+  getCoverageAgentSession: mocks.getCoverageAgentSession,
+  listFeatureDocs: vi.fn(async () => ({ docs: [], sourceDocCount: 0, hasPrdSummary: false, docsDrift: false })),
+  getFeatureCoverage: vi.fn(async () => null),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(async () => null),
+  getEnvsetsIndex: vi.fn(async () => null),
+}))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ workflows: [], loadPortify: vi.fn() }),
   usePortifyWorkflow: () => null,
-}))
+  usePortifyDetail: detailFixture(async () => undefined),
+}) })
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({ tasks: [], taskById: () => null }),
   useEvaluationExportLog: () => ({ log: '', watchTask: vi.fn() }),
@@ -87,6 +99,37 @@ async function expandActivity() {
 }
 
 describe('Flight generation Activity', () => {
+  it('opens recalculation Activity on Requirements and preserves the selection through discovery and mapping', async () => {
+    const selectStage = vi.fn()
+    const renderRecovery = async (id: string) => {
+      await act(async () => root.render(<InvalidationProvider>
+        <FlightPage flightId={id} liveFlight={{ ...flight, flightId: id }} coverageJobs={jobs}
+          stage="docs" onSelectStage={selectStage} onClose={vi.fn()} onSelectFlight={vi.fn()}
+          recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'started' }} />
+      </InvalidationProvider>))
+    }
+    await renderRecovery('fl_loading')
+    expect(text()).toContain('Extracting requirements from spec.md')
+    jobs = [{ ...summary, status: 'done' }, mapping]
+    await renderRecovery('fl_resolved')
+    expect(selectStage).not.toHaveBeenCalledWith(null)
+    expect(text()).toContain('Extracting requirements from spec.md')
+    expect(text()).not.toContain('Linking R1 to checkout.spec.ts')
+  })
+
+  it('shows a launch failure with a retry on the destination', async () => {
+    const retry = vi.fn()
+    await act(async () => root.render(<InvalidationProvider>
+      <FlightPage flightId={flight.flightId} coverageJobs={[]} stage="docs" onSelectStage={vi.fn()}
+        onClose={vi.fn()} onSelectFlight={vi.fn()} onRetryRecalculation={retry}
+        recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'failed', error: 'Launch unavailable' }} />
+    </InvalidationProvider>))
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Launch unavailable')
+    const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Retry recalculation')!
+    act(() => button.click())
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
   it('follows the summary and mapping stages using their actual coverage sessions', async () => {
     await render()
     expect(text()).toContain('Extracting requirements from spec.md')

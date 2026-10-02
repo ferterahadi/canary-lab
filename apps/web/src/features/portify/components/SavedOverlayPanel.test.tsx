@@ -3,14 +3,15 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { openPortifyProject, type PortifyManifest } from '@/shared/api/client'
+import { openPortifyProject } from '@/shared/api/cleanup'
+import type { PortifyManifest } from '@/shared/api/portify'
 import { SavedOverlayPanel } from './SavedOverlayPanel'
 
 // The panel opens the saved overlay folder via the client; stub it.
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return { ...actual, openPortifyProject: vi.fn() }
-})
+vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/cleanup')>()),
+  openPortifyProject: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root
@@ -137,3 +138,12 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
     ...over,
   }
 }
+
+it('counts header-looking source in the collapsed badge and updates it while open', async () => {
+  const m = manifest()
+  m.diff = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n--- old\n+++ new\n'
+  await act(async () => root.render(<SavedOverlayPanel manifest={m} collapsibleDiff />))
+  expect(container.textContent).toContain('Show diff · 2 lines')
+  await act(async () => root.render(<SavedOverlayPanel manifest={{ ...m, diff: m.diff + '+extra\n' }} collapsibleDiff />))
+  expect(container.textContent).toContain('Show diff · 3 lines')
+})

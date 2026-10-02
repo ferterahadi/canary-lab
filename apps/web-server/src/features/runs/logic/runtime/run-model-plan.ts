@@ -4,22 +4,14 @@
 // config edit mid-run cannot change a running agent, and a restart reuses what
 // the run started with instead of silently re-resolving.
 import {
-  normalizeStagePlans,
+  normalizeLaunchPlans,
   perAgentStageChoices,
   resolveStageChoice,
   type AgentModelsConfig,
   type StageModelChoice,
-} from '../../../agent-sessions/logic/agent-models'
+} from '../../../../../../../shared/agent-models'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
-
-/** Resolved choices for the two agent spawns a run owns. Both keys are always
- *  present — an agent-default resolution is stored as `{model:null,effort:null}`
- *  rather than omitted, so a restart can tell "locked to the default" apart
- *  from "pre-2.2.0 record with no plan at all". */
-export interface RunModelPlan {
-  heal: StageModelChoice
-  commit: StageModelChoice
-}
+import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 
 /** Resolve the plan for a fresh launch. `override` is the untrusted request
  *  body (`models` on POST /api/runs, or a flight's stored stage plan forwarded
@@ -30,7 +22,7 @@ export function resolveRunModelPlan(
   config: AgentModelsConfig,
   override?: unknown,
 ): RunModelPlan {
-  const requested = normalizeStagePlans(agent, override)
+  const requested = normalizeLaunchPlans(agent, override)
   return {
     heal: resolveStageChoice(agent, config, 'heal', requested.heal ?? null),
     commit: resolveStageChoice(agent, config, 'commit', requested.commit ?? null),

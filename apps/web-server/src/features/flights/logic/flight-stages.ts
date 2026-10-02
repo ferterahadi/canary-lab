@@ -1,7 +1,21 @@
+import { sameRepoSet as compareRepoSets } from '../../../shared/repo-identity'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, flightStagesResetByEntry, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  FLIGHT_STAGE_KEYS,
+  flightStagesResetByEntry,
+  type AgentActivity,
+  type FlightCheckpoint,
+  type FlightCheckpointResponse,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageAgentSession,
+  type FlightStageErrorDetail,
+  type FlightStageKey,
+  type FlightStageTimingKey,
+} from '../../../../../../shared/flights/types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'
@@ -352,8 +366,7 @@ export async function resetStagesForRestart(
 }
 
 export function sameRepoSet(a: string[], b: string[]): boolean {
-  const norm = (paths: string[]) => [...paths].map((p) => p.replace(/[\\/]+$/, '')).sort().join('\n')
-  return norm(a) === norm(b)
+  return compareRepoSets(a, b)
 }
 
 /** Fresh stage array; with `fromStage`, earlier execution-priority stages are

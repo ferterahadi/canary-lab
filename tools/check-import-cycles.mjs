@@ -33,8 +33,14 @@ const CEILING = {
    *  Read this WITH `largest`, never alone: breaking one big knot into several
    *  small ones raises this number while improving the code, which is exactly
    *  what happened at 29 → 31 when the orchestrator's fourteen modules came
-   *  apart. A rise is only a regression when `largest` did not fall. */
-  components: 31,
+   *  apart. A rise is only a regression when `largest` did not fall.
+   *
+   *  31 → 26 when the web feature barrels and every re-export module were
+   *  deleted: a barrel joins every file behind it into one import node, so
+   *  pointing callers at the declaring file dissolved five knots outright.
+   *  26 → 25 when the wire types moved to root `shared/`: the run manifest
+   *  types no longer sit in the module that also reads and writes manifests. */
+  components: 25,
   /** Modules inside the single largest knot — the real "how much must I read
    *  at once" number, and the one that hurts when it grows.
    *

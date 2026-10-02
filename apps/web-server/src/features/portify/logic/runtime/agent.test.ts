@@ -3,7 +3,8 @@ import os from 'os'
 import path from 'path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import * as agentProcess from '../../../agent-sessions/logic/agent-process'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 
 // Stub `claude`/`codex` on PATH with no-op executables so the test never spawns
@@ -51,9 +52,16 @@ describe('runPortifyAgent', () => {
     await runPortifyAgent({ agent: 'claude', prompt: 'again', cwd: dir, sessionId: 's1', resume: true })
   })
 
-  it('runs codex with exec --full-auto', async () => {
+  it('runs Codex with explicit sandbox policy and the selected model', async () => {
     const dir = tmp()
-    await runPortifyAgent({ agent: 'codex', prompt: 'do it', cwd: dir })
+    const spy = vi.spyOn(agentProcess, 'runAgentProcess')
+    try {
+      await runPortifyAgent({ agent: 'codex', prompt: 'do it', cwd: dir, models: { model: 'test-model', effort: 'high' } })
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'codex', cwd: dir,
+        args: ['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy="on-request"', '--model', 'test-model', '-c', 'model_reasoning_effort=high', 'do it'],
+      }))
+    } finally { spy.mockRestore() }
   })
 
   it('runs claude without a pinned session id', async () => {

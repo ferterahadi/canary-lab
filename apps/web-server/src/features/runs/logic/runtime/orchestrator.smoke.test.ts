@@ -252,7 +252,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeRerunTargetsOrdered skips unparseable specs but still targets the parseable ones', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'partial-parse')
     fs.mkdirSync(featureDir, { recursive: true })
     // A syntactically-broken spec that yields zero tests is skipped.
@@ -268,7 +268,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeRerunTargetsOrdered returns extraction-failed when every spec fails to parse', async () => {
-    const { computeRerunTargetsOrdered } = await import('./run-verdict')
+    const { computeRerunTargetsOrdered } = await import('./rerun-targets')
     const featureDir = path.join(tmpDir, 'features', 'all-broken')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'broken.spec.ts', 'nope ((( <<< not valid\n')
@@ -277,7 +277,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeNonPassedTargets skips unparseable specs and reports extraction-failed when all fail', async () => {
-    const { computeNonPassedTargets } = await import('./run-verdict')
+    const { computeNonPassedTargets } = await import('./rerun-targets')
     const partialDir = path.join(tmpDir, 'features', 'npt-partial')
     fs.mkdirSync(partialDir, { recursive: true })
     writeSpec(partialDir, 'broken.spec.ts', 'this ((( is <<< broken\n')

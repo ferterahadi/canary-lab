@@ -1,18 +1,6 @@
 import fs from 'fs'
-import { parseJournalMarkdown } from './runtime/log-enrichment'
-
-// Pure-ish business logic for the journal viewer. The Fastify route layer
-// owns the request shape; this module owns the markdown parsing and filtering.
-
-export interface JournalSection {
-  iteration: number | null
-  timestamp: string | null
-  feature: string | null
-  run: string | null
-  outcome: string | null
-  hypothesis: string | null
-  body: string
-}
+import { parseJournalMarkdown } from './runtime/heal-journal'
+import type { JournalSection } from '../../../../../../shared/run-detail'
 
 const HEADING_RE = /^##\s+Iteration\s+(\d+)(?:\s+[—-]\s+(.+?))?\s*$/
 const FIELD_RE = /^\s*-\s+([\w.-]+):\s*(.*)$/

@@ -6,8 +6,8 @@ import type {
   ReadableStoryRole,
   ReadableStorySpan,
   ReadableTest,
-} from '../api/types'
-import type { TestExecutionHighlightKind } from '@/features/runs'
+} from '@shared/readable-tests/types'
+import type { TestExecutionHighlightKind } from '@/features/runs/utils/test-step-status'
 import { useTheme } from '../lib/theme'
 import { codeThemeFor, getCodeHighlighter } from './code-highlighter'
 import { storyLocalSequenceLabel, storySequenceLabel } from './readable-story-sequence'

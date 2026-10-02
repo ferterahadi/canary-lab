@@ -1,13 +1,17 @@
-import crypto from 'crypto'
-import fs from 'fs'
-import os from 'os'
+import { missingFromRoster as missingRosterNames } from './mapping-roster'
+import { canonicalPathTypes } from '../../../../../../../shared/coverage/path-types'
 import path from 'path'
-import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import {
+  AGENT_DEFAULT_CHOICE,
+  type PerAgentStageChoices,
+  type StageModelChoice,
+} from '../../../../../../../shared/agent-models'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
+import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
@@ -17,8 +21,6 @@ export interface CoverageAgentSession {
   agent: 'claude' | 'codex'
   sessionId: string
 }
-
-export type { ProposedMapping }
 
 // Coverage annotate-pass (the engine's pass 1). Given the PRD requirements and
 // the feature's UNTAGGED tests, infer which requirement(s) each test verifies and
@@ -32,8 +34,6 @@ const ANNOTATE_SCHEMA_PATH = promptPath('coverage-annotate.schema.json')
 // Idle (inactivity) window: the annotate agent is killed only after this long
 // with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
 const ANNOTATE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
-
-const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
 
 export type AnnotateAdapter = 'auto' | 'claude' | 'codex'
 
@@ -81,7 +81,6 @@ interface RunAgentOpts {
   signal?: AbortSignal
   spawnScope?: string
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
-  onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
   /** Resolved model+effort for this launch; absent → agent default. */
   models?: StageModelChoice
@@ -92,12 +91,7 @@ interface RunAgentOpts {
 // ---------------------------------------------------------------------------
 
 function normalizePathTypes(value: unknown): PathType[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const seen = new Set<PathType>()
-  for (const item of value) {
-    if (typeof item === 'string' && (PATH_TYPES as string[]).includes(item)) seen.add(item as PathType)
-  }
-  const ordered = PATH_TYPES.filter((p) => seen.has(p))
+  const ordered = canonicalPathTypes(value)
   return ordered.length ? ordered : undefined
 }
 
@@ -257,94 +251,23 @@ export function buildAnnotatePrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
-  const preferred = adapter === 'claude' || adapter === 'codex'
-    ? pickAvailableHealAgent(adapter)
-    : pickAvailableHealAgent()
-  const agents = [preferred, pickAvailableHealAgent('claude'), pickAvailableHealAgent('codex')]
-    .filter((a): a is HealAgent => a === 'claude' || a === 'codex')
-  return [...new Set(agents)]
-}
-
-function codexArgs(outputPath: string, models: StageModelChoice): string[] {
-  return [
-    'exec', '--skip-git-repo-check', '--sandbox', 'read-only',
-    ...agentModelArgs('codex', models),
-    '--output-last-message', outputPath,
-    '--output-schema', ANNOTATE_SCHEMA_PATH,
-    '-',
-  ]
+  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
-  const outputDir = agent === 'codex'
-    ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-coverage-annotate-'))
-    : undefined
-  const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
-  // Pin a session id for claude so the CLI's JSONL session log is locatable and
-  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Agentic spawn via the shared runner. claude: stream-json for liveness +
-  // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-  // from stdin (`-`) and writes the final message to --output-last-message.
-  const models = opts.models ?? AGENT_DEFAULT_CHOICE
-  const args = agent === 'claude'
-    // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
-    // returns the edits it wants as data for canary to apply, so it must not be
-    // able to reach into the spec files itself.
-    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!, models)
-  opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-  let idled = false
-  const handle = runAgentProcess({
-    command: agent,
-    args,
-    cwd: opts.cwd,
-    stdin: agent === 'codex' ? prompt : undefined,
-    onChunk: (text) => opts.onOutput?.(text),
+  // The annotator returns the edits it wants as data for canary to apply, so it
+  // must not be able to reach into the spec files itself.
+  return runReadOnlyAnswerAgent({
+    ...opts,
+    agent,
+    prompt,
     idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
-    activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
-    onIdle: () => { idled = true },
-    spawnScope: opts.spawnScope,
-    ...(opts.agentJob
-      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
-      : {}),
+    outputDirectoryPrefix: 'canary-coverage-annotate-',
+    outputSchemaPath: ANNOTATE_SCHEMA_PATH,
+    errorLabel: 'coverage annotate agent',
+    cancellationMessage: 'coverage annotate cancelled',
+    cancellationMode: 'after-close',
   })
-
-  const onAbort = (): void => handle.stop()
-  if (opts.signal?.aborted) handle.stop()
-  else opts.signal?.addEventListener('abort', onAbort, { once: true })
-  const detach = (): void => opts.signal?.removeEventListener('abort', onAbort)
-  const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
-
-  return handle.done.then(
-    ({ code, signal, stdout, stderr }) => {
-      detach()
-      try {
-        if (opts.signal?.aborted) throw new Error('coverage annotate cancelled')
-        if (idled) throw new Error(`coverage annotate agent idle for ${ANNOTATE_IDLE_TIMEOUT_MS}ms`)
-        if (code !== 0) {
-          throw new Error(`coverage annotate agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`)
-        }
-        // codex's --output-last-message file is the authoritative final answer;
-        // claude's stdout is stream-json envelopes → recover the final message.
-        // Read it BEFORE rmOutputDir() (in finally) clears the temp dir.
-        let finalOutput = recoverAgentAnswer(agent, stdout)
-        if (outputPath && fs.existsSync(outputPath)) {
-          const fromFile = fs.readFileSync(outputPath, 'utf-8')
-          if (fromFile.trim()) finalOutput = fromFile
-        }
-        return finalOutput
-      } finally {
-        rmOutputDir()
-      }
-    },
-    (err: Error) => {
-      detach()
-      rmOutputDir()
-      throw new Error(`coverage annotate agent failed: ${err.message}`)
-    },
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -362,14 +285,12 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
  * into a detectable failure.
  */
 export function missingFromRoster(tests: AnnotateTestInput[], answer: AnnotateAnswer): string[] {
-  const accounted = new Set<string>([...answer.mappings.map((m) => m.testName), ...answer.unmappable])
-  return tests.map((t) => t.name).filter((name) => !accounted.has(name))
+  return missingRosterNames(tests.map((test) => test.name), answer.mappings, answer.unmappable)
 }
 
 /**
  * Propose `covers` mappings for the given (untagged) tests. Tries the configured
- * agent(s); on no-agent / parse-failure / error it falls back to the deterministic
- * token-overlap heuristic so the engine always returns SOMETHING actionable.
+ * agent(s); no usable agent answer is an error, never a guessed mapping.
  * Mappings pointing at unknown requirement ids are dropped at parse time.
  */
 export async function proposeCoverageMappings(
@@ -404,7 +325,6 @@ export async function proposeCoverageMappings(
           signal: args.signal,
           spawnScope: args.spawnScope,
           agentJob: args.agentJob,
-          onOutput: args.onOutput,
           onSession: args.onSession,
           models: args.models?.[agent],
         })

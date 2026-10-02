@@ -14,7 +14,8 @@ vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, listFeatureDocs } from './service'
+import { runCoverageEngine as runCoverageEngineReal } from './coverage-engine'
+import { regeneratePrdSummary as regeneratePrdSummaryReal, listFeatureDocs } from './feature-docs'
 import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 

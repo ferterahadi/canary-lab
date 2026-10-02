@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import { Modal } from '@/shared/ui/atoms'
+import * as runsApi from '@/shared/api/runs'
+import * as workspaceApi from '@/shared/api/workspace'
+import { Modal } from '@/shared/ui/Overlays'
 import { DiffView } from '@/shared/ui/DiffView'
 import { fileCountLabel } from '../utils/repair-files'
 
@@ -31,14 +32,14 @@ export function RepairPatchDialog({
   files: number
   fileNames: string[]
 }) {
-  const [patch, setPatch] = useState<api.RunFixPatch | null>(null)
+  const [patch, setPatch] = useState<runsApi.RunFixPatch | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!open) { setPatch(null); setError(null); setCopied(false); return }
     let live = true
-    api.getRunFixPatch(runId, repoName)
+    runsApi.getRunFixPatch(runId, repoName)
       .then((r) => { if (live) setPatch(r) })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
     return () => { live = false }
@@ -77,7 +78,7 @@ export function RepairPatchDialog({
               <button
                 type="button"
                 data-testid={`changes-patch-open-${repoName}`}
-                onClick={() => { void api.openEditor({ file: patch.patchPath }).catch(() => {}) }}
+                onClick={() => { void workspaceApi.openEditor({ file: patch.patchPath }).catch(() => {}) }}
                 className="cl-button px-2.5 py-1 text-[11px]"
               >
                 Open patch file ↗

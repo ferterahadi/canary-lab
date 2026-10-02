@@ -26,10 +26,13 @@ import { useCallback, useEffect, useState } from 'react'
  *  localStorage persistence) minus the split: this panel has one movable edge
  *  and a fixed ceiling, where the splitter has two panes negotiating one total.
  *
- *  `maxPx` is the ceiling in pixels; the caller is still responsible for a
- *  relative cap (a `max-h-[70%]` class) so a stored height from a tall window
- *  cannot swallow a short pane. Every read re-clamps, so a stale stored value
- *  can never strand the panel off-screen. */
+ *  `maxPx` is the ceiling in pixels. A panel whose real ceiling is the room its
+ *  container has passes `ceilingPx` too: a drag or key step then stops at that
+ *  live measurement, and a drag starts from the height actually shown rather
+ *  than a taller stored one, so the edge never has dead travel to burn. The
+ *  caller still caps the rendered height (a `max-h-full` class) for a window
+ *  that shrinks under a stored height. Every read re-clamps, so a stale stored
+ *  value can never strand the panel off-screen. */
 export function useResizableHeight({
   storageKey,
   defaultPx,
@@ -38,6 +41,7 @@ export function useResizableHeight({
   collapsePx,
   collapsed,
   onCollapsedChange,
+  ceilingPx,
   /** Keyboard step for the handle's arrow keys; shift multiplies it by 3. */
   stepPx = 16,
 }: {
@@ -50,6 +54,9 @@ export function useResizableHeight({
   collapsePx: number
   collapsed: boolean
   onCollapsedChange: (collapsed: boolean) => void
+  /** The live room the panel may grow into, read at drag and key time; null
+   *  while it can't be measured. */
+  ceilingPx?: () => number | null
   stepPx?: number
 }): {
   height: number
@@ -69,8 +76,8 @@ export function useResizableHeight({
   }
 } {
   const clamp = useCallback(
-    (n: number): number => Math.max(minPx, Math.min(maxPx, Math.round(n))),
-    [minPx, maxPx],
+    (n: number): number => Math.max(minPx, Math.min(maxPx, ceilingPx?.() ?? maxPx, Math.round(n))),
+    [minPx, maxPx, ceilingPx],
   )
   const [height, setHeight] = useState<number>(() => {
     try {
@@ -130,8 +137,8 @@ export function useResizableHeight({
     // A folded panel has no height to start from, so the origin is the fold
     // point: the edge then behaves as if it were parked just under the floor,
     // and one short pull brings it back.
-    setDrag({ y: e.clientY, startHeight: collapsed ? collapsePx : height })
-  }, [collapsed, collapsePx, height])
+    setDrag({ y: e.clientY, startHeight: collapsed ? collapsePx : clamp(height) })
+  }, [clamp, collapsed, collapsePx, height])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     const step = e.shiftKey ? stepPx * 3 : stepPx

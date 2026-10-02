@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { linkFeatureDocPath } from '@/shared/api/client'
+import { linkFeatureDocPath } from '@/shared/api/flights'
 
 /** Both document surfaces preserve the source name and refresh through their
  * existing loader; the server also broadcasts coverage-changed to other views. */

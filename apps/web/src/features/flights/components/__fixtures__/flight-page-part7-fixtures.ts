@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 
 export function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   return {

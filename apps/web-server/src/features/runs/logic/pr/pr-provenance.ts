@@ -1,4 +1,9 @@
-import type { RunIntegrity, RunManifest, RunSpecEdits, RunSuiteSnapshot } from '../runtime/manifest'
+import type {
+  RunIntegrity,
+  RunManifest,
+  RunSpecEdits,
+  RunSuiteSnapshot,
+} from '../../../../../../../shared/run-manifest'
 import { INTEGRITY_HINT_FALSE_POSITIVE_RATE } from '../../../../../../../shared/verification-strength/disclosure'
 import { plural } from '../../../../../../../shared/lib/plural'
 

@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
@@ -5,8 +6,9 @@ import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -47,15 +49,9 @@ function buildFeature(name: string, opts: {
 function buildGitRepo(name: string): string {
   const dir = path.join(tmpDir, name)
   fs.mkdirSync(dir, { recursive: true })
-  const git = (args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
-  git(['init', '-b', 'main'])
-  git(['config', 'user.email', 'test@example.com'])
-  git(['config', 'user.name', 'Test User'])
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
-  git(['add', 'README.md'])
-  git(['commit', '-m', 'init'])
-  git(['checkout', '-b', 'feature/demo'])
-  git(['checkout', 'main'])
+  initGitRepo(dir, { branch: 'main' })
+  git(dir, 'branch', 'feature/demo')
   return dir
 }
 
@@ -126,7 +122,7 @@ describe('feature.config endpoints', () => {
   it('DELETE portify-overlay restores the pre-Portify config snapshot, then removes the overlay', async () => {
     const preConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start' }] }], featureDir: __dirname } }`
     const portifiedConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] }] }], featureDir: __dirname } }`
-    const dir = buildFeature('porty', { config: portifiedConfig })
+    const dir = buildFeature('porty', { config: portifiedConfig, envsets: { local: {} } })
     writeOverlay(dir, {
       featureName: 'porty',
       agent: 'claude',

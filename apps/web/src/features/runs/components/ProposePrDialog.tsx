@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { PrPreflight, ProposePrResult } from '@/shared/api/client'
-import { Modal } from '@/shared/ui/atoms'
+import { useEffect, useRef, useState } from 'react'
+import * as runsApi from '@/shared/api/runs'
+import type { ProposePrResult } from '@/shared/api/runs'
+import { Modal } from '@/shared/ui/Overlays'
+import { useLiveResource } from '@/shared/state/use-live-resource'
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { BLOCKED_HELP } from '../utils/pr-blocked-copy'
 
 // R80 — the PR confirm dialog. Pushing to origin is teammate-visible, so a PR is
@@ -22,30 +24,34 @@ export function ProposePrDialog({
   /** Called after PRs are opened so the panel can re-poll for the links. */
   onProposed?: () => void
 }) {
-  const [preflight, setPreflight] = useState<PrPreflight | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const session = useMountedIdentity(JSON.stringify([open, runId]))
+  const mounted = useMountedIdentity('propose-pr')
+  const preflightRead = useLiveResource(null, open ? runId : null, () => runsApi.getRunPrPreflight(runId))
+  const { value: preflight, loading } = preflightRead
+  // A closed dialog does not cancel a server write. Keep its lock until the
+  // request settles, while its results belong only to the originating session.
+  const pending = useRef(new Set<string>())
+  const [, renderPending] = useState(0)
+  const busy = pending.current.has(runId)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<ProposePrResult[] | null>(null)
 
-  useEffect(() => {
-    if (!open) { setPreflight(null); setResults(null); setError(null); return }
-    setLoading(true)
-    api.getRunPrPreflight(runId)
-      .then(setPreflight)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [open, runId])
+  useEffect(() => { setResults(null); setError(null) }, [open, runId])
 
   const pushable = preflight?.repos.filter((r) => r.pushable) ?? []
-
+  const eligible = open && preflightRead.confirmed && !loading && pushable.length > 0
   const propose = (): void => {
-    setBusy(true)
+    if (!eligible || pending.current.has(runId)) return
+    pending.current.add(runId)
+    renderPending((version) => version + 1)
     setError(null)
-    api.proposeRunPr(runId)
-      .then((r) => { setResults(r.results); onProposed?.() })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+    runsApi.proposeRunPr(runId)
+      .then((r) => { if (session()) { setResults(r.results); onProposed?.() } })
+      .catch((e: unknown) => { if (session()) setError(e instanceof Error ? e.message : String(e)) })
+      .finally(() => {
+        pending.current.delete(runId)
+        if (mounted()) renderPending((version) => version + 1)
+      })
   }
 
   return (
@@ -66,7 +72,7 @@ export function ProposePrDialog({
             <button
               type="button"
               data-testid="propose-pr-confirm"
-              disabled={busy || loading || pushable.length === 0}
+              disabled={busy || !eligible}
               onClick={propose}
               className="cl-button-primary px-3 py-1 text-xs"
             >
@@ -78,7 +84,8 @@ export function ProposePrDialog({
     >
       <div className="flex flex-col gap-2">
         {loading && <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Checking GitHub access…</div>}
-        {error && <div className="text-[12px]" style={{ color: 'var(--danger)' }}>{error}</div>}
+        {(error || preflightRead.error) && <div className="text-[12px]" style={{ color: 'var(--danger)' }}>{error || preflightRead.error}</div>}
+        {!results && <button type="button" onClick={preflightRead.refresh} className="cl-button self-start px-3 py-1 text-xs">{preflightRead.error ? 'Retry' : 'Refresh'}</button>}
 
         {/* Results after proposing — PR links or per-repo failure reasons. */}
         {results && (

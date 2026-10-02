@@ -1,0 +1,58 @@
+{
+  "before": {
+    "root": "/private/tmp/canary-comparison-20260928-204119/replay-final",
+    "design": {
+      "mode": "replay",
+      "repetitions": 10,
+      "seed": 42
+    },
+    "sourceDigest": "0730e969e6900311f4bcf661b6d77c097bf1eb37a708a759c20a4213249dbb29",
+    "arms": {
+      "canary": {
+        "attempts": 20,
+        "successes": 20,
+        "meanSeconds": 8.2798
+      },
+      "plain": {
+        "attempts": 20,
+        "successes": 20,
+        "meanSeconds": 2.34125
+      }
+    },
+    "phaseMeans": {
+      "readiness": 2.0296499967575072,
+      "tests": 3.7036500215530395,
+      "repairHandoff": 2.1806999802589417,
+      "other": 0.3658000014305115,
+      "acceptedToRestart": 0.8373500227928161
+    }
+  },
+  "after": {
+    "root": "/private/tmp/canary-replay-fast-waits-20260928-local",
+    "design": {
+      "mode": "replay",
+      "repetitions": 10,
+      "seed": 42
+    },
+    "sourceDigest": "19355825805fecbfe612795627c80edf3d72191df427b4ef6f655030d31bd98e",
+    "arms": {
+      "canary": {
+        "attempts": 20,
+        "successes": 20,
+        "meanSeconds": 6.14645
+      },
+      "plain": {
+        "attempts": 20,
+        "successes": 20,
+        "meanSeconds": 2.3174
+      }
+    },
+    "phaseMeans": {
+      "readiness": 1.5070500373840332,
+      "tests": 3.5940499901771545,
+      "repairHandoff": 0.678600013256073,
+      "other": 0.3667499591827392,
+      "acceptedToRestart": 0.026150012016296388
+    }
+  }
+}

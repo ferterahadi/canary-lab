@@ -14,22 +14,17 @@ import {
   getGitStatus,
   parsePorcelainStatus,
   parseRefList,
-  resolveRepoPath,
   snapshotWorkingTree,
   validateConfiguredRepoBranches,
 } from './git-repo'
+import { resolveRepoPath } from './repo-identity'
+import { git, initGitRepo } from '../../../../tools/test-helpers/git-repo'
 
 function tmpRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-')))
-  const git = (args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
-  git(['init', '-b', 'main'])
-  git(['config', 'user.email', 'test@example.com'])
-  git(['config', 'user.name', 'Test User'])
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
-  git(['add', 'README.md'])
-  git(['commit', '-m', 'init'])
-  git(['checkout', '-b', 'feature/demo'])
-  git(['checkout', 'main'])
+  initGitRepo(dir, { branch: 'main' })
+  git(dir, 'branch', 'feature/demo')
   return dir
 }
 
@@ -68,6 +63,7 @@ describe('git-repo helpers', () => {
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.invalid/repo.git'], { cwd: repo })
     execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repo })
     execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], { cwd: repo })
+    expect(detectBaseBranch(repo)).toBe('main')
     const status = await getGitStatus(repo)
     expect(status.isGitRepo).toBe(true)
     expect(status.currentBranch).toBe('main')

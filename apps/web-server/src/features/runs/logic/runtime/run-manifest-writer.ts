@@ -1,3 +1,4 @@
+import { diagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
 // What a run records about itself while it happens: the initial manifest, every
 // lifecycle event, the status transitions the UI and the stores read, the
 // heartbeat, and the signal-file watcher. Split out of orchestrator.ts; the
@@ -8,10 +9,23 @@ import type { LifecycleRecordOptions } from './run-orchestrator-types'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createRunLifecycleEvent, isTerminalRunStatus, type HealSignalKind } from '../../../../../../../shared/run-state'
+import {
+  createRunLifecycleEvent,
+  isTerminalRunStatus,
+  type HealSignalKind,
+  type RunLifecyclePhase,
+} from '../../../../../../../shared/run-state'
 import { resolvePath } from '../../../../shared/launcher-startup'
-import { readManifest, type RunLifecyclePhase, type RunManifest, type ServiceManifestEntry, type StoppedEarlyReason } from './manifest'
-import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
+import { readManifest } from './manifest'
+import type {
+  RunManifest,
+  ServiceManifestEntry,
+  StoppedEarlyReason,
+} from '../../../../../../../shared/run-manifest'
+import {
+  appendJournalIteration as appendJournalIterationToFile,
+  type JournalAppendInput,
+} from './heal-journal'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { signalLabel, startingServicesDetail } from './run-verdict'
 
@@ -65,6 +79,8 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
   const manifest: RunManifest = {
     runId: ctx.runId,
     executionType: ctx.executionType,
+    ...(previous || ctx.autoHeal?.diagnosisPolicy
+      ? { diagnosisPolicy: diagnosisPolicy(previous ? previous.diagnosisPolicy : ctx.autoHeal?.diagnosisPolicy) } : {}),
     feature: ctx.feature.name,
     featureDir: ctx.feature.featureDir,
     env: ctx.env,
@@ -167,7 +183,7 @@ export function startSignalWatcher(ctx: RunContext): void {
       ctx.emit('signal-detected', result.signal)
       ctx.emit('signal-accepted', result.signal)
     }
-  }, ctx.healthPollIntervalMs)
+  }, Math.max(1, ctx.healSignalPollMs))
 }
 
 // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index

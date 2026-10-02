@@ -1,4 +1,5 @@
-import { createReadableRunLog, openEditor } from '@/shared/api/client'
+import { createReadableRunLog } from '@/shared/api/runs'
+import { openEditor } from '@/shared/api/workspace'
 
 /** Open one of a run's logs in the editor as its readable copy. A log the
  *  server will not copy (outside the run, already gone) still opens raw, so the

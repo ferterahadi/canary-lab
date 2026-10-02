@@ -3,7 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import ts from 'typescript'
-import { __testReviewExportInternals, buildTestReviewPacket } from './test-review-export'
+import { __testReviewExportInternals } from './test-review-export'
+import { buildTestReviewPacket } from './test-review/packet'
 import { detail, lineOf } from './__fixtures__/test-review-fixtures'
 
 let tmpDir: string

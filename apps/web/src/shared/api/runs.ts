@@ -4,7 +4,10 @@
 import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { StageModelChoice } from '@shared/agent-models'
 import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
-import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
+import type { AuditList } from './types-wizard'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunDetail, JournalSection } from '@shared/run-detail'
+import type { RunProposedPr } from '@shared/run-state'
 import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 export function listRuns(
@@ -246,12 +249,7 @@ export interface ApplyTarget {
   branch: string | null
 }
 export function getRunApplyPreflight(runId: string, opts?: ClientOptions): Promise<{ targets: ApplyTarget[] }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ targets: ApplyTarget[] }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-preflight`,
-    { method: 'GET' },
-    fetchImpl,
-  )
+  return requestSnapshot(`/api/runs/${encodeURIComponent(runId)}/apply-preflight`, opts)
 }
 
 // Open a captured repo's working tree in the configured editor. The server
@@ -386,44 +384,18 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
 export function listJournal(
   query: { feature?: string; run?: string } = {},
   opts?: ClientOptions,
-): Promise<JournalEntry[]> {
+): Promise<JournalSection[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const params = new URLSearchParams()
   if (query.feature) params.set('feature', query.feature)
   if (query.run) params.set('run', query.run)
   const qs = params.toString() ? `?${params.toString()}` : ''
-  return request<JournalEntry[]>(`${baseUrl}/api/journal${qs}`, { method: 'GET' }, fetchImpl)
+  return request<JournalSection[]>(`${baseUrl}/api/journal${qs}`, { method: 'GET' }, fetchImpl)
 }
 
 // ─── Flight (`canary-lab flight` pipeline) ────────────────────────────────
 // Manifest shapes live in the repo-shared model — the server conductor and this
 // client read the same JSON.
-
-export type {
-  FlightManifest,
-  FlightIndexEntry,
-  FlightStage,
-  FlightStageErrorDetail,
-  FlightStageKey,
-  FlightStageStatus,
-  FlightStatus,
-  FlightPauseReason,
-  FlightCheckpoint,
-  FlightCheckpointKind,
-  FlightCheckpointResponse,
-  ExternalWorkCheckpointData,
-  FlightEntryOptions,
-  FlightStageEntryOption,
-  SpecsCoveragePass,
-  SpecsCoverageProgress,
-  PlannedFeature,
-  PlanFeaturesTask,
-  PlanFeaturesTaskStatus,
-  PrdSourceAttempt,
-  PrdSourceCheckpointData,
-  FlightStageRemedy,
-} from '@shared/flights/types'
-export { deriveFeatureSlug } from '@shared/flights/types'
 
 // Build a readable copy of one of the run's logs (control codes stripped,
 // redraws resolved, repeats folded) and return its path. The raw log is never

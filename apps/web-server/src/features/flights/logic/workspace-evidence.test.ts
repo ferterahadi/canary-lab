@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { FlightStage } from './types'
+import type { FlightStage } from '../../../../../../shared/flights/types'
 import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
+import * as coverage from '../../coverage/logic/coverage/service'
+import * as featureLoader from '../../../shared/feature-loader'
+import * as runStore from '../../runs/logic/run-store'
+import * as runDetail from '../../runs/logic/run-detail'
 import {
   fillStageEvidence,
   stageEvidenceMissing,
@@ -98,7 +102,131 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+describe('workspaceStageEvidence — shared evaluation inputs', () => {
+  it('evaluates configuration once across scout, portify and coverage, then reads fresh configuration', () => {
+    const counter = path.join(tmp, 'config-loads')
+    const configure = (repos: string): void => {
+      writeRepos(repos)
+      fs.appendFileSync(path.join(featureDir, 'feature.config.cjs'),
+        `\nrequire('fs').appendFileSync(${JSON.stringify(counter)}, 'x')\n`)
+    }
+    configure(`[{ name: 'app', localPath: __dirname, startCommands: [{ command: 'node app.js', ports: [{ name: 'http', env: 'PORT' }] }] }]`)
+    const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout', 'portify', 'specs-coverage'])
+    expect(fs.readFileSync(counter, 'utf8')).toBe('x')
+    expect(ev.scout).toEqual({ repos: 1 })
+    expect(ev.portify).toEqual({ declaredInjectable: 1, serviceCount: 1 })
+    expect(ev['specs-coverage']).toMatchObject({ requirementCount: 0, testsWritten: 0 })
+
+    configure('[]')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout', 'portify'])).toEqual({})
+    expect(fs.readFileSync(counter, 'utf8')).toBe('xx')
+  })
+
+  it('uses the configured linked directory for documents and coverage', () => {
+    const linkedDir = path.join(tmp, 'linked-suite')
+    fs.mkdirSync(path.join(linkedDir, 'docs'), { recursive: true })
+    fs.mkdirSync(path.join(linkedDir, 'e2e'))
+    fs.writeFileSync(path.join(linkedDir, 'docs', 'requirements.md'), '# Linked requirements')
+    fs.writeFileSync(path.join(linkedDir, 'e2e', 'a.spec.ts'), "test('linked test', () => {})\n")
+    fs.appendFileSync(path.join(featureDir, 'feature.config.cjs'),
+      `\nmodule.exports.config.featureDir = ${JSON.stringify(linkedDir)}\n`)
+    const compute = vi.spyOn(coverage, 'computeFeatureCoverage')
+    const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['docs', 'specs-coverage'])
+    expect(ev.docs).toEqual({ docs: ['requirements.md'] })
+    expect(ev['specs-coverage']).toMatchObject({ testsWritten: 1 })
+    expect(compute).toHaveBeenCalledWith({ featuresDir, logsDir, feature: FEATURE, featureDir: linkedDir })
+  })
+
+  it('shares the settled run and selects a newer result on the next evaluation', () => {
+    writeBootedRun('older', [])
+    const list = vi.spyOn(runStore, 'listRuns')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run', 'heal'])).toEqual({
+      run: { runId: 'older', status: 'passed' },
+      heal: { finalStatus: 'passed', healCycles: 0 },
+    })
+    expect(list).toHaveBeenCalledTimes(1)
+
+    writeBootedRun('newer', [])
+    fs.writeFileSync(path.join(logsDir, 'runs', 'index.json'), JSON.stringify([
+      { runId: 'older', feature: FEATURE, status: 'passed', startedAt: '2026-08-07T10:00:00Z' },
+      { runId: 'newer', feature: FEATURE, status: 'passed', startedAt: '2026-08-08T10:00:00Z' },
+    ]))
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['heal', 'run']).run)
+      .toEqual({ runId: 'newer', status: 'passed' })
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps coverage on the latest attempt while run and heal use the settled result', () => {
+    writeBootedRun('settled', [])
+    fs.writeFileSync(path.join(logsDir, 'runs', 'settled', 'e2e-summary.json'),
+      JSON.stringify({ total: 1, passed: 1, passedNames: ['test-case-shared'], failed: [] }))
+    const compute = vi.spyOn(coverage, 'computeFeatureCoverage')
+    workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['specs-coverage'])
+    expect(compute.mock.results[0].value.provenRunId).toBe('settled')
+
+    fs.writeFileSync(path.join(logsDir, 'runs', 'index.json'), JSON.stringify([
+      { runId: 'settled', feature: FEATURE, status: 'passed', startedAt: '2026-08-07T10:00:00Z' },
+      { runId: 'active', feature: FEATURE, status: 'running', startedAt: '2026-08-08T10:00:00Z' },
+    ]))
+    const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run', 'heal', 'specs-coverage'])
+    expect(ev.run).toMatchObject({ runId: 'settled', status: 'passed' })
+    expect(ev.heal).toEqual({ finalStatus: 'passed', healCycles: 0 })
+    expect(compute.mock.results[1].value.provenRunId).toBeUndefined()
+  })
+
+  it('shares absence when no eligible run exists', () => {
+    writeBootedRun('active', [])
+    fs.writeFileSync(path.join(logsDir, 'runs', 'index.json'), JSON.stringify([
+      { runId: 'active', feature: FEATURE, status: 'running', startedAt: '2026-08-07T10:00:00Z' },
+    ]))
+    const list = vi.spyOn(runStore, 'listRuns')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run', 'heal'])).toEqual({})
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it('does no discovery for unsupported keys or populated stages, and keeps expensive probes lazy', () => {
+    const load = vi.spyOn(featureLoader, 'findFeature')
+    const list = vi.spyOn(runStore, 'listRuns')
+    const compute = vi.spyOn(coverage, 'computeFeatureCoverage')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['similarity', 'scaffold'])).toEqual({})
+    const stages = [stage('run', 'done', { runId: 'recorded' }), stage('specs-coverage', 'done', { covered: 1 })]
+    expect(withWorkspaceEvidence({ featuresDir, logsDir }, FEATURE, stages)).toBe(stages)
+    expect(load).not.toHaveBeenCalled()
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['docs'])).toEqual({})
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(list).not.toHaveBeenCalled()
+    expect(compute).not.toHaveBeenCalled()
+  })
+
+  it('keeps heal evidence when the run summary probe throws', () => {
+    writeBootedRun('settled', [])
+    vi.spyOn(runDetail, 'readRunSummary').mockImplementationOnce(() => { throw new Error('summary read failed') })
+    const list = vi.spyOn(runStore, 'listRuns')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run', 'heal'])).toEqual({
+      heal: { finalStatus: 'passed', healCycles: 0 },
+    })
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the next dependent probe retry a thrown lookup', () => {
+    writeBootedRun('settled', [])
+    const list = vi.spyOn(runStore, 'listRuns').mockImplementationOnce(() => { throw new Error('index read failed') })
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run', 'heal'])).toEqual({
+      heal: { finalStatus: 'passed', healCycles: 0 },
+    })
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns no evidence when discovery throws or the configured directory is absent', () => {
+    vi.spyOn(featureLoader, 'findFeature').mockImplementationOnce(() => { throw new Error('discovery failed') })
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])).toEqual({})
+    fs.appendFileSync(path.join(featureDir, 'feature.config.cjs'), '\ndelete module.exports.config.featureDir\n')
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])).toEqual({})
+  })
 })
 
 describe('stageEvidenceMissing', () => {

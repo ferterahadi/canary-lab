@@ -1,14 +1,22 @@
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
-import * as api from '@/shared/api/client'
-import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
-import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
+import * as flightsApi from '@/shared/api/flights'
+import * as configApi from '@/shared/api/config'
+import { Modal, useEscapeToClose, useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
-import { DeleteSuiteConfirm, ModelLaunchGate } from '@/features/config'
+import { DeleteSuiteConfirm } from '@/features/config/components/DeleteSuiteConfirm'
+import { ModelLaunchGate } from '@/features/config/components/ModelLaunchGate'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
-import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
-import { FLIGHT_EXECUTION_ORDER, flightStagesResetByEntry } from '@shared/flights/types'
+import { STAGE_BLURB, STAGE_ICON, stageStatusTone } from './stage-meta'
+import { stageRowKey } from './StageRail'
+import {
+  FLIGHT_EXECUTION_ORDER,
+  flightStagesResetByEntry,
+  type FlightManifest,
+  type FlightStageKey,
+  type FlightStageStatus,
+} from '@shared/flights/types'
 import { flightRailLabel } from '@shared/flights/stage-labels'
 import { FLIGHT_SECTION_ROW_KEYS, FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { EMPTY_AGENT_MODELS, MODEL_STAGE_KEYS } from '@shared/agent-models'
@@ -81,9 +89,9 @@ export function ContinueMenu({
   const [redoFrom, setRedoFrom] = useState<FlightStageKey | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [modelsGate, setModelsGate] = useState<{
-    body: api.StartFlightBody
+    body: flightsApi.StartFlightBody
     agent: 'claude' | 'codex'
-    config: api.ProjectConfig
+    config: configApi.ProjectConfig
   } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
   const menuMode = flight.status === 'paused' || recordlessEntry !== undefined || coverageRecovery !== undefined
@@ -100,14 +108,14 @@ export function ContinueMenu({
     if (preparing) return
     setPreparing(true)
     Promise.all([
-      api.getFlightEntryOptions(flight.feature, flight.opts.env),
+      flightsApi.getFlightEntryOptions(flight.feature, flight.opts.env),
       // This read is part of the launch decision, not optional decoration: if
       // it fails, starting anyway could bypass Ask before launch.
-      api.getProjectConfig(),
+      configApi.getProjectConfig(),
     ])
       .then(([entry, config]) => {
         const agent = config.healAgent === 'codex' ? 'codex' : 'claude'
-        const body: api.StartFlightBody = {
+        const body: flightsApi.StartFlightBody = {
           feature: flight.feature,
           repoPaths: entry.prefill.repoPaths,
           description: entry.prefill.description,
@@ -122,7 +130,7 @@ export function ContinueMenu({
           setModelsGate({ body, agent, config })
           return
         }
-        onAction(() => api.startFlight(body))
+        onAction(() => flightsApi.startFlight(body))
       })
       .catch((err: unknown) => {
         setPreparing(false)
@@ -130,14 +138,7 @@ export function ContinueMenu({
       })
   }
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
   // Escape closes the open dropdown first, above the flight page's own
   // Escape-to-exit — one press dismisses the menu, not the whole page.
   useEscapeToClose(() => setOpen(false), open)
@@ -172,7 +173,7 @@ export function ContinueMenu({
             onClick={() => {
               setOpen(false)
               if (recordlessEntry) startRecordless(recordlessEntry)
-              else onAction(() => api.resumeFlight(flight.flightId))
+              else onAction(() => flightsApi.resumeFlight(flight.flightId))
             }}
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
@@ -226,7 +227,7 @@ export function ContinueMenu({
           onConfirm={(models) => {
             const pending = modelsGate
             setModelsGate(null)
-            onAction(() => api.startFlight({
+            onAction(() => flightsApi.startFlight({
               ...pending.body,
               ...(models ? { models } : {}),
             }))
@@ -261,7 +262,7 @@ export function RedoFlightDialog({
   onRedo?: (fromStage: FlightStageKey, feedback?: string) => void
   initialStage?: FlightStageKey | null
 }) {
-  const [entry, setEntry] = useState<Awaited<ReturnType<typeof api.getFlightEntryOptions>> | null>(null)
+  const [entry, setEntry] = useState<Awaited<ReturnType<typeof flightsApi.getFlightEntryOptions>> | null>(null)
   const [entryFailed, setEntryFailed] = useState(false)
   const [fromStage, setFromStage] = useState<FlightStageKey | null>(initialStage)
   const [feedback, setFeedback] = useState('')
@@ -269,7 +270,7 @@ export function RedoFlightDialog({
 
   useEffect(() => {
     let alive = true
-    api.getFlightEntryOptions(flight.feature, flight.opts.env)
+    flightsApi.getFlightEntryOptions(flight.feature, flight.opts.env)
       .then((options) => { if (alive) setEntry(options) })
       // Validation still happens on submit — a failed pre-check must not
       // brick the dialog, it just can't grey the impossible rows.
@@ -321,7 +322,7 @@ export function RedoFlightDialog({
               const note = feedback.trim() || undefined
               onClose()
               if (onRedo) onRedo(stage, note)
-              else onAction(() => api.redoFlight(flight.flightId, { fromStage: stage, feedback: note }))
+              else onAction(() => flightsApi.redoFlight(flight.flightId, { fromStage: stage, feedback: note }))
             }}
             className="cl-button-primary px-3 py-1.5 text-xs"
           >
@@ -492,14 +493,12 @@ export function FlightMenu({
   const [armed, setArmed] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
 
+  // Closing the menu disarms any half-confirmed action, so reopening it never
+  // shows a destructive item already one click from firing.
   useEffect(() => {
-    if (!open) { setArmed(null); return }
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    if (!open) setArmed(null)
   }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
   // Escape closes the open ⋯ menu first, above the flight page's own
   // Escape-to-exit — one press dismisses the menu, not the whole page.
   useEscapeToClose(() => setOpen(false), open)

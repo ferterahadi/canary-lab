@@ -336,3 +336,23 @@ describe('buildFeatureScaffold repos', () => {
     expect(config).toContain("envs: ['local']")
   })
 })
+
+it('normalizes repository lists while retaining omitted and empty-list behavior', () => {
+  const files = buildFeatureSkeletonScaffold({ featureName: 'envs', repos: [
+    { name: 'normalized', localPath: '/repo', envs: [' staging ', '', 'staging'] },
+    { name: 'blank', localPath: '/repo', envs: [' '] },
+    { name: 'empty', localPath: '/repo', envs: [] },
+    { name: 'omitted', localPath: '/repo' },
+  ] })
+  const file = files.find((f) => f.path === 'feature.config.cjs')!
+  const target = path.join(tmp, 'feature.config.cjs')
+  fs.writeFileSync(target, file.content)
+  const config = require(target).config
+  expect(config.repos.map((r: { envs?: string[] }) => r.envs)).toEqual([['staging'], ['local'], undefined, undefined])
+})
+it.each([
+  { envs: ['staging/eu'] },
+  { repos: [{ name: 'api', localPath: '/repo', envs: ['staging/eu'] }] },
+])('rejects invalid nonblank names in pure scaffolding (%j)', (input) => {
+  expect(() => buildFeatureScaffold({ featureName: 'invalid', ...input })).toThrow('invalid env name: staging/eu')
+})

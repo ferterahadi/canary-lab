@@ -1,6 +1,7 @@
 import path from 'path'
 import { sourceRows, rowsForTest, testSelections } from '../../../../../../shared/test-source-diff'
-import { extractTestMetadataFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
+import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
+import type { ExtractedTest } from '../../../../../../shared/extracted-test'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { diffChangedLines, diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { pairTestDeclarations } from './test-declaration-changes'

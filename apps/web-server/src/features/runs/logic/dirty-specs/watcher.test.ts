@@ -1,4 +1,3 @@
-import { execFileSync } from 'child_process'
 import { EventEmitter } from 'events'
 import fs from 'fs'
 import os from 'os'
@@ -7,13 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startDirtySpecWatcher, type DirtySpecWatcher } from './watcher'
 import type { DirtySpecStore } from './store'
 import * as gitRepo from '../../../../shared/git-repo'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 let featuresDir: string
-
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
 
 function writeFeature(name: string, opts: { withE2eDir?: boolean; withGit?: boolean } = {}): string {
   const dir = path.join(featuresDir, name)
@@ -26,12 +22,12 @@ function writeFeature(name: string, opts: { withE2eDir?: boolean; withGit?: bool
     fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   }
   if (opts.withGit) {
-    git(dir, ['init', '-q'])
-    git(dir, ['config', 'user.email', 't@t.dev'])
-    git(dir, ['config', 'user.name', 'test'])
+    git(dir, 'init', '-q')
+    git(dir, 'config', 'user.email', 't@t.dev')
+    git(dir, 'config', 'user.name', 'test')
     fs.writeFileSync(path.join(dir, 'README.md'), 'x')
-    git(dir, ['add', '.'])
-    git(dir, ['commit', '-q', '-m', 'init'])
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'init')
   }
   return dir
 }
@@ -243,12 +239,12 @@ describe('startDirtySpecWatcher', () => {
     // Two features living inside the same git repo (nested dirs under one root).
     const repoRoot = path.join(featuresDir, 'repo')
     fs.mkdirSync(repoRoot, { recursive: true })
-    git(repoRoot, ['init', '-q'])
-    git(repoRoot, ['config', 'user.email', 't@t.dev'])
-    git(repoRoot, ['config', 'user.name', 'test'])
+    git(repoRoot, 'init', '-q')
+    git(repoRoot, 'config', 'user.email', 't@t.dev')
+    git(repoRoot, 'config', 'user.name', 'test')
     fs.writeFileSync(path.join(repoRoot, 'README.md'), 'x')
-    git(repoRoot, ['add', '.'])
-    git(repoRoot, ['commit', '-q', '-m', 'init'])
+    git(repoRoot, 'add', '.')
+    git(repoRoot, 'commit', '-q', '-m', 'init')
 
     const aDir = path.join(repoRoot, 'a')
     const bDir = path.join(repoRoot, 'b')

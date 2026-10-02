@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerPortifyTools } from './portify'
 import { inputFingerprint } from '../elicitation'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
@@ -330,10 +330,13 @@ describe('cancel_portify and remove_portification', () => {
     expect(await text('cancel_portify', { workflowId: 'wf-1', confirm: true })).toContain('already aborted')
   })
 
-  it('un-portifies a feature and announces it', async () => {
+  it('un-portifies a feature without adding to the writer-owned announcement', async () => {
     const published: unknown[] = []
     const { call } = harness({
-      removePortification: () => ({ name: 'checkout', portified: false, reverted: true }),
+      removePortification: () => {
+        published.push({ type: 'features-changed' })
+        return { name: 'checkout', portified: false, reverted: true }
+      },
       workspaceEvents: { publish: (e: unknown) => published.push(e) },
     })
 

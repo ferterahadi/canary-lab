@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from '../shared/repository-observer'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -11,13 +12,17 @@ import { z } from 'zod'
 export type CanaryLabToolHandler = (args: Record<string, unknown>, ctx: ServerContext) =>
   CallToolResult | InputRequiredResult | Promise<CallToolResult | InputRequiredResult>
 import type { RunStore } from '../features/runs/logic/run-store'
-import type { RunDetail } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { DirtySpecStore } from '../features/runs/logic/dirty-specs/store'
 import type { RepoUpdateRefusal } from '../features/runs/logic/runtime/repo-upstream-update'
 import { type ResolveVerificationInput } from '../features/coverage/logic/verification'
-import { buildTestReviewPacket, deterministicEvaluationRewrite, evaluationTextSlots } from '../features/evaluation/logic/test-review-export'
+import { buildTestReviewPacket } from '../features/evaluation/logic/test-review/packet'
+import {
+  deterministicEvaluationRewrite,
+  evaluationTextSlots,
+} from '../features/evaluation/logic/test-review/rewrite'
 import { type WorkspaceEventPublisher } from '../shared/workspace-events'
 import type {
   PortifyManifest,
@@ -37,16 +42,6 @@ export const evaluationTextSlotInput = z.object({
   id: z.string(),
   text: z.string(),
 })
-
-// The external-submission shapes (coverage mappings, summary requirements, the
-// variant dimension) moved to the coverage logic layer so the flight's
-// external-work responders validate with the SAME schemas these tools declare —
-// re-exported here so the tool groups keep one import home.
-export {
-  coverageMappingInput,
-  summaryRequirementInput,
-  variantDimensionInput,
-} from '../features/coverage/logic/coverage/external-submissions'
 
 export const evaluationRewriteInput = z.object({
   formatVersion: z.number().optional(),
@@ -113,6 +108,9 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  repositoryObserver?: RepositoryObserver
+  /** Shared with REST; suite repository mutations refuse active runs or discovery repair. */
+  isRepoActive?: (feature: string, repo: string) => boolean
   coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>
   testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   getUiUrl?: () => string | undefined
@@ -158,7 +156,8 @@ export interface CanaryLabMcpDeps {
   ) => Promise<{ runId: string }>
   /** PUT /api/features/:name/envsets/:env/:slot — overwrites a slot file's
    *  parsed entries. Provided as a dep so MCP `write_envset` can reuse the
-   *  REST handler's path-traversal and feature-resolution checks. */
+   *  REST handler's path-traversal and feature-resolution checks. The writer
+   *  owns mutation events; the MCP adapter only translates the response. */
   writeEnvsetSlot?: (
     feature: string,
     env: string,
@@ -197,7 +196,8 @@ export interface CanaryLabMcpDeps {
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   /** Un-portify a saved feature: revert its config (snapshot or legacy strip) +
-   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
+   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay.
+   *  The injected writer owns mutation events; the tool only translates its result. */
   removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   /** The Getting Started claim surface for the tools that create their work
    *  records through logic calls rather than REST (start_external_draft,

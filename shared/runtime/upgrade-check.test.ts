@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   stampPath,
@@ -11,20 +10,9 @@ import {
   getInstalledPackageVersion,
   getInstalledPackageName,
 } from './upgrade-check'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-upgrade-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) {
-    const d = tmpDirs.pop()!
-    fs.rmSync(d, { recursive: true, force: true })
-  }
-})
+const mkTmp = trackTempDirs('cl-upgrade-')
 
 describe('stampPath', () => {
   it('resolves to logs/.canary-lab-version under the project root', () => {

@@ -3,24 +3,29 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { FeatureDocsListing } from '@/shared/api/types'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
+import * as flightsApi from '@/shared/api/flights'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { CoverageDocsRail } from './CoverageDocsRail'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listFeatureDocs: vi.fn(),
-    importFeatureDoc: vi.fn(),
-    deleteFeatureDoc: vi.fn(),
-    clearPrdSummary: vi.fn(),
-    openEditor: vi.fn(),
-    linkFeatureDocPath: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  listFeatureDocs: vi.fn(),
+  importFeatureDoc: vi.fn(),
+  deleteFeatureDoc: vi.fn(),
+  clearPrdSummary: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  openEditor: vi.fn(),
+}))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
+  linkFeatureDocPath: vi.fn(),
+}))
 
 const LISTING: FeatureDocsListing = {
   feature: 'checkout',
@@ -52,12 +57,12 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.listFeatureDocs).mockResolvedValue(structuredClone(LISTING))
-  vi.mocked(api.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'features/checkout/docs/x.md' })
-  vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
-  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'], untagged: [] })
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
-  vi.mocked(api.linkFeatureDocPath).mockResolvedValue({ written: true, relativePath: 'docs/prd.md', linked: true })
+  vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue(structuredClone(LISTING))
+  vi.mocked(coverageApi.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'features/checkout/docs/x.md' })
+  vi.mocked(coverageApi.deleteFeatureDoc).mockResolvedValue({ deleted: true })
+  vi.mocked(coverageApi.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'], untagged: [] })
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
+  vi.mocked(flightsApi.linkFeatureDocPath).mockResolvedValue({ written: true, relativePath: 'docs/prd.md', linked: true })
 })
 
 afterEach(() => {
@@ -96,15 +101,19 @@ async function flushUntil(predicate: () => boolean, max = 50): Promise<void> {
   }
 }
 
+function expandSources(): void {
+  act(() => { container.querySelector<HTMLButtonElement>('[data-testid^="doc-disclosure-"]')!.click() })
+}
+
 describe('CoverageDocsRail', () => {
   it('offers relinking for a broken source even when a summary freezes the document set', async () => {
     const listing = structuredClone(LISTING)
     listing.docs[0] = { ...listing.docs[0], linked: true, broken: true, linkTarget: '/old/prd.md' }
-    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue(listing)
     const onDocsChanged = vi.fn()
     await mount({ onDocsChanged })
     await act(async () => { container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')!.click() })
-    expect(api.openEditor).not.toHaveBeenCalled()
+    expect(workspaceApi.openEditor).not.toHaveBeenCalled()
     expect(container.textContent).toContain('Source unavailable. Where is the file now?')
     act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Relink prd.md"]')!.click() })
     const input = container.querySelector<HTMLInputElement>('[aria-label="New path for prd.md"]')!
@@ -112,18 +121,18 @@ describe('CoverageDocsRail', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '/new/renamed.md')
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    vi.mocked(api.listFeatureDocs).mockResolvedValue(LISTING)
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue(LISTING)
     await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
-    expect(api.linkFeatureDocPath).toHaveBeenCalledWith('checkout', '/new/renamed.md', { relPath: 'prd.md', relink: true })
+    expect(flightsApi.linkFeatureDocPath).toHaveBeenCalledWith('checkout', '/new/renamed.md', { relPath: 'prd.md', relink: true })
     expect(onDocsChanged).toHaveBeenCalledOnce()
     expect(container.textContent).not.toContain('Source unavailable')
-    expect(api.clearPrdSummary).not.toHaveBeenCalled()
+    expect(coverageApi.clearPrdSummary).not.toHaveBeenCalled()
   })
 
   it('keeps an invalid replacement editable and disables relinking during generation', async () => {
     const listing = structuredClone(LISTING)
     listing.docs[0] = { ...listing.docs[0], linked: true, broken: true }
-    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue(listing)
     await mount({ generating: true })
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Relink prd.md"]')!.disabled).toBe(true)
     await mount()
@@ -133,7 +142,7 @@ describe('CoverageDocsRail', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '/missing.md')
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    vi.mocked(api.linkFeatureDocPath).mockRejectedValue(new Error('target does not exist'))
+    vi.mocked(flightsApi.linkFeatureDocPath).mockRejectedValue(new Error('target does not exist'))
     await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('target does not exist')
     expect(input.value).toBe('/missing.md')
@@ -144,16 +153,51 @@ describe('CoverageDocsRail', () => {
 
   it('lists docs when open', async () => {
     await mount({ open: true })
-    expect(api.listFeatureDocs).toHaveBeenCalledWith('checkout')
-    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
+    expect(coverageApi.listFeatureDocs).toHaveBeenCalledWith('checkout')
     expect(container.querySelector('[data-testid="doc-pill-_prd-summary.json"]')).toBeTruthy()
+    expandSources()
+    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
+  })
+
+  it('nests the source docs under a collapsed summary pill that the caret toggles', async () => {
+    await mount({ open: true })
+    const summary = container.querySelector<HTMLElement>('[data-testid="doc-pill-_prd-summary.json"]')!
+    expect(summary.textContent).toContain('Generated from 1 doc · 800 B')
+    expect(container.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
+
+    const caret = container.querySelector<HTMLButtonElement>('[data-testid="doc-disclosure-_prd-summary.json"]')!
+    expect(caret.getAttribute('aria-expanded')).toBe('false')
+    act(() => { caret.click() })
+    expect(caret.getAttribute('aria-expanded')).toBe('true')
+    expect(workspaceApi.openEditor).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="summary-source-docs"] [data-testid="doc-pill-prd.md"]')).toBeTruthy()
+
+    act(() => { summary.click() })
+    expect(workspaceApi.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/_prd-summary.json' })
+    act(() => { caret.click() })
+    expect(container.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
+  })
+
+  it('keeps the flat list before a summary is generated', async () => {
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ ...structuredClone(LISTING), docs: [LISTING.docs[0]], hasPrdSummary: false })
+    await mount({ open: true, summaryAbsent: true })
+    expect(container.querySelector('[data-testid^="doc-disclosure-"]')).toBeNull()
+    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
+  })
+
+  it('shows a generated doc flat when no source docs remain to nest', async () => {
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ ...structuredClone(LISTING), docs: [LISTING.docs[1]], sourceDocCount: 0 })
+    await mount({ open: true })
+    expect(container.querySelector('[data-testid^="doc-disclosure-"]')).toBeNull()
+    expect(container.querySelector('[data-testid="doc-pill-_prd-summary.json"]')?.textContent).toContain('Generated PRD artifact')
   })
 
   it('explains a linked doc only on icon hover and opens its project entry path', async () => {
     const listing = structuredClone(LISTING)
     listing.docs[0] = { ...listing.docs[0], linked: true, linkTarget: '/original/prd.md' }
-    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue(listing)
     await mount()
+    expandSources()
     const card = container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')!
     const icon = card.querySelector<HTMLElement>('[data-testid="doc-linked-prd.md"]')!
     expect(icon.querySelector('svg')).toBeTruthy()
@@ -168,7 +212,7 @@ describe('CoverageDocsRail', () => {
     expect(document.querySelector('[role="tooltip"]')).toBeNull()
 
     await act(async () => { card.click() })
-    expect(api.openEditor).toHaveBeenCalledWith({ file: listing.docs[0].absPath })
+    expect(workspaceApi.openEditor).toHaveBeenCalledWith({ file: listing.docs[0].absPath })
   })
 
   it('collapsed shows the toggle and hides the doc list', async () => {
@@ -195,13 +239,13 @@ describe('CoverageDocsRail', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }))
       await Promise.resolve()
     })
-    await flushUntil(() => vi.mocked(api.importFeatureDoc).mock.calls.length >= 3)
-    expect(api.importFeatureDoc).toHaveBeenCalledTimes(3)
+    await flushUntil(() => vi.mocked(coverageApi.importFeatureDoc).mock.calls.length >= 3)
+    expect(coverageApi.importFeatureDoc).toHaveBeenCalledTimes(3)
     expect(onDocsChanged).toHaveBeenCalled()
   })
 
   it('one failing file yields a combined error while the others still import', async () => {
-    vi.mocked(api.importFeatureDoc)
+    vi.mocked(coverageApi.importFeatureDoc)
       .mockResolvedValueOnce({ written: true, relativePath: 'a' })
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ written: true, relativePath: 'c' })
@@ -214,7 +258,7 @@ describe('CoverageDocsRail', () => {
       await Promise.resolve()
     })
     await flushUntil(() => container.querySelector('[data-testid="docs-error"]') != null)
-    expect(api.importFeatureDoc).toHaveBeenCalledTimes(3)
+    expect(coverageApi.importFeatureDoc).toHaveBeenCalledTimes(3)
     const err = container.querySelector('[data-testid="docs-error"]')
     expect(err?.textContent).toContain('1 of 3 docs failed')
     expect(err?.textContent).toContain('b.md')
@@ -231,7 +275,7 @@ describe('CoverageDocsRail', () => {
   })
 
   it('Generate is disabled when there are zero source docs', async () => {
-    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
     await mount({ open: true, summaryAbsent: true })
     expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.disabled).toBe(true)
   })
@@ -249,14 +293,14 @@ describe('CoverageDocsRail', () => {
     // First click only arms the confirm — nothing destructive yet.
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')?.click() })
     expect(container.querySelector('[data-testid="confirm-redo"]')).toBeTruthy()
-    expect(api.clearPrdSummary).not.toHaveBeenCalled()
+    expect(coverageApi.clearPrdSummary).not.toHaveBeenCalled()
     // Confirm → clears the generated summary and deletes each source doc.
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="confirm-redo"]')?.click()
       await Promise.resolve()
     })
-    expect(api.clearPrdSummary).toHaveBeenCalledWith('checkout')
-    expect(api.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
+    expect(coverageApi.clearPrdSummary).toHaveBeenCalledWith('checkout')
+    expect(coverageApi.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
   })
 
   it('Cancel dismisses the redo confirm without deleting anything', async () => {
@@ -264,8 +308,8 @@ describe('CoverageDocsRail', () => {
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="redo-from-start"]')?.click() })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="cancel-redo"]')?.click() })
     expect(container.querySelector('[data-testid="redo-from-start"]')).toBeTruthy()
-    expect(api.clearPrdSummary).not.toHaveBeenCalled()
-    expect(api.deleteFeatureDoc).not.toHaveBeenCalled()
+    expect(coverageApi.clearPrdSummary).not.toHaveBeenCalled()
+    expect(coverageApi.deleteFeatureDoc).not.toHaveBeenCalled()
   })
 
   it('generating=true disables the redo button', async () => {
@@ -281,8 +325,9 @@ describe('CoverageDocsRail', () => {
 
   it('clicking a doc pill opens it in the configured editor', async () => {
     await mount({ open: true, summaryAbsent: false })
+    expandSources()
     act(() => { container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')?.click() })
-    expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/prd.md' })
+    expect(workspaceApi.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/prd.md' })
   })
 
   it('before a summary exists, generating=true HIDES the editable add + remove (not just disables)', async () => {
@@ -304,7 +349,7 @@ describe('CoverageDocsRail', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="remove-doc-prd.md"]')?.click()
       await Promise.resolve()
     })
-    expect(api.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
+    expect(coverageApi.deleteFeatureDoc).toHaveBeenCalledWith('checkout', 'prd.md')
     expect(onDocsChanged).toHaveBeenCalled()
   })
 

@@ -3,21 +3,18 @@
 import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../api/client'
+import * as configApi from '../api/config'
 import { GlobalStatusBar } from './GlobalStatusBar'
 import type { TestReviewReceipt } from '@shared/test-review'
-import type { RunDetail } from '../api/types'
+import type { RunDetail } from '@shared/run-detail'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return {
-    ...actual,
-    getMcpHealth: vi.fn(),
-    getFeatureTests: vi.fn().mockResolvedValue([{ file: 'test.ts', tests: [{}, {}, {}] }]),
-  }
-})
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getMcpHealth: vi.fn(),
+  getFeatureTests: vi.fn().mockResolvedValue([{ file: 'test.ts', tests: [{}, {}, {}] }]),
+}))
 
 const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
 const mockRuns = vi.hoisted(() => ({ value: [] as unknown[] }))
@@ -78,7 +75,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   window.localStorage.removeItem('cl-mcp-connect-open')
-  vi.mocked(api.getMcpHealth).mockImplementation(async () => {
+  vi.mocked(configApi.getMcpHealth).mockImplementation(async () => {
     const profile = 'compact'
     const tools = ['exec']
     return {
@@ -166,7 +163,7 @@ it('suppresses the recommendation while an existing run request is continuing', 
 
 it('uses honest generic wording when current source cannot be read', async () => {
   acceptance.enabled = true
-  vi.mocked(api.getFeatureTests).mockRejectedValueOnce(new Error('Unavailable'))
+  vi.mocked(configApi.getFeatureTests).mockRejectedValueOnce(new Error('Unavailable'))
   await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} onRunLatestTests={vi.fn()} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-test-review-accepted"]')?.textContent).toContain('Current source changes are committed.')
@@ -359,7 +356,7 @@ describe('GlobalStatusBar', () => {
     expect(container.textContent).not.toContain('12 tools')
     expect(container.textContent).not.toContain('Check health')
     expect(container.textContent).not.toContain('Test MCP')
-    expect(api.getMcpHealth).toHaveBeenCalledWith()
+    expect(configApi.getMcpHealth).toHaveBeenCalledWith()
 
     const indicator = [...container.querySelectorAll('button')]
       .find((button) => button.getAttribute('aria-label') === 'MCP connection details')

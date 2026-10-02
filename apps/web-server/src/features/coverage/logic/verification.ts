@@ -1,3 +1,5 @@
+import { listFiles } from '../../../shared/list-files'
+import { stripTerminalEscapes } from '../../../shared/terminal-text'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
@@ -9,10 +11,13 @@ import type {
   VerificationTarget,
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
-import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
+import type { PlaywrightArtifactGroup } from '../../../../../../shared/run-detail'
+import type { RunDetail, RunSummaryFailedEntry } from '../../../../../../shared/run-detail'
 import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
 import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
+import { bootsServicesForEnv } from '../../runs/logic/runtime/service-specs'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
@@ -189,8 +194,7 @@ export function resolveVerificationRun(
     if (target.url) {
       try {
         const url = new URL(target.url)
-        const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-        if (loopback && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
+        if (isLoopbackHost(url.hostname) && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
       } catch {
         /* An unparsable URL already fails the run visibly at request time. */
       }
@@ -290,11 +294,7 @@ function writeConfigFile(
   file: VerificationConfigFile,
   events?: WorkspaceEventPublisher,
 ): void {
-  const target = verificationConfigPath(feature)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  const tmp = `${target}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify({ configs: file.configs }, null, 2) + '\n')
-  fs.renameSync(tmp, target)
+  atomicWriteJson(verificationConfigPath(feature), { configs: file.configs })
   publishWorkspaceEvent(events, { type: 'verification-config-changed', feature: feature.name })
 }
 
@@ -371,6 +371,30 @@ function singleUrlEnvVar(urls: Record<string, string>): string | undefined {
   return keys.length === 1 ? keys[0] : undefined
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
+
+/** The deployed origins a suite reaches when it boots nothing in `env`, keyed
+ *  by envset variable. A run's repair cycle edits a worktree those hosts never
+ *  read, so such a run is a Verify in Run clothing. Origins only: an envset URL
+ *  may carry credentials or tokens in its userinfo or query. Null when a
+ *  service boots, or when no envset URL leaves this machine. */
+export function remoteOnlyTargets(feature: FeatureConfig, env: string): Record<string, string> | null {
+  if (bootsServicesForEnv(feature, env)) return null
+  const remote: Record<string, string> = {}
+  for (const [key, value] of Object.entries(readEnvsetUrlEntries(feature, env))) {
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch {
+      continue /* An unparsable URL names no host to verify. */
+    }
+    if (!isLoopbackHost(url.hostname)) remote[key] = url.origin
+  }
+  return Object.keys(remote).length > 0 ? remote : null
+}
+
 function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefined): Record<string, string> {
   if (!envsetId) return {}
   const envsetsDir = path.join(feature.featureDir, 'envsets')
@@ -403,16 +427,6 @@ function parseDotenvLine(line: string): { key: string; value: string } | null {
     value = value.slice(1, -1)
   }
   return { key, value }
-}
-
-function listFiles(root: string): string[] {
-  const out: string[] = []
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const full = path.join(root, entry.name)
-    if (entry.isDirectory()) out.push(...listFiles(full))
-    else if (entry.isFile()) out.push(full)
-  }
-  return out
 }
 
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
@@ -460,5 +474,5 @@ function tail(value: string, maxChars: number): string {
 }
 
 function stripAnsi(value: string): string {
-  return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+  return stripTerminalEscapes(value, 'verification')
 }

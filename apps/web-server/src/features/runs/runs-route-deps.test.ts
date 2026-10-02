@@ -4,15 +4,17 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { PaneBroker } from './logic/pane-broker'
-import { createRegistry, RunStore, type OrchestratorRegistry } from './logic/run-store'
+import { RunStore } from './logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from './logic/run-registry'
 import { buildRunPaths, runDirFor } from './logic/runtime/run-paths'
-import type { RunManifest } from './logic/runtime/manifest'
+import type { RunManifest } from '../../../../../shared/run-manifest'
 import { MODE_COPY } from './logic/runtime/auto-heal'
 import { buildRunScheduling } from './run-scheduling'
 import { buildRunsRouteDeps, type RunsRouteDepsParts } from './runs-route-deps'
 import type { ServerContext } from '../../server-context'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
+import { git } from '../../../../../tools/test-helpers/git-repo'
 
 /**
  * The two mocked edges, and why they are the only two.
@@ -92,18 +94,27 @@ const agentProbe = vi.hoisted(() => ({
   promptFails: null as string | null,
 }))
 
-vi.mock('./logic/runtime/auto-heal', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./logic/runtime/auto-heal')>()
+vi.mock('./logic/runtime/heal-agent-spawn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./logic/runtime/heal-agent-spawn')>()),
+  pickAvailableHealAgent: (requested?: string) => {
+    agentProbe.asked.push(requested)
+    return agentProbe.answer
+  },
+}))
+vi.mock('../agent-sessions/logic/agent-binary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../agent-sessions/logic/agent-binary')>()
   return {
     ...actual,
-    pickAvailableHealAgent: (requested?: string) => {
-      agentProbe.asked.push(requested)
-      return agentProbe.answer
-    },
     resolveAgentBinary: (agent: Parameters<typeof actual.resolveAgentBinary>[0]) => {
       agentProbe.resolved.push(agent)
       return agentProbe.binaryFound ? `/opt/canary/bin/${agent}` : null
     },
+  }
+})
+vi.mock('./logic/runtime/auto-heal', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./logic/runtime/auto-heal')>()
+  return {
+    ...actual,
     buildOrchestratorHealPrompt: (opts: Parameters<typeof actual.buildOrchestratorHealPrompt>[0]) => {
       if (agentProbe.promptFails) throw new Error(agentProbe.promptFails)
       return actual.buildOrchestratorHealPrompt(opts)
@@ -214,10 +225,6 @@ function writeEnvset(featureDir: string, setName: string, rawConfig?: string): s
   return target
 }
 
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'ignore' })
-}
-
 /** A real git repo, because `addWorktree` / `hydrateWorkingTreeDiff` shell out
  *  to real git and a fake would only prove the fake was called. */
 function initRepo(dir: string): string {
@@ -228,11 +235,11 @@ function initRepo(dir: string): string {
   // copy it into the fresh worktree, which both inflates the untracked count
   // and pre-creates the directory `linkNodeModules` refuses to overwrite.
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n')
-  git(dir, ['init', '-q', '-b', 'main'])
-  git(dir, ['config', 'user.email', 'test@example.com'])
-  git(dir, ['config', 'user.name', 'Test'])
-  git(dir, ['add', '-A'])
-  git(dir, ['commit', '-q', '-m', 'init'])
+  git(dir, 'init', '-q', '-b', 'main')
+  git(dir, 'config', 'user.email', 'test@example.com')
+  git(dir, 'config', 'user.name', 'Test')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'init')
   return dir
 }
 
@@ -244,16 +251,16 @@ function initRepo(dir: string): string {
 function initBehindClone(dir: string): { from: string; to: string } {
   const originDir = path.join(tmpDir, 'origin.git')
   const seedDir = initRepo(path.join(tmpDir, 'seed'))
-  git(tmpDir, ['init', '-q', '--bare', '-b', 'main', originDir])
-  git(seedDir, ['remote', 'add', 'origin', originDir])
-  git(seedDir, ['push', '-q', '-u', 'origin', 'main'])
-  git(tmpDir, ['clone', '-q', originDir, dir])
-  git(dir, ['config', 'user.email', 'test@example.com'])
-  git(dir, ['config', 'user.name', 'Test'])
+  git(tmpDir, 'init', '-q', '--bare', '-b', 'main', originDir)
+  git(seedDir, 'remote', 'add', 'origin', originDir)
+  git(seedDir, 'push', '-q', '-u', 'origin', 'main')
+  git(tmpDir, 'clone', '-q', originDir, dir)
+  git(dir, 'config', 'user.email', 'test@example.com')
+  git(dir, 'config', 'user.name', 'Test')
   const from = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
   fs.writeFileSync(path.join(seedDir, 'server.ts'), 'export const port = 5000\n')
-  git(seedDir, ['commit', '-qam', 'bump port'])
-  git(seedDir, ['push', '-q', 'origin', 'main'])
+  git(seedDir, 'commit', '-qam', 'bump port')
+  git(seedDir, 'push', '-q', 'origin', 'main')
   const to = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim()
   return { from, to }
 }
@@ -1117,7 +1124,7 @@ describe('startRun — external heal origin', () => {
     expect(runnerLogText(runId)).toContain('claimed and will drive the heal loop')
   })
 
-  it('omits the optional client fields the request did not supply', async () => {
+  it.each([undefined, ''])('omits absent or empty optional client fields (%j)', async (metadata) => {
     writeFeature('demo')
     const h = harness()
 
@@ -1125,6 +1132,8 @@ describe('startRun — external heal origin', () => {
       kind: 'external',
       sessionId: 'session-0000000000',
       clientKind: 'other',
+      clientVersion: metadata,
+      conversationName: metadata,
     })
 
     const session = lastOpts().externalHealSession as Record<string, unknown>

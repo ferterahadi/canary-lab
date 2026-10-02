@@ -1,5 +1,5 @@
 import type { ExternalSessionMeta } from '../../../../../../shared/run-mode'
-import type { FlightManifest } from './types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 
 /** Resolve the identity passed into standalone external workflows. New
  *  MCP-driven Flights carry the real conversation metadata. Old records fall

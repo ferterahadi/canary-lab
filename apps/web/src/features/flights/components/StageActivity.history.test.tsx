@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => ({
   connectAgentSessionStream: vi.fn(() => ({ close: vi.fn() })),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightAgentSession: mocks.getFlightAgentSession,
 }))
 
@@ -40,7 +40,8 @@ describe('StageActivityRail multi-session chronology', () => {
         sessionId: stage,
         events: [{
           kind: 'assistant-message',
-          timestamp: '2026-08-26T01:00:00.000Z',
+          // Each event really occurs in its session; chronology must use event time.
+          timestamp: `2026-08-26T01:0${(Number(stage.slice(-3)) - 1) * 4}:00.000Z`,
           text: eventText[stage],
         }],
       }
@@ -99,7 +100,7 @@ describe('StageActivityRail multi-session chronology', () => {
     expect(text.indexOf('Pass 2 authoring event')).toBeLessThan(text.indexOf('validated 1 file(s)'))
   })
 
-  it('keeps old raw-chunk separators readable without rendering them', async () => {
+  it('labels undated historical rows separately without rendering copied transcripts', async () => {
     await act(async () => {
       root.render(
         <StageActivityRail
@@ -124,10 +125,58 @@ describe('StageActivityRail multi-session chronology', () => {
     })
 
     const text = container.textContent ?? ''
-    expect(text.indexOf('Pass 1 authoring event')).toBeLessThan(text.indexOf('validated 2 file(s)'))
-    expect(text.indexOf('validated 2 file(s)')).toBeLessThan(text.indexOf('Pass 1 mapping event'))
-    expect(text.indexOf('Pass 1 mapping event')).toBeLessThan(text.indexOf('mapped 4 requirement(s)'))
+    expect(text).toContain('Time unavailable')
+    expect(text.indexOf('validated 2 file(s)')).toBeLessThan(text.indexOf('mapped 4 requirement(s)'))
+    expect(text.indexOf('mapped 4 requirement(s)')).toBeLessThan(text.indexOf('Pass 1 authoring event'))
+    expect(text.indexOf('Pass 1 authoring event')).toBeLessThan(text.indexOf('Pass 1 mapping event'))
     expect(text).not.toContain('legacy author chunk')
     expect(text).not.toContain('legacy mapping chunk')
+  })
+
+  it('opens a collapsed band for a routed log entry, and records it open', async () => {
+    mocks.getFlightAgentSession.mockResolvedValue({ agent: 'claude', sessionId: 'docs', events: [
+      { kind: 'assistant-message', timestamp: '2026-08-26T01:00:00.000Z', text: 'Collected the docs.\nThree files.' },
+    ] })
+    const onOpenChange = vi.fn()
+    await act(async () => {
+      root.render(
+        <StageActivityRail
+          stageKey="docs"
+          sessionSources={[{ label: 'Summarizing docs', source: { kind: 'flight', flightId: 'fl_1', stage: 'docs', live: false } }]}
+          live={false}
+          settled
+          log=""
+          open={false}
+          onOpenChange={onOpenChange}
+          openLogId="flight:fl_1:docs:event:0"
+          onOpenLogChange={vi.fn()}
+        />,
+      )
+    })
+
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    // The routed row is the one shown open and marked selected.
+    expect(container.querySelector('li[data-kind="agent"] .agentts-log')?.getAttribute('data-selected')).toBe('true')
+    expect(container.querySelector('[data-testid="activity-log-modal"]')?.textContent).toContain('Three files.')
+  })
+
+  it('caps the band at the whole column it shares with the stage panes', async () => {
+    const column = document.createElement('div')
+    container.appendChild(column)
+    const columnRoot = createRoot(column)
+    Object.defineProperty(column, 'clientHeight', { configurable: true, value: 600 })
+    await act(async () => {
+      columnRoot.render(
+        <>
+          <div />
+          <StageActivityRail stageKey="docs" sessionSources={[]} live={false} settled log="" open onOpenChange={vi.fn()} />
+        </>,
+      )
+    })
+
+    const handle = column.querySelector<HTMLElement>('[data-testid="stage-activity-resize"]')!
+    await act(async () => { handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })) })
+    expect(handle.getAttribute('aria-valuenow')).toBe('600')
+    act(() => columnRoot.unmount())
   })
 })

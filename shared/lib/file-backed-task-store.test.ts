@@ -3,10 +3,14 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  abortOnRestart,
   FileBackedTaskStore,
   IllegalTaskTransitionError,
+  INTERRUPTED_BY_RESTART,
+  legacyEntryId,
   resetSharedTaskStores,
   sharedTaskStore,
+  TaskListeners,
 } from './file-backed-task-store'
 
 interface Rec {
@@ -449,5 +453,66 @@ describe('sharedTaskStore', () => {
     const first = sharedTaskStore<Rec>(config(dir))
     resetSharedTaskStores()
     expect(sharedTaskStore<Rec>(config(dir))).not.toBe(first)
+  })
+})
+
+describe('FileBackedTaskStore.rows', () => {
+  let logsDir: string
+  beforeEach(() => { logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-task-rows-')) })
+  afterEach(() => { fs.rmSync(logsDir, { recursive: true, force: true }) })
+
+  it('lists the feature-shaped rows without the store bookkeeping', () => {
+    const store = makeStore(logsDir)
+    store.save({ id: 'w1', status: 'running', feature: 'shop', createdAt: '2026-01-01T00:00:00Z' })
+
+    expect(store.rows<{ status: string; feature: string }>()).toEqual([{ status: 'running', feature: 'shop' }])
+  })
+})
+
+describe('legacyEntryId', () => {
+  const idOf = legacyEntryId('workflowId')
+
+  it('prefers `id`, falls back to the legacy key, and leaves an unkeyed row unaddressable', () => {
+    expect(idOf({ id: 'new', createdAt: 't', workflowId: 'old' })).toBe('new')
+    expect(idOf({ workflowId: 'old', createdAt: 't' } as never)).toBe('old')
+    // A legacy key holding something other than a string is not an id: joining
+    // it into a path is how a boot reconcile would address a junk directory.
+    expect(idOf({ workflowId: 42, createdAt: 't' } as never)).toBeUndefined()
+  })
+})
+
+describe('abortOnRestart', () => {
+  type Job = { status: 'running' | 'done' | 'aborted'; endedAt?: string; error?: string }
+  const policy = abortOnRestart<Job>((job) => job.status === 'running')
+
+  it('aborts with the restart reason, keeping an end time or error already recorded', () => {
+    expect(policy.isInterrupted({ status: 'running' })).toBe(true)
+    expect(policy.isInterrupted({ status: 'done' })).toBe(false)
+    expect(policy.mark({ status: 'running' }, 'now')).toEqual({ status: 'aborted', endedAt: 'now', error: INTERRUPTED_BY_RESTART })
+    expect(policy.mark({ status: 'running', endedAt: 'then', error: 'disk full' }, 'now'))
+      .toEqual({ status: 'aborted', endedAt: 'then', error: 'disk full' })
+  })
+
+  it('refuses at compile time a record whose status cannot be aborted', () => {
+    type Draft = { status: 'open' | 'closed' }
+    // @ts-expect-error — `aborted` is not a Draft status, so the policy would
+    // write a state Draft's readers reject.
+    abortOnRestart<Draft>((draft) => draft.status === 'open')
+  })
+})
+
+describe('TaskListeners', () => {
+  it('reaches every listener even when one throws, and stops after delete', () => {
+    const listeners = new TaskListeners<number>()
+    const heard: number[] = []
+    const record = (n: number) => { heard.push(n) }
+    listeners.add(() => { throw new Error('bad subscriber') })
+    listeners.add(record)
+
+    listeners.emit(1)
+    listeners.delete(record)
+    listeners.emit(2)
+
+    expect(heard).toEqual([1])
   })
 })

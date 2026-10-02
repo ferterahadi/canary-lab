@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { comparisonPatchRows } from '@/shared/lib/comparison-diff'
+import { comparisonPatchRows } from '@shared/comparison-patch'
 import { ComparisonLegend, ComparisonTable } from './ComparisonTable'
 
 /** Captured patches use the same before/after presentation as semantic changes.

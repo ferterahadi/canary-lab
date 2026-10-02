@@ -1,4 +1,4 @@
-import path from 'path'
+
 import type { FastifyInstance } from 'fastify'
 import { runsRoutes } from './routes/runs'
 import { journalRoutes } from './routes/journal'

@@ -1,24 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { ConfigValue, PortifyManifest } from '@/shared/api/client'
-import { ConfirmModal, Section, TrashIcon } from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import type { ConfigValue } from '@/shared/api/config'
+import { Section } from '@/shared/ui/atoms'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import { TrashIcon } from '@/shared/ui/Icons'
 import { ReadOnlyBar } from './SaveBar'
-import {
-  isActivePortify,
-  latestSavedWorkflowId,
-  SavedOverlayPanel,
-  usePortify,
-} from '@/features/portify'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import { latestSavedWorkflowId } from '@/features/portify/state/portify-state'
+import { SavedOverlayPanel } from '@/features/portify/components/SavedOverlayPanel'
+import { usePortify, usePortifyDetail } from '@/features/portify/state/PortifyContext'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useCachedDoc } from './config-doc-cache'
 import { patchFileName } from '@shared/portify-overlay'
 import { portInjectability, startCommandPortSlotCounts, type PortInjectability } from '@shared/launcher/port-injectability'
-import {
-  deriveRepoName,
-  parseRepo,
-  PortSlotTable,
-  type RepoSlice,
-} from './ReposTab'
+import { PortSlotTable } from './ReposTab'
+import { deriveRepoName, parseRepo, type RepoSlice } from './repo-slice'
 
 /**
  * The frame every state of this tab shares: the inset scroller plus the footer
@@ -71,7 +67,7 @@ export function PortsTab({
   // Read-only: this tab no longer writes config, so a plain read replaces the
   // editable-slice + SaveBar. The doc is the SAME one General + Service read, so
   // it comes from the dialog-scoped cache — switching tabs no longer refetches it.
-  const cached = useCachedDoc(`config-doc:${feature}`, () => api.getFeatureConfigDoc(feature))
+  const cached = useCachedDoc(`config-doc:${feature}`, () => configApi.getFeatureConfigDoc(feature))
   const v = (cached.doc?.parsed.value ?? null) as { [k: string]: ConfigValue } | null
   const repos: RepoSlice[] | null = v == null
     ? null
@@ -101,19 +97,7 @@ export function PortsTab({
   // is the reliable source. `portified` is the verified gate — bandState below
   // is `'verified'` iff `portified` is true, and it's computed after the early
   // returns, so gate the fetch on the prop here.
-  const [overlay, setOverlay] = useState<PortifyManifest | null>(null)
-  const [overlayLoading, setOverlayLoading] = useState(false)
-  useEffect(() => {
-    if (!portified || !savedWorkflowId) { setOverlay(null); return }
-    let cancelled = false
-    setOverlay(null)
-    setOverlayLoading(true)
-    api.getPortify(savedWorkflowId)
-      .then((m) => { if (!cancelled) setOverlay(m) })
-      .catch(() => { if (!cancelled) setOverlay(null) })
-      .finally(() => { if (!cancelled) setOverlayLoading(false) })
-    return () => { cancelled = true }
-  }, [portified, savedWorkflowId])
+  const { manifest: overlay, loading: overlayLoading, error: overlayError, missing: overlayMissing, retry: retryOverlay } = usePortifyDetail(portified ? savedWorkflowId : null)
   // Live sync with every other Portify entry point (flight Parallel-readiness
   // stage, run-collision dialog, MCP): the `/ws/portify`-fed index is shared,
   // so an active workflow started ANYWHERE shows up here without a refresh.
@@ -149,7 +133,7 @@ export function PortsTab({
     setRemoving(true)
     setRemoveError(null)
     try {
-      await api.removePortifyOverlay(feature)
+      await configApi.removePortifyOverlay(feature)
       // features-changed → App refetches /api/features → `portified` flips false
       // (status band updates live). Drop the cached config doc too: the file was
       // reverted, so every tab reading it must re-read to lose the removed slots.
@@ -165,6 +149,9 @@ export function PortsTab({
   return (
     <>
       <PortsFrame>
+    {(overlayError || overlayMissing) && <div role="alert" className="p-4 text-xs text-danger">
+      {overlayError ?? 'Saved port work is no longer available.'} <button className="cl-button" onClick={retryOverlay}>Retry</button>
+    </div>}
         {/* Same inset card stack every other config tab uses (General, Service,
             Playwright): sibling Sections in a `flex flex-col gap-3 p-3` scroller,
             so no block bleeds to the modal edge. */}

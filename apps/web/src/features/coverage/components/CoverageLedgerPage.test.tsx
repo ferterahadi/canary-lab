@@ -6,12 +6,15 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
 import { readableTest } from '@/shared/api/__fixtures__/readable-test'
 
-import type { CoverageLedger } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
 
 import { CoverageLedgerPage } from './CoverageLedgerPage'
+import { pushEscapeLayer } from '@/shared/ui/Overlays'
 
 ;
 
@@ -40,21 +43,24 @@ vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
 
 vi.mock('shiki/wasm', () => ({ default: {} }))
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getFeatureCoverage: vi.fn(),
-    listFeatureDocs: vi.fn(),
-    regeneratePrdSummary: vi.fn(),
-    startCoverageJob: vi.fn(),
-    getProjectConfig: vi.fn(),
-    getCoverageJob: vi.fn(),
-    listCoverageJobs: vi.fn(),
-    getFeatureTests: vi.fn(),
-    openEditor: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
+  getFeatureCoverage: vi.fn(),
+  listFeatureDocs: vi.fn(),
+  regeneratePrdSummary: vi.fn(),
+  startCoverageJob: vi.fn(),
+  getCoverageJob: vi.fn(),
+  listCoverageJobs: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  openEditor: vi.fn(),
+}))
 
 const LEDGER: CoverageLedger = {
   feature: 'checkout',
@@ -106,17 +112,17 @@ let root: Root
 
 beforeEach(() => {
   // The Generate gate probes the config first — defaults keep it disarmed.
-  vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
-  vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
-  vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
-  vi.mocked(api.getFeatureTests).mockResolvedValue([
+  vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
+  vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
+  vi.mocked(coverageApi.listCoverageJobs).mockResolvedValue([]) // no running job by default
+  vi.mocked(configApi.getFeatureTests).mockResolvedValue([
     { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [], readable: readableTest('adds item') }] },
   ])
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
 })
 
 afterEach(() => {
@@ -157,5 +163,27 @@ describe('CoverageLedgerPage — flight generating banner (R14)', () => {
   it('renders no banner when no flight is generating', async () => {
     await mount()
     expect(container.querySelector('[data-testid="coverage-flight-generating"]')).toBeNull()
+  })
+})
+
+describe('CoverageLedgerPage — Escape', () => {
+  const escape = () => act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+
+  it('leaves Escape to a layer opened over the page, then closes on the next press', async () => {
+    const onClose = vi.fn()
+    await act(async () => { root.render(<CoverageLedgerPage onOpenGeneration={openGeneration} feature="checkout" onClose={onClose} />) })
+    // A dialog opened over the ledger registers its own layer after the page's.
+    const dialogClose = vi.fn()
+    const popDialog = pushEscapeLayer(dialogClose)
+
+    escape()
+    // The page used to hold its own keydown listener, so this one press closed
+    // the dialog AND the page behind it.
+    expect(dialogClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+
+    popDialog()
+    escape()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

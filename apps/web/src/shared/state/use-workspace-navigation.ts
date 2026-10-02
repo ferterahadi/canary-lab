@@ -17,7 +17,7 @@ import {
   type FlightLauncherIntent,
   type NavState,
 } from './nav-state'
-import type { FlightStageKey } from '../api/client'
+import type { FlightStageKey } from '@shared/flights/types'
 
 // Owns the workspace navigation: the routed state, the URL/localStorage
 // persistence, the cross-tab sync, and the selection-mirror refs the WS handler
@@ -41,7 +41,11 @@ export interface WorkspaceNavigation {
    *  (?stage=…) so a drill-through's way back, and a refresh, land on the stage
    *  the user was actually on. */
   flightStage: FlightStageKey | null
+  /** Selecting a different stage closes that stage's open log entry. */
   setFlightStage: (stage: FlightStageKey | null) => void
+  /** Which Activity entry's full log is open (?log=…) — see NavState. */
+  flightLog: string | null
+  setFlightLog: (id: string | null) => void
   configFor: string | null
   /** Which tab the config dialog is on (null = the default the mount picks). */
   configTab: ConfigTab | null
@@ -140,7 +144,16 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(SEED.flight)
-  const [flightStage, setFlightStage] = useState<FlightStageKey | null>(SEED.flightStage)
+  const [flightStage, setFlightStageState] = useState<FlightStageKey | null>(SEED.flightStage)
+  const [flightLog, setFlightLog] = useState<string | null>(SEED.flightLog)
+  const flightStageRef = useRef(flightStage)
+  useEffect(() => { flightStageRef.current = flightStage }, [flightStage])
+  // An open log entry names a row of ONE stage's Activity, so it closes when the
+  // selection moves to another stage. Re-selecting the same stage keeps it.
+  const setFlightStage = useCallback((stage: FlightStageKey | null) => {
+    if (stage !== flightStageRef.current) setFlightLog(null)
+    setFlightStageState(stage)
+  }, [])
   const [configFor, setConfigForState] = useState<string | null>(SEED.configFor)
   const [configTab, setConfigTab] = useState<ConfigTab | null>(SEED.configTab)
   // One opener for the dialog + its tab so the tab can never outlive the open
@@ -205,6 +218,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     run: selectedRunId,
     flight: selectedFlightId,
     flightStage,
+    flightLog,
     configFor,
     configTab,
     verifyOpen,
@@ -238,7 +252,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -251,13 +265,13 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // flight returns to follow-mode. Re-opening the SAME one keeps it — that
     // call is a drill-through's way back, and dropping the stage there is the
     // bug this exists to fix.
-    if (flightId !== selectedFlightIdRef.current) setFlightStage(null)
+    if (flightId !== selectedFlightIdRef.current) { setFlightStage(null); setFlightLog(null) }
     setSelectedFlightId(flightId)
     setView('flights')
     // Arriving at a flight IS the return — drop the origin so the way back
     // can't outlive the trip that set it.
     setReturnFlight(null)
-  }, [])
+  }, [setFlightStage])
 
   const navigateToRun = useCallback((feature: string, runId: string, target?: RunOpenTarget, fromFlight: string | null = null) => {
     pendingRunSelectionRef.current = null
@@ -295,6 +309,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     selectedFlightId,
     flightStage,
     setFlightStage,
+    flightLog,
+    setFlightLog,
     configFor,
     configTab,
     verifyOpen,

@@ -5,25 +5,23 @@ import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { parseDotenv, writeDotenv, type KvEntry } from '../logic/dotenv-edit'
+import { parseDotenv, writeDotenv, type KvEntry } from '../../../../../../shared/lib/dotenv-edit'
 import { loadFeatures } from '../../../shared/feature-loader'
-import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
-import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { EnvsetsConfigJson, buildAppRoots, isValidSlotName, isWithin, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
+import { resolveVars, buildAppRoots } from '../logic/envset-runtime'
+import { publishEnvsetChange } from '../logic/envset-events'
+import { removeEnvironment } from '../logic/envset-removal'
+import { isValidSlotName, shortenHome } from './feature-config-support'
+import {
+  EnvsetsConfigJson,
+  listEnvFolders,
+  readEnvsetsConfig,
+  syncEnvsInConfig,
+  writeEnvsetsConfig,
+} from '../logic/envset-config'
+import { isWithin } from '../logic/path-containment'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
-  // Every envset mutation in this file writes files under
-  // `<featureDir>/envsets/` with plain `fs` calls — there is no store and no
-  // shared writer to hang the event off, so THIS is the seam: each handler
-  // finishes through `announceEnvsets`, which owns what an envset write tells
-  // the workspace. `structure` also refreshes the feature list, because adding
-  // or removing an env changes what `/api/features` reports about the suite;
-  // editing a slot's contents does not.
-  const announceEnvsets = (feature: string, scope: 'slots' | 'structure' = 'slots'): void => {
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
-    if (scope === 'structure') publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-  }
-
   // ─── envsets ──────────────────────────────────────────────────────────
   // Layout (per workspace convention):
   //   <featureDir>/envsets/envsets.config.json
@@ -36,10 +34,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
   app.get<{ Params: { name: string } }>('/api/features/:name/envsets', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     const envsetsDir = path.join(feature.featureDir, 'envsets')
     if (!fs.existsSync(envsetsDir)) {
       return { envs: [], slotDescriptions: {}, slotTargets: {} }
@@ -78,10 +73,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const envName = (req.body?.env ?? '').trim()
       if (!envName || !/^[a-zA-Z0-9_.-]+$/.test(envName)) {
         reply.code(400)
@@ -115,7 +107,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
         fs.writeFileSync(path.join(envDir, 'feature.env'), '')
       }
       syncEnvsInConfig(feature.featureDir)
-      announceEnvsets(feature.name, 'structure')
+      publishEnvsetChange(deps.workspaceEvents, feature.name, 'structure')
       reply.code(201)
       return { env: envName }
     },
@@ -126,19 +118,9 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const envsetsDir = path.join(feature.featureDir, 'envsets')
-      const envDir = path.join(envsetsDir, req.params.env)
-      if (!isWithin(envsetsDir, envDir) || !fs.existsSync(envDir)) {
-        reply.code(404)
-        return { error: 'env not found' }
-      }
-      fs.rmSync(envDir, { recursive: true, force: true })
-      syncEnvsInConfig(feature.featureDir)
-      announceEnvsets(feature.name, 'structure')
+      if (!feature?.featureDir) return notFound(reply, 'feature')
+      const result = removeEnvironment({ feature: feature.name, featureDir: feature.featureDir, workspaceEvents: deps.workspaceEvents }, req.params.env)
+      if (result !== 'removed') return notFound(reply, 'env')
       reply.code(204)
       return null
     },
@@ -149,18 +131,12 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const slotPath = path.join(feature.featureDir, 'envsets', req.params.env, req.params.slot)
       // Defense-in-depth path-traversal guard: refuse if the resolved path
       // escapes the feature's envsets dir.
       const envsetsRoot = path.join(feature.featureDir, 'envsets')
-      if (!isWithin(envsetsRoot, slotPath) || !fs.existsSync(slotPath)) {
-        reply.code(404)
-        return { error: 'slot not found' }
-      }
+      if (!isWithin(envsetsRoot, slotPath) || !fs.existsSync(slotPath)) return notFound(reply, 'slot')
       const content = fs.readFileSync(slotPath, 'utf-8')
       const parsed = parseDotenv(content)
       return { path: slotPath, content, ...parsed }
@@ -175,16 +151,10 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const slotPath = path.join(feature.featureDir, 'envsets', req.params.env, req.params.slot)
       const envsetsRoot = path.join(feature.featureDir, 'envsets')
-      if (!isWithin(envsetsRoot, slotPath) || !fs.existsSync(slotPath)) {
-        reply.code(404)
-        return { error: 'slot not found' }
-      }
+      if (!isWithin(envsetsRoot, slotPath) || !fs.existsSync(slotPath)) return notFound(reply, 'slot')
       if (!Array.isArray(req.body?.entries)) {
         reply.code(400)
         return { error: 'entries[] required' }
@@ -193,7 +163,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       const next = writeDotenv(source, req.body.entries)
       fs.writeFileSync(slotPath, next)
       const parsed = parseDotenv(next)
-      announceEnvsets(feature.name)
+      publishEnvsetChange(deps.workspaceEvents, feature.name, 'slots')
       return { path: slotPath, content: next, ...parsed }
     },
   )
@@ -211,10 +181,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
   }>('/api/features/:name/envsets/slots', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     const sourceRaw = (req.body?.sourcePath ?? '').trim()
     if (!sourceRaw) {
       reply.code(400)
@@ -271,7 +238,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       },
     }
     writeEnvsetsConfig(envsetsDir, nextCfg)
-    announceEnvsets(feature.name)
+    publishEnvsetChange(deps.workspaceEvents, feature.name, 'slots')
     reply.code(201)
     return { slot: slotName }
   })
@@ -281,10 +248,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const slotName = req.params.slot
       if (!isValidSlotName(slotName)) {
         reply.code(400)
@@ -292,19 +256,19 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       }
       const envsetsDir = path.join(feature.featureDir, 'envsets')
       const envs = listEnvFolders(feature.featureDir)
+      const cfg = readEnvsetsConfig(envsetsDir)
       // Same reasoning as the create route: the validated slot name plus a real
       // env folder name cannot join to a path outside `envsetsDir`.
       for (const env of envs) {
         const slotPath = path.join(envsetsDir, env, slotName)
         if (fs.existsSync(slotPath)) fs.rmSync(slotPath, { force: true })
       }
-      const cfg = readEnvsetsConfig(envsetsDir)
       if (cfg.slots) delete cfg.slots[slotName]
       if (cfg.feature?.slots) {
         cfg.feature.slots = cfg.feature.slots.filter((s) => s !== slotName)
       }
       if (fs.existsSync(envsetsDir)) writeEnvsetsConfig(envsetsDir, cfg)
-      announceEnvsets(feature.name)
+      publishEnvsetChange(deps.workspaceEvents, feature.name, 'slots')
       reply.code(204)
       return null
     },

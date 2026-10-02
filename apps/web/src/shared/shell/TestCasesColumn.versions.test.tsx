@@ -2,14 +2,23 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
-import * as api from '../api/client'
-import type { FeatureSpecFile, RunSummary } from '../api/types'
+import * as configApi from '../api/config'
+import * as featuresApi from '../api/features'
+import type { FeatureSpecFile } from '../api/types'
+import type { RunSummary } from '@shared/run-detail'
 import type { TestSourceComparison } from '@shared/test-review'
 import { readableTest } from '../api/__fixtures__/readable-test'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
-vi.mock('../api/client', async (original) => ({ ...await original<typeof api>(), getFeatureTests: vi.fn(), getFeatureTestsPreview: vi.fn(), getTestSourceComparison: vi.fn() }))
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  getTestSourceComparison: vi.fn(),
+}))
 vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: vi.fn(), starting: false, startError: null }) }))
 vi.mock('../ui/TestPresentation', () => ({ TestPresentation: () => null }))
 
@@ -36,9 +45,8 @@ beforeEach(() => {
   current = [spec('/source', ['passed', 'failed', 'skipped', 'new'])]
   recorded = [spec('/recorded', ['passed', 'failed', 'skipped'])]
   comparison = { ...noChanges, differences: [{ file: 'e2e/a.spec.ts', affectedTests: ['new'] }], changes: { added: [{ file: 'e2e/a.spec.ts', name: 'new', line: 31, endLine: 39 }], changed: [], removed: [] } }
-  vi.mocked(api.getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? recorded : current)
-  vi.mocked(api.getFeatureTestsPreview).mockResolvedValue([])
-  vi.mocked(api.getTestSourceComparison).mockImplementation(async () => comparison)
+  vi.mocked(configApi.getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? recorded : current)
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementation(async () => comparison)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
@@ -92,21 +100,21 @@ it('never turns extra runtime cases or stale recorded names into new declaration
 it('keeps removed declarations accessible even without a corresponding runtime record', async () => {
   comparison = { ...noChanges, files: ['e2e/a.spec.ts', 'e2e/deleted.spec.ts'], changes: { added: [], changed: [], removed: [{ file: 'e2e/deleted.spec.ts', name: 'removed', line: 1, endLine: 4 }] } }
   await render()
-  expect(api.getTestSourceComparison).toHaveBeenCalledWith('suite', 'r1')
+  expect(featuresApi.getTestSourceComparison).toHaveBeenCalledWith('suite', 'r1')
   await act(async () => button('Compare 1 removed tests').click())
   expect(review).toHaveBeenLastCalledWith('e2e/deleted.spec.ts', 1, 'run', 'removed', 'removed')
 })
 it('clears old counts while refreshing the source comparison after edits', async () => {
   await render()
   let finish!: (value: TestSourceComparison) => void
-  vi.mocked(api.getTestSourceComparison).mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementation(() => new Promise((resolve) => { finish = resolve }))
   await act(async () => invalidate('tests'))
   expect(button('Compare 1 new tests')).toBeNull()
   await act(async () => finish(noChanges))
   expect(button('Compare 1 new tests')).toBeNull()
 })
 it.each(['request', 'parse'] as const)('discloses unknown comparisons instead of guessing additions: %s', async (mode) => {
-  if (mode === 'request') vi.mocked(api.getTestSourceComparison).mockRejectedValue(new Error('Snapshot unavailable'))
+  if (mode === 'request') vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new Error('Snapshot unavailable'))
   else comparison = { state: 'unavailable', files: [], differences: [], reasons: ['Invalid source'] }
   await render()
   expect(button('Compare 1 new tests')).toBeNull()
@@ -121,11 +129,11 @@ it.each(['request', 'parse'] as const)('discloses unknown comparisons instead of
 })
 it('ignores a late source comparison from a previously selected run', async () => {
   let finish!: (value: TestSourceComparison) => void
-  vi.mocked(api.getTestSourceComparison).mockImplementation((_feature, runId) => runId === 'r1' ? new Promise((resolve) => { finish = resolve }) : Promise.resolve(noChanges))
+  vi.mocked(featuresApi.getTestSourceComparison).mockImplementation((_feature, runId) => runId === 'r1' ? new Promise((resolve) => { finish = resolve }) : Promise.resolve(noChanges))
   await render()
   await render({ baseline: { ...manifest, runId: 'r2' } })
   expect(button('Compare 1 new tests')).toBeNull()
   await act(async () => finish(comparison))
   expect(button('Compare 1 new tests')).toBeNull()
-  expect(api.getTestSourceComparison).toHaveBeenLastCalledWith('suite', 'r2')
+  expect(featuresApi.getTestSourceComparison).toHaveBeenLastCalledWith('suite', 'r2')
 })

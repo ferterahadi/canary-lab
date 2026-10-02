@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createReadableRunLog, openEditor } from '@/shared/api/client'
+import { createReadableRunLog } from '@/shared/api/runs'
+import { openEditor } from '@/shared/api/workspace'
 import { openRunLog } from './open-run-log'
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/runs', () => ({
   createReadableRunLog: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', () => ({
   openEditor: vi.fn(),
 }))
 

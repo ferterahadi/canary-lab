@@ -4,10 +4,12 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import * as sessionLog from '../../../agent-sessions/logic/agent-session-log'
+import * as sessionLogAgentSessionPaths from '../../../agent-sessions/logic/agent-session-paths'
+import * as sessionLogAgentSessionRender from '../../../agent-sessions/logic/agent-session-render'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
+import { readManifest } from './manifest'
 
 interface FakeProcess {
   pid: number
@@ -100,6 +102,92 @@ function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
 }
 
 describe('RunOrchestrator.restartHealFromFailure', () => {
+  it('restores runtime inputs before healing while preserving the recorded suite and review history', async () => {
+    const f = makeFakeFactory()
+    const feature = makeFeature({ repos: [{ name: 'api', localPath: tmpDir }] })
+    const envTarget = path.join(feature.featureDir, '.env')
+    fs.mkdirSync(path.join(feature.featureDir, 'e2e'), { recursive: true })
+    fs.mkdirSync(path.join(feature.featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(feature.featureDir, 'envsets', 'local', 'api'), 'BASE_URL=http://localhost:4100\n')
+    fs.writeFileSync(path.join(feature.featureDir, 'envsets', 'envsets.config.json'), JSON.stringify({
+      appRoots: {}, slots: { api: { description: 'suite URL', target: envTarget } },
+      feature: { slots: ['api'], testCommand: 'true', testCwd: feature.featureDir },
+    }))
+    const spec = path.join(feature.featureDir, 'e2e', 'contract.spec.ts')
+    const recordedSpec = "test('contract', () => expect(true).toBe(true))"
+    fs.writeFileSync(spec, recordedSpec)
+    fs.writeFileSync(envTarget, 'BASE_URL=http://localhost:4100\n')
+    const options = {
+      feature, env: 'local', runId: RUN_ID, runDir, ptyFactory: f.factory,
+      healSignalPollMs: 1, healAgentTimeoutMs: 2000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: buildRunPaths(runDir).suiteSnapshotDir }),
+      autoHeal: { agent: 'codex' as const, maxCycles: 1, buildSpawnCommand: () => 'codex heal', buildCyclePrompt: () => 'heal' },
+    }
+    const first = new RunOrchestrator(options)
+    await first.start()
+    await first.stop('failed')
+    const previous = readManifest(first.paths.manifestPath)!
+    previous.specEdits = { checkedAt: 'prior', pending: [], adopted: [{ at: 'prior', by: 'human', files: ['e2e/contract.spec.ts'] }] }
+    fs.writeFileSync(first.paths.manifestPath, JSON.stringify(previous))
+    expect(fs.existsSync(path.join(first.paths.suiteSnapshotDir, '.env'))).toBe(false)
+    // A restart allocates a new port and reapplies the feature target. Only
+    // these runtime bytes may enter the retained suite; live test edits may not.
+    fs.writeFileSync(envTarget, 'BASE_URL=http://localhost:4200\n')
+    fs.writeFileSync(spec, "test('different contract', () => expect(false).toBe(true))")
+    fs.writeFileSync(first.paths.summaryPath, JSON.stringify({ total: 1, passed: 0, failed: [{ name: 'test-case-contract' }] }))
+
+    const resumed = new RunOrchestrator(options)
+    const promise = resumed.restartHealFromFailure('retry the app fix')
+    try {
+      await vi.waitFor(() => expect(f.spawned).toHaveLength(1))
+      const suiteEnv = path.join(resumed.paths.suiteSnapshotDir, '.env')
+      expect(fs.readFileSync(suiteEnv, 'utf8')).toBe('BASE_URL=http://localhost:4200\n')
+      const manifest = readManifest(resumed.paths.manifestPath)!
+      expect(manifest.startedAt).toBe(previous.startedAt)
+      expect(manifest.suiteSnapshot).toEqual(previous.suiteSnapshot)
+      expect(manifest.specEdits?.adopted).toEqual(previous.specEdits.adopted)
+      expect(manifest.specEdits?.pending[0].file).toBe('e2e/contract.spec.ts')
+      expect(fs.readFileSync(path.join(resumed.paths.suiteSnapshotDir, 'e2e', 'contract.spec.ts'), 'utf8')).toBe(recordedSpec)
+      fs.writeFileSync(resumed.paths.restartSignal, JSON.stringify({ hypothesis: 'app repaired' }))
+      await vi.waitFor(() => expect(f.spawned).toHaveLength(2))
+      expect(f.spawned[1].options.cwd).toBe(resumed.paths.suiteSnapshotDir)
+      expect(fs.readFileSync(suiteEnv, 'utf8')).toContain('4200')
+      fs.writeFileSync(resumed.paths.summaryPath, JSON.stringify({ total: 1, passed: 1, passedNames: ['test-case-contract'], failed: [] }))
+      f.spawned[1].emitExit(0)
+      expect(await promise).toBe('passed')
+    } finally {
+      await resumed.cancelHeal()
+      for (const process of f.spawned) process.emitExit(1)
+      await resumed.stop('failed')
+      await promise
+    }
+    expect(fs.existsSync(path.join(resumed.paths.suiteSnapshotDir, '.env'))).toBe(false)
+    expect(fs.existsSync(resumed.paths.suiteRuntimeInputsDir)).toBe(false)
+  })
+
+  it('refuses a missing recorded suite before replacing evidence or spawning an agent', async () => {
+    const f = makeFakeFactory()
+    const feature = makeFeature({ repos: undefined })
+    fs.mkdirSync(feature.featureDir, { recursive: true })
+    const options = {
+      feature, runId: RUN_ID, runDir, ptyFactory: f.factory,
+      autoHeal: { agent: 'codex' as const, buildSpawnCommand: () => 'codex heal', buildCyclePrompt: () => 'heal' },
+    }
+    const first = new RunOrchestrator(options)
+    await first.start()
+    await first.stop('failed')
+    fs.rmSync(first.paths.suiteSnapshotDir, { recursive: true })
+    const previous = fs.readFileSync(first.paths.manifestPath, 'utf8')
+    const resumed = new RunOrchestrator(options)
+    try {
+      await expect(resumed.restartHealFromFailure('retry')).rejects.toThrow('recorded suite snapshot is missing')
+      expect(fs.readFileSync(first.paths.manifestPath, 'utf8')).toBe(previous)
+      expect(f.spawned).toHaveLength(0)
+    } finally {
+      await resumed.stop('failed')
+    }
+  })
+
   it('refuses a spent suite attempt before spawning a heal agent', async () => {
     const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
     fs.mkdirSync(path.dirname(receipt), { recursive: true })
@@ -325,7 +413,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
   it('claude restart: recovers a missing pointer from the native Claude session log', async () => {
     const PRIOR_SID = 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f'
     const paths = buildRunPaths(runDir)
-    const locateSpy = vi.spyOn(sessionLog, 'locateLatestSessionLogForAgent').mockReturnValue({
+    const locateSpy = vi.spyOn(sessionLogAgentSessionPaths, 'locateLatestSessionLogForAgent').mockReturnValue({
       agent: 'claude',
       sessionId: PRIOR_SID,
       logPath: '/tmp/claude-session.jsonl',
@@ -390,7 +478,7 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
       logPath: '/tmp/codex-session.jsonl',
     }))
     fs.writeFileSync(paths.agentSessionIdPath, '019e1779-6b55-73b1-8ab7-e8e345bd889a')
-    const renderSpy = vi.spyOn(sessionLog, 'renderAgentSessionContext')
+    const renderSpy = vi.spyOn(sessionLogAgentSessionRender, 'renderAgentSessionContext')
       .mockReturnValue('Previous codex session 019e...\nASSISTANT: inspect fallback SMS call')
 
     try {

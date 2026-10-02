@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { EvaluationExportTask } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { useEvaluationExportLog, useEvaluationExports } from '../state/EvaluationExportContext'
 import { EvaluationTaskOutput, modeLabel } from './EvaluationExportTaskToast'
 
-function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
+function dotStateForExport(status: EvaluationExportTaskView['status']): StatusDotState {
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'failed'
   return 'running'
@@ -19,7 +19,7 @@ export function EvaluationTaskPanel({
   task,
   showDownload = true,
 }: {
-  task: EvaluationExportTask
+  task: EvaluationExportTaskView
   /** The flight stage header already carries its own download action. */
   showDownload?: boolean
 }) {

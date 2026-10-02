@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
+import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 
-import { act, useRef } from 'react'
+import { act, useCallback, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Feature, RunIndexEntry } from '../api/types'
-import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
-import type { ConnectWorkspaceEventsOptions, WorkspaceEvent } from '../api/workspace-socket'
+import type { Feature } from '../api/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '@shared/flights/types'
+import type { ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
 import type { InvalidationTopic } from './invalidation-bus'
 import type { WorkspaceData, WorkspaceDataDeps } from './use-workspace-data'
 
@@ -22,7 +24,16 @@ const api = {
   listPlanFeatures: vi.fn<() => Promise<{ tasks: PlanFeaturesTask[] }>>(),
   getVersionStatus: vi.fn(),
 }
-vi.mock('../api/client', () => api)
+vi.mock('../api/features', () => ({
+  listFeatures: api.listFeatures,
+}))
+vi.mock('../api/flights', () => ({
+  listFlights: api.listFlights,
+  listPlanFeatures: api.listPlanFeatures,
+}))
+vi.mock('../api/workspace', () => ({
+  getVersionStatus: api.getVersionStatus,
+}))
 
 // Captures the options the hook connects with, so a test can drive `onEvent` /
 // `onReconnect` synchronously instead of racing a real socket. `connectThrows`
@@ -40,10 +51,17 @@ vi.mock('../api/workspace-socket', () => ({
   },
 }))
 
-const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false }
-vi.mock('@/features/flights', () => ({ useFlightsStream: () => stream }))
+const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false, forgetFlight: vi.fn() }
+vi.mock('@/features/flights/state/use-flights-stream', () => ({
+  useFlightsStream: () => stream,
+}))
 
-const { useWorkspaceData } = await import('./use-workspace-data')
+vi.mock('@/features/runs/state/RunsContext', () => ({
+  useRun: () => ({ detail: undefined }),
+}))
+let { useWorkspaceData } = await import('./use-workspace-data')
+let { InvalidationProvider, useInvalidation } = await import('./invalidation')
+const { useWorkspaceSelection } = await import('./use-workspace-selection')
 
 function feature(name: string): Feature {
   return { name, repos: [] } as unknown as Feature
@@ -78,39 +96,61 @@ const setSelectedFeature = (f: string | null): void => { harness.featureRef.curr
 const setSelectedRunId = (r: string | null): void => { harness.runIdRef.current = r; harness.selectedRunId.push(r) }
 const onRenamed = (from: string, to: string): void => { harness.renames.push([from, to]) }
 
-// The two nav mirrors the hook writes through are real refs owned by the probe,
-// so a test asserts the same way App observes them.
-function Probe({ config }: { config: Partial<WorkspaceDataDeps> & { withRenameHandler?: boolean } }) {
-  const featureRef = useRef<string | null>(harness.featureRef.current)
+// Compose the data hook with the real selection controller so the original
+// selection assertions still prove the behavior at their new owning boundary.
+interface HarnessConfig extends Partial<WorkspaceDataDeps> {
+  withRenameHandler?: boolean
+  allRuns?: RunIndexEntry[]
+  initialSelectedFeature?: string | null
+}
+
+function Probe({ config }: { config: HarnessConfig }) {
+  const { invalidate: publish } = useInvalidation()
+  const invalidateAndRecord = useCallback((topic: InvalidationTopic, scope?: string) => {
+    invalidate(topic, scope)
+    publish(topic, scope)
+  }, [publish])
+  const featureRef = useRef<string | null>(config.initialSelectedFeature ?? harness.featureRef.current)
   const runIdRef = useRef<string | null>(harness.runIdRef.current)
   const pendingRef = useRef<string | null>(harness.pendingRef.current)
   harness.featureRef = featureRef
   harness.runIdRef = runIdRef
   harness.pendingRef = pendingRef
-  harness.data = useWorkspaceData({
-    invalidate,
-    allRuns: [],
-    initialSelectedFeature: null,
+  const selection = useWorkspaceSelection({
+    allRuns: config.allRuns ?? [],
+    selectedFeature: featureRef.current,
+    selectedRunId: runIdRef.current,
     setSelectedFeature,
     setSelectedRunId,
     selectedFeatureRef: featureRef,
     selectedRunIdRef: runIdRef,
     pendingRunSelectionRef: pendingRef,
+  })
+  harness.data = useWorkspaceData({
+    invalidate: invalidateAndRecord,
+    onInitialFeatures: selection.onInitialFeatures,
+    onFeaturesRefreshed: selection.onFeaturesRefreshed,
+    selectedFeatureRef: featureRef,
+    selectedRunIdRef: runIdRef,
     onFeatureRenamed: config.withRenameHandler ? onRenamed : undefined,
     ...config,
   })
   return null
 }
 
-async function mount(config: Partial<WorkspaceDataDeps> & { withRenameHandler?: boolean } = {}): Promise<void> {
-  await act(async () => { root.render(<Probe config={config} />) })
+async function mount(config: HarnessConfig = {}): Promise<void> {
+  await act(async () => { root.render(<InvalidationProvider><Probe config={config} /></InvalidationProvider>) })
 }
 
 async function fire(event: WorkspaceEvent): Promise<void> {
   await act(async () => { socket.opts?.onEvent(event) })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each test starts with an unknown planning value, not another test's cache.
+  vi.resetModules()
+  ;({ useWorkspaceData } = await import('./use-workspace-data'))
+  ;({ InvalidationProvider, useInvalidation } = await import('./invalidation'))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -341,7 +381,7 @@ describe('useWorkspaceData — running pre-flight poll', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     expect(api.listPlanFeatures.mock.calls.length).toBe(afterMount + 1)
 
-    // Settling the plan must clear the interval, not merely stop reading it.
+    // Settled plans stop periodic HTTP reads.
     api.listPlanFeatures.mockResolvedValue({ tasks: [{ taskId: 't1', status: 'done' } as PlanFeaturesTask] })
     await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     const afterSettle = api.listPlanFeatures.mock.calls.length
@@ -372,7 +412,7 @@ describe('useWorkspaceData — workspace events', () => {
 
     expect(harness.renames).toEqual([['old', 'new']])
     expect(harness.selectedFeature.at(-1)).toBe('new')
-    expect(harness.invalidated).toEqual([['flights', undefined], ['repos', undefined]])
+    expect(harness.invalidated).toEqual([['flights', undefined], ['repos', undefined], ['configuration', 'old'], ['configuration', 'new']])
   })
 
   it('keeps the current selection when some other suite is renamed', async () => {
@@ -427,7 +467,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'feature-deleted', feature: 'gone' })
 
     expect(harness.selectedFeature.at(-1)).toBe('remaining')
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['configuration', 'gone']])
   })
 
   it('invalidates repos on a bulk features change', async () => {
@@ -435,7 +475,7 @@ describe('useWorkspaceData — workspace events', () => {
 
     await fire({ type: 'features-changed' })
 
-    expect(harness.invalidated).toEqual([['repos', undefined]])
+    expect(harness.invalidated).toEqual([['repos', undefined], ['configuration', undefined]])
   })
 
   it('invalidates tests only for the selected suite, but always re-reads features', async () => {
@@ -472,7 +512,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
 
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
-    expect(harness.invalidated).toEqual([['coverage', undefined]])
+    expect(harness.invalidated).toEqual([['configuration', 'checkout'], ['coverage', undefined]])
   })
 
   it('invalidates coverage and re-reads features on a coverage change', async () => {
@@ -564,8 +604,9 @@ describe('useWorkspaceData — server reconnect resync', () => {
     await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
-      ['repos', undefined], ['tests', undefined], ['coverage', undefined],
-      ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
+      ['cleanup', 'runs'], ['cleanup', 'worktrees'], ['cleanup', 'portify'],
+      ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
+      ['verification', undefined], ['journal', 'r1'], ['flights', undefined], ['pre-flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
@@ -603,6 +644,10 @@ describe('useWorkspaceData — socket lifecycle', () => {
 
 it.each([{ allRuns: [] }, { allRuns: [run('newest', 'checkout'), run('historical', 'checkout')] }])('keeps the selected historical run across a feature refresh with runs $allRuns', async ({ allRuns }) => {
   api.listFeatures.mockResolvedValue([feature('checkout')])
+  // Hydrate before rendering: mutating only the mirror afterward makes the
+  // next render look like a new run selection to the composed controller.
+  harness.runIdRef.current = 'historical'
+  harness.pendingRef.current = 'historical'
   await mount({ allRuns, initialSelectedFeature: 'checkout' })
   harness.featureRef.current = 'checkout'
   harness.runIdRef.current = 'historical'
@@ -611,4 +656,111 @@ it.each([{ allRuns: [] }, { allRuns: [run('newest', 'checkout'), run('historical
   await act(async () => { harness.data.refreshFeatures('checkout') })
   expect(harness.selectedRunId).toEqual([])
   expect(harness.pendingRef.current).toBe('historical')
+})
+
+it('routes repository watch hints to exact consumers without fetching features or reconnecting', async () => {
+  await mount()
+  const listCalls = api.listFeatures.mock.calls.length
+  const connection = socket.opts
+  harness.invalidated.length = 0
+  await fire({ type: 'repos-changed', consumers: [{ feature: 'checkout', repo: 'service' }, { flightId: 'flight' }] })
+  expect(harness.invalidated).toEqual([['repos', JSON.stringify(['repo', 'checkout', 'service'])], ['repos', JSON.stringify(['flight', 'flight'])]])
+  expect(api.listFeatures).toHaveBeenCalledTimes(listCalls)
+  expect(socket.opts).toBe(connection); expect(socket.closes).toBe(0)
+})
+
+function pendingPlans() {
+  let resolve!: (value: { tasks: PlanFeaturesTask[] }) => void
+  const promise = new Promise<{ tasks: PlanFeaturesTask[] }>((done) => { resolve = done })
+  return { promise, resolve }
+}
+const runningPlan = { taskId: 'plan-ordering', status: 'running' } as PlanFeaturesTask
+
+describe('pre-flight observation ordering and recovery', () => {
+  it.each(['completion', 'deletion'] as const)('ignores a delayed running response after %s', async (outcome) => {
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await mount()
+    const tasks = outcome === 'deletion' ? [] : [{ ...runningPlan, status: 'done' as const }]
+    api.listPlanFeatures.mockResolvedValue({ tasks })
+    await fire({ type: 'pre-flight-changed' })
+    expect(harness.data.preFlights).toEqual(tasks)
+    await act(async () => { older.resolve({ tasks: [runningPlan] }) })
+    expect(harness.data.preFlights).toEqual(tasks)
+  })
+
+  it('retains accepted rows through overlapping refreshes and failure, then recovers', async () => {
+    vi.useFakeTimers()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await mount()
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await act(async () => { harness.data.refreshPreFlights() })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    api.listPlanFeatures.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => { harness.data.refreshPreFlights() })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    const done = { ...runningPlan, status: 'done' as const }
+    api.listPlanFeatures.mockResolvedValue({ tasks: [done] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+    await act(async () => { older.resolve({ tasks: [runningPlan] }) })
+    expect(harness.data.preFlights).toEqual([done])
+  })
+
+  it.each(['failed', 'hung'] as const)('recovers a %s initial read without a workspace event', async (mode) => {
+    vi.useFakeTimers()
+    const initial = pendingPlans()
+    if (mode === 'failed') api.listPlanFeatures.mockRejectedValueOnce(new Error('offline'))
+    else api.listPlanFeatures.mockReturnValueOnce(initial.promise)
+    await mount()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    await act(async () => { initial.resolve({ tasks: [] }) })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+  })
+
+  it('refreshes settled plans on each server handshake and stops reads after deletion', async () => {
+    vi.useFakeTimers()
+    await mount()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await fire({ type: 'connected' })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    api.listPlanFeatures.mockResolvedValue({ tasks: [] })
+    await fire({ type: 'connected' })
+    expect(harness.data.preFlights).toEqual([])
+    const calls = api.listPlanFeatures.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(api.listPlanFeatures).toHaveBeenCalledTimes(calls)
+  })
+
+  it('cleans up polling and prevents a late unmounted read from poisoning the cache', async () => {
+    vi.useFakeTimers()
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await mount()
+    await act(async () => { root.render(null) })
+    await act(async () => { older.resolve({ tasks: [runningPlan] }); await vi.advanceTimersByTimeAsync(10_000) })
+    expect(api.listPlanFeatures).toHaveBeenCalledTimes(1)
+    expect(socket.closes).toBe(1)
+    api.listPlanFeatures.mockReturnValueOnce(new Promise(() => {}))
+    await mount()
+    expect(harness.data.preFlights).toEqual([])
+  })
+})
+
+it('routes cleanup changes to the matching inventory only', async () => {
+  await mount()
+  harness.invalidated.length = 0
+  await fire({ type: 'cleanup-changed', resource: 'worktrees' })
+  expect(harness.invalidated).toEqual([['cleanup', 'worktrees']])
+})
+
+
+it('forgets a deleted flight from both the pushed index and its REST fallback', async () => {
+  api.listFlights.mockResolvedValue(['gone', 'kept'].map((flightId): FlightIndexEntry => ({ id: flightId, flightId, feature: 'checkout', repoPaths: [], status: 'done', currentStage: null, createdAt: '', updatedAt: '' })))
+  await mount()
+  await act(async () => harness.data.forgetFlight('gone'))
+  expect(stream.forgetFlight).toHaveBeenCalledWith('gone')
+  expect(harness.data.flights.map(row => row.flightId)).toEqual(['kept'])
 })

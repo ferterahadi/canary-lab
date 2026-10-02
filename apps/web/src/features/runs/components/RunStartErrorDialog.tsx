@@ -1,6 +1,12 @@
 import { useState } from 'react'
-import { ApiError, asBranchMismatch, asTestReviewRequired, type RepoBranchMismatch, type TestReviewRequired } from '@/shared/api/client'
-import { Modal } from '@/shared/ui/atoms'
+import { ApiError } from '@/shared/api/internal'
+import {
+  asBranchMismatch,
+  asTestReviewRequired,
+  type RepoBranchMismatch,
+  type TestReviewRequired,
+} from '@/shared/api/runs'
+import { Modal } from '@/shared/ui/Overlays'
 
 // Maps a failed `POST /api/runs` into a human headline, the raw server reason,
 // and a "what to do next" hint. Kept pure + exported so it's unit-testable

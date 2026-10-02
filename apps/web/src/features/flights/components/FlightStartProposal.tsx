@@ -1,8 +1,8 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { PlanFeaturesTask, PlannedFeature } from '@/shared/api/client'
+import * as typesApi from '@shared/flights/types'
+import type { PlanFeaturesTask, PlannedFeature } from '@shared/flights/types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { Textarea } from '@/shared/ui/atoms'
+import { Textarea } from '@/shared/ui/FormFields'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 
 /** R54: the breakdown agent owns the dialog while it thinks — its timeline is
@@ -89,6 +89,7 @@ export function ProposalView({
   conflicts,
   sharedGroup,
   busy,
+  canConfirm,
   error,
   onChange,
   onGroupChange,
@@ -99,6 +100,7 @@ export function ProposalView({
   conflicts: string[]
   sharedGroup: string
   busy: boolean
+  canConfirm: boolean
   error: ReactNode
   onChange: (features: PlannedFeature[]) => void
   onGroupChange: (group: string) => void
@@ -161,7 +163,7 @@ export function ProposalView({
 
       <ul className="m-0 flex max-h-[360px] list-none flex-col gap-1.5 overflow-auto p-0 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
         {proposal.map((f, i) => {
-          const slug = api.deriveFeatureSlug(f.name)
+          const slug = typesApi.deriveFeatureSlug(f.name)
           const conflicted = conflicts.includes(slug)
           const isEditing = editing.has(i) || conflicted
           return (
@@ -272,7 +274,7 @@ export function ProposalView({
         <button
           type="button"
           data-testid="flight-proposal-confirm"
-          disabled={busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
+          disabled={!canConfirm || busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
           onClick={onConfirm}
           className="cl-button-primary px-3.5 py-1 text-xs"
         >

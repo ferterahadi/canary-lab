@@ -3,17 +3,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  checkPathExists,
-  getFeatureConfigDoc,
-  getGitRemote,
-  getPortify,
-  getRepoGitStatus,
-  openPortifyProject,
-  removePortifyOverlay,
-  type ParsedConfigDoc,
-  type PortifyManifest,
-} from '@/shared/api/client'
+import { checkPathExists, getGitRemote, getRepoGitStatus } from '@/shared/api/workspace'
+import { getFeatureConfigDoc, removePortifyOverlay, type ParsedConfigDoc } from '@/shared/api/config'
+import { getPortify, type PortifyManifest } from '@/shared/api/portify'
+import { openPortifyProject } from '@/shared/api/cleanup'
 import { PortsTab } from './PortsTab'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
@@ -25,19 +18,25 @@ function CaptureInvalidate() {
   return null
 }
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    checkPathExists: vi.fn(),
-    getFeatureConfigDoc: vi.fn(),
-    getGitRemote: vi.fn(),
-    getPortify: vi.fn(),
-    getRepoGitStatus: vi.fn(),
-    openPortifyProject: vi.fn(),
-    removePortifyOverlay: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  checkPathExists: vi.fn(),
+  getGitRemote: vi.fn(),
+  getRepoGitStatus: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+  removePortifyOverlay: vi.fn(),
+}))
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  getPortify: vi.fn(),
+}))
+vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/cleanup')>()),
+  openPortifyProject: vi.fn(),
+}))
 
 // PortsTab imports parsers/components from ReposTab, which imports RunsContext.
 vi.mock('@/features/runs/state/RunsContext', () => ({
@@ -47,9 +46,10 @@ vi.mock('@/features/runs/state/RunsContext', () => ({
 // PortsTab reads the live workflow index from PortifyContext (active workflow
 // + latest saved overlay). Tests set `mockWorkflows` to simulate the WS feed.
 let mockWorkflows: { workflowId: string; feature: string; status: string; startedAt: string }[] = []
-vi.mock('@/features/portify/state/PortifyContext', () => ({
-  usePortify: () => ({ workflows: mockWorkflows }),
-}))
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return { usePortify: () => ({ workflows: mockWorkflows }), usePortifyDetail: detailFixture((id) => getPortify(id)) }
+})
 
 let container: HTMLDivElement
 let root: Root
@@ -85,6 +85,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('PortsTab', () => {
@@ -508,3 +509,18 @@ function emptyDoc(): ParsedConfigDoc {
     },
   }
 }
+
+
+it('recovers the reproduced failed saved-workflow hydration without reopening Ports', async () => {
+  vi.useFakeTimers()
+  vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+  vi.mocked(getPortify).mockRejectedValueOnce(new Error('temporary network failure'))
+  mockWorkflows = [{ workflowId: 'wf_saved', feature: 'cns_exactly_once_fallback', status: 'saved', startedAt: '2026-01-01' }]
+  await act(async () => root.render(<PortsTab feature="cns_exactly_once_fallback" portified />))
+  expect(container.textContent).toContain('temporary network failure')
+  expect(container.textContent).not.toContain('Booted twice')
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(container.textContent).toContain('Booted twice')
+  expect(container.textContent).not.toContain('temporary network failure')
+  expect(getPortify).toHaveBeenCalledTimes(2)
+})

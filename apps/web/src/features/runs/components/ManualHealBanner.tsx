@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as workspaceApi from '@/shared/api/workspace'
+import * as runsApi from '@/shared/api/runs'
 
 interface Props {
   runId: string
@@ -27,7 +28,7 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
     setOpening(agent)
     setErr(null)
     try {
-      await api.openAgentApp(agent)
+      await workspaceApi.openAgentApp(agent)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : `Could not open ${agent}`)
     } finally {
@@ -39,7 +40,7 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
     setCancelling(true)
     setErr(null)
     try {
-      await api.cancelHealRun(runId)
+      await runsApi.cancelHealRun(runId)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Cancel failed')
     } finally {

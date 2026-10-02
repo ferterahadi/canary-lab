@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   getFeatureTests,
-  getFeatureTestsPreview,
   getFeatureConfig,
   getFeatureConfigDoc,
   putFeatureConfigDoc,
@@ -57,12 +56,6 @@ describe('config api', () => {
       'http://x/api/features/a%2Fb%20c/tests',
       { method: 'GET' },
     )
-  })
-
-  it('requests the source preview separately from full discovery', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(ok([]))
-    await getFeatureTestsPreview('a/b c', { baseUrl: 'http://x', fetchImpl })
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/a%2Fb%20c/tests?preview=1', { method: 'GET' })
   })
 
   it('getFeatureTests throws ApiError on 404 with non-JSON body', async () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { readPlaywrightPlaybackEvents } from './run-store'
+import { readPlaywrightPlaybackEvents } from './run-detail'
 import { indexPlaywrightArtifacts } from './run-artifacts'
 
 let tmpDir: string

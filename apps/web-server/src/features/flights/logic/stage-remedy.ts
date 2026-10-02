@@ -1,5 +1,6 @@
+import type { RepositoryObserver } from '../../../shared/repository-observer'
 import path from 'path'
-import { parsePorcelainStatus, runGit } from '../../../shared/git-repo'
+import { readWorkingTree, runGit } from '../../../shared/git-repo'
 import type { FlightManifest, FlightStageRemedy } from '../../../../../../shared/flights/types'
 
 // A failed stage's `error` is a persisted string; the fix for the common
@@ -19,14 +20,16 @@ function failedStageWithDirtySignature(manifest: FlightManifest) {
 /** Compute the remedy for a flight, or null when nothing is actionable (no
  *  matching failed stage, or every repo is clean again — the caller renders
  *  "just Continue" for the latter by checking `repos.length === 0`). */
-export async function flightStageRemedy(manifest: FlightManifest): Promise<FlightStageRemedy | null> {
+export async function flightStageRemedy(manifest: FlightManifest, observer?: Pick<RepositoryObserver, 'readWorkingTree'>): Promise<FlightStageRemedy | null> {
   const stage = failedStageWithDirtySignature(manifest)
   if (!stage) return null
   const repos: FlightStageRemedy['repos'] = []
   for (const repoPath of manifest.repoPaths) {
-    const status = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-    if (status.code !== 0) continue // not a git repo (or gone) — nothing to stash
-    const modified = parsePorcelainStatus(status.stdout).length
+    const status = observer
+      ? await observer.readWorkingTree(repoPath, 'directory', { flightId: manifest.flightId })
+      : await readWorkingTree(repoPath, 'directory')
+    if (!status.ok) continue // not a git repo (or gone) — nothing to stash
+    const modified = status.lines.length
     if (modified > 0) repos.push({ name: path.basename(repoPath), path: repoPath, modified })
   }
   return { kind: 'dirty-repos', stage: stage.key, repos, actions: ['stash', 'commit'] }

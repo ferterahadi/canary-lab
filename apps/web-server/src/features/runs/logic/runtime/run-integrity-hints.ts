@@ -5,15 +5,9 @@
 // `weaker` and `cannot-classify` are worth a reader's attention; an edit the
 // differential reads as equivalent or stronger is reported as a pending edit
 // and nothing more.
-import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { PendingSpecEdit } from '../../../../../../../shared/run-manifest'
 import { testRequirementsReader } from '../dirty-specs/test-requirements'
 import type { PredicateChange } from '../../../../../../../shared/verification-strength/types'
-
-// The disclosure lives in the root shared tree so the web can show it beside a
-// hint that has no run manifest to read it from; re-exported here for the
-// server-side callers that already import it from this module.
-export { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
-export type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 
 export function deriveIntegrityHints(

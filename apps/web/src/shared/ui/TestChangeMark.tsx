@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { MinusIcon, PencilIcon, PlusIcon } from './Icons'
 import { Tooltip } from './Tooltip'
-import type { TestChangeKind } from '../lib/test-versions'
+import type { TestChangeKind } from '@shared/test-review'
 
 /** What each drift mark means, in the words every surface uses. The counting
  *  rule travels with the glyph: "2 changed" is only unambiguous once you know a

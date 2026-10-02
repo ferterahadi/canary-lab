@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { computeDocsHash, type DocsCollection } from './docs-collection'
-import { assembleSummary, parsePrdSummaryOutput } from './prd-summary'
+import { assembleSummary, parsePrdSummaryOutput } from './prd-summary-parse'
 import type { Requirement } from '../../../../../../../shared/coverage/types'
 
 // D11 prerequisites on the requirement itself: provenance (where the wording came

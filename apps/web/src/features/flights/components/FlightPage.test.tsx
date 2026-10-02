@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { ApiError } from '@/shared/api/internal'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(async () => {}),
+  loadPortify: vi.fn(async (_id: string) => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -48,13 +48,11 @@ const mocks = vi.hoisted(() => ({
   evaluationTasks: vi.fn(() => []),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/flights', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
   getFlightRemedy: mocks.getFlightRemedy,
   applyFlightRemedy: mocks.applyFlightRemedy,
-  getRunDetail: mocks.getRunDetail,
-  listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
@@ -62,27 +60,39 @@ vi.mock('@/shared/api/client', () => ({
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
-  listRuns: mocks.listRuns,
-  getEnvsetSlot: mocks.getEnvsetSlot,
-  getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getFeatureCoverage: mocks.getFeatureCoverage,
-  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
-  getPlaywrightConfig: mocks.getPlaywrightConfig,
-  getRepoGitStatus: mocks.getRepoGitStatus,
-  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
-  putPlaywrightConfig: mocks.putPlaywrightConfig,
-  listFeatureDocs: mocks.listFeatureDocs,
   getFlightEntryOptions: mocks.getFlightEntryOptions,
-  importFeatureDoc: mocks.importFeatureDoc,
-  deleteFeatureDoc: mocks.deleteFeatureDoc,
-  deleteFeature: mocks.deleteFeature,
   linkFeatureDocPath: mocks.linkFeatureDocPath,
-  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/runs', () => ({
+  getRunDetail: mocks.getRunDetail,
+  listJournal: mocks.listJournal,
+  listRuns: mocks.listRuns,
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+}))
+vi.mock('@/shared/api/config', () => ({
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
+  getPlaywrightConfig: mocks.getPlaywrightConfig,
+  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
+  putPlaywrightConfig: mocks.putPlaywrightConfig,
+  deleteFeature: mocks.deleteFeature,
+}))
+vi.mock('@/shared/api/coverage', () => ({
+  getFeatureCoverage: mocks.getFeatureCoverage,
+  listFeatureDocs: mocks.listFeatureDocs,
+  importFeatureDoc: mocks.importFeatureDoc,
+  deleteFeatureDoc: mocks.deleteFeatureDoc,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  getRepoGitStatus: mocks.getRepoGitStatus,
+  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/internal', () => ({
   ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
+    constructor(public status: number, public body: unknown, message?: string) { super(message ?? `HTTP ${status}`) }
   },
 }))
 
@@ -116,10 +126,13 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ loadPortify: mocks.loadPortify }),
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
-}))
+  usePortifyDetail: detailFixture(async (id) => { await mocks.loadPortify(id); return mocks.portifyWorkflow(id) }, (id) => mocks.portifyWorkflow(id)),
+}) })
 
 // TestRunPanel reads the run detail + the run index off the shared runs store
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
@@ -613,4 +626,39 @@ describe('the open flight rides the push channel', () => {
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')).not.toBeNull()
     expect(mocks.getFlight).not.toHaveBeenCalled()
   })
+})
+
+describe('live edit counts and deleted details', () => {
+  it('updates the open Portify tile without reopening the step, then removes a deleted Running detail', async () => {
+    const live = (editedFiles: number): FlightManifest => manifest({
+      status: 'running', currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'portify' ? 'running' : 'done',
+        ...(key === 'portify' ? { progress: { workflowId: 'editing', status: 'editing', editedFiles } } : {}),
+      })),
+    })
+    const render = (editedFiles: number, missing = false) => act(async () => {
+      root.render(<InvalidationProvider><FlightPage flightId="fl_1" liveFlight={missing ? null : live(editedFiles)} missing={missing}
+        stage="portify" onSelectStage={vi.fn()} onSelectFlight={vi.fn()} onClose={vi.fn()} /></InvalidationProvider>)
+    })
+    await render(1)
+    expect(container.textContent).toContain('current working-tree changes')
+    const tile = () => Array.from(container.querySelectorAll('[data-testid]')).find((el) => el.getAttribute('data-testid')?.includes('fact') && el.textContent?.includes('Files edited'))
+    expect(tile()?.textContent).toContain('1')
+    await render(2); expect(tile()?.textContent).toContain('2')
+    await render(0); expect(tile()?.textContent).toContain('0')
+    expect(container.textContent).not.toContain('ports were already swappable')
+    await render(0, true)
+    expect(container.textContent).toContain('This flight no longer exists.')
+    expect(container.textContent).not.toContain('Running')
+    expect(container.querySelector('[data-testid="stage-rail-portify"]')).toBeNull()
+  })
+})
+
+
+it('reports a confirmed missing detail to the shared Flight index owner', async () => {
+  mocks.getFlight.mockRejectedValue(new ApiError(404, { error: 'flight not found' }))
+  const onFlightMissing = vi.fn()
+  await act(async () => { root.render(<InvalidationProvider><FlightPage flightId="fl_1" onFlightMissing={onFlightMissing} onSelectFlight={vi.fn()} onClose={vi.fn()} /></InvalidationProvider>) })
+  expect(onFlightMissing).toHaveBeenCalledExactlyOnceWith('fl_1')
+  expect(container.textContent).toContain('This flight no longer exists.')
 })

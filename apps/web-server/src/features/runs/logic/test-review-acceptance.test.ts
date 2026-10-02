@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from './test-review-acceptance'
+import { suiteReviewFiles } from './runtime/suite-review'
 
 const cleanups: string[] = []
 
@@ -28,6 +29,27 @@ function fixture(): string {
 }
 
 describe('revision-bound Git test review', () => {
+  it('matches snapshot comparison for the same bytes and deduplicates disclosed paths', async () => {
+    const root = fixture()
+    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-baseline-'))
+    cleanups.push(snapshot)
+    fs.cpSync(root, snapshot, { recursive: true })
+    fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after without newline')
+    fs.rmSync(path.join(root, 'e2e/fixture.ts'))
+    fs.writeFileSync(path.join(root, 'empty.txt'), '')
+    const gitReview = await buildGitReview(root, ['unrelated.txt', 'empty.txt', 'e2e/fixture.ts', 'e2e/a.spec.ts', 'empty.txt'])
+    expect(gitReview).toEqual(suiteReviewFiles(snapshot, root))
+    expect(gitReview.files).toEqual([
+      { file: 'e2e/a.spec.ts', change: 'modified' }, { file: 'e2e/fixture.ts', change: 'deleted' },
+      { file: 'empty.txt', change: 'added' },
+    ])
+    const missing = await buildGitReview(root, ['missing.ts', 'missing.ts'])
+    expect(missing).toEqual({
+      revision: 'fc6818fa21d92d2d314fa4568ca3fd117c06942ecb757f8678ae602c95472a0c',
+      files: [{ file: 'missing.ts', change: 'added' }], before: new Map(), after: new Map(),
+    })
+  })
+
   it('rejects an uncommitted suite and does not hide filesystem read failures', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-no-git-'))
     cleanups.push(root)

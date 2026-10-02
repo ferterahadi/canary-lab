@@ -1,7 +1,19 @@
+import type { DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
 import path from 'path'
 import type { FeatureConfig, HealthProbe } from '../../../../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
-import { type ExternalHealSession, type RunLifecycleAbortReason, type RunLifecycleEvent, type RunLifecycleRestartPlan, type RunLifecycleSeverity, type RunLifecycleTargetedRerun, type RepoBranchSnapshot, type RunManifest } from './manifest'
+import type {
+  ExternalHealSession,
+  RepoBranchSnapshot,
+  RunManifest,
+} from '../../../../../../../shared/run-manifest'
+import type {
+  RunLifecycleAbortReason,
+  RunLifecycleEvent,
+  RunLifecycleRestartPlan,
+  RunLifecycleSeverity,
+  RunLifecycleTargetedRerun,
+} from '../../../../../../../shared/run-state'
 import { type RunStateSink } from './run-state-sink'
 import type { PtyFactory } from './pty-spawner'
 import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
@@ -9,7 +21,7 @@ import type { BuildHealCyclePrompt } from './auto-heal'
 import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
-import type { RunModelPlan } from './run-model-plan'
+import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
@@ -88,8 +100,9 @@ export interface OrchestratorOptions {
    *  sees the "Healing via Claude Desktop" badge from the very first frame
    *  instead of after a follow-up patch round-trip. */
   externalHealSession?: ExternalHealSession
-  // Polling interval for the heal-cycle signal-wait loop. Defaults to
-  // healthPollIntervalMs.
+  // Signal-file polling and no-signal liveness checks. Accepted signals wake
+  // the consumer immediately. Defaults to an explicit healthPollIntervalMs,
+  // or 100ms when neither interval is supplied.
   healSignalPollMs?: number
   // Hard ceiling on a single heal cycle (signal-wait). Defaults to 60 min.
   // When the agent is actively producing output, this is the absolute upper
@@ -213,6 +226,7 @@ export interface LifecycleRecordOptions {
 export type AutoHealAgent = 'claude' | 'codex'
 
 export interface AutoHealConfig {
+  diagnosisPolicy?: DiagnosisPolicy
   agent: AutoHealAgent
   // Optional 1-based cap on heal cycles. Omit for the production default
   // (AUTO_HEAL_MAX_CYCLES = 10). The loop also gives up earlier when the

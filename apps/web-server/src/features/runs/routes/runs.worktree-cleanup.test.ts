@@ -1,16 +1,26 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
-import { compareActiveRuns } from './runs-route-support'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../logic/run-store'
-import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import { runsRoutes } from './runs'
+import { type ExternalHealAgentRequest } from './runs-route-support'
+import { compareActiveRuns } from '../logic/active-run-order'
+import { RunStore } from '../logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorLike,
+  type RestartHealResult,
+  type RestartRunResult,
+} from '../logic/run-registry'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
+import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -69,14 +79,6 @@ function writeFeatureWithRepos(name: string, repos: Array<{ name: string; localP
   )
 }
 
-function gitInit(dir: string): void {
-  const opts = { cwd: dir, stdio: 'ignore' as const }
-  execFileSync('git', ['init', '-q'], opts)
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], opts)
-  execFileSync('git', ['config', 'user.name', 'Test'], opts)
-  execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'init'], opts)
-}
-
 function addGitWorktree(sourceRepo: string, worktreePath: string): void {
   fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
   execFileSync('git', ['worktree', 'add', '-q', '--detach', worktreePath], { cwd: sourceRepo, stdio: 'ignore' })
@@ -91,7 +93,7 @@ function addGitWorktree(sourceRepo: string, worktreePath: string): void {
 function setupWorktreeFixtures(): { sourceRepo: string; runWorktree: string; miscWorktree: string } {
   const sourceRepo = path.join(tmpDir, 'source-repo')
   fs.mkdirSync(sourceRepo, { recursive: true })
-  gitInit(sourceRepo)
+  initGitRepo(sourceRepo, { commit: 'empty' })
   writeFeatureWithRepos('foo', [{ name: 'app', localPath: sourceRepo }])
   writeFeature('bare')
   writeFeatureWithRepos('ghostrepo', [{ name: 'x', localPath: path.join(tmpDir, 'does-not-exist') }])
@@ -248,13 +250,15 @@ describe('cleanup/worktrees routes (real git worktrees)', () => {
     it('200s, removes the worktree via git, and returns freedBytes', async () => {
       const { runWorktree } = setupWorktreeFixtures()
       fs.writeFileSync(path.join(runWorktree, 'data.bin'), Buffer.alloc(64))
-      const { app } = await build({ isWorktreeOwnerActive: () => false })
+      const events: WorkspaceEvent[] = []
+      const { app } = await build({ isWorktreeOwnerActive: () => false, events })
       const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: runWorktree } })
       expect(res.statusCode).toBe(200)
       const body = res.json() as { removed: boolean; freedBytes: number }
       expect(body.removed).toBe(true)
       expect(body.freedBytes).toBeGreaterThan(0)
       expect(fs.existsSync(runWorktree)).toBe(false)
+      expect(events).toContainEqual({ type: 'cleanup-changed', resource: 'worktrees' })
     })
 
     it('200s removing a worktree with no run/benchmark owner without consulting isWorktreeOwnerActive', async () => {
@@ -327,9 +331,7 @@ describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
     const repo = path.join(tmpDir, 'prod-repo')
     fs.mkdirSync(repo, { recursive: true })
     fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
-    const g = (args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
-    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't'])
-    g(['add', '-A']); g(['commit', '-q', '-m', 'init', '--no-verify'])
+    initGitRepo(repo)
     const scratch = path.join(tmpDir, 'scratch')
     execFileSync('git', ['clone', '-q', repo, scratch], { stdio: 'ignore' })
     fs.writeFileSync(path.join(scratch, 'app.js'), 'const x = 2\n')
@@ -351,4 +353,26 @@ describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
     expect(res.json()).toEqual({ results: [{ repoName: 'prod', ok: true }], allOk: true })
     expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf-8')).toBe('const x = 2\n')
   })
+})
+
+it('lists and removes a two-dot-prefixed worktree without admitting outside paths', async () => {
+  const { sourceRepo } = setupWorktreeFixtures()
+  const target = path.join(logsDir, '..cache', 'app')
+  addGitWorktree(sourceRepo, target)
+  const { app } = await build()
+  try {
+    const listing = await app.inject({ method: 'GET', url: '/api/cleanup/worktrees' })
+    expect(listing.json().worktrees).toContainEqual(expect.objectContaining({ path: target }))
+    for (const outside of [`${logsDir}-sibling/app`, path.join(logsDir, '..', 'outside')]) {
+      const rejected = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: outside } })
+      expect(rejected.statusCode).toBe(400)
+      expect(fs.existsSync(target)).toBe(true)
+    }
+    const deleted = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: target } })
+    expect(deleted.statusCode).toBe(200)
+    expect(fs.existsSync(target)).toBe(false)
+    expect(fs.existsSync(sourceRepo)).toBe(true)
+  } finally {
+    await app.close()
+  }
 })

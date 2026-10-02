@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { capSlice, capSliceWithMeta, enrichSummaryWithLogs, extractAllSlices, extractLogsForTest, readableTerminalLog, stripAnsi, writeErrorFile, writeHealIndex } from './log-enrichment'
+import {
+  capSlice,
+  capSliceWithMeta,
+  enrichSummaryWithLogs,
+  extractAllSlices,
+  extractLogsForTest,
+  readableTerminalLog,
+  stripAnsi,
+  writeErrorFile,
+} from './log-enrichment'
+import { writeHealIndex } from './heal-index'
 import { LOGS_DIR as REAL_LOGS, MANIFEST_PATH as REAL_MANIFEST, SUMMARY_PATH as REAL_SUMMARY } from './paths'
 
 let tmpDir: string

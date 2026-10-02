@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { stripPortSlots, revertPortification } from './unportify'
 import { writeOverlay, overlayDir } from './overlay'
-import type { ConfigValue } from '../../../../shared/config-ast'
+import { readFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
 
 let tmpDir: string
 beforeEach(() => {
@@ -85,6 +85,7 @@ const OVERLAY_INPUT = {
 
 describe('revertPortification', () => {
   it('restores from snapshot when overlay has an original-config backup', () => {
+    fs.mkdirSync(path.join(tmpDir, 'envsets', 'local'), { recursive: true })
     fs.writeFileSync(path.join(tmpDir, 'feature.config.cjs'), PORTIFIED_CONFIG)
     writeOverlay(tmpDir, { ...OVERLAY_INPUT, originalConfig: CONFIG_CONTENT })
     const { reverted } = revertPortification(tmpDir)
@@ -115,4 +116,33 @@ describe('revertPortification', () => {
     const { reverted } = revertPortification(tmpDir)
     expect(reverted).toBe(false)
   })
+})
+
+it.each([{ envs: [] }, { envs: ['staging'] }, { envs: ['staging', 'dev'] }])('restores snapshot settings with current environments $envs', ({ envs }) => {
+  const config = path.join(tmpDir, 'feature.config.cjs')
+  const original = '// Keep the app settings\n' + CONFIG_CONTENT
+  fs.writeFileSync(config, PORTIFIED_CONFIG)
+  for (const env of envs) fs.mkdirSync(path.join(tmpDir, 'envsets', env), { recursive: true })
+  writeOverlay(tmpDir, { ...OVERLAY_INPUT, originalConfig: original })
+  expect(revertPortification(tmpDir)).toEqual({ reverted: true })
+  const source = fs.readFileSync(config, 'utf8')
+  expect(source).toContain('// Keep the app settings')
+  expect(readFeatureConfig(source).value).toEqual({ ...readFeatureConfig(original).value, envs: [...envs].sort() })
+  expect(fs.existsSync(overlayDir(tmpDir))).toBe(false)
+})
+
+it('retains the backup when environment discovery fails and permits a corrected retry', () => {
+  const config = path.join(tmpDir, 'feature.config.cjs')
+  fs.writeFileSync(config, PORTIFIED_CONFIG)
+  writeOverlay(tmpDir, { ...OVERLAY_INPUT, originalConfig: CONFIG_CONTENT })
+  const envsets = path.join(tmpDir, 'envsets')
+  fs.writeFileSync(envsets, 'not a directory')
+  expect(() => revertPortification(tmpDir)).toThrow(expect.objectContaining({ code: 'ENOTDIR' }))
+  expect(fs.existsSync(overlayDir(tmpDir))).toBe(true)
+  // No rollback: the snapshot was restored, but its backup remains for retry.
+  expect(fs.readFileSync(config, 'utf8')).toBe(CONFIG_CONTENT)
+  fs.rmSync(envsets)
+  expect(revertPortification(tmpDir)).toEqual({ reverted: true })
+  expect(readFeatureConfig(fs.readFileSync(config, 'utf8')).value.envs).toEqual([])
+  expect(fs.existsSync(overlayDir(tmpDir))).toBe(false)
 })

@@ -1,12 +1,15 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
+import type { GettingStartedActiveSession } from '../../../../../../shared/getting-started'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { verificationRoutes } from './verification'
-import { createRegistry, RunStore, type OrchestratorLike } from '../../runs/logic/run-store'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
-import { GettingStartedSessionStore, type GettingStartedActiveSession } from '../../config/logic/getting-started-session'
+import { RunStore } from '../../runs/logic/run-store'
+import { createRegistry, type OrchestratorLike } from '../../runs/logic/run-registry'
+
+import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 let tmpDir: string
 let featuresDir: string

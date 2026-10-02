@@ -2,17 +2,19 @@ import fs from 'fs'
 import path from 'path'
 import { plural } from '../../../../../../../shared/lib/plural'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
-import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
-import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import { removeEnvironment } from '../../../config/logic/envset-removal'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import type { RunBootFailure } from '../../../../../../../shared/run-state'
 import { diagnosticExcerpt } from '../../../runs/logic/runtime/diagnostic-redaction'
-import type { FlightStageErrorDetail } from '../types'
-import type { EnvCaptureStageProgress } from '../../../../../../../shared/flights/types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type {
+  EnvCaptureStageProgress,
+  FlightStageErrorDetail,
+} from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { runJob } from './stage-jobs'
 import type { ScoutDraft } from './scout'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Capture the scout's detected env files into the flight's envset, then prove
 // config + env together with a single dry-run boot (mode:'boot' run via the
@@ -216,10 +218,8 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
     // record cleanup belongs here.
     async reset(ctx) {
       const m = ctx.manifest()
-      const envsetDir = path.join(featureDirFor(deps, m.feature), 'envsets', m.opts.env)
-      if (!fs.existsSync(envsetDir)) return
-      fs.rmSync(envsetDir, { recursive: true, force: true })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: m.feature })
+      const result = removeEnvironment({ feature: m.feature, featureDir: featureDirFor(deps, m.feature), workspaceEvents: deps.workspaceEvents }, m.opts.env)
+      if (result === 'invalid') throw Object.assign(new Error('invalid env name'), { statusCode: 400 })
     },
   }
 }

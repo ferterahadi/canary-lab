@@ -6,23 +6,24 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests, getFeatureTestsPreview } from '../api/client'
+import { ApiError } from '../api/internal'
+import { getTestFileReview, getTestSourceComparison } from '../api/features'
+import { getFeatureTests } from '../api/config'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
 
 import { TestCasesColumn } from './TestCasesColumn'
 
-vi.mock('../api/client', async () => {
-  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return {
-    ...actual,
-    getFeatureTests: vi.fn(),
-    getFeatureTestsPreview: vi.fn(),
-    getTestFileReview: vi.fn(),
-    getTestSourceComparison: vi.fn(),
-  }
-})
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  getTestFileReview: vi.fn(),
+  getTestSourceComparison: vi.fn(),
+}))
 
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
@@ -53,7 +54,6 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
-  vi.mocked(getFeatureTestsPreview).mockReset().mockResolvedValue([])
   vi.mocked(getTestSourceComparison).mockReset().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
@@ -143,40 +143,22 @@ describe('TestCasesColumn', () => {
     expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
   })
 
-  it('shows a provisional source card promptly, then replaces it with the resolved roster', async () => {
+  it('keeps one quiet loading state until the resolved roster arrives', async () => {
     const file = '/tmp/features/alpha/e2e/a.spec.ts'
-    const source = [{ file, tests: [{ name: 'source title', line: 3, bodySource: '', steps: [], readable: readableTest('source title') }] }]
     const resolved = [{ file, tests: [{ name: 'resolved title', line: 3, bodySource: '', steps: [], readable: readableTest('resolved title') }] }]
     let finishDiscovery!: (specs: FeatureTests) => void
     vi.mocked(getFeatureTests).mockReturnValue(new Promise((resolve) => { finishDiscovery = resolve }))
-    vi.mocked(getFeatureTestsPreview).mockResolvedValue(source)
     const onTotalTestsChange = vi.fn()
 
     await act(async () => { root.render(<TestCasesColumn feature="alpha" onTotalTestsChange={onTotalTestsChange} />) })
-    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).not.toBeNull()
-    expect(container.textContent).toContain('source title')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('resolved title')
     expect(onTotalTestsChange).not.toHaveBeenCalledWith(1)
 
     await act(async () => { finishDiscovery(resolved) })
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
     expect(container.textContent).toContain('resolved title')
-    expect(container.textContent).not.toContain('source title')
     expect(onTotalTestsChange).toHaveBeenCalledWith(1)
-  })
-
-  it('does not let a late source preview replace the resolved list', async () => {
-    const file = '/tmp/features/alpha/e2e/a.spec.ts'
-    const test = (name: string) => ({ name, line: 3, bodySource: '', steps: [], readable: readableTest(name) })
-    let finishPreview!: (specs: FeatureTests) => void
-    vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [test('resolved title')] }])
-    vi.mocked(getFeatureTestsPreview).mockReturnValue(new Promise((resolve) => { finishPreview = resolve }))
-
-    await act(async () => { root.render(<TestCasesColumn feature="alpha" />) })
-    await act(async () => { finishPreview([{ file, tests: [test('old source title')] }]) })
-    expect(container.textContent).toContain('resolved title')
-    expect(container.textContent).not.toContain('old source title')
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
   })
 
   it('renders tests after loading succeeds', async () => {
@@ -276,6 +258,38 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).toContain('Run beta first step')
     expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
     expect(container.textContent).not.toContain('Run alpha first step')
+  })
+
+  it('restores a cached suite and its chosen card before its refetch finishes', async () => {
+    const test = (name: string, line: number) => ({ name, line, bodySource: '', steps: [], readable: readableTest(name) })
+    const alpha = [{ file: '/alpha/a.spec.ts', tests: [test('alpha first', 1), test('alpha second', 2)] }]
+    const beta = [{ file: '/beta/b.spec.ts', tests: [test('beta first', 1)] }]
+    let alphaLoads = 0
+    vi.mocked(getFeatureTests).mockImplementation((feature) => {
+      if (feature === 'beta') return Promise.resolve(beta)
+      alphaLoads += 1
+      return alphaLoads === 1 ? Promise.resolve(alpha) : new Promise<FeatureTests>(() => {})
+    })
+    const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} />))
+    const card = (name: string) => [...container.querySelectorAll<HTMLElement>('.cl-card')]
+      .find((element) => element.querySelector('button')?.textContent?.includes(name))
+
+    await render('alpha')
+    await act(async () => { card('alpha second')?.querySelector('button')?.click() })
+    expect(card('alpha second')?.children).toHaveLength(2)
+
+    await render('beta')
+    await render('alpha')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
+    expect(card('alpha second')?.children).toHaveLength(2)
+    expect(card('alpha first')?.children).toHaveLength(1)
+    expect(container.textContent).not.toContain('beta first')
+
+    await act(async () => { card('alpha second')?.querySelector('button')?.click() })
+    await render('beta')
+    await render('alpha')
+    expect(card('alpha second')?.children).toHaveLength(1)
+    expect(card('alpha first')?.children).toHaveLength(1)
   })
 
   it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {
@@ -683,9 +697,31 @@ describe('TestCasesColumn', () => {
         />,
       )
     })
-    await waitFor(() => container.querySelector('[data-active-line="true"]') === null)
-    expect(container.textContent).toContain('Running now · pw:api · source line unavailable')
-    expect(container.textContent).not.toContain('Running now · line 8')
+    expect(container.querySelector('[data-active-line="true"]')?.textContent).toContain('await send(payload)')
+    expect(container.textContent).toContain('Running now · line 8 · pw:api')
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-english-tab"]') as HTMLButtonElement).click()
+    })
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the payload')
+
+    for (const location of [undefined, '/tmp/features/alpha/e2e/a.spec.ts:999:5', '/tmp/features/alpha/e2e/a.spec.ts:7:5']) {
+      await act(async () => {
+        root.render(<TestCasesColumn feature="alpha" runEvidence={{ summary: {
+          complete: false, total: 1, passed: 0, passedNames: [], failed: [],
+          running: {
+            name: 'test-case-sends-message', location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+            step: { title: 'next step', category: 'expect', location },
+          },
+        }, status: 'running' }} />)
+      })
+      expect(container.querySelector('[data-execution-highlight="running"]')?.textContent)
+        .toContain(location?.includes(':7:') ? 'Create the payload' : 'Send the payload')
+    }
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+    })
+    await waitFor(() => container.querySelector('[data-active-line="true"]')?.textContent?.includes('createPayload') === true)
 
     await act(async () => {
       root.render(
@@ -719,6 +755,45 @@ describe('TestCasesColumn', () => {
     expect(failedEnglish?.textContent).toContain('Create the payload')
     expect(failedEnglish?.textContent).toContain('FAILED HERE')
     expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
+  })
+
+  it('clears retained running rows on completion and does not carry them into another run', async () => {
+    const file = '/tmp/features/alpha/e2e/a.spec.ts'
+    vi.mocked(getFeatureTests).mockResolvedValue([{
+      file,
+      tests: [{ name: 'sends message', line: 3, bodyLine: 5, bodySource: '{\n  await send()\n}', steps: [],
+        readable: readableTest('sends message', [{
+          id: 'send', kind: 'leaf', role: 'action', text: 'Send the message', fidelity: 'derived',
+          source: { file, startLine: 6, endLine: 6, snippet: 'await send()' },
+        }]),
+      }],
+    }])
+    const render = async (runId: string, running: boolean, location?: string) => {
+      await act(async () => {
+        root.render(<TestCasesColumn feature="alpha" runEvidence={{ manifest: { runId }, summary: {
+          complete: !running, total: 1, passed: running ? 0 : 1, failed: [],
+          passedNames: running ? [] : ['test-case-sends-message'],
+          running: running ? {
+            name: 'test-case-sends-message', location: `${file}:3:1`,
+            step: { title: 'send', category: 'pw:api', location },
+          } : undefined,
+        }, status: running ? 'running' : 'passed' }} />)
+      })
+    }
+    await render('first', true, `${file}:6:3`)
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the message')
+    await render('first', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the message')
+    await render('first', false)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    await render('first', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    expect(container.textContent).toContain('source line unavailable')
+    await render('first', true, `${file}:6:3`)
+    expect(container.querySelector('[data-execution-highlight="running"]')).not.toBeNull()
+    await render('second', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    expect(container.textContent).toContain('source line unavailable')
   })
 
   it('marks edited tests without a review control anywhere in the Tests column', async () => {
@@ -928,7 +1003,7 @@ describe('TestCasesColumn', () => {
   // rerun only re-lists the tests it re-runs — so the roster's recorded line is
   // allowed to be stale for a test that already passed. Matching by exact line
   // turned two real passes into "pending" (run 2026-09-04T0638-7rcl).
-  it('keeps a passed verdict when a heal edit moved the test to another line', async () => {
+  it.each(['', ':5'])('keeps a passed verdict when a heal edit moved the test to another line (column suffix %s)', async (column) => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/current.spec.ts',
@@ -946,7 +1021,7 @@ describe('TestCasesColumn', () => {
             passedNames: ['test-case-validates-checkout'],
             passedIds: ['test-id-checkout'],
             knownTests: [
-              { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
+              { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: `/tmp/features/alpha/e2e/current.spec.ts:14${column}` },
             ],
             failed: [],
           }, status: 'passed' }}
@@ -958,7 +1033,7 @@ describe('TestCasesColumn', () => {
     expect(statusBadges()).toEqual(['passed'])
   })
 
-  it('lets the line decide only when one file declares the same title twice', async () => {
+  it.each(['', ':5'])('lets the line decide only when one file declares the same title twice (column suffix %s)', async (column) => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/current.spec.ts',
@@ -979,8 +1054,8 @@ describe('TestCasesColumn', () => {
             passedNames: ['test-case-renders'],
             passedIds: ['id-guest'],
             knownTests: [
-              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
-              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:30' },
+              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `/tmp/features/alpha/e2e/current.spec.ts:14${column}` },
+              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `/tmp/features/alpha/e2e/current.spec.ts:30${column}` },
             ],
             failed: [{ id: 'id-host', name: 'test-case-renders' }],
           }, status: 'failed' }}
@@ -990,5 +1065,28 @@ describe('TestCasesColumn', () => {
 
     await waitFor(() => statusBadges().length === 2)
     expect(statusBadges()).toEqual(['passed', 'failed'])
+  })
+
+  it('updates a column-qualified recorded verdict while the Tests column stays mounted', async () => {
+    const file = '/tmp/features/alpha/e2e/current.spec.ts'
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      { file, tests: [{ name: 'renders', line: 14, bodySource: '{}', steps: [], readable: readableTest('renders') }] },
+    ])
+    const renderEvidence = async (passed: boolean) => {
+      await act(async () => root.render(<TestCasesColumn feature="alpha" runEvidence={{
+        summary: {
+          complete: true, total: 1, passed: passed ? 1 : 0,
+          passedIds: passed ? ['id-render'] : [],
+          knownTests: [{ id: 'id-render', name: 'test-case-renders', title: 'renders', location: `${file}:14:5` }],
+          failed: passed ? [] : [{ id: 'id-render', name: 'test-case-renders' }],
+        },
+        status: passed ? 'passed' : 'failed',
+      }} />))
+    }
+    await renderEvidence(false)
+    await waitFor(() => statusBadges().length === 1)
+    expect(statusBadges()).toEqual(['failed'])
+    await renderEvidence(true)
+    expect(statusBadges()).toEqual(['passed'])
   })
 })

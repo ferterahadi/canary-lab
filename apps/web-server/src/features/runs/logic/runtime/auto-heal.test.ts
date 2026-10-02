@@ -2,7 +2,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { MODE_COPY, buildAgentSpawnCommand, buildClaudeMcpConfigArg, detectHealMode, isAgentCliAvailable, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue, resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './auto-heal'
+import { MODE_COPY, detectHealMode } from './auto-heal'
+import {
+  buildAgentSpawnCommand,
+  buildClaudeMcpConfigArg,
+  makeAgentSpawnCommandBuilder,
+  pickAvailableHealAgent,
+  readPriorSessionId,
+  readPriorSessionIdFromValue,
+} from './heal-agent-spawn'
+import {
+  isAgentCliAvailable,
+  resolveAgentBinary,
+  type AgentResolveDeps,
+  type HealAgent,
+} from '../../../agent-sessions/logic/agent-binary'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 
 // Deps that find nothing — `which` misses and no candidate path is executable.

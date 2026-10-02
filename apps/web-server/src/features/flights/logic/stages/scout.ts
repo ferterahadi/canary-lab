@@ -1,7 +1,7 @@
 import path from 'path'
 import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { decodeSubmission, extractJson, stageFeedback, stageModels, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalizable, externalWorkCheckpoint } from './externalizable'

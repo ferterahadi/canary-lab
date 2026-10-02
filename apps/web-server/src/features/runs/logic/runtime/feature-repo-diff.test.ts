@@ -9,6 +9,7 @@ import {
   diffContentForFeatureRepos,
 } from './feature-repo-diff'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 // The snapshot/diff pair is ground truth for what the heal agent edited — it
 // feeds the journal's fix.file line and the orchestrator's restart planning, so
@@ -25,14 +26,6 @@ function tmp(): string {
   const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-frd-')))
   dirs.push(d)
   return d
-}
-
-function gitInit(dir: string): void {
-  const opts = { cwd: dir, stdio: 'ignore' as const }
-  execFileSync('git', ['init', '-q'], opts)
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], opts)
-  execFileSync('git', ['config', 'user.name', 'Test'], opts)
-  execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'init'], opts)
 }
 
 const feature = (over: Partial<FeatureConfig>): FeatureConfig =>
@@ -67,7 +60,7 @@ describe('snapshotFeatureRepos', () => {
 
   it('omits a git working tree when its index prevents a snapshot', async () => {
     const root = tmp()
-    gitInit(root)
+    initGitRepo(root, { commit: 'empty' })
     // A corrupt index is load-bearing: rev-parse can still resolve the git
     // root, while stash create fails at the separate snapshot boundary.
     fs.writeFileSync(path.join(root, '.git', 'index'), 'not-a-git-index')
@@ -82,11 +75,11 @@ describe('snapshotFeatureRepos', () => {
 
   it('excludes a service repo nested under the feature dir from its pathspec', async () => {
     const root = tmp()
-    gitInit(root)
+    initGitRepo(root, { commit: 'empty' })
     const featureDir = path.join(root, 'features', 'demo')
     const nested = path.join(featureDir, 'service')
     fs.mkdirSync(nested, { recursive: true })
-    gitInit(nested)
+    initGitRepo(nested, { commit: 'empty' })
 
     const snaps = await snapshotFeatureRepos(feature({ featureDir, repos: [{ name: 'svc', localPath: nested }] }))
 
@@ -99,7 +92,7 @@ describe('snapshotFeatureRepos', () => {
 describe('diffFeatureRepos', () => {
   it('returns absolute paths of files edited since the snapshot', async () => {
     const repo = tmp()
-    gitInit(repo)
+    initGitRepo(repo, { commit: 'empty' })
     fs.writeFileSync(path.join(repo, 'tracked.ts'), 'export const a = 1\n')
     execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'ignore' })
     execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: repo, stdio: 'ignore' })
@@ -112,7 +105,7 @@ describe('diffFeatureRepos', () => {
 
   it('returns nothing when the agent changed no files', async () => {
     const repo = tmp()
-    gitInit(repo)
+    initGitRepo(repo, { commit: 'empty' })
 
     const snaps = await snapshotFeatureRepos(feature({ repos: [{ name: 'svc', localPath: repo }] }))
 
@@ -121,7 +114,7 @@ describe('diffFeatureRepos', () => {
 
   it('scopes a nested monorepo service to its configured subtree', async () => {
     const root = tmp()
-    gitInit(root)
+    initGitRepo(root, { commit: 'empty' })
     const serviceDir = path.join(root, 'demo-app', 'catalog-service')
     const siblingDir = path.join(root, 'demo-app', 'billing-service')
     fs.mkdirSync(serviceDir, { recursive: true })
@@ -149,7 +142,7 @@ describe('diffFeatureRepos', () => {
 
   it('captures an isolated worktree override instead of the source checkout', async () => {
     const sourceRoot = tmp()
-    gitInit(sourceRoot)
+    initGitRepo(sourceRoot, { commit: 'empty' })
     const sourceService = path.join(sourceRoot, 'services', 'catalog')
     fs.mkdirSync(sourceService, { recursive: true })
     fs.writeFileSync(path.join(sourceService, 'server.ts'), 'before\n')
@@ -184,7 +177,7 @@ describe('diffFeatureRepos', () => {
 
   it('also captures the source feature dir when its service uses a worktree override', async () => {
     const sourceRoot = tmp()
-    gitInit(sourceRoot)
+    initGitRepo(sourceRoot, { commit: 'empty' })
     fs.mkdirSync(path.join(sourceRoot, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(sourceRoot, 'server.ts'), 'server-before\n')
     fs.writeFileSync(path.join(sourceRoot, 'e2e', 'helper.ts'), 'helper-before\n')
@@ -217,7 +210,7 @@ describe('diffFeatureRepos', () => {
 
   it('scopes the feature-dir diff to the feature subtree', async () => {
     const root = tmp()
-    gitInit(root)
+    initGitRepo(root, { commit: 'empty' })
     const featureDir = path.join(root, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'spec.ts'), 'a\n')
@@ -238,7 +231,7 @@ describe('diffFeatureRepos', () => {
 describe('diffContentForFeatureRepos', () => {
   it('returns the unified diff for a single tree with no repo header', async () => {
     const repo = tmp()
-    gitInit(repo)
+    initGitRepo(repo, { commit: 'empty' })
     fs.writeFileSync(path.join(repo, 'a.ts'), 'one\n')
     execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'ignore' })
     execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: repo, stdio: 'ignore' })
@@ -256,7 +249,7 @@ describe('diffContentForFeatureRepos', () => {
     const repoA = tmp()
     const repoB = tmp()
     for (const r of [repoA, repoB]) {
-      gitInit(r)
+      initGitRepo(r, { commit: 'empty' })
       fs.writeFileSync(path.join(r, 'f.ts'), 'before\n')
       execFileSync('git', ['add', '-A'], { cwd: r, stdio: 'ignore' })
       execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: r, stdio: 'ignore' })
@@ -277,7 +270,7 @@ describe('diffContentForFeatureRepos', () => {
     const repoA = tmp()
     const repoB = tmp()
     for (const r of [repoA, repoB]) {
-      gitInit(r)
+      initGitRepo(r, { commit: 'empty' })
       fs.writeFileSync(path.join(r, 'f.ts'), 'before\n')
       execFileSync('git', ['add', '-A'], { cwd: r, stdio: 'ignore' })
       execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: r, stdio: 'ignore' })
@@ -295,7 +288,7 @@ describe('diffContentForFeatureRepos', () => {
 
   it('returns an empty string when nothing changed anywhere', async () => {
     const repo = tmp()
-    gitInit(repo)
+    initGitRepo(repo, { commit: 'empty' })
 
     const snaps = await snapshotFeatureRepos(feature({ repos: [{ name: 'svc', localPath: repo }] }))
 

@@ -1,12 +1,20 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../logic/run-store'
+import { runsRoutes } from './runs'
+import type { ExternalHealAgentRequest } from './runs-route-support'
+import { RunStore } from '../logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorLike,
+  type RestartHealResult,
+  type RestartRunResult,
+} from '../logic/run-registry'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 

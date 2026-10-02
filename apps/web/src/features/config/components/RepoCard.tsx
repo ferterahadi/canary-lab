@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import { ChevronRightIcon, ComplexValueBadge, FieldRow, IconButton, TextInput, TrashIcon } from '@/shared/ui/atoms'
+import * as workspaceApi from '@/shared/api/workspace'
+import { IconButton } from '@/shared/ui/atoms'
+import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { ComplexValueBadge, FieldRow, TextInput } from '@/shared/ui/FormFields'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
+import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
+import { useRepoPathProbe } from '../state/use-repo-path-probe'
+import type { RepoEdit } from './repo-editor-rows'
 import { BranchControl } from './RepoBranchControl'
 import { HealthEditor } from './RepoProbeEditors'
 import { CommandSlice, Health, Probe, RepoSlice, deriveRepoName, nextRepoName, summarizeRepo } from './repo-slice'
@@ -88,19 +93,18 @@ export function RepoCard({
   activeRun,
   onChange,
   onRemove,
-  refreshKey,
 }: {
   feature: string
   repo: RepoSlice
   repoLookupName: string | undefined
   rootEnvs: string[]
   activeRun: boolean
-  onChange: (next: RepoSlice) => void
+  onChange: (next: RepoEdit) => void
   onRemove: () => void
-  refreshKey?: number
 }) {
   const [open, setOpen] = useState(true)
-  const [pathExists, setPathExists] = useState<boolean | null>(null)
+  const [remotePath, setRemotePath] = useState<string | null>(null)
+  const pendingClone = useRef(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloning, setCloning] = useState(false)
   const [cloneTargetOpen, setCloneTargetOpen] = useState(false)
@@ -110,53 +114,44 @@ export function RepoCard({
   const localPathStr = typeof repo.localPath === 'string' ? repo.localPath : ''
   const summary = summarizeRepo(repo)
 
-  // Probe whether the configured localPath actually exists on this machine.
-  // Drives the "missing folder — clone?" warning below.
+  const current = useMountedIdentity(JSON.stringify([feature, localPathStr, repo.cloneUrl]))
+  const mounted = useMountedIdentity(feature)
+  const probe = useRepoPathProbe(isExpr ? '' : localPathStr, remotePath)
+  const pathExists = probe.existence.confirmed ? probe.existence.value?.exists ?? null : null
   useEffect(() => {
-    if (isExpr || !localPathStr) {
-      setPathExists(null)
-      return
-    }
-    let cancelled = false
-    api.checkPathExists(localPathStr)
-      .then((r) => { if (!cancelled) setPathExists(r.exists) })
-      .catch(() => { if (!cancelled) setPathExists(null) })
-    return () => { cancelled = true }
-  }, [isExpr, localPathStr])
+    if (!probe.remote.confirmed || !probe.remote.value?.cloneUrl || remotePath !== localPathStr) return
+    const cloneUrl = probe.remote.value.cloneUrl
+    onChange((latest) => latest.localPath === remotePath && !latest.cloneUrl ? { ...latest, cloneUrl } : latest)
+    setRemotePath(null)
+  }, [probe.remote.confirmed, probe.remote.value, remotePath, localPathStr, onChange])
+  useEffect(() => { setCloneError(null); setCloneTargetOpen(false) }, [feature, localPathStr, repo.cloneUrl])
 
-  // When the user picks a localPath that has a .git/config, prefill cloneUrl.
   const handleLocalPathChange = (absolutePath: string): void => {
-    const nextName = nextRepoName(repo.name, derivedName, absolutePath, repo.cloneUrl)
-    const next: RepoSlice = { ...repo, localPath: absolutePath, name: nextName }
-    onChange(next)
-    if (!repo.cloneUrl) {
-      api.getGitRemote(absolutePath)
-        .then((r) => {
-          if (r.cloneUrl) onChange({ ...next, cloneUrl: r.cloneUrl })
-        })
-        .catch(() => { /* ignore; field stays editable */ })
-    }
+    setRemotePath(repo.cloneUrl ? null : absolutePath)
+    onChange((latest) => ({ ...latest, localPath: absolutePath,
+      name: nextRepoName(latest.name, deriveRepoName(latest.localPath, latest.cloneUrl), absolutePath, latest.cloneUrl),
+    }))
   }
 
   const handleClone = async (parentDir: string): Promise<void> => {
-    if (!repo.cloneUrl) return
-    const repoName = deriveRepoName(repo.localPath, repo.cloneUrl) || 'repo'
+    if (!repo.cloneUrl || pendingClone.current) return
+    pendingClone.current = true
+    const repoName = derivedName || 'repo'
     setCloning(true)
     setCloneError(null)
     try {
-      const r = await api.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
-      onChange({
-        ...repo,
-        localPath: r.localPath,
-        name: nextRepoName(repo.name, derivedName, r.localPath, repo.cloneUrl),
-      })
-      setPathExists(true)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'clone failed'
-      setCloneError(msg)
-    } finally {
-      setCloning(false)
+      const r = await workspaceApi.cloneRepository({ cloneUrl: repo.cloneUrl, parentDir, repoName })
+      if (!current()) return
+      onChange((latest) => ({ ...latest, localPath: r.localPath,
+        name: latest.name === repo.name ? nextRepoName(latest.name, derivedName, r.localPath, latest.cloneUrl) : latest.name,
+      }))
+      probe.existence.refresh()
       setCloneTargetOpen(false)
+    } catch (e) {
+      if (current()) setCloneError(e instanceof Error ? e.message : 'clone failed')
+    } finally {
+      pendingClone.current = false
+      if (mounted()) setCloning(false)
     }
   }
 
@@ -242,7 +237,6 @@ export function RepoCard({
               isExpr={isExpr}
               activeRun={activeRun}
               onChange={onChange}
-              refreshKey={refreshKey}
             />
 
             {pathExists === false && repo.cloneUrl && !isExpr && (
@@ -269,6 +263,10 @@ export function RepoCard({
                 </button>
               </div>
             )}
+            {(probe.existence.error || probe.remote.error) && <div role="status" className="text-xs text-warning">
+              {probe.existence.error || probe.remote.error}
+              <button type="button" className="cl-button ml-2 px-2" onClick={() => { probe.existence.refresh(); probe.remote.refresh() }}>Retry</button>
+            </div>}
             {cloneError && (
               <div className="mt-1 mb-2 text-[10px]" style={{ color: 'var(--danger)' }}>{cloneError}</div>
             )}
@@ -286,7 +284,7 @@ export function RepoCard({
               <TextInput
                 value={repo.cloneUrl ?? ''}
                 placeholder="git@github.com:org/repo.git"
-                onChange={(s) => onChange({ ...repo, cloneUrl: s || undefined })}
+                onChange={(s) => { setRemotePath(null); onChange({ ...repo, cloneUrl: s || undefined }) }}
               />
             </FieldRow>
           </Disclosure>

@@ -4,12 +4,20 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider } from '../state/invalidation'
-import { ApiError, getFeatureTests, getFeatureTestsPreview } from '../api/client'
+import { ApiError } from '../api/internal'
+import { getFeatureTests } from '../api/config'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
 import { connectReconnectingSocket } from '../api/reconnecting-socket'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
-vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), getFeatureTests: vi.fn(), getFeatureTestsPreview: vi.fn(), getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }) }))
+vi.mock('../api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('../api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/features')>()),
+  getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }),
+}))
 vi.mock('../api/discovery-repair', () => ({ listDiscoveryRepairs: vi.fn(), startDiscoveryRepair: vi.fn() }))
 vi.mock('../api/reconnecting-socket', () => ({ defaultWsBase: () => 'ws://test', connectReconnectingSocket: vi.fn(() => ({ close: vi.fn() })) }))
 vi.mock('../ui/TestPresentation', () => ({ TestPresentation: () => null }))
@@ -31,7 +39,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listDiscoveryRepairs).mockResolvedValue([])
   vi.mocked(getFeatureTests).mockResolvedValue(failedSpecs)
-  vi.mocked(getFeatureTestsPreview).mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -54,7 +61,7 @@ describe('Tests column discovery repair', () => {
 
   it('replaces the removed card when an external agent restores the suite without a page refresh', async () => {
     let checkAvailability: (() => void) | undefined
-    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback, delay) => {
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay?: number) => {
       if (delay === 10_000) checkAvailability = callback as () => void
       return 1 as unknown as ReturnType<typeof setInterval>
     }) as typeof setInterval)

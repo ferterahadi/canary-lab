@@ -1,22 +1,25 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
-import * as api from '@/shared/api/client'
-import type { StageModelChoice } from '@/shared/api/client'
-import type {
-  DisplayStatus,
-  RunDetail,
-  RunIndexEntry,
-  RunStatus,
-  TransientAction,
-} from '@/shared/api/types'
-import { deriveDisplayStatus } from '../utils/run-actions'
-import { isActiveRunStatus, isUnsettledRunStatus } from '@shared/run-state'
+import * as runsApi from '@/shared/api/runs'
+import * as verificationApi from '@/shared/api/verification'
+import { createObservedReads } from '@/shared/state/observed-reads'
+import type { StageModelChoice } from '@shared/agent-models'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import { deriveDisplayStatus } from '@shared/run-state'
+import {
+  isActiveRunStatus,
+  isUnsettledRunStatus,
+  type DisplayStatus,
+  type RunStatus,
+  type TransientAction,
+} from '@shared/run-state'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import type { ConnectionState } from '@/shared/state/record-stream'
 import {
   errorMessage,
   frameToAction,
   initialRunsState,
   runsReducer,
-  type ConnectionState,
   type RunsState,
   type RunsStreamFrame,
 } from './runs-state'
@@ -24,12 +27,9 @@ import {
 // Single React-side store for everything runs-related: the index list, the
 // per-run details, and the in-flight transient flags ("aborting" /
 // "deleting" / etc.). Sourced from `/ws/runs` push frames so the browser
-// never polls. HTTP is reserved for one-shot mutations (start / abort /
-// delete) — and even those just trigger the server to push the resulting
-// state through the WS. The pure reducer + frame-mapper live in
-// `runs-state.ts` so they're testable without jsdom.
-
-export type { ConnectionState } from './runs-state'
+// uses push as its fast path. The existing active-detail recovery read also
+// reconciles the index, keeping sidebar badges and detail evidence together
+// when an update is missed. The reducer + frame-mapper live in `runs-state.ts`.
 
 // ─── Context ─────────────────────────────────────────────────────────────
 
@@ -87,11 +87,12 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   // closure isn't stale across re-renders. Same trick as react-redux'.
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
-  const detailLoadsRef = useRef<Set<string>>(new Set())
+  const detailLoadsRef = useRef(createObservedReads())
 
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
     const url = wsUrl ?? defaultWsUrl()
+    const detailLoads = detailLoadsRef.current
     const connection = connectReconnectingSocket({
       url,
       WebSocketImpl,
@@ -117,18 +118,31 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
           return
         }
         const action = frameToAction(frame)
-        if (action) dispatchRef.current(action)
+        if (action) {
+          // A later stream observation supersedes reads already in flight.
+          // Invalidate their tokens so a late response cannot undo a stop or
+          // resurrect a removed run, and a new observation can read again.
+          if (action.type === 'update' || action.type === 'removed') {
+            detailLoads.invalidate(action.runId)
+          } else {
+            detailLoads.clear()
+          }
+          dispatchRef.current(action)
+        }
       },
     })
 
-    return () => connection.close()
+    return () => {
+      detailLoads.clear()
+      connection.close()
+    }
   }, [wsUrl, WebSocketImpl])
 
   // ── HTTP fallback ─────────────────────────────────────────────────
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const runs = await api.listRuns()
+      const runs = await runsApi.listRuns()
       dispatch({ type: 'http-list', runs })
     } catch { /* surfaced via connection state */ }
   }, [])
@@ -171,7 +185,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     const opts = env || isolation || boot || models
       ? { ...(env ? { env } : {}), ...(isolation ? { isolation } : {}), ...(boot ? { mode: 'boot' as const } : {}), ...(models ? { models } : {}) }
       : undefined
-    const { runId } = await api.startRun(feature, opts)
+    const { runId } = await runsApi.startRun(feature, opts)
     if (state.connection !== 'live') await refresh()
     return runId
   }, [refresh, state.connection])
@@ -180,29 +194,32 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     feature: string,
     input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ): Promise<string> => {
-    const { runId } = await api.executeVerification(feature, input)
+    const { runId } = await verificationApi.executeVerification(feature, input)
     if (state.connection !== 'live') await refresh()
     return runId
   }, [refresh, state.connection])
 
   const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
-    if (detailLoadsRef.current.has(runId)) return
-    detailLoadsRef.current.add(runId)
+    const reads = detailLoadsRef.current
+    const token = reads.begin(runId)
+    if (!token) return
     try {
-      const detail = await api.getRunDetail(runId)
-      dispatch({ type: 'http-detail', runId, detail })
+      const detail = await runsApi.getRunDetail(runId)
+      if (reads.current(runId, token)) {
+        dispatch({ type: 'http-detail', runId, detail })
+      }
     } catch {
       // Missing detail is non-fatal for the global run store. The list row
       // remains usable, and a future WS update can still hydrate the detail.
     } finally {
-      detailLoadsRef.current.delete(runId)
+      reads.finish(runId, token)
     }
   }, [])
 
-  const abort = useCallback((runId: string) => runAction(runId, 'aborting', () => api.stopRun(runId)), [runAction])
-  const deleteRun = useCallback((runId: string) => runAction(runId, 'deleting', () => api.deleteRun(runId)), [runAction])
-  const pauseHeal = useCallback((runId: string) => runAction(runId, 'pausing', () => api.pauseHealRun(runId)), [runAction])
-  const cancelHeal = useCallback((runId: string) => runAction(runId, 'cancelling-heal', () => api.cancelHealRun(runId)), [runAction])
+  const abort = useCallback((runId: string) => runAction(runId, 'aborting', () => runsApi.stopRun(runId)), [runAction])
+  const deleteRun = useCallback((runId: string) => runAction(runId, 'deleting', () => runsApi.deleteRun(runId)), [runAction])
+  const pauseHeal = useCallback((runId: string) => runAction(runId, 'pausing', () => runsApi.pauseHealRun(runId)), [runAction])
+  const cancelHeal = useCallback((runId: string) => runAction(runId, 'cancelling-heal', () => runsApi.cancelHealRun(runId)), [runAction])
 
   const clearError = useCallback((runId: string) => {
     dispatch({ type: 'error-clear', runId })

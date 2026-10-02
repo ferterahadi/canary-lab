@@ -12,14 +12,15 @@ import { flightsRoutes } from './flights'
 
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 
-import type { StageAdapters } from '../logic/conductor'
+import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import { issueCheckpointInput } from '../logic/checkpoint-input'
 
-import type { FlightIndexEntry, FlightManifest } from '../logic/types'
+import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -237,14 +238,8 @@ describe('flights routes', () => {
   })
 
   it('remedy: lists live-dirty repos on a matching failed stage, stashes them, and resumes', async () => {
-    const { execFileSync } = await import('child_process')
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoDir, stdio: 'ignore' })
     fs.writeFileSync(path.join(repoDir, 'f.txt'), 'a')
-    git('init')
-    git('config', 'user.email', 't@t')
-    git('config', 'user.name', 't')
-    git('add', '-A')
-    git('commit', '-m', 'init')
+    initGitRepo(repoDir)
     fs.writeFileSync(path.join(repoDir, 'f.txt'), 'changed') // now dirty
 
     let fail = true
@@ -274,8 +269,8 @@ describe('flights routes', () => {
     const applied = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/remedy`, body: { action: 'stash' } })
     expect(applied.statusCode).toBe(200)
     await waitForStatus(flightId, ['done'])
-    expect(execFileSync('git', ['status', '--porcelain'], { cwd: repoDir }).toString().trim()).toBe('')
-    expect(execFileSync('git', ['stash', 'list'], { cwd: repoDir }).toString()).toContain('canary-lab: pre-flight stash')
+    expect(git(repoDir, 'status', '--porcelain')).toBe('')
+    expect(git(repoDir, 'stash', 'list')).toContain('canary-lab: pre-flight stash')
 
     // Settled flight has no matching failed stage — remedy self-clears.
     const after = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })

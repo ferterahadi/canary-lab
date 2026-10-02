@@ -1,32 +1,20 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  type ReactNode,
-} from 'react'
-import * as api from '@/shared/api/client'
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react'
+import * as portifyApi from '@/shared/api/portify'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
-import {
-  portifyReducer,
-  initialPortifyState,
-  frameToAction,
-  isActivePortify,
-  type PortifyState,
-  type PortifyStreamFrame,
-} from './portify-state'
+import { useRecordDetail, useRecordIndexStore } from '@/shared/state/record-index-store'
+import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import { portifyIndex } from './portify-state'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 
 // Port-ification store, mirroring BenchmarkContext: a `/ws/portify`-fed reducer
 // for the index + per-workflow manifests, plus one-shot start/save/cancel
 // actions. The GlobalStatusBar button reads the active workflow from here; the
-// wizard reads a single manifest via usePortifyWorkflow.
+// detail consumers share hydration through usePortifyDetail.
 
-interface PortifyContextValue {
-  state: PortifyState
+type PortifyStore = ReturnType<typeof useRecordIndexStore<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>>
+
+interface PortifyContextValue extends PortifyStore {
   startPortify: (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => Promise<string>
   savePortify: (id: string) => Promise<void>
   cancelPortify: (id: string) => Promise<void>
@@ -37,9 +25,6 @@ interface PortifyContextValue {
 
 const PortifyContext = createContext<PortifyContextValue | null>(null)
 
-const RECONNECT_INITIAL_MS = 500
-const RECONNECT_MAX_MS = 10_000
-
 export function PortifyProvider({
   children,
   wsUrl,
@@ -49,101 +34,35 @@ export function PortifyProvider({
   wsUrl?: string
   WebSocketImpl?: typeof WebSocket
 }) {
-  const [state, dispatch] = useReducer(portifyReducer, initialPortifyState)
-  const dispatchRef = useRef(dispatch)
-  dispatchRef.current = dispatch
-
-  useEffect(() => {
-    const url = wsUrl ?? defaultWsUrl()
-    const Ctor = WebSocketImpl ?? WebSocket
-    let socket: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let backoff = RECONNECT_INITIAL_MS
-    let cancelled = false
-
-    // No `cancelled` guard of its own: its only callers are the initial call
-    // below and the reconnect timer, and cleanup clears that timer before its
-    // callback can fire. Same shape as RunsContext's socket lifecycle.
-    const connect = (): void => {
-      try {
-        socket = new Ctor(url)
-      } catch {
-        scheduleReconnect()
-        return
-      }
-      socket.onopen = () => {
-        backoff = RECONNECT_INITIAL_MS
-        dispatchRef.current({ type: 'connection', status: 'live' })
-      }
-      socket.onmessage = (e) => {
-        let frame: PortifyStreamFrame
-        try {
-          frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
-        } catch {
-          return
-        }
-        const action = frameToAction(frame)
-        if (action) dispatchRef.current(action)
-      }
-      socket.onclose = () => {
-        if (cancelled) return
-        dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-        scheduleReconnect()
-      }
-    }
-
-    // Same reasoning: the constructor's catch runs inside `connect`, and
-    // `onclose` checks `cancelled` before it gets here.
-    const scheduleReconnect = (): void => {
-      reconnectTimer = setTimeout(() => {
-        if (backoff >= RECONNECT_MAX_MS) {
-          dispatchRef.current({ type: 'connection', status: 'disconnected' })
-        }
-        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS)
-        connect()
-      }, backoff)
-    }
-
-    connect()
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      try {
-        socket?.close()
-      } catch {
-        /* already closed */
-      }
-    }
-  }, [wsUrl, WebSocketImpl])
+  const { state, hydration } = useRecordIndexStore({
+    index: portifyIndex,
+    url: wsUrl ?? defaultWsUrl(),
+    WebSocketImpl,
+    read: portifyApi.getPortify,
+    errorMessage: 'Could not load port work',
+  })
 
   const startPortify = useCallback(
     async (input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number }) => {
-      const { workflowId } = await api.startPortify(input)
+      const { workflowId } = await portifyApi.startPortify(input)
       return workflowId
     },
     [],
   )
 
   const savePortify = useCallback(async (id: string) => {
-    await api.savePortify(id)
+    await portifyApi.savePortify(id)
   }, [])
 
   const cancelPortify = useCallback(async (id: string) => {
-    await api.cancelPortify(id)
+    await portifyApi.cancelPortify(id)
   }, [])
 
-  const loadPortify = useCallback(async (id: string) => {
-    try {
-      const manifest = await api.getPortify(id)
-      if (manifest) dispatchRef.current({ type: 'update', workflowId: id, manifest })
-    } catch {
-      /* leave it unhydrated — the caller shows a loading/empty state */
-    }
-  }, [])
+  const loadPortify = hydration.load
 
   const value = useMemo<PortifyContextValue>(
-    () => ({ state, startPortify, savePortify, cancelPortify, loadPortify }),
-    [state, startPortify, savePortify, cancelPortify, loadPortify],
+    () => ({ state, hydration, startPortify, savePortify, cancelPortify, loadPortify }),
+    [state, hydration, startPortify, savePortify, cancelPortify, loadPortify],
   )
   return <PortifyContext.Provider value={value}>{children}</PortifyContext.Provider>
 }
@@ -170,6 +89,12 @@ export function usePortify() {
 export function usePortifyWorkflow(id: string | null | undefined): PortifyManifest | undefined {
   const ctx = usePortifyContext()
   return id ? ctx.state.details[id] : undefined
+}
+
+/** A canonical manifest with mounted recovery demand, never a private copy. */
+export function usePortifyDetail(id: string | null | undefined) {
+  const { state, hydration } = usePortifyContext()
+  return useRecordDetail(state.details, hydration, id)
 }
 
 /** The single active workflow, if any (portify is one-at-a-time). */

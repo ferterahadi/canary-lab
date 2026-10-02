@@ -1,9 +1,8 @@
 import path from 'path'
 import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
-import type { FlightStageKey } from '../types'
-import type { StageContext, StageJob } from '../conductor'
-import { stageSidecarDirs } from '../flight-stages'
+import type { FlightStageKey } from '../../../../../../../shared/flights/types'
+import { stageSidecarDirs, type StageContext, type StageJob } from '../flight-stages'
 import type { FlightStageDeps } from './context'
 
 // The five kinds of work a flight stage can own, each behind the one `StageJob`

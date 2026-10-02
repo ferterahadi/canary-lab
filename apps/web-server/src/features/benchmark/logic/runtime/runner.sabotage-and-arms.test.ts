@@ -12,6 +12,8 @@ import * as gitRepoMod from '../../../../shared/git-repo'
 
 import * as repoWorktreeMod from '../../../runs/logic/runtime/repo-worktree'
 
+import { runAgentProcess } from '../../../agent-sessions/logic/agent-process'
+
 import { createBenchmarkRunner } from './runner'
 
 import { OFF_BY_ONE, feat, flatFixture, gitInit, makeDeps, nestedFixture, pollUntil, roots, waitForStatus } from './__fixtures__/runner-fixtures'
@@ -372,6 +374,12 @@ describe('createBenchmarkRunner', () => {
 
       const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'codex', iterations: 1, ...OFF_BY_ONE })
       expect(await pollUntil(() => amock.calls > 0)).toBe(true)
+
+      const invocation = vi.mocked(runAgentProcess).mock.calls.find(([options]) => options.command === 'codex')?.[0]
+      expect(invocation?.args.slice(0, 5)).toEqual(['exec', '--sandbox', 'workspace-write', '-c', 'approval_policy="on-request"'])
+      expect(invocation?.args).toHaveLength(6)
+      expect(invocation?.args[5].length).toBeGreaterThan(0)
+      expect(invocation?.cwd).toBeTruthy()
 
       await expect(startBenchmark({ feature: 'bench-feat', agent: 'codex', iterations: 1, ...OFF_BY_ONE }))
         .rejects.toMatchObject({ statusCode: 409 })

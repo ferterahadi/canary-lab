@@ -1,22 +1,19 @@
+import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
-import type {
-  BenchmarkManifest,
-  SabotageLevel,
-  StartBenchmarkInput,
-  StartBenchmarkResult,
-} from '../logic/runtime/types'
+import type { BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
+import type { SabotageLevel } from '../../../../../../shared/benchmark-index'
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
-import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
+import { notFound } from '../../../shared/http-error'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
 // injected BenchmarkStore; the start path delegates to the injected
@@ -88,11 +85,8 @@ export async function benchmarkRoutes(
         reply.code(400)
         return { error: 'feature is required' }
       }
-      const feature = loadFeatures(deps.featuresDir).find((f) => f.name === featureName)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      const feature = findFeature(deps.featuresDir, featureName)
+      if (!feature) return notFound(reply, 'feature')
       const env = typeof req.query.env === 'string' && req.query.env.trim() ? req.query.env.trim() : undefined
       return computePortPreflight(feature, env)
     },
@@ -102,10 +96,7 @@ export async function benchmarkRoutes(
     '/api/benchmarks/:benchmarkId',
     async (req, reply) => {
       const manifest = deps.store.get(req.params.benchmarkId)
-      if (!manifest) {
-        reply.code(404)
-        return { error: 'benchmark not found' }
-      }
+      if (!manifest) return notFound(reply, 'benchmark')
       return manifest
     },
   )
@@ -142,10 +133,7 @@ export async function benchmarkRoutes(
     '/api/benchmarks/:benchmarkId/open-worktree',
     async (req, reply) => {
       const manifest = deps.store.get(req.params.benchmarkId)
-      if (!manifest) {
-        reply.code(404)
-        return { error: 'benchmark not found' }
-      }
+      if (!manifest) return notFound(reply, 'benchmark')
       const target = req.body?.target
       if (target !== 'frozen' && target !== 'A' && target !== 'B') {
         reply.code(400)
@@ -207,10 +195,7 @@ export async function benchmarkRoutes(
     '/api/benchmarks/:benchmarkId/clear-worktrees',
     async (req, reply) => {
       const manifest = deps.store.get(req.params.benchmarkId)
-      if (!manifest) {
-        reply.code(404)
-        return { error: 'benchmark not found' }
-      }
+      if (!manifest) return notFound(reply, 'benchmark')
       const done = manifest.status === 'done' || manifest.status === 'aborted' || manifest.status === 'error'
       if (!done) {
         reply.code(409)
@@ -261,22 +246,6 @@ export async function benchmarkRoutes(
       return { error: err instanceof Error ? err.message : String(err) }
     }
   })
-}
-
-// Git toplevels of every configured feature repo — the source roots that
-// `git worktree remove` / `listWorktrees` operate against. Mirrors the helper
-// in routes/runs.ts (kept local to avoid a route→route import).
-async function featureRepoRoots(featuresDir: string): Promise<string[]> {
-  const roots = new Set<string>()
-  for (const feature of loadFeatures(featuresDir)) {
-    for (const repo of feature.repos ?? []) {
-      try {
-        const root = await getGitRoot(resolveRepoPath(repo.localPath))
-        if (root) roots.add(root)
-      } catch { /* skip repos that aren't resolvable */ }
-    }
-  }
-  return [...roots]
 }
 
 // Lazily ensure a pristine checkout at the sabotage SHA under the benchmark's

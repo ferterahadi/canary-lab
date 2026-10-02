@@ -1,3 +1,4 @@
+import { normalizeEnvironmentName, normalizeEnvironmentNames } from '../../../../../../shared/lib/environment-names'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -9,26 +10,21 @@ import {
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
-import { checkoutBranch, findRepo, resolveRepoPath } from '../../../shared/git-repo'
-import {
-  describeFastForward,
-  describeRepoCheckout,
-  fastForwardToUpstream,
-  type RepoCheckoutStatus,
-} from '../../../shared/git-upstream'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo, type FeatureRepoDeps } from './feature-repos'
+import { listEnvFolders, readEnvsetsConfig, writeEnvsetsConfig, syncEnvsInConfig } from './envset-config'
 import {
   SPEC_SELECTION_RULE,
   findVariableSpecSelection,
   isPlaywrightConfigPath,
 } from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { publishEnvsetChange } from './envset-events'
+import { isWithin } from './path-containment'
+import { deleteSuite } from './feature-deletion'
 
-export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
-
-export interface FeatureAuthoringContext {
+export interface FeatureAuthoringContext extends FeatureRepoDeps {
   projectRoot: string
   featuresDir: string
   /** The workspace bus, so a write announces ITSELF.
@@ -89,16 +85,6 @@ export interface FeatureEnvsetSummary {
   }>
 }
 
-interface EnvsetsConfigJson {
-  appRoots?: Record<string, string>
-  slots?: Record<string, { description?: string; target?: string }>
-  feature?: {
-    slots?: string[]
-    testCommand?: string
-    testCwd?: string
-  }
-}
-
 export function createFeatureSkeleton(input: FeatureAuthoringContext & {
   feature: string
   description?: string
@@ -115,10 +101,11 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
 } | { ok: false; error: string; featureDir?: string } {
   const validation = validateFeatureTarget(input.projectRoot, input.feature)
   if (!validation.ok) return { ok: false, error: validation.error, featureDir: validation.featureDir }
+  const envs = normalizeEnvironmentNames(input.envs)
   const files = buildFeatureSkeletonScaffold({
     featureName: input.feature,
     description: input.description,
-    envs: input.envs,
+    envs,
     repos: input.repos,
   })
   const featureDir = validation.featureDir
@@ -131,7 +118,7 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
     fs.writeFileSync(target, file.content, 'utf8')
     written.push(target)
   }
-  for (const env of sanitizeEnvNames(input.envs)) {
+  for (const env of envs) {
     fs.mkdirSync(path.join(featureDir, 'envsets', env), { recursive: true })
   }
   publishWorkspaceEvent(input.workspaceEvents, { type: 'feature-created', feature: input.feature })
@@ -152,12 +139,7 @@ export function getFeatureEnvsetSummary(ctx: FeatureAuthoringContext, featureNam
   const envsetsDir = path.join(feature.featureDir, 'envsets')
   const configPath = path.join(envsetsDir, 'envsets.config.json')
   const cfg = readEnvsetsConfig(envsetsDir)
-  const envs = fs.existsSync(envsetsDir)
-    ? fs.readdirSync(envsetsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort()
-    : []
+  const envs = listEnvFolders(feature.featureDir)
   return {
     feature: feature.name,
     featureDir: feature.featureDir,
@@ -195,13 +177,12 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   cfg.feature.slots ??= []
 
   const captured: CapturedEnvFile[] = []
-  const envs = new Set(feature.envs ?? [])
   for (const source of input.sources) {
     const sourcePath = path.resolve(source.sourcePath)
     if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
       return { ok: false, error: `source file not found: ${source.sourcePath}` }
     }
-    const env = sanitizeEnvName(source.env == null ? 'local' : source.env)
+    const env = normalizeEnvironmentName(source.env == null ? 'local' : source.env)
     const slot = sanitizeSlotName(source.slot ?? path.basename(sourcePath))
     const envDir = path.join(envsetsDir, env)
     const dest = path.join(envDir, slot)
@@ -220,7 +201,6 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
       target,
     }
     if (!cfg.feature.slots.includes(slot)) cfg.feature.slots.push(slot)
-    envs.add(env)
     captured.push({
       env,
       slot,
@@ -231,79 +211,27 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
     })
   }
   writeEnvsetsConfig(envsetsDir, cfg)
-  syncFeatureEnvs(feature.featureDir, Array.from(envs).sort())
+  syncEnvsInConfig(feature.featureDir)
   const summary = getFeatureEnvsetSummary(ctx, input.feature)
-  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+  publishEnvsetChange(ctx.workspaceEvents, feature.name, 'structure')
   return { ok: true, captured, summary: summary! }
 }
 
-export async function getFeatureRepoStatus(
-  ctx: FeatureAuthoringContext,
-  featureName: string,
-  repoName: string,
-  opts: { fetch?: boolean } = {},
-): Promise<RepoCheckoutStatus | null> {
-  const feature = findFeature(ctx.featuresDir, featureName)
-  if (!feature) return null
-  const repo = findRepo(feature, repoName)
-  if (!repo) return null
-  return describeRepoCheckout(repo, opts)
+// Compatibility entry points retain authoring's result shapes; suite repository
+// policy and publication belong to feature-repos for REST and MCP alike.
+export async function getFeatureRepoStatus(ctx: FeatureAuthoringContext, feature: string, repo: string, opts: { fetch?: boolean } = {}) {
+  const result = await readFeatureRepo(ctx, { feature, repo }, opts)
+  return result.ok ? result.value : null
 }
 
-/**
- * Fast-forward a declared repo's checkout to its upstream tip. The pinned
- * `branch` is the target when the feature has one; otherwise whatever branch is
- * checked out. Announces on the bus only when the checkout actually moved — an
- * up-to-date or ahead checkout changed nothing the Repos tab needs to refetch.
- */
-export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  repo: string
-  confirm: true
-}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature) return { error: 'feature not found', statusCode: 404 }
-  const repo = findRepo(feature, input.repo)
-  if (!repo) return { error: 'repo not found', statusCode: 404 }
-  const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
-  if (outcome.kind === 'refused') {
-    return { error: `${outcome.reason}: ${outcome.message}`, statusCode: 409 }
-  }
-  if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(ctx.workspaceEvents, { type: 'features-changed' })
-  return {
-    update: outcome,
-    summary: describeFastForward(outcome),
-    ...await describeRepoCheckout(repo),
-  }
+export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: { feature: string; repo: string; confirm: true }) {
+  const result = await updateFeatureRepo(ctx, input)
+  return result.ok ? result.value : { error: result.error, statusCode: result.statusCode }
 }
 
-export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  repo: string
-  branch: string
-  confirm: true
-}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature) return { error: 'feature not found', statusCode: 404 }
-  const repo = findRepo(feature, input.repo)
-  if (!repo) return { error: 'repo not found', statusCode: 404 }
-  try {
-    return {
-      ...await checkoutBranch(repo.localPath, input.branch.trim(), ctx.workspaceEvents),
-      path: resolveRepoPath(repo.localPath),
-      expectedBranch: repo.branch ?? null,
-    }
-  } catch (err) {
-    // A rejection value is `unknown`, so neither an Error shape nor a statusCode
-    // is guaranteed here — both fallbacks are real. Pinned in
-    // feature-authoring.mock.test.ts.
-    return {
-      error: err instanceof Error ? err.message : String(err),
-      statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500,
-    }
-  }
+export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, input: { feature: string; repo: string; branch: string; confirm: true }) {
+  const result = await checkoutFeatureRepo(ctx, input)
+  return result.ok ? result.value : { error: result.error, statusCode: result.statusCode }
 }
 
 export function deleteFeature(ctx: FeatureAuthoringContext, input: {
@@ -311,16 +239,11 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
   confirmName: string
 }): { ok: true; featureDir: string } | { ok: false; error: string; featureDir?: string } {
   if (input.confirmName !== input.feature) return { ok: false, error: 'confirmName must match the feature name' }
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  const featuresRoot = path.resolve(ctx.featuresDir)
-  const featureDir = path.resolve(feature.featureDir)
-  if (featureDir === featuresRoot || !isWithin(featuresRoot, featureDir)) {
-    return { ok: false, error: 'feature directory is outside the features root', featureDir }
-  }
-  fs.rmSync(featureDir, { recursive: true, force: true })
-  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'feature-deleted', feature: input.feature })
-  return { ok: true, featureDir }
+  // Scaffold reset keeps its owning Flight; preserve this directory-only API.
+  const result = deleteSuite({ featuresDir: ctx.featuresDir, workspaceEvents: ctx.workspaceEvents }, input)
+  if (result.ok) return { ok: true, featureDir: result.featureDir }
+  const { statusCode: _statusCode, ...failure } = result
+  return failure
 }
 
 export async function applyExternalDraftFiles(input: {
@@ -414,37 +337,6 @@ export function parseRedactedEntries(raw: string): RedactedEntry[] {
   return Array.from(keys).sort().map((key) => ({ key, value: '********' as const }))
 }
 
-export function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
-  return loadFeatures(featuresDir).find((feature) => feature.name === featureName)
-}
-
-function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {
-  const cfgPath = path.join(envsetsDir, 'envsets.config.json')
-  if (!fs.existsSync(cfgPath)) return {}
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as EnvsetsConfigJson
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function writeEnvsetsConfig(envsetsDir: string, cfg: EnvsetsConfigJson): void {
-  fs.mkdirSync(envsetsDir, { recursive: true })
-  fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), `${JSON.stringify(cfg, null, 2)}\n`, 'utf8')
-}
-
-function syncFeatureEnvs(featureDir: string, envs: string[]): void {
-  const configPath = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-    .map((name) => path.join(featureDir, name))
-    .find((candidate) => fs.existsSync(candidate))
-  if (!configPath) return
-  const source = fs.readFileSync(configPath, 'utf8')
-  const parsed = readFeatureConfig(source)
-  const next: ConfigValue = { ...parsed.value, envs }
-  fs.writeFileSync(configPath, writeFeatureConfig(source, next), 'utf8')
-}
-
 function listSlotFiles(envDir: string): string[] {
   if (!fs.existsSync(envDir)) return []
   return fs.readdirSync(envDir, { withFileTypes: true })
@@ -464,26 +356,10 @@ function readExistingSpecFiles(featureDir: string): GeneratedFeatureFile[] {
     }))
 }
 
-function sanitizeEnvNames(envs: string[] | undefined): string[] {
-  const clean = (envs ?? ['local']).map((env) => sanitizeEnvName(env)).filter(Boolean)
-  return Array.from(new Set(clean.length > 0 ? clean : ['local']))
-}
-
-function sanitizeEnvName(env: string): string {
-  const clean = env.trim()
-  if (!/^[a-zA-Z0-9_-]+$/.test(clean)) throw new Error(`invalid env name: ${env}`)
-  return clean
-}
-
 function sanitizeSlotName(slot: string): string {
   const clean = slot.trim()
   if (!clean || path.isAbsolute(clean) || clean.includes('/') || clean.includes('\\') || clean === '..' || clean.includes('..')) {
     throw new Error(`invalid slot name: ${slot}`)
   }
   return clean
-}
-
-export function isWithin(root: string, candidate: string): boolean {
-  const rel = path.relative(path.resolve(root), path.resolve(candidate))
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }

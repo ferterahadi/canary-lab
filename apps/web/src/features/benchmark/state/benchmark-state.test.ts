@@ -1,10 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import {
-  benchmarkReducer,
-  initialBenchmarkState,
-  frameToAction,
-} from './benchmark-state'
+import { benchmarkIndex } from './benchmark-state'
 import type { BenchmarkManifest } from '../api/benchmark-types'
+
+const { reducer: benchmarkReducer, initialState: initialBenchmarkState, frameToAction } = benchmarkIndex
 
 function m(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {

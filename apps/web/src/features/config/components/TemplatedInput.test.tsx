@@ -3,18 +3,15 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/client'
+import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/config'
 import { TemplatedInput } from './TemplatedInput'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getEnvsetsIndex: vi.fn(),
-    getEnvsetSlot: vi.fn(),
-    getFeatureConfigDoc: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getEnvsetsIndex: vi.fn(),
+  getEnvsetSlot: vi.fn(),
+  getFeatureConfigDoc: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root

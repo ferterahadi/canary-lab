@@ -3,16 +3,28 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { CleanupListing } from '@/shared/api/types'
+import * as cleanupApi from '@/shared/api/cleanup'
+import * as runsApi from '@/shared/api/runs'
+import * as portifyApi from '@/shared/api/portify'
+import type { CleanupListing } from '@shared/cleanup-listing'
 import { LogCleanupPage } from './LogCleanupPage'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return { ...actual, cleanupRuns: vi.fn(), trimRun: vi.fn(), deleteRun: vi.fn(), cleanupPortify: vi.fn(), removePortify: vi.fn() }
-})
+vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/cleanup')>()),
+  cleanupRuns: vi.fn(),
+  trimRun: vi.fn(),
+  cleanupPortify: vi.fn(),
+}))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  deleteRun: vi.fn(),
+}))
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  removePortify: vi.fn(),
+}))
 
 const LISTING: CleanupListing = {
   runs: [
@@ -31,17 +43,17 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.cleanupRuns).mockResolvedValue(structuredClone(LISTING))
-  vi.mocked(api.trimRun).mockResolvedValue({ freedBytes: 880_000_000 })
-  vi.mocked(api.deleteRun).mockResolvedValue(undefined)
-  vi.mocked(api.cleanupPortify).mockResolvedValue({
+  vi.mocked(cleanupApi.cleanupRuns).mockResolvedValue(structuredClone(LISTING))
+  vi.mocked(cleanupApi.trimRun).mockResolvedValue({ freedBytes: 880_000_000 })
+  vi.mocked(runsApi.deleteRun).mockResolvedValue(undefined)
+  vi.mocked(cleanupApi.cleanupPortify).mockResolvedValue({
     workflows: [
       { workflowId: 'portify-2026-05-01T1000-x1', feature: 'shop', status: 'aborted', startedAt: '2026-05-01T10:00:00Z', folderBytes: 4_500_000 },
       { workflowId: 'portify-2026-05-02T1000-x2', feature: 'auth', status: 'saved', startedAt: '2026-05-02T10:00:00Z', folderBytes: 1_200_000 },
     ],
     totalBytes: 5_700_000,
   })
-  vi.mocked(api.removePortify).mockResolvedValue({ workflowId: 'portify-2026-05-01T1000-x1', removed: true })
+  vi.mocked(portifyApi.removePortify).mockResolvedValue({ workflowId: 'portify-2026-05-01T1000-x1', removed: true })
 })
 
 afterEach(() => {
@@ -118,7 +130,7 @@ describe('LogCleanupPage', () => {
     const confirmBtn = [...container.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Trim') as HTMLButtonElement
     await act(async () => { confirmBtn.click() })
     await act(async () => { await Promise.resolve() })
-    expect(api.trimRun).toHaveBeenCalledWith('2026-05-01T1000-aaaa')
+    expect(cleanupApi.trimRun).toHaveBeenCalledWith('2026-05-01T1000-aaaa')
   })
 
   it('clicking a run id navigates to that run', async () => {
@@ -147,8 +159,8 @@ describe('LogCleanupPage', () => {
     const confirmBtn = [...container.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
     await act(async () => { confirmBtn.click() })
     await act(async () => { await Promise.resolve() })
-    expect(api.deleteRun).toHaveBeenCalledWith('2026-05-03T1000-cccc')
-    expect(api.deleteRun).toHaveBeenCalledWith('2026-05-04T1000-dddd')
+    expect(runsApi.deleteRun).toHaveBeenCalledWith('2026-05-03T1000-cccc')
+    expect(runsApi.deleteRun).toHaveBeenCalledWith('2026-05-04T1000-dddd')
   })
 
   it('portify per-row delete goes through the confirm (record-only note) before removing', async () => {
@@ -159,15 +171,15 @@ describe('LogCleanupPage', () => {
     const deleteBtn = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
     await act(async () => { deleteBtn.click() })
     // No API call yet — the confirm dialog with the overlay note must appear first.
-    expect(api.removePortify).not.toHaveBeenCalled()
+    expect(portifyApi.removePortify).not.toHaveBeenCalled()
     const dialog = container.querySelector('[role="dialog"]')!
     expect(dialog.textContent).toContain('saved overlay')
     expect(dialog.textContent).toContain('Delete Portify record')
     const confirmBtn = [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
     await act(async () => { confirmBtn.click() })
     await act(async () => { await Promise.resolve() })
-    expect(api.removePortify).toHaveBeenCalledWith('portify-2026-05-01T1000-x1')
-    expect(api.removePortify).toHaveBeenCalledTimes(1)
+    expect(portifyApi.removePortify).toHaveBeenCalledWith('portify-2026-05-01T1000-x1')
+    expect(portifyApi.removePortify).toHaveBeenCalledTimes(1)
   })
 
   it('opens Portify history in the feature Flight stage', async () => {
@@ -190,7 +202,7 @@ describe('LogCleanupPage', () => {
     await act(async () => { deleteBtn.click() })
     const cancelBtn = [...container.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Cancel') as HTMLButtonElement
     await act(async () => { cancelBtn.click() })
-    expect(api.removePortify).not.toHaveBeenCalled()
+    expect(portifyApi.removePortify).not.toHaveBeenCalled()
     expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 })

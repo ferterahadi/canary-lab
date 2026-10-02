@@ -3,6 +3,7 @@ import path from 'path'
 import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../shared/launcher/types'
 import { normalizeStartCommand, validateHealthCheck } from './launcher-startup'
 import { validateSingleAttempt } from './single-attempt'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
 
 // Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
 // Takes an explicit featuresDir so tests can point at a fixture tree.
@@ -15,9 +16,7 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
   for (const dir of dirs) {
-    const candidate = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-      .map((name) => path.join(featuresDir, dir, name))
-      .find((p) => fs.existsSync(p))
+    const candidate = findExistingConfig(path.join(featuresDir, dir), FEATURE_CONFIG_NAMES)?.path
     if (!candidate) continue
     try {
       // Bust the require cache so tests can rewrite a fixture and re-load.
@@ -59,6 +58,10 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
   return out
 }
 
+export function findFeature(featuresDir: string, name: string): FeatureConfig | undefined {
+  return loadFeatures(featuresDir).find((feature) => feature.name === name)
+}
+
 export type SuiteAvailability =
   | { kind: 'ready'; feature: FeatureConfig; configPath: string }
   | { kind: 'removed' }
@@ -69,12 +72,11 @@ export type SuiteAvailability =
  * test directory. A suite omitted by loadFeatures is not necessarily deleted. */
 export function suiteAvailability(featuresDir: string, name: string): SuiteAvailability {
   if (!name || name === '.' || name === '..' || path.basename(name) !== name || !fs.existsSync(featuresDir)) return { kind: 'removed' }
-  const feature = loadFeatures(featuresDir).find((item) => item.name === name)
+  const feature = findFeature(featuresDir, name)
   const entry = fs.readdirSync(featuresDir, { withFileTypes: true }).find((item) => item.name === name && item.isDirectory())
   if (!entry && !feature) return { kind: 'removed' }
   const discoveryDir = entry ? path.join(featuresDir, name) : feature!.featureDir
-  const configPath = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-    .map((file) => path.join(discoveryDir, file)).find((file) => fs.existsSync(file))
+  const configPath = findExistingConfig(discoveryDir, FEATURE_CONFIG_NAMES)?.path
   if (feature && fs.existsSync(feature.featureDir)) return { kind: 'ready', feature, configPath: configPath ?? path.join(discoveryDir, 'feature.config.cjs') }
   if (feature) return { kind: 'removed' }
   return configPath

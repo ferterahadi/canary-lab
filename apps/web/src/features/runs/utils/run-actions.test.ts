@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { canCancelHeal, canDelete, canPauseHeal, canStop, deriveDisplayStatus } from './run-actions'
+import { canCancelHeal, canDelete, canPauseHeal, canStop } from './run-actions'
+import { deriveDisplayStatus } from '@shared/run-state'
 
 describe('canPauseHeal', () => {
   it('is true only when status is running', () => {

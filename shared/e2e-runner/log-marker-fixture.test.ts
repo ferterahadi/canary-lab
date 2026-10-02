@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -20,19 +19,11 @@ import {
   wrapWithCallSite,
   type CallSiteStep,
 } from './log-marker-fixture'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const THIS_FILE = fileURLToPath(import.meta.url)
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-lm-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const mkTmp = trackTempDirs('cl-lm-')
 
 describe('slugify (log-marker-fixture)', () => {
   it('lowercases and replaces non-alphanumeric runs with a single dash', () => {
@@ -89,7 +80,6 @@ describe('withLogMarkers', () => {
       'pre\n<test-case-my-case>\nduring\n</test-case-my-case>\n',
     )
   })
-
 
   it('skips close tag when run() throws (current behavior — no try/finally)', async () => {
     const dir = mkTmp()
@@ -495,4 +485,14 @@ describe('base.extend wiring', () => {
       { location: { file: '/specs/login.spec.ts', line: 1, column: 1 } },
     ))).rejects.toThrow()
   })
+})
+
+
+it('retains repeated marker writes when a path appears in both manifest formats', async () => {
+  const dir = mkTmp()
+  const log = path.join(dir, 'service.log')
+  const manifest = path.join(dir, 'manifest.json')
+  fs.writeFileSync(manifest, JSON.stringify({ serviceLogs: [log], services: [{ logPath: log }, {}] }))
+  await withLogMarkers('cart', manifest, async () => { fs.appendFileSync(log, 'during\n') })
+  expect(fs.readFileSync(log, 'utf-8')).toBe('<test-case-cart>\n<test-case-cart>\nduring\n</test-case-cart>\n</test-case-cart>\n')
 })

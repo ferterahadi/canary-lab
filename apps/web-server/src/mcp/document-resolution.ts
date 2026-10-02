@@ -2,10 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import { findFeature, isWithin, linkFeatureDoc } from '../features/config/logic/feature-authoring'
+import { findFeature } from '../shared/feature-loader'
+import { linkFeatureDoc } from '../features/config/logic/feature-docs-authoring'
+import { isWithin } from '../features/config/logic/path-containment'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
 import { documentHash, documentResolutionInput, readDocumentSelection, writeDocumentSelection, type DocumentSource } from '../features/coverage/logic/coverage/document-resolution'
-import { resolveRepoPath } from '../shared/git-repo'
+import { resolveRepoPath } from '../shared/repo-identity'
 import { renderPrompt } from '../shared/prompts'
 import { publishWorkspaceEvent } from '../shared/workspace-events'
 import { elicitationAdviceFor } from './client-surface'
@@ -13,8 +15,6 @@ import { requestDocuments } from './document-input'
 import { requestBrokenDocumentPath } from './document-relink'
 import { inputFingerprint, inputPending, requestUserInput, resumeUrlInput } from './elicitation'
 import { asJsonResult, authoringCtx, errorResult, type ToolGroupContext } from './tool-support'
-
-export { documentResolutionInput }
 type Result = CallToolResult | InputRequiredResult
 
 // Resolve directory aliases (for example macOS /var → /private/var) while

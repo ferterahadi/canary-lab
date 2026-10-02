@@ -8,26 +8,32 @@ import {
   resumeFlight,
   setFlightAutopilot,
   respondToFlightCheckpoint,
-  abortFlight,
   pauseFlight,
   redoFlight,
+  reopenStages,
+  type FlightConductorDeps,
+} from './conductor'
+import {
+  abortFlight,
   deleteFlight,
   removeFlightRecordsForFeature,
   enqueueFlight,
   drainQueuedFlights,
-  reopenStages,
+} from './flight-queue'
+import {
   stampSystemLine,
   FlightConflictError,
   FlightExistsError,
   FlightFrozenError,
   FlightStageEntryError,
-  type FlightConductorDeps,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
-} from './conductor'
+} from './flight-errors'
+import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 
 let tmpDir: string
 
@@ -530,4 +536,17 @@ describe('redoFlight', () => {
   it('refuses to redo an unknown flight id', () => {
     expect(() => redoFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
   })
+})
+
+it('accepts a frozen-flight re-entry through an equivalent repository symlink', async () => {
+  const repo = path.join(tmpDir, 'repo')
+  const alias = path.join(tmpDir, 'alias')
+  fs.mkdirSync(repo)
+  fs.symlinkSync(repo, alias, 'dir')
+  const first = startFlight(args(repo), deps(allDone()))
+  await first.completion
+  const resumed = startFlight({ ...args(alias), mode: 'jump', fromStage: 'similarity' }, deps(allDone()))
+  expect(resumed.manifest.flightId).toBe(first.manifest.flightId)
+  expect(resumed.manifest.repoPaths).toEqual([repo])
+  await resumed.completion
 })

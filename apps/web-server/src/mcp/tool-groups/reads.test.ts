@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decode } from '@toon-format/toon'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerReadTools } from './reads'
 import { captureTools } from './__fixtures__/tool-group-harness'
 

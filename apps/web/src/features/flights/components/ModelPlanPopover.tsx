@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useEscapeToClose } from '@/shared/ui/atoms'
+import { useRef, useState, type ReactNode } from 'react'
+import { useEscapeToClose, useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
 
 /** One row of a model plan: which spawn, and the knobs it was pinned to. */
 export interface ModelPlanRow {
@@ -38,14 +38,7 @@ export function ModelPlanPopover({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
   useEscapeToClose(() => setOpen(false), open)
 
   return (

@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../runs/logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 
 let tmpDir: string
 let spawnCalls: Array<{ command: string; args: string[]; child: FakeChild }> = []
@@ -25,7 +25,7 @@ afterEach(() => {
 describe('evaluation rewrite agent path', () => {
   it('returns null when no rewrite agents are available', async () => {
     mockAgentModules()
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail(), 'deterministic', tmpDir)).resolves.toBeNull()
     expect(spawnCalls).toEqual([])
@@ -51,7 +51,7 @@ describe('evaluation rewrite agent path', () => {
       child.close(0)
     })
     const onOutput = vi.fn()
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'codex', tmpDir, { onOutput })
 
@@ -93,7 +93,7 @@ describe('evaluation rewrite agent path', () => {
       child.close(0)
     })
     const onOutput = vi.fn()
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir, { onOutput })
 
@@ -122,7 +122,7 @@ describe('evaluation rewrite agent path', () => {
       child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir)
 
@@ -145,7 +145,7 @@ describe('evaluation rewrite agent path', () => {
       child.stderr.emit('data', 'bad flag')
       child.close(2)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail(), 'auto', tmpDir)).rejects.toThrow(
       /claude: unparseable output: <empty output>.*codex: evaluation rewrite agent failed with exit code 2/s,
@@ -154,15 +154,15 @@ describe('evaluation rewrite agent path', () => {
 
   it('records non-Error spawn failures from an available agent', async () => {
     availableAgents = ['claude']
-    vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
-      pickAvailableHealAgent: () => 'claude',
-    }))
+    vi.doMock('../../runs/logic/runtime/heal-agent-spawn', () => ({
+  pickAvailableHealAgent: () => 'claude',
+}))
     vi.doMock('child_process', () => ({
       spawn: () => {
         throw 'spawn exploded'
       },
     }))
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir)).rejects.toThrow(
       'claude: spawn exploded',
@@ -174,7 +174,7 @@ describe('evaluation rewrite agent path', () => {
     mockAgentModules()
     const controller = new AbortController()
     controller.abort()
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail(), 'claude', tmpDir, { signal: controller.signal })).rejects.toThrow(
       'evaluation rewrite cancelled',
@@ -188,7 +188,7 @@ describe('evaluation rewrite agent path', () => {
       child.close(null, 'SIGKILL')
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail(), 'codex', tmpDir)).rejects.toThrow(
       'evaluation rewrite agent failed with SIGKILL',
@@ -211,7 +211,7 @@ describe('evaluation rewrite agent path', () => {
       }))
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     const rewrite = await generateEvaluationRewriteWithAgent(detail(), 'codex', tmpDir)
 
@@ -220,12 +220,12 @@ describe('evaluation rewrite agent path', () => {
 })
 
 function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; child: FakeChild }) => void): void {
-  vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
-    pickAvailableHealAgent: (preferred?: string) => {
-      if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
-      return availableAgents[0] ?? null
-    },
-  }))
+  vi.doMock('../../runs/logic/runtime/heal-agent-spawn', () => ({
+  pickAvailableHealAgent: (preferred?: string) => {
+    if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
+    return availableAgents[0] ?? null
+  },
+}))
   // Prevent path resolution so spawn receives bare agent names.
   vi.doMock('../../agent-sessions/logic/agent-binary', () => ({
     resolveAgentBinary: (agent: string) => agent,

@@ -45,6 +45,33 @@ async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Cl
 }
 
 describe('MCP HTTP server (smoke)', () => {
+  it('delivers the recorded experimental policy to an open client and recovers it after reconnect', async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-policy-')))
+    const logsDir = path.join(projectRoot, 'logs')
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full')
+      for (const policy of ['parent-only', 'adaptive'] as const) {
+        const runId = `policy-${policy}`
+        runStore.bootstrap({ runId, diagnosisPolicy: policy, feature: 'demo', startedAt: new Date().toISOString(), status: 'healing', healCycles: 1, services: [], healMode: 'external' })
+        const context = JSON.parse(toolText(await client.callTool({ name: 'get_heal_context', arguments: { runId, session_id: 'policy-client' } })))
+        expect(context.diagnosisPolicy).toBe(policy)
+        expect(context.nextSteps.join('\n')).toContain(`Diagnosis policy: ${policy}`)
+        expect(context.nextSteps.join('\n')).not.toContain('sub-agent per failure')
+      }
+      await client.close()
+      client = await connectClient(address, '/mcp?profile=full')
+      const recovered = JSON.parse(toolText(await client.callTool({ name: 'get_heal_context', arguments: { runId: 'policy-adaptive', session_id: 'policy-client' } })))
+      expect(recovered.diagnosisPolicy).toBe('adaptive')
+      expect(recovered.nextSteps.join('\n')).toContain('at most two concurrent children')
+    } finally {
+      await client?.close()
+      await app.close()
+      fs.rmSync(projectRoot, { recursive: true, force: true })
+    }
+  })
   // These E2E tests exercise claim flows across interactive client kinds
   // (codex, 'other' auto-claims), which the default denylist policy allows.
   // Pin the default block list explicitly so an ambient override can't leak in;

@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useLiveResource, type LiveResource } from './use-live-resource'
 import { getFeatureCoverage } from '../api/coverage'
-import type { CoverageLedger } from '../api/types'
-
+import type { CoverageLedger } from '@shared/coverage/types'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
@@ -47,6 +46,63 @@ async function render(props: { id: string | null; fetcher: (key: string) => Prom
 
 const read = (testId: string): string | undefined =>
   container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? undefined
+
+it('expires a retained observation during a hung read and ignores refreshes while hidden', async () => {
+  vi.useFakeTimers()
+  let live!: LiveResource<string>
+  const fetcher = vi.fn<() => Promise<string>>().mockResolvedValueOnce('current').mockImplementation(() => new Promise(() => {}))
+  function Reader() {
+    live = useLiveResource(null, 'lease', fetcher, { reconcileMs: 5000, leaseMs: 15000, pauseWhenHidden: true })
+    return null
+  }
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  try {
+    await act(async () => root.render(<Reader />))
+    expect(live.confirmed).toBe(true)
+    await act(async () => vi.advanceTimersByTimeAsync(15000))
+    expect(live.value).toBe('current')
+    expect(live.confirmed).toBe(false)
+    visibility.mockReturnValue('hidden')
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    const reads = fetcher.mock.calls.length
+    await act(async () => live.refresh())
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(fetcher).toHaveBeenCalledTimes(reads)
+    expect(vi.getTimerCount()).toBe(0)
+  } finally { visibility.mockRestore() }
+})
+
+it('rejects an observation delivered by an effect being replaced during refresh', async () => {
+  let live!: LiveResource<string>
+  const accepted: boolean[] = []
+  function Reader({ revision }: { revision: number }) {
+    live = useLiveResource(null, 'replacement', async () => 'current', { refreshKey: revision })
+    useEffect(() => () => { accepted.push(live.accept('obsolete')) }, [revision])
+    return null
+  }
+  await act(async () => root.render(<Reader revision={0} />))
+  await act(async () => root.render(<Reader revision={1} />))
+  expect(accepted).toEqual([false])
+  expect(live.value).toBe('current')
+})
+
+it('ignores a domain retry already queued when its reader is closed', async () => {
+  vi.useFakeTimers()
+  const original = globalThis.setTimeout
+  let retry!: () => void
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, ms?: number) => {
+    if (ms === 1000) retry = handler
+    return original(handler, ms)
+  }) as typeof setTimeout)
+  const fetcher = vi.fn(async () => 'pending')
+  function Reader() { useLiveResource(null, 'retry-close', fetcher, { retryDelayMs: () => 1000 }); return null }
+  try {
+    await act(async () => root.render(<Reader />))
+    await act(async () => root.render(null))
+    await act(async () => retry())
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  } finally { timer.mockRestore() }
+})
 
 describe('useLiveResource', () => {
   it('coalesces mounted readers but starts new reads after an event or a missed-event recovery round', async () => {
@@ -327,4 +383,126 @@ describe('useLiveResource', () => {
     await act(async () => { release?.('done') })
     expect(seen.at(-1)).toBe(false)
   })
+})
+
+it('uses a key-bound creation seed, retains accepted reads, and preserves accepted absence', async () => {
+  let resource!: LiveResource<string>
+  const fetcher = vi.fn<() => Promise<string | null>>().mockImplementation(() => new Promise(() => {}))
+  function Seeded({ id, seedKey = id }: { id: string; seedKey?: string }) {
+    resource = useLiveResource('pre-flights', id, fetcher, {
+      seed: { key: seedKey, value: 'created' }, cache: 'seed-test', pollWhile: () => false,
+    })
+    return <span>{resource.value ?? 'unknown'}</span>
+  }
+  await act(async () => root.render(<Seeded id="seed-first" />))
+  expect(resource.value).toBe('created')
+  fetcher.mockResolvedValue('accepted')
+  await act(async () => resource.refresh())
+  expect(resource.value).toBe('accepted')
+  fetcher.mockRejectedValue(new Error('offline'))
+  await act(async () => resource.refresh())
+  expect(resource.value).toBe('accepted')
+  fetcher.mockResolvedValue(null)
+  await act(async () => resource.refresh())
+  fetcher.mockImplementation(() => new Promise(() => {}))
+  await act(async () => resource.refresh())
+  expect(resource.value).toBeNull()
+  await act(async () => root.render(<Seeded id="seed-second" seedKey="wrong-key" />))
+  expect(resource.value).toBeNull()
+  await act(async () => root.render(<Seeded id="seed-third" />))
+  expect(resource.value).toBe('created')
+  // Returning to a cached absence must never resurrect the creation seed.
+  await act(async () => root.render(<Seeded id="seed-first" />))
+  expect(resource.value).toBeNull()
+})
+
+it('uses a custom active polling cadence and cleans it up without changing the default', async () => {
+  vi.useFakeTimers()
+  const custom = vi.fn(async () => 'running')
+  const standard = vi.fn(async () => 'running')
+  function Tasks() {
+    useLiveResource('pre-flights', 'custom-cadence', custom, { pollWhile: () => true, pollIntervalMs: 1500 })
+    useLiveResource('pre-flights', 'default-cadence', standard, { pollWhile: () => true })
+    return null
+  }
+  await act(async () => root.render(<Tasks />))
+  await act(async () => vi.advanceTimersByTimeAsync(1500))
+  expect(custom).toHaveBeenCalledTimes(2)
+  expect(standard).toHaveBeenCalledTimes(1)
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(standard).toHaveBeenCalledTimes(2)
+  await act(async () => root.render(null))
+  await act(async () => vi.advanceTimersByTimeAsync(6000))
+  expect(custom).toHaveBeenCalledTimes(2)
+  expect(standard).toHaveBeenCalledTimes(2)
+})
+
+describe('polling without an invalidation topic', () => {
+  it('ignores bus changes but supports explicit refresh, polling, and cleanup', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn(async () => 'accepted')
+    let live!: LiveResource<string>
+    let bump!: () => void
+    function Reader() {
+      const bus = useInvalidation()
+      bump = () => { bus.invalidate('journal', 'run'); bus.invalidate('coverage') }
+      live = useLiveResource(null, 'no-topic', fetcher, { pollIntervalMs: 2000, pollWhile: () => true })
+      return <span>{live.value}</span>
+    }
+    await act(async () => root.render(<InvalidationProvider><Reader /></InvalidationProvider>))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await act(async () => bump())
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await act(async () => live.refresh())
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTimeAsync(2000))
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    await act(async () => root.render(null))
+    await act(async () => vi.advanceTimersByTimeAsync(6000))
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+})
+
+it('cancels domain retries after accept, replacement, and teardown', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn().mockResolvedValue('retry')
+  let resource!: LiveResource<string>
+  function Retrying({ id }: { id: string }) {
+    resource = useLiveResource(null, id, fetcher, { retryDelayMs: (value) => value === 'retry' ? 1000 : undefined })
+    return null
+  }
+  await act(async () => root.render(<Retrying id="one" />))
+  await act(async () => resource.accept('accepted'))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  await act(async () => resource.refresh())
+  fetcher.mockResolvedValue('replacement')
+  await act(async () => root.render(<Retrying id="two" />))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(3)
+  expect(resource.value).toBe('replacement')
+  fetcher.mockResolvedValue('retry')
+  await act(async () => resource.refresh())
+  await act(async () => root.render(null))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(4)
+})
+
+it('allows a domain retry after rejection and supersedes it on manual refresh', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('ready')
+  let resource!: LiveResource<string>
+  function Retrying() {
+    resource = useLiveResource(null, 'one', fetcher, { retryDelayMs: (_, error) => error ? 1000 : undefined })
+    return null
+  }
+  await act(async () => root.render(<Retrying />))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(resource.value).toBe('ready')
+  fetcher.mockRejectedValueOnce(new Error('offline'))
+  await act(async () => resource.refresh())
+  await act(async () => resource.refresh())
+  await act(async () => vi.advanceTimersByTimeAsync(2000))
+  expect(fetcher).toHaveBeenCalledTimes(4)
+  expect(resource.error).toBeNull()
 })

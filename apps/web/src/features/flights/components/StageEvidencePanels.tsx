@@ -1,15 +1,25 @@
 import { useState } from 'react'
-import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, GapType, RunDetail, ServiceManifestEntry, TestCoverage, TestStrength } from '@/shared/api/types'
-import { useEvaluationExports } from '@/features/evaluation'
-import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
+import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/portify'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@shared/coverage/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { ServiceManifestEntry } from '@shared/run-manifest'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import {
+  GAP_META,
+  STRENGTH_META,
+  STRENGTH_ORDER,
+  countFor,
+} from '@/features/coverage/components/CoverageCards'
+import { SEG_ORDER } from '@/features/coverage/components/CoverageHeader'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { SkeletonBar, SkeletonBead, SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
-import { evaluationArchiveFilename, formatBytes, formatDuration, shortRunRef, timeAgo } from '@/shared/lib/format'
+import { formatBytes, formatDuration, shortRunRef, timeAgo } from '@/shared/lib/format'
+import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 import { StageColumn } from './stage-meta'
-import { plural } from './StageFacts'
+import { plural } from '@shared/lib/plural'
 import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, splitFilePath } from './stage-metrics'
 
 // The evidence blocks that sit UNDER a stage's band: the per-service boot rows,
@@ -444,7 +454,7 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
  *  completed export for the feature, whatever produced it), so the kicker says
  *  "latest" rather than claiming the flight built it. */
 export function EvaluationDeliverablePanel({ task, awaiting, probed }: {
-  task: EvaluationExportTask | null
+  task: EvaluationExportTaskView | null
   awaiting?: AwaitingState
   probed?: boolean
 }) {
@@ -452,7 +462,7 @@ export function EvaluationDeliverablePanel({ task, awaiting, probed }: {
   if (!task) {
     return awaiting ? <StageColumn><SkeletonPanel kicker={kicker} awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
   }
-  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const filename = evaluationTaskFilename(task)
   return (
     <StageColumn>
       <PanelCard kicker={kicker} testId="evaluation-deliverable">
@@ -560,10 +570,10 @@ export function AllReportsPanel({
 /** One archive's download. Icon-only in a row, labelled on the deliverable card.
  *  A failure turns the control danger-toned and retries on click rather than
  *  failing silently. */
-function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; label?: string }) {
+function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTaskView; label?: string }) {
   const { downloadTask } = useEvaluationExports()
   const [failed, setFailed] = useState(false)
-  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const filename = evaluationTaskFilename(task)
   const title = failed ? 'Download failed — click to retry' : `Download ${filename}`
   const download = (): void => {
     setFailed(false)
@@ -584,7 +594,7 @@ function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; la
   )
 }
 
-function builtBy(task: EvaluationExportTask): string {
+function builtBy(task: EvaluationExportTaskView): string {
   const how = task.mode === 'localized' ? 'written by an agent' : 'built from the run'
   const who = task.producer === 'external' ? 'your own client' : task.sessionRef?.agent
   return who ? `${how} · ${who}` : how
@@ -593,7 +603,7 @@ function builtBy(task: EvaluationExportTask): string {
 /** "11 videos · 4.2 MB", or just the size when the archive holds no videos.
  *  Empty string when the contents were never recorded (an older export), so the
  *  caller's join drops it instead of printing "0 videos". */
-function archiveContents(task: EvaluationExportTask): string {
+function archiveContents(task: EvaluationExportTaskView): string {
   const archive = task.archive
   if (!archive) return ''
   const videos = archive.videos > 0 ? `${archive.videos} ${archive.videos === 1 ? 'video' : 'videos'}` : null

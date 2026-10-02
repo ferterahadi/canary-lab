@@ -1,3 +1,4 @@
+import { callFromExpression, callFromStatement, unwrapCallExpression } from './call-syntax'
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
@@ -62,15 +63,7 @@ function safeExpression(
   if (!node) return undefined
   const rendered = renderExpression(node, sourceFile)
   if (rendered.fidelity !== 'unresolved') return rendered
-  let unwrapped = node
-  while (
-    ts.isAwaitExpression(unwrapped)
-    || ts.isParenthesizedExpression(unwrapped)
-    || ts.isAsExpression(unwrapped)
-    || ts.isTypeAssertionExpression(unwrapped)
-    || ts.isNonNullExpression(unwrapped)
-    || ts.isSatisfiesExpression(unwrapped)
-  ) unwrapped = unwrapped.expression
+  const unwrapped = unwrapCallExpression(node)
   return ts.isCallExpression(unwrapped)
     ? renderNamedCallResult(unwrapped, sourceFile, { allowBareZeroArguments }) ?? rendered
     : rendered
@@ -350,22 +343,6 @@ const ACTION_RULES: ActionRule[] = [
   // but a future `page.close(options)` variant must never be shadowed).
   LIFECYCLE_RULE,
 ]
-
-function callFromExpression(expression: ts.Expression): ts.CallExpression | undefined {
-  let current = expression
-  while (ts.isAwaitExpression(current) || ts.isParenthesizedExpression(current)) current = current.expression
-  return ts.isCallExpression(current) ? current : undefined
-}
-
-function callFromStatement(statement: ts.Statement): ts.CallExpression | undefined {
-  if (ts.isExpressionStatement(statement)) return callFromExpression(statement.expression)
-  if (ts.isReturnStatement(statement) && statement.expression) return callFromExpression(statement.expression)
-  if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
-    const initializer = statement.declarationList.declarations[0].initializer
-    return initializer ? callFromExpression(initializer) : undefined
-  }
-  return undefined
-}
 
 const CALL_FREE_ASSIGNMENT_TEXT = new Map<ts.SyntaxKind, string>([
   [ts.SyntaxKind.EqualsToken, 'Set {target} to {value}'],

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { RunStatus } from '@/shared/api/types'
+import type { RunStatus } from '@shared/run-state'
 import type { RunArrivalTab } from '@/shared/lib/workspace-view-state'
 import { branchForService } from '../utils/run-detail-playback'
 import { useRun } from '../state/RunsContext'
-import { useInvalidationKey } from '@/shared/state/invalidation'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -24,10 +23,6 @@ import { ServiceTabButton, TabButton } from './RunServicePanels'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
-
-export { canRestartHeal, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
-export { PlaywrightPlayback, shortLocation } from './RunPlaybackPanels'
-export { assertionFilename, assertionHref, downloadEvaluationReport, evaluationFilename, evaluationHref, hasAssertionVideos, isAssertionExportable, isEvaluationExportable, isTerminalRunStatus } from './run-export-links'
 
 type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'changes' | 'journal'
 
@@ -71,9 +66,6 @@ export function RunDetailColumn({
   bootFailureOpen?: boolean
   onBootFailureOpenChange?: (open: boolean) => void
 }) {
-  // The journal refetches on `journal-changed` for THIS run (scoped so a bump
-  // for another run doesn't reload it).
-  const journalRefreshKey = useInvalidationKey('journal', runId ?? undefined)
   // Arriving with a focused failure means the Playwright tab IS the destination —
   // opening on Overview would hide the thing that was clicked. A named arrival
   // tab is the same contract for a link that points at a pane rather than a test.
@@ -158,6 +150,8 @@ export function RunDetailColumn({
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
+  // External heal keeps its own panel: the parked/claimed state is the answer there.
+  const settledWithoutRepair = isTerminalRunStatus(m.status) && m.healCycles === 0 && m.healMode !== 'external'
   // The dialog is the full compiler-error list, so only a card that shows such a
   // list can open it. A dependency blocker has its own panel and no dialog.
   const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
@@ -168,7 +162,7 @@ export function RunDetailColumn({
       <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
+            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waiting={view.waiting} />
           </span>
           <span
             className="min-w-0 flex-1 truncate text-sm font-medium"
@@ -286,6 +280,15 @@ export function RunDetailColumn({
               wrapper clips at its own height, so a `h-full` agent view under a
               banner overflowed by exactly the banner's height and cut that much
               off the bottom of the transcript. */}
+          {settledWithoutRepair ? (
+            // A run that finished without one repair cycle has no transcript to
+            // read: answer at once, in the same padded pane — surface, inset
+            // and vertical position — as the Changes and Journal empty states,
+            // instead of a session read that can only come back empty.
+            <RunPane padded>
+              <EmptyState testId="heal-empty" {...healEmptyCopy(m.status, m.healCycles)} />
+            </RunPane>
+          ) : (
           <RunPane scroll={false}>
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
               {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
@@ -323,6 +326,7 @@ export function RunDetailColumn({
                 RetestIconButton). The footer-bar variant that used to sit here
                 duplicated that affordance. */}
           </RunPane>
+          )}
         </div>}
         {!isVerify && !isBootRun && tab === 'changes' && (
           // No wrapper scroller: the tab renders its own `RunPane`, the same
@@ -340,7 +344,7 @@ export function RunDetailColumn({
           />
         )}
         {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />
+          <JournalTab feature={m.feature} runId={m.runId} healCycles={m.healCycles} />
         )}
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand

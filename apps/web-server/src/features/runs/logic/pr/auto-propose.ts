@@ -1,3 +1,4 @@
+import { proposalRecord } from './proposal-record'
 import { buildPrPreflight } from './pr-preflight'
 import { proposeFixesForRun } from './propose-fixes'
 import { verdictProvenanceOf } from './pr-provenance'
@@ -5,7 +6,8 @@ import { readManifest } from '../runtime/manifest'
 import { commitModelPlans } from '../runtime/run-model-plan'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import type { RunContext } from '../runtime/run-context'
-import type { RunFixCapture, RunManifest, RunPrAttempt, RunProposedPr } from '../runtime/manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { RunFixCapture } from '../../../../../../../shared/run-state'
 
 // End-of-run pull request. A test run that healed green leaves a captured diff
 // and, unless the workspace turned it off, proposes it as a DRAFT pull request
@@ -93,17 +95,7 @@ export async function autoProposeFixes(opts: {
     ),
   })
 
-  const opened: RunProposedPr[] = results.flatMap((r) => (r.ok && r.pr ? [r.pr] : []))
-  const attempt: RunPrAttempt = {
-    at: now(),
-    auto: true,
-    results: results.map((r) => ({
-      repoName: r.repoName,
-      ok: r.ok,
-      ...(r.pr ? { url: r.pr.url } : {}),
-      ...(r.reason ? { reason: r.reason } : {}),
-    })),
-  }
+  const { opened, attempt } = proposalRecord(results, { at: now(), auto: true })
   ctx.stateSink.patchManifest(ctx.runId, {
     ...(opened.length > 0 ? { proposedPrs: opened } : {}),
     prAttempt: attempt,

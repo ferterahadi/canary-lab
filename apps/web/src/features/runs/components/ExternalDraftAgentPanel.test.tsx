@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ExternalDraftAgentPanel } from './ExternalDraftAgentPanel'
-import type { DraftRecord, ExternalDraftStage, ExternalHealClientKind } from '@/shared/api/types'
+import type { DraftRecord, ExternalDraftStage } from '@shared/draft-types'
+import type { ClientKind } from '@shared/run-mode'
 
 function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
   return {
@@ -66,7 +67,7 @@ describe('ExternalDraftAgentPanel', () => {
     ['claude', 'Claude'],
     ['codex-pty', 'Codex (runner)'],
     ['other', 'External agent'],
-  ] as Array<[ExternalHealClientKind, string]>)('renders the %s client label', (kind, label) => {
+  ] as Array<[ClientKind, string]>)('renders the %s client label', (kind, label) => {
     const html = renderToStaticMarkup(
       <ExternalDraftAgentPanel draft={draft({ externalClientKind: kind })} stageView="planning" />,
     )

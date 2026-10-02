@@ -1,11 +1,15 @@
+import { repositoryConsumerKey } from '@shared/repository-observation'
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import * as api from '../api/client'
-import type { Feature, RunIndexEntry, VersionStatus } from '../api/types'
-import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
+import * as flightsApi from '../api/flights'
+import * as workspaceApi from '../api/workspace'
+import type { Feature } from '../api/types'
+import type { VersionStatus } from '@shared/version-status'
+import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '@shared/flights/types'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
-import { useFlightsStream } from '@/features/flights'
+import { useFlightsStream } from '@/features/flights/state/use-flights-stream'
 import type { InvalidationTopic } from './invalidation-bus'
-import { isAuxiliaryExecution } from '@shared/verification'
+import { useWorkspaceFeatures } from './use-workspace-features'
+import { useLiveResource } from './use-live-resource'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -13,28 +17,18 @@ import { isAuxiliaryExecution } from '@shared/verification'
 // wiring that keeps them (and the invalidation bus) live. Lifted out of App so
 // the shell is layout + composition, not a fetch/socket controller.
 //
-// The nav selection it must touch (auto-select the first feature, re-select
-// when a feature is renamed/deleted/gone) comes in as injected setters + mirror
-// refs — the data layer stays free of nav STATE, and the render-coupled
-// run-selection reconciliation remains in App where `featureRuns` is derived.
-
-const NON_TEST = (r: RunIndexEntry) => !isAuxiliaryExecution(r.executionType)
+// Selection policy belongs to useWorkspaceSelection. The read-only navigation
+// mirrors here qualify event invalidations; loaded lists go to that controller.
 
 export interface WorkspaceDataDeps {
   invalidate: (topic: InvalidationTopic, scope?: string) => void
-  /** Live runs index — mirrored to a ref so refreshFeatures can pick a feature's
-   *  latest run without the WS connect effect churning on every run tick. */
-  allRuns: RunIndexEntry[]
-  /** The mount-time selected feature (auto-select fills it only when empty). */
-  initialSelectedFeature: string | null
-  setSelectedFeature: (f: string | null) => void
-  setSelectedRunId: (r: string | null) => void
-  selectedFeatureRef: MutableRefObject<string | null>
-  selectedRunIdRef: MutableRefObject<string | null>
-  pendingRunSelectionRef: MutableRefObject<string | null>
+  onInitialFeatures: (features: readonly Feature[]) => void
+  onFeaturesRefreshed: (features: readonly Feature[], preferredFeature?: string | null) => void
+  selectedFeatureRef: Readonly<MutableRefObject<string | null>>
+  selectedRunIdRef: Readonly<MutableRefObject<string | null>>
   /** A suite was renamed elsewhere (another tab, an MCP client, this tab's own
    *  save). Anything App holds keyed by the old name — an open config dialog —
-   *  must re-point at the new one; the selection itself is handled here. */
+   *  must re-point at the new one; selection goes through onFeaturesRefreshed. */
   onFeatureRenamed?: (from: string, to: string) => void
 }
 
@@ -44,6 +38,8 @@ export interface WorkspaceData {
   /** Full manifests the flights channel pushed, by flight id. The open flight
    *  detail reads its own from here instead of polling for it. */
   flightDetails: Record<string, FlightManifest>
+  flightsHydrated: boolean
+  forgetFlight: (id: string) => void
   flightsRef: MutableRefObject<FlightIndexEntry[]>
   preFlights: PlanFeaturesTask[]
   versionStatus: VersionStatus | null
@@ -55,9 +51,8 @@ export interface WorkspaceData {
 
 export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const {
-    invalidate, allRuns, initialSelectedFeature,
-    setSelectedFeature, setSelectedRunId,
-    selectedFeatureRef, selectedRunIdRef, pendingRunSelectionRef,
+    invalidate, onInitialFeatures, onFeaturesRefreshed,
+    selectedFeatureRef, selectedRunIdRef,
     onFeatureRenamed,
   } = deps
 
@@ -66,7 +61,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const onFeatureRenamedRef = useRef(onFeatureRenamed)
   useEffect(() => { onFeatureRenamedRef.current = onFeatureRenamed }, [onFeatureRenamed])
 
-  const [features, setFeatures] = useState<Feature[]>([])
+  const { features, refreshFeatures } = useWorkspaceFeatures(onInitialFeatures, onFeaturesRefreshed)
   // REST-loaded list, used until `/ws/flights` sends its first snapshot (and as
   // the fallback where no WebSocket exists at all — a component unit test).
   const [restFlights, setRestFlights] = useState<FlightIndexEntry[]>([])
@@ -74,78 +69,35 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   // every flight write, so the list advances without a refetch and without the
   // 5s poll that used to cover a dropped `flights-changed`.
   const flightsStream = useFlightsStream()
+  const forgetStreamFlight = flightsStream.forgetFlight
+  const forgetFlight = useCallback((id: string) => {
+    forgetStreamFlight(id)
+    setRestFlights((rows) => rows.filter((row) => row.flightId !== id))
+  }, [forgetStreamFlight])
   const flights = flightsStream.hydrated ? flightsStream.flights : restFlights
-  const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
+  const { value: planningTasks, refresh: refreshPreFlights } = useLiveResource<PlanFeaturesTask[]>(
+    'pre-flights', 'workspace', async () => (await flightsApi.listPlanFeatures()).tasks,
+    {
+      cache: 'pre-flight-plans',
+      // Unknown initial reads must recover too, including a hung first request.
+      pollWhile: (tasks) => tasks === null || tasks.some((task) => task.status === 'running'),
+    },
+  )
+  const preFlights = planningTasks ?? []
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
 
-  // allRuns changes on every run-progress tick; read it via a ref inside the
-  // stable refreshFeatures so the /ws/workspace connect effect (which depends on
-  // refreshFeatures) doesn't tear down + reconnect on every tick — the bus has
-  // no replay, so a mutation during that window would be lost ("only updates
-  // after a refresh"). Same trick for the flights index (openActivity reads it).
-  const allRunsRef = useRef(allRuns)
-  useEffect(() => { allRunsRef.current = allRuns }, [allRuns])
   const flightsRef = useRef(flights)
   useEffect(() => { flightsRef.current = flights }, [flights])
 
-  // Stable identity ([] deps) — reads current feature/runs via refs, not closure.
-  const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
-    api.listFeatures().then((data) => {
-      setFeatures(data)
-      const runs = allRunsRef.current
-      if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
-        // Reconnect and metadata refreshes target the current suite too. Keep
-        // its explicit run selection, including one awaiting the runs snapshot.
-        if (selectedFeatureRef.current === preferredFeature && selectedRunIdRef.current) return
-        pendingRunSelectionRef.current = null
-        setSelectedFeature(preferredFeature)
-        setSelectedRunId(runs.find((r) => r.feature === preferredFeature && NON_TEST(r))?.runId ?? null)
-      } else if (!selectedFeatureRef.current || !data.some((f) => f.name === selectedFeatureRef.current)) {
-        const nextFeature = data[0]?.name ?? null
-        pendingRunSelectionRef.current = null
-        setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? runs.find((r) => r.feature === nextFeature && NON_TEST(r))?.runId ?? null : null)
-      }
-    }).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const refreshVersion = useCallback((): void => {
-    api.getVersionStatus().then(setVersionStatus).catch(() => {})
+    workspaceApi.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
   const refreshFlights = useCallback((): void => {
-    api.listFlights().then(setRestFlights).catch(() => {})
+    flightsApi.listFlights().then(setRestFlights).catch(() => {})
   }, [])
-  const refreshPreFlights = useCallback((): void => {
-    api.listPlanFeatures().then((r) => setPreFlights(r.tasks)).catch(() => {})
-  }, [])
-
-  // Initial features load + auto-select the first feature when none is hydrated.
-  useEffect(() => {
-    let cancelled = false
-    api.listFeatures().then((data) => {
-      if (cancelled) return
-      setFeatures(data)
-      if (data.length > 0 && !initialSelectedFeature) setSelectedFeature(data[0].name)
-    }).catch(() => {})
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Initial flights / pre-flights / version loads (feed the pill + footer before
-  // any event fires).
+  // Initial flights / version loads; useLiveResource owns the planning list.
   useEffect(() => { refreshFlights() }, [refreshFlights])
-  useEffect(() => { refreshPreFlights() }, [refreshPreFlights])
   useEffect(() => { refreshVersion() }, [refreshVersion])
-
-  // A running pre-flight settles via `pre-flight-changed`, but that push is
-  // best-effort — back a running plan with a gentle poll (cl_live-state-sync).
-  const anyPreFlightRunning = preFlights.some((t) => t.status === 'running')
-  useEffect(() => {
-    if (!anyPreFlightRunning) return
-    const id = setInterval(refreshPreFlights, 2500)
-    return () => clearInterval(id)
-  }, [anyPreFlightRunning, refreshPreFlights])
 
   // /ws/workspace events → refetch the feature-derived surfaces + publish topic
   // invalidations for the fetch-owning leaves. On reconnect (e.g. across a server
@@ -154,7 +106,9 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     let conn: { close(): void } | null = null
     const resyncWorkspace = (): void => {
       refreshFeatures(selectedFeatureRef.current)
+      for (const resource of ['runs', 'worktrees', 'portify']) invalidate('cleanup', resource)
       invalidate('repos')
+      invalidate('configuration')
       invalidate('tests')
       invalidate('coverage')
       invalidate('verification')
@@ -163,7 +117,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       refreshVersion()
       refreshFlights()
       invalidate('flights')
-      refreshPreFlights()
+      invalidate('pre-flights')
       invalidate('project-config')
       invalidate('onboarding')
       invalidate('notifications')
@@ -178,6 +132,14 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             resyncWorkspace()
             return
           }
+          if (event.type === 'cleanup-changed') {
+            invalidate('cleanup', event.resource)
+            return
+          }
+          if (event.type === 'repos-changed') {
+            for (const consumer of event.consumers) invalidate('repos', repositoryConsumerKey(consumer))
+            return
+          }
           if (event.type === 'feature-renamed') {
             // The suite kept its identity but changed its name. Follow it —
             // otherwise the selected feature (and any surface keyed by the old
@@ -190,11 +152,17 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             refreshFlights()
             invalidate('flights')
             invalidate('repos')
+            invalidate('configuration', event.from)
+            invalidate('configuration', event.to)
             return
           }
           if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
             refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
-            if (event.type === 'features-changed') invalidate('repos')
+            if (event.type === 'features-changed') {
+              invalidate('repos')
+              invalidate('configuration')
+            }
+            if (event.type === 'feature-deleted') invalidate('configuration', event.feature)
             return
           }
           if (event.type === 'tests-changed') {
@@ -203,7 +171,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // Authored specs light the picker's derived rail (specs evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
-          if (event.type === 'envsets-changed') refreshFeatures(selectedFeatureRef.current)
+          if (event.type === 'envsets-changed') {
+            refreshFeatures(selectedFeatureRef.current)
+            invalidate('configuration', event.feature)
+          }
           if (event.type === 'coverage-changed') {
             invalidate('coverage')
             // A generated PRD summary lights the derived rail (prdSummary evidence).
@@ -222,7 +193,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // reads), which is what the `flights` topic invalidates.
           if (event.type === 'flights-changed') invalidate('flights')
           if (event.type === 'notifications-changed') invalidate('notifications')
-          if (event.type === 'pre-flight-changed') refreshPreFlights()
+          if (event.type === 'pre-flight-changed') invalidate('pre-flights')
           // canary-lab.config.json changed — in this tab or another client.
           // The demo launcher reads `showDemo` from it, so the status-bar pill
           // appears/disappears live instead of on the next reload.
@@ -234,7 +205,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures, refreshVersion, refreshFlights, refreshPreFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
+  }, [refreshFeatures, refreshVersion, refreshFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
 
-  return { features, flights, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
+  return { features, flights, forgetFlight, flightsHydrated: flightsStream.hydrated, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
 }

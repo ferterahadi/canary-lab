@@ -1,3 +1,5 @@
+import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
+import { normalizeKnownTestRecord } from './known-test-record'
 // Turning a Playwright run's summary + manifest into a verdict: pass counts,
 // rerun/verification plans, failure extraction, and the final run status.
 //
@@ -9,8 +11,8 @@
 
 import fs from 'fs'
 import path from 'path'
-import { type RunLifecycleTargetedRerun } from './manifest'
-import { slugify } from './summary-reporter'
+import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { listSpecFiles } from '../../../../shared/feature-loader'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { SummaryShape, VerificationPlan, computedTotal, countPassed, extractFailedSlugs } from './run-verdict'
@@ -102,7 +104,7 @@ export function computeRerunTargetsOrdered(
     for (const t of result.tests) {
       allTests.push({
         location: `${file}:${t.line}`,
-        slug: `test-case-${slugify(t.name)}`,
+        slug: summaryEntryName(t.name),
       })
     }
   }
@@ -192,7 +194,7 @@ export function computeNonPassedTargets(
     for (const t of result.tests) {
       allTests.push({
         location: `${file}:${t.line}`,
-        slug: `test-case-${slugify(t.name)}`,
+        slug: summaryEntryName(t.name),
       })
     }
   }
@@ -251,7 +253,7 @@ export function serialSpecFiles(featureDir: string): Set<string> {
  *  before the reporter captured locations. */
 export function specFileOfKnownTest(test: KnownSummaryTest): string | undefined {
   if (!test.location) return undefined
-  const file = test.location.replace(/:\d+(?::\d+)?$/, '')
+  const { file } = parseSourceLocation(test.location)
   return file.length > 0 ? path.resolve(file) : undefined
 }
 
@@ -299,26 +301,9 @@ export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[]
   const raw = Array.isArray(summary.knownTests) ? summary.knownTests : []
   const out: KnownSummaryTest[] = []
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const value = entry as {
-      name?: unknown
-      title?: unknown
-      titlePath?: unknown
-      listLine?: unknown
-      location?: unknown
-    }
-    if (typeof value.name !== 'string' || value.name.length === 0) continue
-    if (typeof value.title !== 'string' || value.title.length === 0) continue
-    if (out.some((test) => test.name === value.name)) continue
-    out.push({
-      name: value.name,
-      title: value.title,
-      ...(Array.isArray(value.titlePath)
-        ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
-        : {}),
-      ...(typeof value.listLine === 'string' && value.listLine.length > 0 ? { listLine: value.listLine } : {}),
-      ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
-    })
+    const record = normalizeKnownTestRecord(entry)
+    if (!record || out.some((test) => test.name === record.fields.name)) continue
+    out.push(record.fields)
   }
   return out
 }

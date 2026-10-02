@@ -116,6 +116,13 @@ prompt — it's a structured skill definition bundled with the package for the
 same reason prompts are (ships via `dist/apps/web-server/prompts/`, upgrades
 with the package).
 
+`apps/web-server/prompts/benchmark-study/` holds real `{{placeholder}}`
+templates, but only the contributor benchmark in `tools/benchmark-study`
+renders them (`renderPrompt('benchmark-study/<name>.md', …)`). They keep the
+one prompt home, yet never ship: `tools/prepare-assets.mjs` skips the folder
+and `npm run smoke:pack` fails if it reaches the tarball. Put a new
+benchmark-only prompt there, never at the flat top level.
+
 ## Common mistakes
 
 | Mistake | Consequence |

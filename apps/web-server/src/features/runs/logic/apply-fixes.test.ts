@@ -3,27 +3,22 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { applyFixCapture, buildApplyPreflight, porcelainPath } from './apply-fixes'
+import { applyFixCapture, buildApplyPreflight } from './apply-fixes'
+import { porcelainPath } from '../../../shared/git-status-path'
+import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let root: string
 let repo: string
 let fixesDir: string
-
-function git(dir: string, args: string[]): void {
-  execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
-}
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-fix-'))
   repo = path.join(root, 'repo')
   fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
-  git(repo, ['init', '-q'])
-  git(repo, ['config', 'user.email', 't@t'])
-  git(repo, ['config', 'user.name', 'test'])
-  git(repo, ['add', '-A'])
-  git(repo, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(repo)
   fixesDir = path.join(root, 'fixes')
   fs.mkdirSync(fixesDir, { recursive: true })
 })
@@ -98,7 +93,7 @@ describe('applyFixCapture', () => {
     const patchPath = makePatch()
     // Move the repo out from under the patch so it cannot apply.
     fs.writeFileSync(path.join(repo, 'app.js'), 'completely different\n')
-    git(repo, ['commit', '-aqm', 'drift', '--no-verify'])
+    git(repo, 'commit', '-aqm', 'drift', '--no-verify')
     const out = await applyFixCapture(capture(patchPath))
     expect(out.allOk).toBe(false)
     expect(out.results[0].ok).toBe(false)
@@ -124,22 +119,21 @@ describe('applyFixCapture', () => {
   })
 })
 
-describe('porcelainPath', () => {
-  it('drops the two status columns', () => {
-    expect(porcelainPath(' M src/app.ts')).toBe('src/app.ts')
-    expect(porcelainPath('?? new/file.ts')).toBe('new/file.ts')
-  })
-
-  it('takes the destination of a rename', () => {
-    expect(porcelainPath('R  old/name.ts -> new/name.ts')).toBe('new/name.ts')
-  })
-
-  it('unquotes a path git had to escape', () => {
-    expect(porcelainPath(' M "src/with space.ts"')).toBe('src/with space.ts')
-  })
+it('keeps the shared decoder available through the compatibility export', async () => {
+  expect(porcelainPath).toBe((await import('../../../shared/git-status-path')).porcelainPath)
 })
 
 describe('buildApplyPreflight', () => {
+  it('rejects unreadable status and cannot apply a patch through a corrupt index', async () => {
+    const patchPath = makePatch()
+    const index = path.join(repo, '.git', 'index')
+    fs.writeFileSync(index, 'invalid index')
+    await expect(buildApplyPreflight(capture(patchPath))).rejects.toMatchObject({ statusCode: 500 })
+    expect(await applyFixCapture(capture(patchPath))).toMatchObject({ allOk: false, results: [{ ok: false }] })
+    expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf8')).toBe('const x = 1\n')
+    expect(fs.readFileSync(index, 'utf8')).toBe('invalid index')
+  })
+
   it('reads the branch and reports a clean repo as having nothing foreign', async () => {
     const [t] = await buildApplyPreflight(capture(makePatch()))
     expect(t).toMatchObject({ repoName: 'repo', repoRoot: repo, ready: true, foreignDirty: [] })
@@ -157,6 +151,32 @@ describe('buildApplyPreflight', () => {
     // `app.js` is dirty too, but it is OUR dirt — warning about it would nag on
     // every re-open of a repo the user already applied into.
     expect(t.foreignDirty).toEqual(['mine.js'])
+  })
+
+  it('compares decoded dirty paths with recorded repair paths and leaves other files foreign', async () => {
+    const names = ['café.txt', 'tab\tfile.txt', 'back\\slash.txt', 'quote"file.txt', 'left -> right.txt']
+    const fix = capture(makePatch())
+    git(repo, 'config', 'core.quotePath', 'true')
+    for (const name of names) fs.writeFileSync(path.join(repo, name), 'work in progress')
+    fix.repos[0].fileNames = names.slice(1)
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).toEqual(['café.txt'])
+  })
+
+  it('matches new literal and legacy quoted capture names without mutating saved input', async () => {
+    const name = 'back\\slash.txt'
+    fs.writeFileSync(path.join(repo, name), 'original')
+    git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'capture fixture')
+    fs.writeFileSync(path.join(repo, name), 'repair')
+    const fileNames = await diffNamesSinceSnapshot(repo, 'HEAD')
+    expect(fileNames).toEqual([name])
+    const fix = capture(makePatch())
+    fix.repos[0].fileNames = fileNames
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).not.toContain(name)
+    fix.repos[0].fileNames = ['"back\\\\slash.txt"']
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).not.toContain(name)
+    expect(fix.repos[0].fileNames).toEqual(['"back\\\\slash.txt"'])
+    fix.repos[0].fileNames = fileNames
+    expect(fix.repos[0].fileNames).toEqual(fileNames)
   })
 
   it('treats a capture with no recorded file names as all-foreign', async () => {

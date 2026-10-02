@@ -11,16 +11,18 @@
 
 import fs from 'fs'
 import path from 'path'
-import { readPriorSessionId, readPriorSessionIdFromValue } from './auto-heal'
+import { readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
+import {
+  parseAgentSessionRefFile,
+  type AgentSessionRef,
+  type AgentSessionRefFile,
+} from '../../../agent-sessions/logic/agent-session-log'
 import {
   locateClaudeSessionLog,
   locateCodexSessionLog,
   locateLatestSessionLogForAgent,
-  parseAgentSessionRefFile,
-  renderAgentSessionContext,
-  type AgentSessionRef,
-  type AgentSessionRefFile,
-} from '../../../agent-sessions/logic/agent-session-log'
+} from '../../../agent-sessions/logic/agent-session-paths'
+import { renderAgentSessionContext } from '../../../agent-sessions/logic/agent-session-render'
 
 export type AgentSessionAgent = 'claude' | 'codex'
 

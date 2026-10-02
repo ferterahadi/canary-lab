@@ -8,26 +8,32 @@ import {
   resumeFlight,
   setFlightAutopilot,
   respondToFlightCheckpoint,
-  abortFlight,
   pauseFlight,
   redoFlight,
+  reopenStages,
+  type FlightConductorDeps,
+} from './conductor'
+import {
+  abortFlight,
   deleteFlight,
   removeFlightRecordsForFeature,
   enqueueFlight,
   drainQueuedFlights,
-  reopenStages,
+} from './flight-queue'
+import {
   stampSystemLine,
   FlightConflictError,
   FlightExistsError,
   FlightFrozenError,
   FlightStageEntryError,
-  type FlightConductorDeps,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
-} from './conductor'
+} from './flight-errors'
 
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
+import { sameRepoSet, type StageAdapter, type StageAdapters, type StageOutcome } from './flight-stages'
 
 let tmpDir: string
 
@@ -467,4 +473,34 @@ describe('FlightRunStore repo lookups', () => {
     expect(store.activeForRepos(['/repo/a'])).toBeNull()
     expect(store.latestForRepos(['/repo/a'])).toBeNull()
   })
+})
+
+
+it('matches persisted aliases without rewriting history or changing newest/active precedence', async () => {
+  const repo = path.join(tmpDir, 'repo')
+  const alias = path.join(tmpDir, 'alias')
+  fs.mkdirSync(repo); fs.symlinkSync(repo, alias, 'dir')
+  const first = startFlight(args(alias), deps(allDone()))
+  await first.completion
+  const original = store.get(first.manifest.flightId)!
+  store.save({ ...original, status: 'running' })
+  expect(store.activeForRepos([repo])?.flightId).toBe(original.flightId)
+  expect(store.latestForRepos([repo])?.flightId).toBe(original.flightId)
+  expect(store.get(original.flightId)?.repoPaths).toEqual([alias])
+  expect(store.activeForRepos([tmpDir])).toBeNull()
+  store.save({ ...original, flightId: 'newer', status: 'done', createdAt: '2026-02-01T00:00:00Z' })
+  expect(store.activeForRepos([repo])?.flightId).toBe(original.flightId)
+  expect(store.latestForRepos([repo])?.flightId).toBe('newer')
+  fs.unlinkSync(alias)
+  expect(store.latestForRepos([alias])?.flightId).toBe('newer')
+  expect(store.latestForRepos([repo])).toBeNull()
+})
+
+it('compares physical repository sets without discarding duplicate multiplicity', () => {
+  const alias = path.join(tmpDir, 'alias')
+  fs.symlinkSync(tmpDir, alias, 'dir')
+  expect(sameRepoSet([alias, tmpDir], [tmpDir, alias + '/'])).toBe(true)
+  expect(sameRepoSet([alias, tmpDir], [tmpDir])).toBe(false)
+  expect(sameRepoSet([alias], [path.join(tmpDir, 'missing')])).toBe(false)
+  expect(sameRepoSet([path.join(tmpDir, 'missing')], [path.relative(process.cwd(), path.join(tmpDir, 'missing'))])).toBe(true)
 })

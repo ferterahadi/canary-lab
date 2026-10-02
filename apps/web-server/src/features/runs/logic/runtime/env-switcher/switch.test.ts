@@ -2,9 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
 
 const spawn = vi.fn()
 
@@ -17,33 +16,14 @@ vi.mock('readline', () => ({
   default: { createInterface },
 }))
 
-const {
-  resolveVars,
-  getEnvSetsDir,
-  loadConfig,
-  listEnvSets,
-  getSlotFilesInSet,
-  backup,
-  applySet,
-  restore,
-  main,
-} = await import('./switch')
+const { resolveVars, getEnvSetsDir, loadConfig, getSlotFilesInSet } = await import('../../../../config/logic/envset-runtime')
+const { listEnvSets, backup, applySet, restore, main } = await import('./switch')
 
-const tmpDirs: string[] = []
-
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sw-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
+const mkTmp = trackTempDirs('cl-sw-')
 
 const initialSigintListeners = process.listeners('SIGINT').slice()
 
 afterEach(() => {
-  while (tmpDirs.length) {
-    const d = tmpDirs.pop()!
-    fs.rmSync(d, { recursive: true, force: true })
-  }
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   spawn.mockReset()

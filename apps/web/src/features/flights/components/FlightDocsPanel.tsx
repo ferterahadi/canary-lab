@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
-import type { FeatureDocsListing } from '@/shared/api/types'
-import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
+import * as coverageApi from '@/shared/api/coverage'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { FlightStage, FlightStageStatus } from '@shared/flights/types'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
+import { readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
+import { DocPill } from '@/features/coverage/components/DocPill'
 import { useDocRelink } from '@/features/coverage/components/DocRelink'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
@@ -38,7 +40,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
 
   const load = useCallback((keepError = false) => {
     if (!owned) return
-    api.listFeatureDocs(feature)
+    coverageApi.listFeatureDocs(feature)
       .then((data) => { setFetched(data); if (!keepError) setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature, owned])
@@ -52,7 +54,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
     for (const file of Array.from(files)) {
       try {
         const base64 = await readAsBase64(file)
-        await api.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
+        await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
       } catch (e: unknown) {
         failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
       }
@@ -65,14 +67,14 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
 
   const removeDoc = useCallback((relPath: string) => {
     setBusy(true)
-    api.deleteFeatureDoc(feature, relPath)
+    coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onChanged?.() })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }, [feature, load, onChanged])
 
   const openDoc = useCallback((absPath: string) => {
-    api.openEditor({ file: absPath }).catch(() => {})
+    workspaceApi.openEditor({ file: absPath }).catch(() => {})
   }, [])
 
   const sourceDocs = (listing?.docs ?? []).filter((d) => !d.generated)

@@ -1,15 +1,17 @@
+import type { RepositoryObserver } from '../../../shared/repository-observer'
 // The dependency surface every flights route module is constructed with.
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
-import { type StageAdapters } from '../logic/conductor'
+import type { StageAdapters } from '../logic/flight-stages'
 import { PlanFeaturesStore } from '../logic/plan-features'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface FlightRouteDeps {
+  repositoryObserver?: RepositoryObserver
   featuresDir: string
   logsDir: string
   projectRoot: string

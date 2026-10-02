@@ -4,19 +4,18 @@
 // tool-registry.ts captures those registrations once, then this file exposes
 // either a focused set of atomic tools or the compact single-tool dispatcher.
 import type { McpServer } from '@modelcontextprotocol/server'
+import { CLIENT_KIND } from './tool-support'
 import {
-  CLIENT_KIND,
   DEFAULT_CANARY_LAB_MCP_PROFILE,
   TOOLS_BY_PROFILE,
-  type CanaryLabMcpDeps,
   type CanaryLabMcpToolName,
   type CanaryLabMcpToolOptions,
-} from './tool-support'
+} from './tool-profiles'
+import type { CanaryLabMcpDeps } from './tool-schemas'
 import { classifyMcpClient, clientKindFromFacts, type McpClientFacts } from './client-surface'
 import { registerCompactExecTool } from './exec-tool'
-import { createCanaryLabToolRegistry, type CanaryLabToolConfig, type CanaryLabToolHandler } from './tool-registry'
-
-export * from './tool-support'
+import { createCanaryLabToolRegistry, type CanaryLabToolConfig } from './tool-registry'
+import type { CanaryLabToolHandler } from './tool-schemas'
 
 export function registerCanaryLabTools(
   server: McpServer,

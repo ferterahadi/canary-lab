@@ -1,5 +1,5 @@
-import type { RepoBranchSnapshot, ServiceManifestEntry, ServiceStatus } from '@/shared/api/types'
-import type { RunBootFailure } from '@shared/run-state'
+import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
+import type { RunBootFailure, ServiceStatus } from '@shared/run-state'
 import { bootFailureSummary, bootNextAction, compilerErrors, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
 import { StatusDot } from '@/shared/ui/atoms'
 import { alertClass } from './RunDiagnosticsPanels'
@@ -9,13 +9,15 @@ import { dependencyIncompatibilityReason, type RunDependencyProvenance } from '@
 import { openRunLog } from '../utils/open-run-log'
 import { CompilerErrorRow } from './BootFailureDialog'
 
-export const STATUS_COLOR: Record<ServiceStatus, string> = {
-  queued: 'var(--text-muted)',
-  ready: 'var(--success)',
-  starting: 'var(--warning)',
-  timeout: 'var(--danger)',
-  failed: 'var(--danger)',
-  stopped: 'var(--text-muted)',
+/** The service card's state chip — the same tinted face as a playback test's
+ *  verdict chip, so READY and FAILED on one run read as one vocabulary. */
+const SERVICE_CHIP_TONE: Record<ServiceStatus, string> = {
+  queued: 'bg-elevated text-muted',
+  ready: 'bg-success/10 text-success',
+  starting: 'bg-warning/10 text-warning',
+  timeout: 'bg-danger/10 text-danger',
+  failed: 'bg-danger/10 text-danger',
+  stopped: 'bg-elevated text-muted',
 }
 
 const EVIDENCE_LINE = /\b(error|failed|failure|exception|unauthorized|refused|denied|fatal)\b/i
@@ -115,22 +117,20 @@ export function ServiceCard({
   const primaryLabel = servicePrimaryLabel(service, branch?.name, siblings)
   const dependencyLogPath = dependency?.validation?.logPath
   return (
-    <li className="cl-card group/card p-3">
+    <li className="cl-card group/card overflow-hidden">
       {/* The title starts on the card's own left edge — flush with the label
           column below it. It carried a status-dot slot before, which indented
           the one line that should anchor the card. State is the chip's job. */}
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="cl-card-head">
         <div className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{primaryLabel}</div>
         {service.status && (
-          <span
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
-            style={{ background: 'var(--bg-selected)', color: STATUS_COLOR[service.status] }}
-          >
+          <span className={`cl-status-chip ${SERVICE_CHIP_TONE[service.status]}`}>
             {service.status}
           </span>
         )}
       </div>
-      <div className="mt-2.5 grid grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-x-2.5 gap-y-1.5">
+      <div className="cl-card-body">
+      <div className="grid grid-cols-[34px_minmax(0,1fr)_20px] items-center gap-x-2.5 gap-y-1.5">
         <ServiceField label="cmd" value={service.command} tone="primary" />
         <ServiceField label="cwd" value={service.cwd} />
         <BranchRow branch={branch} />
@@ -149,6 +149,7 @@ export function ServiceCard({
         </div>
       )}
       {bootFailure && bootFailure.reason !== 'dependency-incompatible' && <ServiceBootFailure runId={runId} failure={bootFailure} onOpenDetail={onOpenBootFailure} />}
+      </div>
     </li>
   )
 }

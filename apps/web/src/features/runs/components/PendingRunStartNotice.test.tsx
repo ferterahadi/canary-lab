@@ -6,7 +6,10 @@ import type { RunStartRequest } from '@shared/test-review'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
 const api = vi.hoisted(() => ({ getRunStartRequest: vi.fn(), cancelRunStartRequest: vi.fn() }))
-vi.mock('@/shared/api/client', () => api)
+vi.mock('@/shared/api/runs', () => ({
+  getRunStartRequest: api.getRunStartRequest,
+  cancelRunStartRequest: api.cancelRunStartRequest,
+}))
 import { PendingRunStartNotice } from './PendingRunStartNotice'
 
 let container: HTMLDivElement

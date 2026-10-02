@@ -1,5 +1,8 @@
 import fs from 'fs'
-import { getGitStatus, resolveRepoPath, runGit } from '../../../shared/git-repo'
+import { getGitStatus, runGit } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
+import { porcelainPath } from '../../../shared/git-status-path'
+import { normalizeFixCaptureNames } from './fix-capture-names'
 import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/run-state'
 
 // Apply a run's captured heal-fix patches (see RunFixCapture) INTO the real
@@ -91,31 +94,23 @@ export interface ApplyTarget {
   branch: string | null
 }
 
-/** Path out of a `git status --porcelain` line: 2 status columns, a space, then
- *  the path — and for a rename, the destination after the ` -> `. */
-export function porcelainPath(line: string): string {
-  const withoutStatus = line.slice(3)
-  const arrow = withoutStatus.lastIndexOf(' -> ')
-  return (arrow >= 0 ? withoutStatus.slice(arrow + 4) : withoutStatus).replace(/^"|"$/g, '')
-}
-
 /** Read every captured repo's current state, so the Changes tab knows which
- *  cards can offer to open and which need to warn first. Never throws: a repo
- *  git cannot describe comes back `ready:false` with the reason on it. */
-export async function buildApplyPreflight(fixCapture: RunFixCapture): Promise<ApplyTarget[]> {
-  return Promise.all(fixCapture.repos.map((repo) => applyTargetFor(repo)))
+ *  cards can offer to open and which need to warn first. Missing/non-repo paths
+ *  are not ready; failed Git reads reject rather than present clean evidence. */
+export async function buildApplyPreflight(fixCapture: RunFixCapture, readStatus = getGitStatus): Promise<ApplyTarget[]> {
+  return Promise.all(fixCapture.repos.map((repo) => applyTargetFor(repo, readStatus)))
 }
 
-async function applyTargetFor(repo: RunFixCaptureRepo): Promise<ApplyTarget> {
+async function applyTargetFor(repo: RunFixCaptureRepo, readStatus: typeof getGitStatus): Promise<ApplyTarget> {
   const repoRoot = resolveRepoPath(repo.repoRoot)
   if (!fs.existsSync(repoRoot)) {
     return { repoName: repo.repoName, repoRoot, ready: false, reason: 'the repo path no longer exists', foreignDirty: [], branch: null }
   }
-  const status = await getGitStatus(repoRoot)
+  const status = await readStatus(repoRoot)
   if (!status.isGitRepo) {
     return { repoName: repo.repoName, repoRoot, ready: false, reason: 'not a git working tree', foreignDirty: [], branch: null }
   }
-  const fixFiles = new Set(repo.fileNames ?? [])
+  const fixFiles = new Set(normalizeFixCaptureNames(repo).fileNames ?? [])
   return {
     repoName: repo.repoName,
     repoRoot,

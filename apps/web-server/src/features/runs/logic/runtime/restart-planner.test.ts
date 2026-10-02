@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import path from 'path'
 import { planRestart } from './restart-planner'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 
 function svc(safeName: string, cwd: string): ServiceSpec {
   return { repoName: safeName, name: safeName, safeName, command: 'echo', cwd }
@@ -84,4 +84,10 @@ describe('planRestart', () => {
     expect(plan.toKeep).toEqual([])
     expect(plan.noMatch).toBe(true)
   })
+})
+
+it('matches two-dot-prefixed children without matching escaped siblings', () => {
+  const service = svc('api', '/repo')
+  expect(planRestart(['/repo/..cache/app.ts'], [service]).toRestart).toEqual(['api'])
+  expect(planRestart(['/repo/../repo-other/app.ts'], [service]).toRestart).toEqual([])
 })

@@ -90,3 +90,28 @@ it('ignores mousedown inside any owned element — trigger or portalled surface 
   expect(dismiss).toHaveBeenCalledTimes(1)
   outside.remove()
 })
+
+it('honors selector-owned portals and uses the latest inside predicate and dismiss callback', () => {
+  const first = vi.fn()
+  const latest = vi.fn()
+  function Dropdown({ dismiss, selector }: { dismiss: () => void; selector: string }) {
+    useDismissOnOutsideMousedown(dismiss, true, [], (target) =>
+      target instanceof Element && Boolean(target.closest(selector)))
+    return <><div data-owned><button id="owned-item">Item</button></div><button id="outside">Outside</button></>
+  }
+  const down = (selector: string) => act(() => {
+    container.querySelector(selector)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  })
+  act(() => root.render(<Dropdown dismiss={first} selector="[data-owned]" />))
+  down('#owned-item')
+  expect(first).not.toHaveBeenCalled()
+  act(() => root.render(<Dropdown dismiss={latest} selector="#outside" />))
+  down('#outside')
+  expect(latest).not.toHaveBeenCalled()
+  down('#owned-item')
+  expect(latest).toHaveBeenCalledTimes(1)
+  expect(first).not.toHaveBeenCalled()
+  act(() => root.render(null))
+  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  expect(latest).toHaveBeenCalledTimes(1)
+})

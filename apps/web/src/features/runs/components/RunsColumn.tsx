@@ -1,12 +1,11 @@
-import * as api from '@/shared/api/client'
-import type { RunIndexEntry } from '@/shared/api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { useRunDetails } from '../state/RunsContext'
 import { useRunsColumn } from './use-runs-column'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { EmptyState } from '@/shared/ui/EmptyState'
-import { VerificationDialog } from '@/features/coverage'
+import { VerificationDialog } from '@/features/coverage/components/VerificationDialog'
 import { ActionButton, ConfirmDialog, DeleteIconButton, ExecutionTypeBadge, RetestIconButton, RunActionsKebab } from './RunActionsKebab'
 import { ICON_PAUSE, ICON_STOP, RunLaunchControl } from './RunLaunchControl'
 
@@ -181,7 +180,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           </span>
                           <ExecutionTypeBadge type={executionType} />
                         </div>
-                        <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
+                        <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} />
                       </div>
                       <div
                         className="flex w-full min-w-0 items-center justify-between gap-2"
@@ -278,7 +277,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
+                              <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} />
                             </span>
                           </>
                         )}

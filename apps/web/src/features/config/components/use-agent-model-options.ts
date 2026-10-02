@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { AgentProbeSnapshot, ModelAgentKind } from '@/shared/api/client'
-import { KNOWN_MODEL_OPTIONS, type KnownModelOption } from '@shared/agent-models'
+import * as configApi from '@/shared/api/config'
+import type { AgentProbeSnapshot } from '@/shared/api/config'
+import { KNOWN_MODEL_OPTIONS, type KnownModelOption, type ModelAgentKind } from '@shared/agent-models'
 
 /** One shared read for both model-picking surfaces. The endpoint is already
  *  cached and single-flight on the server; launch gates wait until Customize is
@@ -20,7 +20,7 @@ export function useAgentModelOptions(agent: ModelAgentKind, enabled = true): {
     if (!enabled) return
     let current = true
     setProbeBusy(true)
-    api.getAgentProbe(retryCount > 0)
+    configApi.getAgentProbe(retryCount > 0)
       .then((snapshot) => {
         if (current) setProbe(snapshot)
       })

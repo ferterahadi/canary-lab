@@ -11,17 +11,7 @@ import type {
   EvaluationExportSessionRef,
   EvaluationExportTaskRecord,
   EvaluationExportTaskView,
-} from './evaluation-export-types'
-
-export type {
-  EvaluationArchiveContents,
-  EvaluationExportMode,
-  EvaluationExportProducer,
-  EvaluationExportSessionRef,
-  EvaluationExportStatus,
-  EvaluationExportTaskRecord,
-  EvaluationExportTaskView,
-} from './evaluation-export-types'
+} from '../../../../../../shared/evaluation-export-types'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string
@@ -265,6 +255,7 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     downloadReady: record.downloadReady,
+    archiveBase: record.archiveBase,
     ...(record.clientKind ? { clientKind: record.clientKind } : {}),
     ...(record.sessionId ? { sessionId: record.sessionId } : {}),
     ...(record.conversationName ? { conversationName: record.conversationName } : {}),

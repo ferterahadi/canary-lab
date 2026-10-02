@@ -1,4 +1,6 @@
 import fs from 'fs'
+import { diagnosisPolicy, type DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
+import { renderDiagnosisPolicy } from './heal-diagnosis-policy'
 import path from 'path'
 import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
 import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
@@ -6,27 +8,9 @@ import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
 import { promptPath, loadPromptTemplate, renderPrompt, renderPromptTemplate } from '../../../../shared/prompts'
-import {
-  resolveAgentBinary,
-  isAgentCliAvailable,
-  candidateAgentPaths,
-  type HealAgent,
-  type AgentResolveDeps,
-} from '../../../agent-sessions/logic/agent-binary'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { directoryExists, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 import { claimedSingleAttempt } from '../../../../shared/single-attempt'
-
-export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
-export type { AgentSpawnArgs, AgentSpawnCommandDefaults } from './heal-agent-spawn'
-export { buildHealPromptMap, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
-export type { HealPromptMap, HealPromptMapOptions, HealPromptResourceEntry, HealPromptStartEntry } from './heal-prompt-map'
-
-// Agent-binary resolution moved to the spawn primitive's module so the runner
-// can resolve a bare agent name itself; re-exported here for the orchestrator's
-// REPL command builder and the long-standing import surface.
-export { resolveAgentBinary, isAgentCliAvailable, candidateAgentPaths }
-
-export type { HealAgent, AgentResolveDeps }
 
 const HEAL_PROMPT_TEMPLATE_PATH = promptPath('heal-agent.md')
 
@@ -71,6 +55,7 @@ export function detectHealMode(manifestPath: string): HealMode {
 }
 
 export interface OrchestratorAutoHealFactoryOptions {
+  diagnosisPolicy?: DiagnosisPolicy
   agent: HealAgent
   /** Project root used to render repo-relative run paths in the prompt. */
   projectRoot: string
@@ -122,6 +107,7 @@ export function buildOrchestratorHealPrompt(
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
   const promptTemplate = loadPromptTemplate(opts.promptPath ?? HEAL_PROMPT_TEMPLATE_PATH)
+  const selectedPolicy = opts.diagnosisPolicy === undefined ? undefined : diagnosisPolicy(opts.diagnosisPolicy)
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
   const paths = buildRunPaths(opts.runDir)
   const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
@@ -157,6 +143,7 @@ export function buildOrchestratorHealPrompt(
       restartSignal: paths.restartSignal,
       rerunSignal: paths.rerunSignal,
       personalWikiMap: renderPersonalWikiMap(opts.personalWikiPath),
+      diagnosisPolicyGuidance: renderDiagnosisPolicy(diagnosisPolicy(manifest ? manifest.diagnosisPolicy : selectedPolicy)),
       healingDirective: modeCopy.healingDirective,
       testSpecRule: modeCopy.testSpecRule,
       loggingRule: modeCopy.loggingRule,

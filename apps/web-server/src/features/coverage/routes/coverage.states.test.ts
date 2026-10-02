@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -32,7 +33,7 @@ vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
 
 import { coverageRoutes } from './coverage'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 import type { CoverageJobManifest, CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 
@@ -41,7 +42,7 @@ import { FlightRunStore } from '../../flights/logic/store'
 
 import { coverageJobStore } from '../logic/coverage/jobs/store'
 
-import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
 let tmpDir: string
 

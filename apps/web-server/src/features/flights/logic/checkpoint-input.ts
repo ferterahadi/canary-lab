@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
-import type { FlightManifest } from './types'
+import type { FlightManifest } from '../../../../../../shared/flights/types'
 
 const key = randomBytes(32)
 const TTL_MS = 30 * 60 * 1000

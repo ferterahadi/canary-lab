@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import { useDismissOnOutsideMousedown, useEscapeToClose } from '@/shared/ui/Overlays'
 import type { SortKey } from './cleanup-rows'
 
 // "Quick select" presets collapsed into a single dropdown so the toolbar stays
@@ -10,14 +11,8 @@ export function QuickSelectMenu<T>({ presets, onSelect }: {
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent): void => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
-  }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
+  useEscapeToClose(() => setOpen(false), open)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
@@ -161,5 +156,42 @@ export function SpinnerGlyph() {
     <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" style={{ animation: 'cl-spin 0.9s linear infinite' }}>
       <path d="M21 12a9 9 0 1 1-6.2-8.6" />
     </svg>
+  )
+}
+
+export function CleanupRefreshError({ error }: { error: string }) {
+  return <div role="alert" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>Inventory may be outdated: {error}</div>
+}
+
+export function CleanupToolbar<T>({ presets, onSelect, selectedCount, onClear, busy, loading, onRefresh, children }: {
+  presets: Array<{ label: string; predicate: (row: T) => boolean }>
+  onSelect: (predicate: (row: T) => boolean) => void
+  selectedCount: number
+  onClear: () => void
+  busy: boolean
+  loading: boolean
+  onRefresh: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
+      {presets.length > 0 && <QuickSelectMenu presets={presets} onSelect={onSelect} />}
+      {selectedCount > 0 && (
+        <button type="button" onClick={onClear} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }} disabled={busy}>Clear selection</button>
+      )}
+      <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+        {children}
+        <button type="button" onClick={onRefresh} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
+      </div>
+    </div>
+  )
+}
+
+export function CleanupActionBar({ selectedCount, children }: { selectedCount: number; children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 items-center gap-3 border-t px-5 py-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)' }}>{selectedCount}</strong> selected</span>
+      <div className="ml-auto flex items-center gap-2">{children}</div>
+    </div>
   )
 }

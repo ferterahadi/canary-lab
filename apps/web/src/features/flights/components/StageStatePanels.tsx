@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { FlightManifest, FlightStage, FlightStageErrorDetail, FlightStageRemedy } from '@/shared/api/client'
+import { useFlightRemedy } from '../state/use-flight-remedy'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import * as flightsApi from '@/shared/api/flights'
+import * as workspaceApi from '@/shared/api/workspace'
+import type { FlightManifest, FlightStage, FlightStageErrorDetail } from '@shared/flights/types'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
-import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
+import { STAGE_COLUMN } from './stage-meta'
+import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
+import { stageStateLine } from './StageStatusLines'
 import { CheckpointControls } from './CheckpointControls'
-import { truncate } from './StageDetail'
+import { truncate } from './StageActivity'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { BootEvidenceRows } from '@/shared/ui/BootEvidence'
 import { StatusDot } from '@/shared/ui/atoms'
@@ -33,27 +37,35 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
   // status) — null when this error has no known remedy. Executing it cleans
   // the repos and resumes the flight; the WS flights-changed refresh then
   // replaces this panel with the retried stage.
-  const [remedy, setRemedy] = useState<FlightStageRemedy | null>(null)
+  const { remedy, confirmed, loading, error: readError, refresh } = useFlightRemedy(flightId, detail)
   const [remedyBusy, setRemedyBusy] = useState<'stash' | 'commit' | null>(null)
   const [remedyError, setRemedyError] = useState<string | null>(null)
+  const identity = JSON.stringify([flightId, detail])
+  const target = useMemo(() => ({ identity }), [identity])
+  const current = useRef<typeof target | null>(target)
+  current.current = target
   useEffect(() => {
-    let cancelled = false
-    api.getFlightRemedy(flightId)
-      .then((r) => { if (!cancelled) setRemedy(r.remedy) })
-      .catch(() => {}) // no remedy is the quiet default — the raw error stands
-    return () => { cancelled = true }
-  }, [flightId, detail])
+    current.current = target
+    setRemedyBusy(null)
+    setRemedyError(null)
+    return () => { current.current = null }
+  }, [target])
   const runRemedy = (action: 'stash' | 'commit') => {
     setRemedyBusy(action)
     setRemedyError(null)
-    api.applyFlightRemedy(flightId, action)
+    flightsApi.applyFlightRemedy(flightId, action)
       .catch((err) => {
-        setRemedyError(err instanceof Error ? err.message : String(err))
-        // Partial failures leave some repos cleaned — re-read so the rows match.
-        api.getFlightRemedy(flightId).then((r) => setRemedy(r.remedy)).catch(() => {})
+        if (current.current === target) setRemedyError(err instanceof Error ? err.message : String(err))
       })
-      .finally(() => setRemedyBusy(null))
+      .finally(() => {
+        if (current.current !== target) return
+        setRemedyBusy(null)
+        // Revalidate partial failure as well as success; mutations always use
+        // their own fresh server-side inspection, never this display snapshot.
+        refresh()
+      })
   }
+  const staleReason = confirmed ? undefined : 'Repository evidence is stale; waiting for a successful read.'
   return (
     <section
       data-testid="stage-error"
@@ -98,7 +110,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           <button
             type="button"
             data-testid="stage-error-open-log"
-            onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
+            onClick={() => { workspaceApi.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
             className="cl-button min-h-6 shrink-0 px-2 py-0.5"
           >
             Open full service log
@@ -109,6 +121,11 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
         </div>
       )}
       {errorDetail?.nextAction && <p className="cl-type-body text-secondary">{errorDetail.nextAction}</p>}
+      {!confirmed && (
+        <p data-testid="stage-remedy-freshness" className="cl-type-meta text-warning">
+          {readError ?? (remedy ? staleReason : loading ? 'Checking repository changes…' : 'Repository evidence is unconfirmed.')}
+        </p>
+      )}
       {remedy && (
         <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5 border-line">
           <div className="cl-rubric">
@@ -143,8 +160,8 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
                   <button
                     type="button"
                     data-testid="stage-remedy-stash"
-                    disabled={remedyBusy !== null || mutationLockedReason != null}
-                    title={mutationLockedReason}
+                    disabled={!confirmed || remedyBusy !== null || mutationLockedReason != null}
+                    title={mutationLockedReason ?? staleReason}
                     onClick={() => runRemedy('stash')}
                     className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   >
@@ -155,8 +172,8 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
                   <button
                     type="button"
                     data-testid="stage-remedy-commit"
-                    disabled={remedyBusy !== null || mutationLockedReason != null}
-                    title={mutationLockedReason}
+                    disabled={!confirmed || remedyBusy !== null || mutationLockedReason != null}
+                    title={mutationLockedReason ?? staleReason}
                     onClick={() => runRemedy('commit')}
                     className="cl-button px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   >

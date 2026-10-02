@@ -1,5 +1,16 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useState } from 'react'
-import type { CoverageLedger, CoverageStatus, EnforcementState, ExtractedTest, GapType, PathType, RequirementCoverage, RequirementEnforcement, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { ExtractedTest } from '@shared/extracted-test'
+import type {
+  CoverageLedger,
+  CoverageStatus,
+  EnforcementState,
+  GapType,
+  PathType,
+  RequirementCoverage,
+  RequirementEnforcement,
+  TestCoverage,
+  TestStrength,
+} from '@shared/coverage/types'
 import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { Tooltip } from '@/shared/ui/Tooltip'

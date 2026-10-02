@@ -30,7 +30,10 @@ const announcedNoise = new Set<string>()
 
 export default defineConfig({
   test: {
-    bail: 1,
+    bail: 0,
+    // Real integration tests also spawn services and Playwright workers. Leave
+    // CPU headroom so synchronous parser tests do not time out under coverage.
+    maxWorkers: 12,
     onConsoleLog(log) {
       if (process.env.VITEST_VERBOSE) return undefined // full raw logs
       const hit = EXPECTED_LOG_NOISE.find((n) => n.match(log))
@@ -62,7 +65,7 @@ export default defineConfig({
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
             // Needs real localStorage, not a stub — see the dom project below.
             'apps/web/src/features/flights/lib/group-open-state.test.ts',
-            'apps/web/src/shared/state/demo-launcher.test.ts',
+            'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'node',
         },
@@ -76,7 +79,7 @@ export default defineConfig({
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
             'apps/web/src/features/flights/lib/group-open-state.test.ts',
-            'apps/web/src/shared/state/demo-launcher.test.ts',
+            'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'happy-dom',
         },
@@ -85,6 +88,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
+      reportOnFailure: true,
       reportsDirectory: 'coverage',
       // Coverage threshold scope: every module that decides something. The
       // server's runtime business logic, its route handlers and registrars, the
@@ -152,6 +156,7 @@ export default defineConfig({
         'shared/portify-overlay.ts',
         'shared/run-mode.ts',
         'shared/run-state.ts',
+        'shared/repository-observation.ts',
         'shared/verification.ts',
         // Frontend non-component modules: the API client, the pure utilities,
         // and every `state/` tree — the stores, the context providers and the
@@ -182,8 +187,10 @@ export default defineConfig({
         // are matched UNANCHORED (see the note above), so the `apps/web/src/`
         // prefix is what keeps them off the server's own trees.
         'apps/web/src/features/benchmark/state/**/*.ts',
+        'apps/web/src/features/config/state/**/*.ts',
         'apps/web/src/features/evaluation/state/**/*.ts',
         'apps/web/src/features/flights/state/**/*.ts',
+        'apps/web/src/features/getting-started/state/**/*.ts',
         'apps/web/src/features/portify/state/**/*.ts',
         'apps/web/src/features/runs/state/**/*.ts',
         'apps/web/src/features/wizard/state/**/*.ts',

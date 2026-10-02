@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import os from 'os'
 import { recoverAgentAnswer, agentActivityPath } from './agent-producer'
-import { claudeSessionLogPath } from './agent-session-log'
+import { claudeSessionLogPath } from './agent-session-paths'
 
 describe('recoverAgentAnswer', () => {
   it('returns codex stdout verbatim (already the plain answer)', () => {

@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { computeFeatureCoverage, regeneratePrdSummary as regeneratePrdSummaryReal, runCoverageEngine as runCoverageEngineReal } from './service'
+import { computeFeatureCoverage } from './service'
+import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs'
+import { runCoverageEngine as runCoverageEngineReal } from './coverage-engine'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.

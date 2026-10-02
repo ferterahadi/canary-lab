@@ -10,10 +10,6 @@ import { registerFlightPlanRoutes } from './flights-plan'
 import { registerFlightReadRoutes } from './flights-read'
 import { registerFlightStartRoutes } from './flights-start'
 
-export type { FlightRouteDeps } from './flight-route-deps'
-export { buildStageEntryValidator, executePlannedLaunch } from './flight-route-support'
-export type { PlannedLaunchDeps } from './flight-route-support'
-
 export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps): Promise<void> {
   const ctx = buildFlightRouteContext(deps)
   await registerFlightReadRoutes(app, deps, ctx)

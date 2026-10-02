@@ -21,6 +21,10 @@ const distAgentIntegrations = path.join(repoRoot, 'dist', 'agent-integrations')
 // directory that happened to share the name.
 const SKIP_TEMPLATE_PATHS = new Set(['project/logs'])
 
+// prompts/benchmark-study/ holds the contributor benchmark's prompts (one prompt
+// home), but only tools/benchmark-study renders them, so they never ship.
+const SKIP_PROMPT_PATHS = new Set(['benchmark-study'])
+
 function copyDir(sourceDir, targetDir, skip = new Set(), rel = '') {
   fs.mkdirSync(targetDir, { recursive: true })
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
@@ -42,7 +46,7 @@ fs.rmSync(distTemplates, { recursive: true, force: true })
 copyDir(sourceTemplates, distTemplates, SKIP_TEMPLATE_PATHS)
 
 fs.rmSync(distPrompts, { recursive: true, force: true })
-copyDir(sourcePrompts, distPrompts)
+copyDir(sourcePrompts, distPrompts, SKIP_PROMPT_PATHS)
 
 fs.rmSync(distAssets, { recursive: true, force: true })
 copyDir(sourceAssets, distAssets)

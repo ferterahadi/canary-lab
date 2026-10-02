@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { TestFileReview, ReviewSource } from '../../../../../../shared/test-review'
-import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
+import { findFeature, listSpecFiles } from '../../../shared/feature-loader'
 import { extractTestsFromSource, extractTestPredicatesFromSource, extractTestMetadataFromSource } from '../../../shared/ast-extractor'
 import { translateReadableSource } from '../../../shared/readable-tests/translator'
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
@@ -44,7 +44,7 @@ function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | u
 
 export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/test-source-comparison', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    const feature = findFeature(deps.featuresDir, req.params.name)
     if (!feature) return reply.code(404).send({ error: 'Suite not found' })
     const snapshot = runSnapshot(deps, feature.name, req.query.runId)
     if ('error' in snapshot) return reply.code(snapshot.status).send({ error: snapshot.error })
@@ -69,7 +69,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     }
   })
   app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string; summary?: string } }>('/api/features/:name/test-review', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    const feature = findFeature(deps.featuresDir, req.params.name)
     if (!feature) return reply.code(404).send({ error: 'Suite not found' })
     const file = req.query.file
     const supportingFile = !!file && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)

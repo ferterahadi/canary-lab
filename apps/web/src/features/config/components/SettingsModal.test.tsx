@@ -3,21 +3,26 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import * as runsApi from '@/shared/api/runs'
+import * as workspaceApi from '@/shared/api/workspace'
 import { SettingsModal } from './SettingsModal'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getProjectConfig: vi.fn(),
-    putProjectConfig: vi.fn(),
-    changeProjectPort: vi.fn(),
-    listWorkspaceDirs: vi.fn(),
-    getGhStatus: vi.fn(),
-    getAgentProbe: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
+  putProjectConfig: vi.fn(),
+  changeProjectPort: vi.fn(),
+  getAgentProbe: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  listWorkspaceDirs: vi.fn(),
+}))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  getGhStatus: vi.fn(),
+}))
 
 function setInputValue(input: HTMLInputElement, value: string): void {
   // React tracks the controlled value via a property descriptor, so a plain
@@ -40,18 +45,18 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.getProjectConfig).mockReset()
-  vi.mocked(api.putProjectConfig).mockReset()
-  vi.mocked(api.changeProjectPort).mockReset()
-  vi.mocked(api.getGhStatus).mockReset().mockResolvedValue({ installed: true, authenticated: true, account: 'ferterahadi-acme', host: 'github.com' })
-  vi.mocked(api.listWorkspaceDirs).mockReset().mockResolvedValue({
+  vi.mocked(configApi.getProjectConfig).mockReset()
+  vi.mocked(configApi.putProjectConfig).mockReset()
+  vi.mocked(configApi.changeProjectPort).mockReset()
+  vi.mocked(runsApi.getGhStatus).mockReset().mockResolvedValue({ installed: true, authenticated: true, account: 'ferterahadi-acme', host: 'github.com' })
+  vi.mocked(workspaceApi.listWorkspaceDirs).mockReset().mockResolvedValue({
     root: '/tmp/wiki',
     at: '',
     absolute: '/tmp/wiki',
     parent: '/tmp',
     dirs: [],
   })
-  vi.mocked(api.getAgentProbe).mockReset().mockResolvedValue({
+  vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue({
     probedAt: 'now',
     claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', remedy: null },
     codex: { agent: 'codex', state: 'ok', binaryPath: '/bin/codex', version: '1', remedy: null },
@@ -67,7 +72,7 @@ afterEach(() => {
 
 describe('SettingsModal', () => {
   it('keeps the visible settings copy short and puts secondary explanations behind help icons', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null,
     })
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
@@ -110,7 +115,7 @@ describe('SettingsModal', () => {
   })
 
   it('carries the agent choice, its models and the launch gate on one card', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
     await act(async () => {})
 
@@ -137,10 +142,10 @@ describe('SettingsModal', () => {
 
   it('folds the retired System default choice into Auto-detect', async () => {
     const onClose = vi.fn()
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'system', personalWikiPath: null,
     })
-    vi.mocked(api.putProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.putProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null,
     })
     await act(async () => { root.render(<SettingsModal onClose={onClose} />) })
@@ -155,12 +160,12 @@ describe('SettingsModal', () => {
       .find((button) => button.textContent === 'Save') as HTMLButtonElement
     expect(save.disabled).toBe(false)
     await act(async () => { save.click() })
-    expect(api.putProjectConfig).toHaveBeenCalledWith(expect.objectContaining({ editor: 'auto' }))
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith(expect.objectContaining({ editor: 'auto' }))
     expect(onClose).toHaveBeenCalled()
   })
 
   it('R80: the GitHub section shows the connected account and refreshes on demand', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
     await act(async () => {})
     const gh = container.querySelector('[data-testid="settings-github"]')
@@ -173,7 +178,7 @@ describe('SettingsModal', () => {
     const recheck = container.querySelector('[data-testid="settings-github-refresh"]')!
     expect(recheck.textContent).toBe('')
     expect(recheck.getAttribute('aria-label')).toBe('Re-check GitHub sign-in')
-    vi.mocked(api.getGhStatus).mockResolvedValue({ installed: true, authenticated: false })
+    vi.mocked(runsApi.getGhStatus).mockResolvedValue({ installed: true, authenticated: false })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="settings-github-refresh"]')?.click() })
     await act(async () => {})
     expect(container.querySelector('[data-testid="settings-github"]')?.textContent).toContain('gh auth login')
@@ -181,12 +186,12 @@ describe('SettingsModal', () => {
 
   it('renders the current wiki path and saves a new one picked via the folder picker', async () => {
     const onClose = vi.fn()
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'auto',
       editor: 'auto',
       personalWikiPath: '/Users/dev/Documents/wiki/wiki',
     })
-    vi.mocked(api.putProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.putProjectConfig).mockResolvedValue({
       healAgent: 'auto',
       editor: 'auto',
       personalWikiPath: '/tmp/wiki',
@@ -219,9 +224,8 @@ describe('SettingsModal', () => {
       save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(api.putProjectConfig).toHaveBeenCalledWith({
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({
       healAgent: 'claude',
-      editor: 'auto',
       personalWikiPath: '/tmp/wiki',
     })
     expect(onClose).toHaveBeenCalled()
@@ -230,10 +234,10 @@ describe('SettingsModal', () => {
   it('shows the current port and redirects to the new origin after a change', async () => {
     const onClose = vi.fn()
     const onRedirect = vi.fn()
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null, port: 8000,
     })
-    vi.mocked(api.changeProjectPort).mockResolvedValue({
+    vi.mocked(configApi.changeProjectPort).mockResolvedValue({
       restarting: true, port: 9000, newOrigin: 'http://localhost:9000',
     })
 
@@ -249,12 +253,12 @@ describe('SettingsModal', () => {
     await act(async () => { change!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     await act(async () => {})
 
-    expect(api.changeProjectPort).toHaveBeenCalledWith(9000, false)
+    expect(configApi.changeProjectPort).toHaveBeenCalledWith(9000, false)
     expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000', expect.any(Function))
   })
 
   it('defaults the port field to 7421 when none is configured', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null,
     })
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
@@ -265,10 +269,10 @@ describe('SettingsModal', () => {
 
   it('requires confirmation when runs are active, then retries with confirm', async () => {
     const onRedirect = vi.fn()
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null, port: 8000,
     })
-    vi.mocked(api.changeProjectPort)
+    vi.mocked(configApi.changeProjectPort)
       .mockResolvedValueOnce({ needsConfirm: true, activeRuns: 2, restarting: false })
       .mockResolvedValueOnce({ restarting: true, port: 9000, newOrigin: 'http://localhost:9000' })
 
@@ -287,13 +291,13 @@ describe('SettingsModal', () => {
     await act(async () => { confirm!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     await act(async () => {})
 
-    expect(api.changeProjectPort).toHaveBeenNthCalledWith(1, 9000, false)
-    expect(api.changeProjectPort).toHaveBeenNthCalledWith(2, 9000, true)
+    expect(configApi.changeProjectPort).toHaveBeenNthCalledWith(1, 9000, false)
+    expect(configApi.changeProjectPort).toHaveBeenNthCalledWith(2, 9000, true)
     expect(onRedirect).toHaveBeenCalledWith('http://localhost:9000', expect.any(Function))
   })
 
   it('keeps configured stage plans inline and hides empty-plan summaries', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({
       healAgent: 'claude',
       editor: 'auto',
       personalWikiPath: null,
@@ -320,7 +324,7 @@ describe('SettingsModal', () => {
     // The matrix saves ONLY the agentModels block; onSaved refreshes the
     // summary line while the settings Save button stays clean (not dirty).
     const savedModels = { claude: { heal: { model: 'sonnet', effort: 'high' } }, codex: {} }
-    vi.mocked(api.putProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.putProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null, agentModels: savedModels,
     })
     const effort = document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!
@@ -330,7 +334,7 @@ describe('SettingsModal', () => {
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
     await act(async () => {})
 
-    expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: savedModels })
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: savedModels })
     expect(document.querySelector('[data-testid="model-matrix-dialog"]')).toBeNull()
     expect(container.querySelector('[data-testid="model-summary-claude"]')?.textContent)
       .toContain('Auto-repair sonnet')
@@ -340,8 +344,8 @@ describe('SettingsModal', () => {
 
   it('the At-launch checkbox flips askModelsOnLaunch and persists it on Save', async () => {
     const onClose = vi.fn()
-    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
-    vi.mocked(api.putProjectConfig).mockResolvedValue({
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+    vi.mocked(configApi.putProjectConfig).mockResolvedValue({
       healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true,
     })
     await act(async () => { root.render(<SettingsModal onClose={onClose} />) })
@@ -359,7 +363,7 @@ describe('SettingsModal', () => {
     expect(save.disabled).toBe(false)
     await act(async () => { save.click() })
 
-    expect(api.putProjectConfig).toHaveBeenCalledWith(expect.objectContaining({ askModelsOnLaunch: true }))
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith(expect.objectContaining({ askModelsOnLaunch: true }))
     expect(onClose).toHaveBeenCalled()
   })
 })

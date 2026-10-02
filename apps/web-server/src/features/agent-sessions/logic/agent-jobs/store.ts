@@ -1,7 +1,7 @@
 import path from 'path'
 import { bridgeStoreEvents } from '../../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../../shared/workspace-events'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../shared/lib/file-backed-task-store'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners } from '../../../../../../../shared/lib/file-backed-task-store'
 import type { AgentJobIndexEntry, AgentJobManifest } from './types'
 
 // File-backed store for spawned-agent records. A thin wrapper over the shared
@@ -44,7 +44,7 @@ function indexEntryFromManifest(m: AgentJobManifest) {
 }
 
 export class AgentJobRunStore {
-  private readonly listeners = new Set<(event: AgentJobStoreEvent) => void>()
+  private readonly events = new TaskListeners<AgentJobStoreEvent>()
   private readonly store: FileBackedTaskStore<AgentJobManifest>
 
   constructor(logsDir: string) {
@@ -67,15 +67,11 @@ export class AgentJobRunStore {
         }),
       },
     })
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, jobId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, jobId: e.id }))
   }
 
   list(): AgentJobIndexEntry[] {
-    // Drop the generic store's bookkeeping mirrors (id/createdAt duplicate
-    // jobId/startedAt) so the public shape stays exactly AgentJobIndexEntry.
-    return this.store.list().map(({ id: _id, createdAt: _createdAt, ...rest }) =>
-      rest as unknown as AgentJobIndexEntry,
-    )
+    return this.store.rows<AgentJobIndexEntry>()
   }
 
   get(jobId: string): AgentJobManifest | null {
@@ -123,17 +119,11 @@ export class AgentJobRunStore {
   }
 
   onEvent(fn: (event: AgentJobStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: AgentJobStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: AgentJobStoreEvent): void {
-    for (const fn of this.listeners) {
-      try { fn(event) } catch { /* a bad listener must not break persistence */ }
-    }
+    this.events.delete(fn)
   }
 }
 

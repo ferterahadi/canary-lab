@@ -1,5 +1,5 @@
 import type { CoverageFreshness } from '@shared/coverage/freshness'
-import type { FlightStageKey } from '@/shared/api/client'
+import type { FlightStageKey } from '@shared/flights/types'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { stageRowKey } from './StageRail'
 

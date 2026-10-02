@@ -3,11 +3,12 @@ import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../logic/runtime/store'
 import { portifyCleanupListing } from '../logic/runtime/cleanup'
 import type { PortifyManifest, StartExternalPortifyInput, StartExternalPortifyResult, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
-import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
+import type { HealAgent } from '../../agent-sessions/logic/agent-binary'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { overlayDir } from '../logic/runtime/overlay'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
+import { notFound } from '../../../shared/http-error'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
 // Reads go through the injected store; start/save/cancel delegate to the
@@ -94,10 +95,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
 
   app.get<{ Params: { workflowId: string } }>('/api/portify/:workflowId', async (req, reply) => {
     const manifest = deps.store.get(req.params.workflowId)
-    if (!manifest) {
-      reply.code(404)
-      return { error: 'workflow not found' }
-    }
+    if (!manifest) return notFound(reply, 'workflow')
     return manifest
   })
 
@@ -109,10 +107,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   // path so the UI can fall back.
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/open', async (req, reply) => {
     const manifest = deps.store.get(req.params.workflowId)
-    if (!manifest) {
-      reply.code(404)
-      return { error: 'workflow not found' }
-    }
+    if (!manifest) return notFound(reply, 'workflow')
     const dirs: string[] = []
     const overlay = overlayDir(manifest.featureDir)
     if (manifest.status === 'saved' && fs.existsSync(overlay)) {

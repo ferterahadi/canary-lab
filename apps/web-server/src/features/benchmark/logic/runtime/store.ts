@@ -1,5 +1,10 @@
-import type { BenchmarkManifest, BenchmarkIndexEntry } from './types'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../shared/lib/file-backed-task-store'
+import {
+  benchmarkIndexEntry,
+  isActiveBenchmarkStatus,
+  type BenchmarkIndexEntry,
+} from '../../../../../../../shared/benchmark-index'
+import type { BenchmarkManifest } from './types'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, legacyEntryId, abortOnRestart } from '../../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting benchmark store (the benchmark analogue of
 // RunStore). A thin wrapper over the shared FileBackedTaskStore: it owns the
@@ -31,17 +36,12 @@ function indexEntryFromManifest(m: BenchmarkManifest) {
   return {
     id: m.benchmarkId,
     createdAt: m.startedAt,
-    benchmarkId: m.benchmarkId,
-    feature: m.feature,
-    level: m.level,
-    status: m.status,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...benchmarkIndexEntry(m),
   }
 }
 
 export class BenchmarkRunStore implements BenchmarkStore {
-  private readonly listeners = new Set<(event: BenchmarkStoreEvent) => void>()
+  private readonly events = new TaskListeners<BenchmarkStoreEvent>()
   private readonly store: FileBackedTaskStore<BenchmarkManifest>
 
   constructor(logsDir: string) {
@@ -54,30 +54,18 @@ export class BenchmarkRunStore implements BenchmarkStore {
       indexEntryOf: indexEntryFromManifest,
       // Legacy rows (pre-`id` index shape) carry only `benchmarkId`; fall back to
       // it so remove/prune/reconcile can address them (else they resurrect on refresh).
-      idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { benchmarkId?: string }).benchmarkId),
+      idOfEntry: legacyEntryId('benchmarkId'),
       featureOf: (m) => m.feature,
       withFeature: (m, feature) => ({ ...m, feature }),
-      reconcile: {
-        // A `sabotaging`/`ready`/`running` benchmark in the index belongs to a
-        // dead process (its driver was killed on restart) and can never finish.
-        isInterrupted: (m) => m.status === 'sabotaging' || m.status === 'ready' || m.status === 'running',
-        mark: (m, now) => ({
-          ...m,
-          status: 'aborted',
-          endedAt: m.endedAt ?? now,
-          error: m.error ?? 'Interrupted by server restart',
-        }),
-      },
+      // A `sabotaging`/`ready`/`running` benchmark in the index belongs to a
+      // dead process (its driver was killed on restart) and can never finish.
+      reconcile: abortOnRestart((m) => isActiveBenchmarkStatus(m.status)),
     })
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, benchmarkId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, benchmarkId: e.id }))
   }
 
   list(): BenchmarkIndexEntry[] {
-    // Drop the generic store's bookkeeping fields (id/createdAt mirror
-    // benchmarkId/startedAt) so the public index shape stays exactly BenchmarkIndexEntry.
-    return this.store.list().map(({ id: _id, createdAt: _createdAt, ...rest }) =>
-      rest as unknown as BenchmarkIndexEntry,
-    )
+    return this.store.rows<BenchmarkIndexEntry>()
   }
 
   get(benchmarkId: string): BenchmarkManifest | null {
@@ -108,20 +96,10 @@ export class BenchmarkRunStore implements BenchmarkStore {
   }
 
   onEvent(fn: (event: BenchmarkStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: BenchmarkStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: BenchmarkStoreEvent): void {
-    for (const fn of this.listeners) {
-      try {
-        fn(event)
-      } catch {
-        /* a bad listener must not break persistence */
-      }
-    }
+    this.events.delete(fn)
   }
 }

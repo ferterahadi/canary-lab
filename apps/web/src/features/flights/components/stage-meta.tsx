@@ -1,27 +1,21 @@
-import type { RunWaitingState } from '@/features/runs'
+import type { RunWaitingState } from '@/features/runs/utils/run-waiting-state'
+import { presentActivityRunStatus, type FeatureActivity } from '../state/feature-activity'
 import type { ReactNode } from 'react'
-import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
+import type {
+  FlightStage,
+  FlightStageKey,
+  FlightStageStatus,
+  SpecsCoverageProgress,
+} from '@shared/flights/types'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-
-export { evaluationTaskId, FactTile, FactsGrid, plural, runHistoryFacts, stageFacts } from './StageFacts'
-export type { StageBandData, StageFact } from './StageFacts'
-export { STAGE_COMPANION, stageRailRows, stageRowKey } from './StageRail'
-export type { StageRailRow } from './StageRail'
-export { formatDuration, formatStageDuration, healEndLine, healEndShort, stageStateLine, stageWorkMs } from './StageStatusLines'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status
 // chip every surface renders, and the per-stage state line ("where are we") the
 // trailer column leads with. Stage KEYS stay canonical in the store/MCP/CLI —
 // only the display layer speaks outcome language.
-
-/** Stage key → user-facing label. Moved to shared/flights/stage-labels.ts so
- *  the server's own user-facing messages (stage-entry rejections) speak the
- *  same names the rail shows instead of raw stage keys; re-exported here so the
- *  flight components keep their one import home. */
-export { FLIGHT_STAGE_LABEL as STAGE_LABEL, flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 
 /** The stage pane's card column. Every panel, facts grid, error/paused card and
  *  the Test Run hero share it, so a stage reads as ONE column of like blocks
@@ -130,19 +124,34 @@ export function stagePresentationStatus(status: FlightStageStatus, waiting?: Run
   return waiting?.kind === 'queued' ? 'pending' : waiting ? 'waiting-for-approval' : status
 }
 
-export function StageStatusChip({ status: recordedStatus, waiting }: { status: FlightStageStatus; waiting?: RunWaitingState }) {
+/** Overlay one active run onto the Test run step without changing saved Flight
+ * stage evidence. The rail, detail chip, and mini rail share this resolver. */
+export function presentStageStatus(recordedStatus: FlightStageStatus, rowKey: string, activity?: FeatureActivity, fallbackWaiting?: RunWaitingState) {
+  const activeRun = rowKey === 'run' && activity?.runId != null
+  const waiting = activeRun ? activity.waiting : fallbackWaiting
   const status = stagePresentationStatus(recordedStatus, waiting)
-  const tone = stageStatusTone(status)
+  if (activeRun) {
+    const run = presentActivityRunStatus(activity)!
+    return { status, label: run.label, tone: run.tone, dot: run.dot, pulse: run.pulse, title: run.title }
+  }
+  return { status, label: waiting?.label ?? STAGE_STATUS_LABEL[status], tone: stageStatusTone(status),
+    dot: status === 'running' ? 'running' as const : undefined, pulse: false, title: undefined }
+}
+
+export function StageStatusChip({ status: recordedStatus, waiting, activity, rowKey }: { status: FlightStageStatus; waiting?: RunWaitingState; activity?: FeatureActivity; rowKey?: string }) {
+  const presentation = presentStageStatus(recordedStatus, rowKey ?? '', activity, waiting)
+  const status = presentation.status
   return (
     <Chip
       testId="stage-status-chip"
       chrome="fill"
-      tone={tone}
+      tone={presentation.tone}
       fontSize={10}
-      icon={status === 'running'
-        ? <StatusDot state="running" className="shrink-0" />
+      icon={presentation.dot
+        ? <StatusDot state={presentation.dot} pulse={presentation.pulse} className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      label={waiting?.label ?? capitalizeFirst(STAGE_STATUS_LABEL[status])}
+      label={capitalizeFirst(presentation.label)}
+      title={presentation.title}
     />
   )
 }
@@ -153,10 +162,6 @@ export function StageStatusChip({ status: recordedStatus, waiting }: { status: F
 // display layer only: outcome language for card titles and option buttons,
 // mirroring the STAGE_LABEL pattern. An unmapped kind/option falls back to its
 // raw key, so new server checkpoints degrade readable, never blank.
-
-// Shared with the durable notification producer so a Flight decision has the
-// same name in the page, inbox and toast.
-export { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
 
 const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   'similarity-choice': {

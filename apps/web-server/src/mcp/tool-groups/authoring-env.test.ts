@@ -5,6 +5,8 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerFeatureEnvTools } from './authoring-env'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { FlightRunStore } from '../../features/flights/logic/store'
+import { removeFlightRecordsForFeature } from '../../features/flights/logic/flight-queue'
 
 // Envset capture/inspection, feature deletion, and the repo-branch surface.
 //
@@ -83,10 +85,7 @@ describe('capture_feature_env_files', () => {
 
     expect(out.ok).toBe(true)
     expect(fs.existsSync(path.join(featuresDir, 'checkout', 'envsets', 'local', 'shop.env'))).toBe(true)
-    // The Envsets tab is derived from disk, so without an announcement it stays
-    // stale. The capture layer publishes its own envsets event too; what this
-    // tool adds is the feature-list refresh.
-    expect(published).toContainEqual({ type: 'features-changed' })
+    expect(published).toEqual([{ type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }])
     // Values are never echoed back — the whole point of the redacted preview.
     expect(JSON.stringify(out)).not.toContain('secret')
   })
@@ -148,7 +147,7 @@ describe('write_envset', () => {
     expect(await text('write_envset', ARGS)).toBe('writeEnvsetSlot dependency is not configured')
   })
 
-  it('writes through the REST handler and announces the envset change', async () => {
+  it('writes through the REST handler without adding an adapter-owned event', async () => {
     const writeEnvsetSlot = vi.fn(async () => ({
       path: '/features/checkout/envsets/local/shop.env',
       entries: [{ key: 'PORT', value: '4000' }],
@@ -165,7 +164,7 @@ describe('write_envset', () => {
       feature: 'checkout', env: 'local', slot: 'shop.env',
       path: '/features/checkout/envsets/local/shop.env', unparsedLines: [3],
     })
-    expect(published).toEqual([{ type: 'envsets-changed', feature: 'checkout' }])
+    expect(published).toEqual([])
   })
 
   it('surfaces the writer\'s rejection', async () => {
@@ -184,6 +183,40 @@ describe('write_envset', () => {
 })
 
 describe('delete_feature', () => {
+  it.each([
+    ['wrong', 'confirmName must match the feature name'],
+    ['missing', 'feature not found'],
+  ])('refuses a missing suite with confirmation %s before the Flight hook', async (confirmName, message) => {
+    const removeFlightRecordsFor = vi.fn(() => ({ error: 'active Flight', removed: 0 }))
+    const { text, published } = harness({ removeFlightRecordsFor })
+    expect(await text('delete_feature', { feature: 'missing', confirmName })).toBe(message)
+    expect(removeFlightRecordsFor).not.toHaveBeenCalled()
+    expect(published).toEqual([])
+  })
+
+  it('preserves real Flight history when a linked suite is outside the features root', async () => {
+    const discovery = writeFeature('linked')
+    const outside = path.join(tmpDir, 'linked-source')
+    fs.mkdirSync(outside)
+    fs.writeFileSync(path.join(discovery, 'feature.config.cjs'),
+      `exports.config = { name: 'linked', featureDir: ${JSON.stringify(outside)}, repos: [] }`)
+    const store = new FlightRunStore(path.join(tmpDir, 'logs'))
+    store.save({ flightId: 'saved-flight', feature: 'linked', repoPaths: [], description: 'fixture',
+      opts: { env: 'local', coverageTarget: 100, yolo: false }, status: 'done', currentStage: null, stages: [],
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' })
+    const before = store.get('saved-flight')
+    const remove = vi.fn((feature: string) => removeFlightRecordsForFeature(store, feature))
+    const { text, published } = harness({ removeFlightRecordsFor: remove })
+
+    expect(await text('delete_feature', { feature: 'linked', confirmName: 'linked' }))
+      .toBe('feature directory is outside the features root')
+    expect(store.get('saved-flight')).toEqual(before)
+    expect(remove).not.toHaveBeenCalled()
+    expect(fs.existsSync(outside)).toBe(true)
+    expect(fs.existsSync(discovery)).toBe(true)
+    expect(published).toEqual([])
+  })
+
   it('refuses a mismatched confirmation before removing any flight history', async () => {
     writeFeature('checkout')
     const removeFlightRecordsFor = vi.fn(() => ({ removed: 3 }))
@@ -243,6 +276,24 @@ describe('the feature repo branch surface', () => {
     git('add', '.')
     git('commit', '-qm', 'init')
     git('branch', 'feature-x')
+  })
+
+  it('refuses both mutations during active work and keeps reads available', async () => {
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
+    const { call, text, published } = harness({ isRepoActive: () => true })
+    for (const tool of ['checkout_feature_repo_branch', 'update_feature_repo_branch']) {
+      expect(await text(tool, { feature: 'checkout', repo: 'shop', branch: 'feature-x', confirm: true })).toBe('repo has an active service run')
+    }
+    expect(await call('get_feature_repo_status', { feature: 'checkout', repo: 'shop', fetch: false })).toMatchObject({ currentBranch: 'main' })
+    expect(git('branch', '--show-current')).toBe('main')
+    expect(published).toEqual([])
+  })
+
+  it('does not announce an unchanged checkout', async () => {
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
+    const { call, published } = harness()
+    await call('checkout_feature_repo_branch', { feature: 'checkout', repo: 'shop', branch: 'main', confirm: true })
+    expect(published).toEqual([])
   })
 
   it('reports an unknown repo rather than guessing a path', async () => {

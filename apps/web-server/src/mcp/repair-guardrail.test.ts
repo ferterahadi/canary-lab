@@ -3,10 +3,16 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { INSTRUCTIONS_BY_PROFILE, INSTRUCTIONS_DELIVERED_WINDOW, WORKFLOW_GUIDES } from './instructions'
 import { EXEC_TOOL_NAME, FULL_TOOLS } from './tool-profiles'
-import { classifyWaitForHealTask, type CanaryLabMcpDeps } from './tools'
-import { EXTERNAL_HEAL_NEXT_STEPS, buildSpecEditsWarning, normalizeRunCounts } from '../features/runs/logic/heal/external-heal-surface'
-import type { RunDetail, RunStore } from '../features/runs/logic/run-store'
-import type { RunManifest } from '../features/runs/logic/runtime/manifest'
+import { classifyWaitForHealTask } from './heal-task-wait'
+import type { CanaryLabMcpDeps } from './tool-schemas'
+import {
+  EXTERNAL_HEAL_NEXT_STEPS,
+  buildSpecEditsWarning,
+} from '../features/runs/logic/heal/external-heal-surface'
+import { normalizeRunCounts } from '../features/runs/logic/heal/external-heal-counts'
+import type { RunStore } from '../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../shared/run-detail'
+import type { RunManifest } from '../../../../shared/run-manifest'
 
 // The repair rule — "fix app/service code, not tests, unless a test is provably
 // wrong" — is the guardrail Canary Lab exists to enforce (docs/PRD.md, Problem +

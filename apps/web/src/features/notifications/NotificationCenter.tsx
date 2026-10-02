@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import type { NotificationTarget, WorkspaceNotification } from '@/shared/api/notifications'
+import type { NotificationTarget, WorkspaceNotification } from '@shared/notifications/types'
 import { timeAgo } from '@/shared/lib/format'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { IconButton, Modal, StatusDot } from '@/shared/ui/atoms'
+import { IconButton, StatusDot } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 import { useNotifications } from './use-notifications'
 
 function needsAttention(item: WorkspaceNotification): boolean {

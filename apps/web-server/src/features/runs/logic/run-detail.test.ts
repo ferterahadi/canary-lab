@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getRunDetail, readRunSummary } from './run-detail'
+import { getRunDetail, readRunSummary, readRunLifecycleEvents, readPlaywrightPlaybackEvents } from './run-detail'
 import { writeManifest } from './runtime/manifest'
-import { runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor } from './runtime/run-paths'
 
 let tmpDir: string
 
@@ -308,4 +308,28 @@ describe('readRunSummary', () => {
       ],
     })
   })
+})
+
+it('preserves each event reader’s defaults, validation, order and duplicates', () => {
+  const paths = buildRunPaths(tmpDir)
+  expect(readRunLifecycleEvents(tmpDir)).toBeUndefined()
+  expect(readPlaywrightPlaybackEvents(tmpDir)).toBeUndefined()
+  fs.writeFileSync(paths.lifecycleEventsPath, '')
+  fs.writeFileSync(paths.playwrightEventsPath, '')
+  expect(readRunLifecycleEvents(tmpDir)).toBeUndefined()
+  expect(readPlaywrightPlaybackEvents(tmpDir)).toEqual([])
+  for (const [file, key] of [[paths.lifecycleEventsPath, 'phase'], [paths.playwrightEventsPath, 'type']]) {
+    const event = { [key]: 'first' }
+    fs.writeFileSync(file, [null, 4, {}, { [key]: 3 }, event, { [key]: 'second' }, event].map(value => JSON.stringify(value)).join('\n') + '\n{partial')
+  }
+  expect(readRunLifecycleEvents(tmpDir)).toEqual([{ phase: 'first' }, { phase: 'second' }, { phase: 'first' }])
+  expect(readPlaywrightPlaybackEvents(tmpDir)).toEqual([{ type: 'first' }, { type: 'second' }, { type: 'first' }])
+})
+
+it('includes accepted lifecycle evidence in run detail', () => {
+  const dir = runDirFor(tmpDir, 'lifecycle')
+  fs.mkdirSync(dir, { recursive: true })
+  writeManifest(path.join(dir, 'manifest.json'), { runId: 'lifecycle', feature: 'example', startedAt: 'now', status: 'passed', healCycles: 0, services: [] })
+  fs.writeFileSync(buildRunPaths(dir).lifecycleEventsPath, '{"phase":"running"}\n{"phase":"complete"}\n{partial')
+  expect(getRunDetail(tmpDir, 'lifecycle')?.lifecycleEvents).toEqual([{ phase: 'running' }, { phase: 'complete' }])
 })

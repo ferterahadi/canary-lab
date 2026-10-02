@@ -3,7 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '@/shared/api/types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
@@ -98,6 +99,75 @@ function startEnvlessRun(container: HTMLDivElement): void {
 }
 
 describe('run launch controls', () => {
+  it('keeps launch-menu trigger and portal clicks inside, dismisses outside, and closes when leaving compact mode', () => {
+    let resize: ResizeObserverCallback = () => {}
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    try {
+      act(() => root.render(<RunsColumn feature="alpha" envs={['local']} runs={[]}
+        selectedRunId={null} onSelectRun={() => {}} onStartRun={() => {}} onStartVerification={async () => {}} />))
+      const setWidth = (width: number) => act(() => resize(
+        [{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver,
+      ))
+      setWidth(300)
+      const trigger = container.querySelector<HTMLButtonElement>('button[data-run-launch-menu]')!
+      act(() => trigger.click())
+      const menu = () => document.querySelector('[role="menu"][data-run-launch-menu]')
+      expect(menu()).not.toBeNull()
+      act(() => trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      act(() => menu()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      expect(menu()).not.toBeNull()
+      act(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      expect(menu()).toBeNull()
+      act(() => trigger.click())
+      expect(menu()).not.toBeNull()
+      setWidth(500)
+      expect(menu()).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('keeps the Run action available while this suite is healing', () => {
+    const onStartRun = vi.fn()
+    const healing: RunIndexEntry = {
+      runId: 'run-1', feature: 'alpha', status: 'healing', startedAt: '2026-01-01T00:00:00Z',
+    }
+    const render = (runs: RunIndexEntry[]) => {
+      act(() => {
+        root.render(
+          <RunsColumn
+            feature="alpha"
+            envs={['local']}
+            runs={runs}
+            selectedRunId={null}
+            onSelectRun={() => {}}
+            onStartRun={onStartRun}
+            onStartVerification={async () => {}}
+          />,
+        )
+      })
+    }
+
+    render([healing])
+    const launch = container.querySelector<HTMLButtonElement>('button[data-run-launch-menu]')
+    expect(launch?.textContent).toContain('Run')
+    expect(launch?.textContent).not.toContain('Healing')
+    expect(launch?.title).toBe('Run')
+    act(() => launch?.click())
+    expect(onStartRun).not.toHaveBeenCalled()
+    const localOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.includes('local'))
+    act(() => localOption?.click())
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith('local', 'test')
+
+    render([{ ...healing, status: 'passed' }])
+    expect(launch?.textContent).toContain('Run')
+    expect(launch?.textContent).not.toContain('Healing')
+    expect(launch?.title).toBe('Run')
+  })
+
   it('gates a run through the MCP promo before starting (env-less feature)', () => {
     const onStartRun = vi.fn()
     gatePromo.mockImplementationOnce(() => {})
@@ -470,8 +540,10 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
 
-    expect(container.textContent).toContain('Heal agent')
-    expect(container.textContent).toContain('Codex')
+    // Agent and cycle count share one Overview tile: who healed, how often.
+    const tile = [...container.querySelectorAll('[data-testid="run-fact"]')]
+      .find((node) => node.firstElementChild?.textContent === 'Heal')
+    expect(tile?.textContent).toContain('Codex')
   })
 
   it('shows an external waiting panel instead of an empty terminal before claim', async () => {
@@ -555,6 +627,48 @@ describe('run overview', () => {
 
     expect(container.textContent).toContain('terminal')
     expect(container.textContent).not.toContain('agent session')
+  })
+
+  it('answers a settled run with no heal cycle at once, without reading a session log', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ healMode: 'auto', healCycles: 0 }),
+      transient: null,
+      status: 'passed',
+      displayStatus: 'passed',
+      error: null,
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+    await act(async () => {
+      clickButton('Heal agent')
+    })
+
+    expect(container.querySelector('[data-testid="heal-empty"]')?.textContent).toContain('No repairs needed')
+    expect(container.textContent).not.toContain('agent session')
+  })
+
+  it('reads the session log once a settled run has a heal cycle to show', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ healMode: 'auto', healCycles: 1 }),
+      transient: null,
+      status: 'passed',
+      displayStatus: 'passed',
+      error: null,
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+    await act(async () => {
+      clickButton('Heal agent')
+    })
+
+    expect(container.querySelector('[data-testid="heal-empty"]')).toBeNull()
+    expect(container.textContent).toContain('agent session')
   })
 })
 

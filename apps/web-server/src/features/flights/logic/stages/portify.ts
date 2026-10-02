@@ -2,14 +2,17 @@ import fs from 'fs'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../../portify/logic/runtime/unportify'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
-import type { PortifyStageProgress } from '../../../../../../../shared/flights/types'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type { PortifyStageProgress, FlightCheckpoint } from '../../../../../../../shared/flights/types'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { featureDirFor, pollUntil, stageModels, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
-import { isActivePortifyStatus, type PortifyStatus } from '../../../portify/logic/runtime/types'
+import {
+  isActionablePortifyStatus as isActivePortifyStatus,
+  type PortifyStatus,
+} from '../../../../../../../shared/portify-index'
 import { portifyJob } from './stage-jobs'
 import { externalWorkCheckpoint, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
-import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
+import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
 // Port-ification runs by default — every flight attempts to leave the feature
 // concurrency-ready. The stage drives the existing portify background job
@@ -126,7 +129,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
             ...(v.status ? { status: v.status } : {}),
             ...(v.attempt != null ? { attempt: v.attempt } : {}),
             ...(v.maxAttempts != null ? { maxAttempts: v.maxAttempts } : {}),
-            ...(edits === null ? {} : { editedFiles: edits.files }),
+            ...(edits?.files == null ? {} : { editedFiles: edits.files }),
           } satisfies PortifyStageProgress)
         }
         // Carried on the polled value so progressKey below can see it — the poll

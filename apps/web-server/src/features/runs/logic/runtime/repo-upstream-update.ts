@@ -1,5 +1,6 @@
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { resolveRepoPath, type RepoBranchSnapshot } from '../../../../shared/git-repo'
+import type { RepoBranchSnapshot } from '../../../../../../../shared/run-manifest'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { describeFastForward, fastForwardToUpstream, type FastForwardOutcome, type FastForwardRefusal } from '../../../../shared/git-upstream'
 
 /**

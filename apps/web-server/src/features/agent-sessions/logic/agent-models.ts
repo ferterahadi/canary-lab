@@ -1,19 +1,5 @@
 import type { ModelAgentKind, StageModelChoice } from '../../../../../../shared/agent-models'
 
-/**
- * Server side of the model cockpit: the argv builders every spawn site splices
- * in, plus the heal-stage env pin. The vocabulary itself (stage keys, effort
- * levels, curated models, recommendation tiers, normalization, resolution)
- * lives in shared/agent-models.ts — ONE home for the web UI and this server.
- *
- * A stage's choice resolves as: launch override (persisted on the
- * run/flight/job record at start — immutable mid-execution) → workspace config
- * (`agentModels` in canary-lab.config.json) → agent default (no flags, the
- * CLI's own configuration). The heal stage additionally honors the
- * `CANARY_LAB_HEAL_MODEL` env pin above all of those.
- */
-export * from '../../../../../../shared/agent-models'
-
 // ── Argv builders ────────────────────────────────────────────────────────────
 /** `['--model', id]` when pinned, or `[]` for agent default — splice into argv. */
 export function modelArgs(model: string | null): string[] {

@@ -1,3 +1,4 @@
+import { resolveConfigDocument, readConfigDocument } from './config-document'
 // Feature-config REST — the feature.config.{cjs,js,ts} document itself, the
 // portify-overlay reset, the per-repo git surface, and feature deletion.
 // Split out of feature-config.ts; handler bodies are unchanged.
@@ -5,50 +6,34 @@ import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
 import os from 'os'
-import path from 'path'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import { loadFeatures } from '../../../shared/feature-loader'
-import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
-import { describeFastForward, describeRepoCheckout, fastForwardToUpstream } from '../../../shared/git-upstream'
+import { getGitStatus } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
+import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo } from '../logic/feature-repos'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
-import { revertPortification } from '../../portify/logic/runtime/unportify'
-import { FEATURE_CONFIG_NAMES, findExistingConfig, isWithin, listEnvFolders } from './feature-config-support'
+import { removeFeaturePortification } from '../../portify/logic/remove-portification'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
+import { listEnvFolders } from '../logic/envset-config'
+import { deleteSuite } from '../logic/feature-deletion'
+import { notFound } from '../../../shared/http-error'
 
 export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── feature.config.{cjs,js,ts} ───────────────────────────────────────
 
   app.get<{ Params: { name: string } }>('/api/features/:name/config-doc', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
-    const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-    if (!cfg) {
-      reply.code(404)
-      return { error: 'config file not found' }
-    }
-    const content = fs.readFileSync(cfg.path, 'utf-8')
-    const parsed = readFeatureConfig(content)
-    return { path: cfg.path, format: cfg.format, content, parsed }
+    const document = resolveConfigDocument(deps.featuresDir, req.params.name, FEATURE_CONFIG_NAMES, 'config file')
+    if (!document.ok) return notFound(reply, document.missing)
+    const { cfg } = document
+    return readConfigDocument(cfg, readFeatureConfig)
   })
 
   app.put<{ Params: { name: string }; Body: { value: ConfigValue } }>(
     '/api/features/:name/config-doc',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (!cfg) {
-        reply.code(404)
-        return { error: 'config file not found' }
-      }
+      const document = resolveConfigDocument(deps.featuresDir, req.params.name, FEATURE_CONFIG_NAMES, 'config file')
+      if (!document.ok) return notFound(reply, document.missing)
+      const { features, feature, cfg } = document
       const source = fs.readFileSync(cfg.path, 'utf-8')
       // Always sync `envs:` to match the actual envset folders on disk —
       // the General tab no longer edits this list (Envsets tab is the
@@ -112,24 +97,21 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   // permanent edits to feature.config.cjs (the declared `ports` slots + the
   // `${port.x}` health-check / inter-service URL rewrites). So removal restores
   // the pre-Portify config — every overlay written since this shipped carries a
-  // snapshot (captured at save), so the restore is exact and lossless.
+  // snapshot (captured at save). Environments are then derived from current folders.
   //
   // Legacy overlays (saved before snapshots existed) have nothing to restore;
   // rather than leave the slots lingering we best-effort strip the declared
   // `ports` so they don't show. Their `${port.x}` health-check tokens can't be
   // un-rewritten without the snapshot — re-run Portify to regenerate a clean
-  // config. Either way the overlay is deleted and we never prompt the user.
+  // config. Successful restoration deletes the overlay without prompting.
   // Emits features-changed so the Portified badge flips live, no refresh.
   app.delete<{ Params: { name: string } }>('/api/features/:name/portify-overlay', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
+    const result = removeFeaturePortification({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents }, req.params.name)
+    if (!result.ok) {
+      reply.code(result.statusCode)
+      return { error: result.error }
     }
-    const { reverted } = revertPortification(feature.featureDir)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-    return { name: feature.name, portified: portifyOverlayExists(feature.featureDir), reverted }
+    return result.value
   })
 
   // `?fetch=1` contacts the remote first so `behindUpstream` describes its tip;
@@ -137,18 +119,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.get<{ Params: { name: string; repo: string }; Querystring: { fetch?: string } }>(
     '/api/features/:name/repos/:repo/git',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      return describeRepoCheckout(repo, { fetch: req.query?.fetch === '1' || req.query?.fetch === 'true' })
+      const result = await readFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo }, { fetch: req.query?.fetch === '1' || req.query?.fetch === 'true' })
+      if (!result.ok) { reply.code(result.statusCode); return { error: result.error } }
+      return result.value
     },
   )
 
@@ -159,75 +132,26 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.post<{ Params: { name: string; repo: string } }>(
     '/api/features/:name/repos/:repo/update',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
+      const result = await updateFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        return { error: result.error, ...(result.reason ? { reason: result.reason } : {}) }
       }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      if (deps.isRepoActive?.(feature.name, repo.name)) {
-        reply.code(409)
-        return { error: 'repo has an active service run' }
-      }
-      const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
-      if (outcome.kind === 'refused') {
-        reply.code(409)
-        return { error: `${outcome.reason}: ${outcome.message}`, reason: outcome.reason }
-      }
-      // Only a moved checkout changes what the Repos tab shows.
-      if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-      return {
-        update: outcome,
-        summary: describeFastForward(outcome),
-        ...await describeRepoCheckout(repo),
-      }
+      return result.value
     },
   )
 
   app.post<{ Params: { name: string; repo: string }; Body: { branch?: string } }>(
     '/api/features/:name/repos/:repo/checkout',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      if (deps.isRepoActive?.(feature.name, repo.name)) {
-        reply.code(409)
-        return { error: 'repo has an active service run' }
-      }
       const branch = req.body?.branch
-      if (typeof branch !== 'string' || branch.trim().length === 0) {
-        reply.code(400)
-        return { error: 'branch required' }
+      const result = await checkoutFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo, branch: typeof branch === 'string' ? branch : '' })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        // Keep REST's body-validation wording and lookup/active-guard precedence.
+        return { error: result.statusCode === 400 && (typeof branch !== 'string' || !branch.trim()) ? 'branch required' : result.error }
       }
-      try {
-        const status = await checkoutBranch(repo.localPath, branch.trim(), deps.workspaceEvents)
-        // Branch moved; refresh the feature list + Repos tab git-status row live.
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-        return {
-          ...status,
-          path: resolveRepoPath(repo.localPath),
-          expectedBranch: repo.branch ?? null,
-        }
-      } catch (err) {
-        const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-          ? (err as { statusCode: number }).statusCode
-          : 500
-        reply.code(code)
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
+      return result.value
     },
   )
 
@@ -241,15 +165,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (!cfg) {
-        reply.code(404)
-        return { error: 'config file not found' }
-      }
+      if (!cfg) return notFound(reply, 'config file')
       const pins: Array<{ name: string; branch: string }> = []
       for (const repo of feature.repos ?? []) {
         if (typeof repo.localPath !== 'string') continue
@@ -290,32 +208,11 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.delete<{ Params: { name: string }; Body: { confirmName?: string } }>(
     '/api/features/:name',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      if (req.body?.confirmName !== feature.name) {
-        reply.code(400)
-        return { error: 'confirmName must match the feature name' }
-      }
-      const featuresRoot = path.resolve(deps.featuresDir)
-      const featureDir = path.resolve(feature.featureDir)
-      if (featureDir === featuresRoot || !isWithin(featuresRoot, featureDir)) {
-        reply.code(400)
-        return { error: 'feature directory is outside the features root' }
-      }
-      // R76: the suite's flight history goes with it — guarded first, so an
-      // active flight blocks the whole deletion before anything is removed.
-      const flights = deps.removeFlightRecordsFor?.(feature.name)
-      if (flights?.error) {
-        reply.code(409)
-        return { error: flights.error }
-      }
-      fs.rmSync(featureDir, { recursive: true, force: true })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: feature.name })
-      if ((flights?.removed ?? 0) > 0) {
+      const result = deleteSuite({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents,
+        removeFlightRecordsFor: deps.removeFlightRecordsFor }, { feature: req.params.name, confirmName: req.body?.confirmName })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        return { error: result.error }
       }
       reply.code(204)
       return null

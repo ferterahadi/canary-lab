@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildTestReviewPacket } from './test-review-export'
+import { buildTestReviewPacket } from './test-review/packet'
 import { detail } from './__fixtures__/test-review-fixtures'
 
 // The report renders the source the VERDICT executed. With a run-start copy in

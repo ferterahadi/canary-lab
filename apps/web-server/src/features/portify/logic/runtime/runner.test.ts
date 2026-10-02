@@ -13,6 +13,7 @@ import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, overlayDir } from './overlay'
 import type { PortifyManifest } from './types'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -70,14 +71,6 @@ afterEach(() => {
   for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
   roots.length = 0
 })
-
-async function gitInit(dir: string): Promise<void> {
-  await runGit(dir, ['init', '-q'])
-  await runGit(dir, ['config', 'user.email', 't@t'])
-  await runGit(dir, ['config', 'user.name', 'test'])
-  await runGit(dir, ['add', '-A'])
-  await runGit(dir, ['commit', '-q', '-m', 'init', '--no-verify'])
-}
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
   const ports = withPorts ? `      ports: [{ name: ${JSON.stringify(slot)}, env: ${JSON.stringify(env)} }],\n` : ''
@@ -173,7 +166,7 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
   fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
   fs.mkdirSync(featureDir, { recursive: true })
   fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
-  await gitInit(appRepo)
+  initGitRepo(appRepo)
   writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
   return { featuresDir, logsDir, appRepo }
 }

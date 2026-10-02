@@ -24,10 +24,7 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-
-function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
+import { git } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string
 
@@ -88,11 +85,11 @@ function makeDirtySpecStore(): DirtySpecStore {
 }
 
 function initGitFeature(dir: string): void {
-  git(dir, ['init', '-q'])
-  git(dir, ['config', 'user.email', 't@t.dev'])
-  git(dir, ['config', 'user.name', 'test'])
-  git(dir, ['add', '-A'])
-  git(dir, ['commit', '-q', '-m', 'baseline'])
+  git(dir, 'init', '-q')
+  git(dir, 'config', 'user.email', 't@t.dev')
+  git(dir, 'config', 'user.name', 'test')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'baseline')
 }
 
 describe('GET /api/features', () => {
@@ -218,6 +215,45 @@ describe('GET /api/features', () => {
 })
 
 describe('GET /api/features/:name/config', () => {
+  it('preserves raw responses and candidate precedence without fallback past malformed configuration', async () => {
+    const dir = writeFeature('alpha')
+    const app = await build()
+    try {
+      for (const format of ['ts', 'js', 'cjs']) {
+        fs.writeFileSync(path.join(dir, `feature.config.${format}`),
+          `// ${format} formatting stays intact\nexports.config = { name: 'alpha', featureDir: __dirname }\n`)
+      }
+      for (const format of ['cjs', 'js', 'ts']) {
+        const configPath = path.join(dir, `feature.config.${format}`)
+        const response = await app.inject('/api/features/alpha/config')
+        expect(response.statusCode).toBe(200)
+        expect(response.json()).toEqual({ path: configPath, content: fs.readFileSync(configPath, 'utf8'), format })
+        fs.writeFileSync(configPath, 'throw new Error("malformed first candidate")')
+        const refused = await app.inject('/api/features/alpha/config')
+        expect(refused.statusCode).toBe(404)
+        expect(refused.json()).toEqual({ error: 'feature not found' })
+        fs.unlinkSync(configPath)
+      }
+    } finally { await app.close() }
+  })
+
+  it('reads configuration from a linked featureDir independently of the discovery directory', async () => {
+    const discovery = writeFeature('linked')
+    const linked = path.join(tmpDir, 'linked-source')
+    fs.mkdirSync(linked)
+    fs.writeFileSync(path.join(discovery, 'feature.config.cjs'),
+      `exports.config = { name: 'linked', featureDir: ${JSON.stringify(linked)} }`)
+    const configPath = path.join(linked, 'feature.config.js')
+    const content = '// raw linked configuration, not loaded for discovery\n'
+    fs.writeFileSync(configPath, content)
+    const app = await build()
+    try {
+      const response = await app.inject('/api/features/linked/config')
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({ path: configPath, content, format: 'js' })
+    } finally { await app.close() }
+  })
+
   it('iterates through candidate file extensions and returns the .js variant', async () => {
     const dir = path.join(featuresDir, 'jsfeat')
     fs.mkdirSync(dir, { recursive: true })
@@ -446,11 +482,11 @@ describe('POST /api/features/:name/commit-dirty', () => {
     if (action === 'reverted') {
       fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
     } else {
-      git(dir, ['add', '.'])
-      git(dir, ['commit', '-qm', 'external commit'])
+      git(dir, 'add', '.')
+      git(dir, 'commit', '-qm', 'external commit')
     }
     fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'keep staged')
-    git(dir, ['add', 'unrelated.txt'])
+    git(dir, 'add', 'unrelated.txt')
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString()
     const changed = vi.fn()
     store.onEvent(changed)

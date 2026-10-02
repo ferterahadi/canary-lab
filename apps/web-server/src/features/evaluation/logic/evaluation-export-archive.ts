@@ -1,17 +1,18 @@
+import { safeFilename, evaluationArchiveBase } from '../../../../../../shared/evaluation-archive-naming'
 import fs from 'fs'
 import path from 'path'
-import type { PlaywrightArtifact, RunDetail } from '../../runs/logic/run-store'
+import type { PlaywrightArtifact } from '../../../../../../shared/run-detail'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
+import { createEvaluationExport } from './test-review-export'
+import type { AssertionHtmlOptions } from './test-review/types'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
-import type { EvaluationArchiveContents } from './evaluation-export-types'
+import type { EvaluationArchiveContents } from '../../../../../../shared/evaluation-export-types'
 import { buildBehaviorCertificate } from './behavior-certificate'
 import {
   type BehaviorCertificate,
 } from '../../../../../../shared/verification-strength/certificate'
-
-export type { EvaluationArchiveContents } from './evaluation-export-types'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string
@@ -57,7 +58,7 @@ export async function buildEvaluationExportArchive(
     ...videoEntries,
   ])
   return {
-    archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+    archiveBase: evaluationArchiveBase(detail.manifest.feature, detail.runId),
     zip,
     contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
     certificate,
@@ -109,8 +110,4 @@ function extensionForContentType(contentType: string | undefined): string | unde
   if (contentType === 'video/mp4') return '.mp4'
   if (contentType === 'video/webm') return '.webm'
   return undefined
-}
-
-function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }

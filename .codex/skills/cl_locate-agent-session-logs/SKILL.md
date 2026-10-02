@@ -42,7 +42,7 @@ default dotdir silently breaks lookup when a user relocates it.
 | claude | `CLAUDE_CONFIG_DIR` | `claudeConfigDir(homeDir)` |
 | codex | `CODEX_HOME` | `codexConfigDir(homeDir)` |
 
-Both live in `agent-session-paths.ts` (re-exported by `agent-session-log.ts`)
+Both live in `agent-session-paths.ts` (import them from there; nothing re-exports them)
 and return the override (trimmed, non-empty)
 else `path.join(homeDir, '.claude' | '.codex')`.
 

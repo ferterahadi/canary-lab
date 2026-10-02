@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CLIENT_KIND, type ToolGroupContext } from '../tool-support'
-import type { ExternalWorkCheckpointData } from '../../features/flights/logic/types'
+import type { ExternalWorkCheckpointData } from '../../../../../shared/flights/types'
 import { registerFlightTools } from './flight'
 
 // What an external coding agent is TOLD when the flight it is working for stops.

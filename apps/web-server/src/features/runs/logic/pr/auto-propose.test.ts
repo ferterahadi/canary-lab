@@ -4,7 +4,8 @@ import os from 'os'
 import path from 'path'
 import { autoProposeFixes, shouldAutoPropose } from './auto-propose'
 import type { RunContext } from '../runtime/run-context'
-import type { RunFixCapture, RunManifest } from '../runtime/manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { RunFixCapture } from '../../../../../../../shared/run-state'
 import type { ProjectConfig } from '../runtime/launcher/project-config'
 import type { PrPreflight } from './pr-preflight'
 
@@ -260,4 +261,24 @@ describe('autoProposeFixes', () => {
     })
     expect(patches[0].prAttempt?.at).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/)
   })
+})
+
+it('replaces prior automatic proposals with successful results instead of merging by repository', async () => {
+  const old = { repoName: 'other', url: 'https://example.test/old', branch: 'old', base: 'main', createdAt: 'old' }
+  const fresh = { repoName: 'fnb', url: 'https://example.test/new', branch: 'new', base: 'main', createdAt: 'new' }
+  let saved: Partial<RunManifest> = { proposedPrs: [old] }
+  const { ctx } = mkCtx({ stateSink: { patchManifest: (_id: string, patch: Partial<RunManifest>) => { saved = { ...saved, ...patch } } } as RunContext['stateSink'] })
+  await autoProposeFixes({ ctx, capture, finalStatus: 'passed', deps: {
+    loadConfig: () => config, preflight: async () => preflight,
+    propose: async () => [{ repoName: 'fnb', ok: true, pr: fresh }], now: () => 'T',
+  } })
+  expect(saved.proposedPrs).toEqual([fresh])
+  expect(saved.prAttempt?.auto).toBe(true)
+})
+
+
+it('does not invoke production proposal dependencies without a workspace', async () => {
+  const { ctx, patches } = mkCtx({ projectRoot: undefined })
+  await autoProposeFixes({ ctx, capture, finalStatus: 'passed' })
+  expect(patches).toEqual([])
 })

@@ -1,7 +1,11 @@
+import type { FlightStage, FlightStageStatus } from '@shared/flights/types'
 import { describe, expect, it } from 'vitest'
-import type { CoverageLedger, RunIndexEntry, RunLifecycleEvent } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunLifecycleEvent } from '@shared/run-state'
 import {
   CONFIG_GROUP,
+  currentStageForPair,
   bootDurationMs,
   distinctRepoPaths,
   estimateTokens,
@@ -418,4 +422,27 @@ describe('presentedStageStatus', () => {
     expect(presentedStageStatus({ status: 'waiting-for-approval' })).toBe('waiting-for-approval')
     expect(presentedStageStatus({ status: 'skipped', evidence: { captured: 1 } })).toBe('done')
   })
+})
+
+it('counts header-looking source as changes within its repository file', () => {
+  expect(overlayDiffStat('# repo: api\ndiff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n--- old\n+++ new\n')).toEqual({
+    files: 1, added: 1, removed: 1, byFile: [{ path: 'a', group: 'api', added: 1, removed: 1 }],
+  })
+  expect(overlayDiffStat('diff --git a/image b/image\nBinary files differ')).toBeNull()
+})
+
+
+it.each([
+  ['running', undefined, false],
+  ['running', 'running', true],
+  ['running', 'waiting-for-approval', true],
+  ['done', 'failed', true],
+  ['done', 'pending', true],
+  ['skipped', 'pending', true],
+  ['running', 'pending', false],
+  ['done', 'done', false],
+] as const)('presents the actionable half of a stage pair (%s, %s)', (primaryStatus, companionStatus, useCompanion) => {
+  const primary: FlightStage = { key: 'scout', status: primaryStatus }
+  const companion: FlightStage | undefined = companionStatus ? { key: 'scaffold', status: companionStatus as FlightStageStatus } : undefined
+  expect(currentStageForPair(primary, companion)).toBe(useCompanion ? companion : primary)
 })

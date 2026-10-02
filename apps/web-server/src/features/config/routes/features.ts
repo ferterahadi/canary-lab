@@ -2,22 +2,19 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
-import { loadFeatures, listSpecFiles, suiteAvailability } from '../../../shared/feature-loader'
-import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
+import { findFeature, listSpecFiles, loadFeatures, suiteAvailability } from '../../../shared/feature-loader'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
+import { extractTestsFromSource } from '../../../shared/ast-extractor'
+import type { ExtractedTest } from '../../../../../../shared/extracted-test'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { dirtySummaryView } from '../../runs/logic/dirty-specs/review-view'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
-import { parseDotenv } from '../logic/dotenv-edit'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
 import { deriveFeatureEvidence } from '../../flights/logic/stage-evidence'
-import {
-  getEnvSetsDir,
-  loadConfig,
-} from '../../runs/logic/runtime/env-switcher/switch'
-import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
+import { envsetProcessEnv } from '../logic/envset-process-env'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
 import { attachSourceChanges } from '../logic/test-source-changes'
 import { recordedTestList } from '../logic/recorded-test-list'
@@ -27,8 +24,7 @@ import type { FeaturesRouteDeps } from './features-route-deps'
 import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-
-export type { FeaturesRouteDeps } from './features-route-deps'
+import { notFound } from '../../../shared/http-error'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
   const statusCode = (error as { statusCode?: number }).statusCode ?? 500
@@ -66,11 +62,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   // Approve the current spec content as intended (Canary-local). Records the
   // current hashes as the accepted baseline so the cue clears without a commit.
   app.post<{ Params: { name: string } }>('/api/features/:name/approve-dirty', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) {
       reply.code(503)
       return { error: 'test-file integrity tracking is not available' }
@@ -80,8 +73,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/test-review-plan', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     try {
       const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
@@ -99,8 +92,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/accept-test-review', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     const revision = req.body?.expectedRevision
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
@@ -126,8 +119,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 
   app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/restore-test-review', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
-    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature?.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
     const revision = req.body?.expectedRevision
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
@@ -157,11 +150,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   // then recomputes; HEAD now matches the working tree so the cue clears. An
   // external commit (user's own terminal) clears the same way via the .git watch.
   app.post<{ Params: { name: string } }>('/api/features/:name/commit-dirty', async (req, reply) => {
-    const feature = loadFeatures(deps.featuresDir).find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+    const feature = findFeature(deps.featuresDir, req.params.name)
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     if (!deps.dirtySpecStore) {
       reply.code(503)
       return { error: 'test-file integrity tracking is not available' }
@@ -202,10 +192,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
       const feature = features.find((f) => f.name === req.params.name)
-      if (!feature || !feature.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
+      if (!feature || !feature.featureDir) return notFound(reply, 'feature')
       const rel = req.query.file
       if (!rel) {
         reply.code(400)
@@ -242,27 +229,16 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
-    if (!feature || !feature.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
+    if (!feature || !feature.featureDir) return notFound(reply, 'feature')
+    const config = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
+    if (config) {
+      const content = fs.readFileSync(config.path, 'utf-8')
+      return { path: config.path, content, format: config.format }
     }
-    const candidates: Array<{ name: string; format: 'cjs' | 'js' | 'ts' }> = [
-      { name: 'feature.config.cjs', format: 'cjs' },
-      { name: 'feature.config.js', format: 'js' },
-      { name: 'feature.config.ts', format: 'ts' },
-    ]
-    for (const c of candidates) {
-      const p = path.join(feature.featureDir, c.name)
-      if (fs.existsSync(p)) {
-        const content = fs.readFileSync(p, 'utf-8')
-        return { path: p, content, format: c.format }
-      }
-    }
-    reply.code(404)
-    return { error: 'config file not found' }
+    return notFound(reply, 'config file')
   })
 
-  app.get<{ Params: { name: string }; Querystring: { runId?: string; preview?: string } }>('/api/features/:name/tests', async (req, reply) => {
+  app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {
     const availability = suiteAvailability(deps.featuresDir, req.params.name)
     if (availability.kind === 'removed') return reply.code(404).send({ code: 'suite-removed', error: 'The live suite is no longer in this workspace.' })
     if (availability.kind === 'config-missing' || availability.kind === 'config-invalid') return reply.code(422).send({ code: 'discovery-failed', error: availability.diagnostic })
@@ -281,6 +257,24 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return { ...test, codeDisplay }
     }
     const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
+    // Playwright module discovery and source enrichment read the same suite
+    // independently. Starting both before either finishes avoids stacking their
+    // cold-start costs on every first visit.
+    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
+    const discovery = recorded?.tests ?? listPlaywrightTests(feature.featureDir, {
+      spawner: deps.playwrightListSpawner,
+      onDiagnostics: (diagnostic) => {
+        discoveryDiagnostics = diagnostic
+        app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed')
+      },
+      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
+        app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
+      }),
+    }).catch((err: unknown) => {
+      discoveryDiagnostics = err instanceof Error ? err.message : String(err)
+      app.log.warn({ err, feature: feature.name }, 'test discovery failed')
+      return null
+    })
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
     //    enrichment. This is the single source of body/step extraction.
@@ -291,43 +285,15 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (recorded && !recorded.dir) unavailableSources.add(file)
       else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
-      try { if (!recorded && req.query.preview !== '1') await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
       astByFile.set(file, result)
     }
 
-    // The source view is provisional; the normal request still resolves the
-    // exact roster through Playwright before using it as test evidence.
-    if (req.query.preview === '1' && !recorded) return specFiles.map((file) => {
-      const result = astByFile.get(file)!
-      return {
-        file,
-        tests: result.tests.map(withCodeDisplay),
-        ...(result.parseError ? { parseError: result.parseError } : {}),
-      }
-    })
-
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
     //    `${var}` substituted). On failure, fall back to AST-only output.
-    // Seeded, not left undefined: every path on which `listPlaywrightTests`
-    // resolves to null runs `onDiagnostics` first — a non-zero exit, a spawn
-    // failure, a timeout and unparseable JSON each carry their own text, and a
-    // null result is never cached — so the failure branch below always has a
-    // reason to show. Holding that as the variable's type keeps the fallback
-    // in one place instead of a `??` and a conditional spread whose empty arms
-    // nothing can reach.
-    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
-    const discovered = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
-      spawner: deps.playwrightListSpawner,
-      onDiagnostics: (diagnostic) => {
-        discoveryDiagnostics = diagnostic
-        app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed')
-      },
-      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
-        app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
-      }),
-    })
+    const discovered = await discovery
 
     if (discovered === null) {
       const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics)
@@ -434,52 +400,4 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       }
     })
   })
-}
-
-export function envsetProcessEnv(
-  featureDir: string,
-  envName: string | undefined,
-  warn: (err: unknown) => void,
-): NodeJS.ProcessEnv {
-  if (!envName) return {}
-  const envSetsDir = getEnvSetsDir(featureDir)
-  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return {}
-
-  let config: EnvSetsConfig
-  try {
-    config = loadConfig(featureDir)
-    if (!isEnvSetsConfig(config)) {
-      warn(new Error('envsets.config.json is missing required feature.slots or slots fields'))
-      return {}
-    }
-  } catch (err) {
-    warn(err)
-    return {}
-  }
-
-  const env: NodeJS.ProcessEnv = {}
-  for (const slot of config.feature.slots) {
-    const sourcePath = path.join(envSetsDir, envName, slot)
-    if (!fs.existsSync(sourcePath)) continue
-    try {
-      const parsed = parseDotenv(fs.readFileSync(sourcePath, 'utf-8'))
-      for (const entry of parsed.entries) {
-        env[entry.key] = entry.value
-      }
-    } catch { /* ignore unreadable envset slots */ }
-  }
-  return env
-}
-
-// `config` is the parsed envsets.config.json (loadConfig returns a typed but
-// unvalidated object); this checks the runtime shape we actually depend on.
-function isEnvSetsConfig(config: EnvSetsConfig): boolean {
-  const value = config as Partial<EnvSetsConfig>
-  return Boolean(value.feature)
-    && typeof value.feature === 'object'
-    && Array.isArray(value.feature.slots)
-    && value.feature.slots.every((slot) => typeof slot === 'string')
-    && Boolean(value.slots)
-    && typeof value.slots === 'object'
-    && !Array.isArray(value.slots)
 }

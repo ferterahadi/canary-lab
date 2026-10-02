@@ -3,27 +3,27 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  checkPathExists,
-  getFeatureConfigDoc,
-  getGitRemote,
-  getRepoGitStatus,
-  putFeatureConfigDoc,
-  type ParsedConfigDoc,
-} from '@/shared/api/client'
+import { checkPathExists, getGitRemote, getRepoGitStatus } from '@/shared/api/workspace'
+import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/config'
 import { ReposTab } from './ReposTab'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    checkPathExists: vi.fn(),
-    getFeatureConfigDoc: vi.fn(),
-    getGitRemote: vi.fn(),
-    getRepoGitStatus: vi.fn(),
-    putFeatureConfigDoc: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  checkPathExists: vi.fn(),
+  getGitRemote: vi.fn(),
+  getRepoGitStatus: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureConfigDoc: vi.fn(),
+  putFeatureConfigDoc: vi.fn(),
+}))
+
+const folders = vi.hoisted(() => new Map<string, (path: string) => void>())
+vi.mock('./FolderPicker', () => ({
+  FolderPicker: ({ value, onChange }: { value: string; onChange: (path: string) => void }) => { folders.set(value, onChange); return null },
+  FolderPickerModal: () => null,
+}))
 
 vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
@@ -211,3 +211,22 @@ function doc(repoName = 'canary-lab'): ParsedConfigDoc {
     },
   }
 }
+
+
+it.each(['remove', 'discard'])('expires a pending remote lookup when its row is %s', async (action) => {
+  const initial = doc()
+  const value = initial.parsed.value as { repos: { cloneUrl?: string }[] }
+  delete value.repos[0].cloneUrl
+  vi.mocked(getFeatureConfigDoc).mockResolvedValue(initial)
+  let resolve!: (value: { cloneUrl: string }) => void
+  vi.mocked(getGitRemote).mockReturnValue(new Promise((yes) => { resolve = yes }))
+  await act(async () => root.render(<ReposTab feature="lifetime-suite" />))
+  await act(async () => folders.get('~/Documents/canary-lab')!('/different'))
+  const button = action === 'remove' ? container.querySelector<HTMLButtonElement>('[aria-label="Remove repo"]')
+    : [...container.querySelectorAll('button')].find((node) => node.textContent === 'Discard')
+  act(() => button!.click())
+  await act(async () => resolve({ cloneUrl: 'https://example.invalid/obsolete.git' }))
+  expect([...container.querySelectorAll('input')].some((input) => input.value.includes('obsolete'))).toBe(false)
+  if (action === 'remove') expect(container.textContent).toContain('No services configured.')
+  else expect(inputForLabel('Name').value).toBe('canary-lab')
+})

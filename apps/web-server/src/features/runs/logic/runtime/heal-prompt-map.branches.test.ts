@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildHealPromptMap, buildOrchestratorHealPrompt } from './auto-heal'
+import { buildOrchestratorHealPrompt } from './auto-heal'
+import { buildHealPromptMap } from './heal-prompt-map'
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({

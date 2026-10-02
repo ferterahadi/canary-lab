@@ -13,12 +13,12 @@ const mocks = vi.hoisted(() => ({
   connectAgentSessionStream: vi.fn(() => ({ close: vi.fn() })),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  // Keep the real `isAgentSessionAbsence` — the view discriminates fetch
-  // results with it, and a stubbed guard would decouple these tests from the
-  // actual absence contract.
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/agent-sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/agent-sessions')>()),
   getAgentSession: mocks.getAgentSession,
+}))
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightAgentSession: mocks.getFlightAgentSession,
 }))
 
@@ -155,11 +155,12 @@ describe('AgentSessionView lifecycle presentation', () => {
   it('labels a settled session as history without showing live loading motion', async () => {
     await render(false)
 
-    expect(container.querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('History')
-    // The settled pill is on screen, not screen-reader-only: it is the only
-    // thing in the header that says whether you are watching or replaying.
-    expect(container.querySelector('[data-testid="agent-session-mode"] .agentts-statusdot')).not.toBeNull()
-    expect(TIMELINE_CSS).not.toMatch(/\.agentts-mode\[data-live="false"\][^}]*clip-path/)
+    // The settled chip is on screen, not screen-reader-only: it is the only
+    // thing on the divider that says whether you are watching or replaying.
+    expect(container.querySelector('[data-testid="agent-session-mode"]')?.textContent).toMatch(/^Ended/)
+    expect(container.querySelector('[data-testid="agent-session-mode"]')?.getAttribute('data-live')).toBe('false')
+    expect(container.querySelector('[data-testid="agent-session-header"] .agentts-divmark')?.getAttribute('data-live')).toBeNull()
+    expect(TIMELINE_CSS).not.toMatch(/\.agentts-divchip\[data-live="false"\][^}]*clip-path/)
     expect(container.querySelector('[data-testid="agent-session-live-tail"]')).toBeNull()
     expect(mocks.connectAgentSessionStream).not.toHaveBeenCalled()
   })
@@ -229,7 +230,7 @@ describe('AgentSessionView lifecycle presentation', () => {
     let headers = [...container.querySelectorAll('[data-testid="agent-session-header"]')]
     expect(container.textContent).toContain('Authored checkout tests')
     expect(headers).toHaveLength(2)
-    expect(headers[0].querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('History')
+    expect(headers[0].querySelector('[data-testid="agent-session-mode"]')?.textContent).toMatch(/^Ended/)
     expect(headers[1].querySelector('[data-testid="agent-session-label"]')?.textContent).toBe('Pass 1 · Mapping')
     expect(headers[1].querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('Live')
     expect(headers[1].querySelector('.agentts-count')?.textContent).toBe('1 event')
@@ -266,10 +267,10 @@ describe('AgentSessionView lifecycle presentation', () => {
       'Pass 1 · Mapping',
       'Pass 2 · Authoring',
     ])
-    expect(headers.map((header) => header.querySelector('[data-testid="agent-session-mode"]')?.textContent)).toEqual([
-      'History',
-      'History',
-      'Live',
+    expect(headers.map((header) => header.querySelector('[data-testid="agent-session-mode"]')?.getAttribute('data-tone'))).toEqual([
+      'settled',
+      'settled',
+      'live',
     ])
   })
 

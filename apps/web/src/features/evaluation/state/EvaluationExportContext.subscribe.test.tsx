@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { EvaluationExportTask } from '@/shared/api/types'
+import * as evaluationApi from '@/shared/api/evaluation'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 
 const { connectEvaluationExportMock } = vi.hoisted(() => ({ connectEvaluationExportMock: vi.fn() }))
 
@@ -16,14 +16,11 @@ vi.mock('@/shared/api/workspace-socket', () => ({
   connectWorkspaceEvents: () => ({ close: vi.fn() }),
 }))
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listEvaluationExportTasks: vi.fn(),
-    startEvaluationExport: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/evaluation')>()),
+  listEvaluationExportTasks: vi.fn(),
+  startEvaluationExport: vi.fn(),
+}))
 
 import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
 
@@ -37,8 +34,8 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   connectEvaluationExportMock.mockReset()
-  vi.mocked(api.listEvaluationExportTasks).mockReset().mockResolvedValue([])
-  vi.mocked(api.startEvaluationExport).mockReset()
+  vi.mocked(evaluationApi.listEvaluationExportTasks).mockReset().mockResolvedValue([])
+  vi.mocked(evaluationApi.startEvaluationExport).mockReset()
 })
 
 afterEach(() => {
@@ -46,12 +43,13 @@ afterEach(() => {
   container.remove()
 })
 
-function task(taskId: string): EvaluationExportTask {
+function task(taskId: string): EvaluationExportTaskView {
   return {
     taskId,
     runId: `run-${taskId}`,
     feature: 'checkout',
     mode: 'raw',
+    producer: 'internal',
     status: 'running',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -77,7 +75,7 @@ describe('EvaluationExportProvider subscription failures', () => {
         </EvaluationExportProvider>,
       )
     })
-    vi.mocked(api.startEvaluationExport).mockResolvedValueOnce(task('error-task')).mockResolvedValueOnce(task('string-task'))
+    vi.mocked(evaluationApi.startEvaluationExport).mockResolvedValueOnce(task('error-task')).mockResolvedValueOnce(task('string-task'))
     connectEvaluationExportMock
       .mockImplementationOnce(() => { throw new Error('adapter offline') })
       .mockImplementationOnce(() => { throw 'adapter string failure' })

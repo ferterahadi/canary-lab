@@ -133,6 +133,10 @@ export interface PersistedView {
    *  re-ran the auto-pick and landed on the last done stage — usually Evaluation
    *  Report — instead of the stage the drill-through left from. */
   flightStage: string | null
+  /** Log-entry qualifier for `flight` — which Activity row's full log is open
+   *  in the stage's modal (URL only; dropped unless a flight is open). The id is
+   *  the row's own activity id, so it names one entry of the selected stage. */
+  flightLog?: string | null
   /** Tab qualifier for `dialog: 'config'` — which config tab is open
    *  (URL only; dropped unless the config dialog is the open one). */
   configTab: ConfigTab | null
@@ -216,6 +220,8 @@ export function readPersistedView(): PersistedView {
     // here (this module knows nothing of stage keys); the nav layer parses it and
     // an unknown name falls back to follow-mode.
     const flightStage = flight ? params.get('stage') || null : null
+    // `log` qualifies an open flight the same way — the stage's Activity modal.
+    const flightLog = flight ? params.get('log') || null : null
     // `tab` only qualifies the config dialog — dropped elsewhere, and an
     // unknown tab name is ignored (falls back to the entry point's default).
     const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
@@ -238,7 +244,8 @@ export function readPersistedView(): PersistedView {
     const source = params.get('tests')
     const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
       ? { currentTests: source === 'current' } : {}
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
+    const log = flightLog ? { flightLog } : {}
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...tests }
     if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
   } catch { /* ignore */ }
   try {
@@ -281,6 +288,7 @@ export function persistView(state: PersistedView): void {
     // `stage` only qualifies an OPEN flight — drop it on the flights landing
     // list and off the view entirely, so a stage pick can't outlive its flight.
     setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
+    setOrDelete(params, 'log', state.view === 'flights' && state.flight ? state.flightLog ?? null : null)
     // `tab` only qualifies the config dialog — drop it otherwise.
     setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
     // `models` only qualifies the settings dialog — drop it otherwise, so a

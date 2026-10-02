@@ -2,13 +2,17 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest } from '@shared/flights/types'
 import { CheckpointControls } from './CheckpointControls'
 import { isElicitationReview } from '@/shared/lib/workspace-view-state'
 
 const respond = vi.hoisted(() => vi.fn(async () => ({})))
-vi.mock('@/shared/api/client', () => ({ respondFlightCheckpoint: respond }))
-vi.mock('@/features/evaluation', () => ({ useEvaluationExports: () => ({}) }))
+vi.mock('@/shared/api/flights', () => ({
+  respondFlightCheckpoint: respond,
+}))
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExports: () => ({}),
+}))
 afterEach(() => { window.history.replaceState(null, '', '/'); vi.clearAllMocks() })
 
 describe('human input invited by MCP URL elicitation', () => {

@@ -3,7 +3,13 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import ts from 'typescript'
-import { __testReviewExportInternals, buildTestReviewPacket, createAssertionExport, createEvaluationExport, createEvaluationHtml } from './test-review-export'
+import {
+  __testReviewExportInternals,
+  createAssertionExport,
+  createEvaluationExport,
+  createEvaluationHtml,
+} from './test-review-export'
+import { buildTestReviewPacket } from './test-review/packet'
 import { detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
 
 let tmpDir: string

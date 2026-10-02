@@ -4,8 +4,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatCodeForDisplayWithLineMap } from '@shared/code-display-format'
-import type { ExtractedTest, ReadableStoryItem } from '../api/types'
-import { openEditor } from '../api/client'
+import type { ExtractedTest } from '@shared/extracted-test'
+import type { ReadableStoryItem } from '@shared/readable-tests/types'
+import { openEditor } from '../api/workspace'
 import { applyTheme } from '../lib/theme'
 import { TestPresentation } from './TestPresentation'
 
@@ -25,7 +26,9 @@ vi.mock('shiki/langs/typescript.mjs', () => ({ default: {} }))
 vi.mock('shiki/themes/one-dark-pro.mjs', () => ({ default: {} }))
 vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
 vi.mock('shiki/wasm', () => ({ default: {} }))
-vi.mock('../api/client', () => ({ openEditor: vi.fn() }))
+vi.mock('../api/workspace', () => ({
+  openEditor: vi.fn(),
+}))
 
 const TEST: ExtractedTest = {
   name: 'completes checkout',

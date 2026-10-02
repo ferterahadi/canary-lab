@@ -5,11 +5,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
+import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
-import type { RunManifest } from './manifest'
-import type { ServiceSpec } from './orchestrator'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { ServiceSpec } from './run-orchestrator-types'
+import { detectRepoCollision } from './repo-collision'
 
 let tmpDir: string
 
@@ -30,6 +31,35 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 }
 
 describe('writeInitialManifest', () => {
+  it('retains the diagnosis policy through the owning state sink when resuming a run', () => {
+    const { ctx, sink } = ctxFor({ autoHeal: { agent: 'codex', diagnosisPolicy: 'parent-only' } })
+    writeInitialManifest(ctx, 'starting', { diagnosisPolicy: 'adaptive' } as RunManifest)
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.diagnosisPolicy).toBe('adaptive')
+  })
+  it('delivers a signal at the signal interval and preserves acceptance evidence', async () => {
+    vi.useFakeTimers()
+    const { ctx } = ctxFor({ healthPollIntervalMs: 1000, healSignalPollMs: 100 })
+    fs.mkdirSync(path.dirname(ctx.paths.restartSignal), { recursive: true })
+    ctx.signalGate.beginWaiting()
+    startSignalWatcher(ctx)
+    const body = { hypothesis: 'fix', fixDescription: 'corrected app' }
+    fs.writeFileSync(ctx.paths.restartSignal, JSON.stringify(body))
+    const woke = vi.fn()
+    const waiting = ctx.signalGate.waitForSignal(1000).then(woke)
+    try {
+      await vi.advanceTimersByTimeAsync(99)
+      expect(woke).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await waiting
+      expect(woke).toHaveBeenCalledOnce()
+      expect(ctx.signalGate.consume()).toEqual({ kind: 'restart', body })
+      expect(fs.existsSync(ctx.paths.restartSignal)).toBe(false)
+    } finally {
+      clearInterval(ctx.signalWatcher!)
+    }
+  })
+
   it('pins the prior attempt policy across a restart even if the suite changed', () => {
     const { ctx, sink } = ctxFor()
     ctx.feature.singleAttempt = { receipt: 'current.json' }
@@ -238,4 +268,20 @@ describe('setStatus', () => {
 
     expect(finalizeRun).not.toHaveBeenCalled()
   })
+})
+
+
+it('records the occupied worktree path without claiming its source checkout', () => {
+  const source = path.join(tmpDir, 'source')
+  const worktree = path.join(tmpDir, 'worktree')
+  const alias = path.join(tmpDir, 'worktree-alias')
+  fs.mkdirSync(source); fs.mkdirSync(worktree); fs.symlinkSync(worktree, alias, 'dir')
+  const { ctx, sink } = ctxFor({}, { worktrees: [{ repoName: 'app', localPath: alias, sourceRoot: source, worktreeRoot: worktree }] })
+  ctx.feature.repos = [{ name: 'app', localPath: source }]
+  writeInitialManifest(ctx)
+  const written = vi.mocked(sink.bootstrap).mock.calls[0][0]
+  expect(written.repoPaths).toEqual([alias])
+  const active = [{ runId: written.runId, feature: written.feature, repoPaths: written.repoPaths! }]
+  expect(detectRepoCollision([source], active)).toBeNull()
+  expect(detectRepoCollision([worktree], active)?.conflictingRunId).toBe(written.runId)
 })

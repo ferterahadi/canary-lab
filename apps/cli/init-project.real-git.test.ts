@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 // A SECOND suite because `init-project.test.ts` mocks `child_process` module-wide
@@ -9,17 +8,9 @@ import path from 'path'
 // that the repo it produced is one portify's worktrees can actually read. The
 // invariant under test is a property of real git, so this file uses real git.
 import { commitSampleRepos, commitScaffold } from './init-project'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-init-git-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const mkTmp = trackTempDirs('cl-init-git-')
 
 describe('commitScaffold (real git)', () => {
   // The failure this exists to prevent: a scaffolded workspace had `git init` but no

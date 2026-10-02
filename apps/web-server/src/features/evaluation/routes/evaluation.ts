@@ -1,15 +1,19 @@
+import { evaluationArchiveBase, evaluationTaskFilename } from '../../../../../../shared/evaluation-archive-naming'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import type { RunDetail, RunStore } from '../../runs/logic/run-store'
+import type { RunStore } from '../../runs/logic/run-store'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../../runs/logic/pane-broker'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import { generateEvaluationRewriteWithAgent, type EvaluationRewrite, type EvaluationRewriteAgentOptions } from '../logic/test-review-export'
-import { normalizePerAgentChoices, perAgentStageChoices } from '../../agent-sessions/logic/agent-models'
+import { generateEvaluationRewriteWithAgent } from '../logic/test-review/rewrite-agent'
+import type { EvaluationRewrite, EvaluationRewriteAgentOptions } from '../logic/test-review/types'
+import { normalizePerAgentChoices, perAgentStageChoices } from '../../../../../../shared/agent-models'
 import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
 import {
   appendEvaluationExportLog,
@@ -22,9 +26,13 @@ import {
   readEvaluationExportTask,
   readEvaluationExportZip,
   writeEvaluationExportBuild,
-  type EvaluationExportMode,
-  type EvaluationExportTaskRecord,
 } from '../logic/evaluation-export-store'
+import type {
+  EvaluationExportMode,
+  EvaluationExportTaskRecord,
+} from '../../../../../../shared/evaluation-export-types'
+import { notFound } from '../../../shared/http-error'
+import { sendFrame } from '../../../shared/ws/record-stream'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
@@ -101,10 +109,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
 
   const sendEvaluationExport = async (runId: string, reply: FastifyReply) => {
     const detail = deps.store.get(runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     if (!isTerminalRunStatus(detail.manifest.status)) {
       reply.code(409)
       return { error: 'evaluation export is available after the run finishes' }
@@ -112,7 +117,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const { archiveBase, zip } = await buildEvaluationZip(detail, 'localized')
     reply
       .type('application/zip')
-      .header('content-disposition', `attachment; filename="${archiveBase}.zip"`)
+      .header('content-disposition', `attachment; filename="${evaluationTaskFilename({ archiveBase, feature: detail.manifest.feature, runId: detail.runId })}"`)
     return reply.send(zip)
   }
 
@@ -146,7 +151,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       createdAt: now,
       updatedAt: now,
       downloadReady: false,
-      archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+      archiveBase: evaluationArchiveBase(detail.manifest.feature, detail.runId),
     }
     const active: ActiveEvaluationExportTask = {
       broker: new PaneBroker(),
@@ -210,10 +215,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
 
   app.post<{ Params: { runId: string }; Body: { mode?: string; models?: unknown } }>('/api/runs/:runId/evaluation-export', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
-    if (!detail) {
-      reply.code(404)
-      return { error: 'run not found' }
-    }
+    if (!detail) return notFound(reply, 'run')
     if (!isTerminalRunStatus(detail.manifest.status)) {
       reply.code(409)
       return { error: 'evaluation export is available after the run finishes' }
@@ -236,10 +238,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
     recoverStaleEvaluationExports()
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    if (!task) {
-      reply.code(404)
-      return { error: 'evaluation export task not found' }
-    }
+    if (!task) return notFound(reply, 'evaluation export task')
     return evaluationExportTaskView(task)
   })
 
@@ -268,10 +267,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {
     recoverStaleEvaluationExports()
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    if (!task) {
-      reply.code(404)
-      return { error: 'evaluation export task not found' }
-    }
+    if (!task) return notFound(reply, 'evaluation export task')
     const zip = task.status === 'completed' ? readEvaluationExportZip(deps.store.logsDir, task.taskId) : null
     if (!zip) {
       reply.code(409)
@@ -279,7 +275,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     }
     reply
       .type('application/zip')
-      .header('content-disposition', `attachment; filename="${task.archiveBase}.zip"`)
+      .header('content-disposition', `attachment; filename="${evaluationTaskFilename(task)}"`)
     return reply.send(zip)
   })
 
@@ -292,10 +288,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
   app.post<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/abort', async (req, reply) => {
     recoverStaleEvaluationExports()
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    if (!task) {
-      reply.code(404)
-      return { error: 'evaluation export task not found' }
-    }
+    if (!task) return notFound(reply, 'evaluation export task')
     const active = activeEvaluationExports.get(task.taskId)
     if (task.status !== 'running' || !active) {
       // Idempotent no-op, never a 409: the caller is a best-effort teardown, and
@@ -314,10 +307,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
 
   app.delete<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    if (!task) {
-      reply.code(404)
-      return { error: 'evaluation export task not found' }
-    }
+    if (!task) return notFound(reply, 'evaluation export task')
     const active = activeEvaluationExports.get(task.taskId)
     if (task.status === 'running') {
       active?.abortController.abort()
@@ -350,9 +340,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       return
     }
     const sub: PaneSubscriber = {
-      send: (msg) => {
-        try { socket.send(JSON.stringify(msg)) } catch { /* socket closed */ }
-      },
+      send: (msg) => sendFrame(socket, msg),
       close: () => {
         try { socket.close() } catch { /* already closed */ }
       },
@@ -360,10 +348,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const unsub = active.broker.subscribe('export', sub, { replay: false })
     socket.on('close', () => unsub())
   })
-}
-
-function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
 async function loadEvaluationRewrite(

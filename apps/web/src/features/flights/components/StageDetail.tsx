@@ -1,18 +1,32 @@
+import { ACTIVITY_CHIP } from './FlightChipState'
+import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
-import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type {
+  ExternalWorkCheckpointData,
+  FlightManifest,
+  FlightStage,
+  FlightStageKey,
+} from '@shared/flights/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { coverageSessionSources, stageCoverageJobs } from '../lib/coverage-activity'
-import * as api from '@/shared/api/client'
-import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import * as coverageApi from '@/shared/api/coverage'
+import type { AgentSessionSegmentSource, AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import type { ExternalSessionActivity } from '@/shared/ui/activity-log'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
-import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
+import { FeatureSetupPanel } from './FeatureSetupPanel'
+import { FlightDocsPanel } from './FlightDocsPanel'
+import { RepoScanPanel } from './RepoScanPanel'
+import { RequirementsFork } from './RequirementsFork'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageRowKey, stageStateLine, type StageRailRow } from './stage-meta'
-import { useEvaluationExports } from '@/features/evaluation'
-import { PortifyWorkflowControls } from '@/features/portify'
+import { StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress } from './stage-meta'
+import { evaluationTaskId, FactsGrid, stageFacts } from './StageFacts'
+import { stageRowKey, type StageRailRow } from './StageRail'
+import { stageStateLine } from './StageStatusLines'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { PortifyWorkflowControls } from '@/features/portify/components/PortifyWorkflowControls'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
@@ -37,8 +51,6 @@ import {
 } from './StageEvidencePanels'
 import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
-
-export { AgentBlock, SpecsPassTimeline, StageActivityRail, specsPhaseSub, truncate } from './StageActivity'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -96,6 +108,8 @@ export function externalSessionActivity(
     message = `Stopped in ${owner}.`
   }
   return {
+    taskId: trace.resourceId ? `${trace.kind}:${trace.resourceId}` : undefined,
+    actionLabel: ACTIVITY_CHIP[trace.kind].title,
     clientKind,
     ...(sessionId ? { sessionId } : {}),
     status: trace.status,
@@ -227,6 +241,8 @@ export function StageDetail({
   coverageJobs = [],
   activityOpen,
   onActivityOpenChange,
+  openLogId,
+  onOpenLogChange,
   externalMutationOwner,
   onResponded,
   onActionError,
@@ -261,6 +277,9 @@ export function StageDetail({
    *  the normal default: open while live, collapsed otherwise. */
   activityOpen?: boolean
   onActivityOpenChange: (open: boolean) => void
+  /** The routed Activity log entry open in the modal, and its setter. */
+  openLogId?: string | null
+  onOpenLogChange?: (id: string | null) => void
   /** Present while mutations belong to the Claude/Codex session. */
   externalMutationOwner?: ExternalMutationOwner
   onResponded: () => void
@@ -285,7 +304,7 @@ export function StageDetail({
   const { value: coverageJob } = useLiveResource(
     'coverage',
     coverageOwnsCurrent ? `${latestCoverageJob.jobId}:${latestCoverageJob.status}` : null,
-    () => api.getCoverageJob(latestCoverageJob!.jobId),
+    () => coverageApi.getCoverageJob(latestCoverageJob!.jobId),
     { cache: 'flight-coverage-job', pollWhile: (job) => job === null || job.status === 'running' },
   )
   const stage = coverageOwnsCurrent
@@ -426,6 +445,7 @@ export function StageDetail({
     (activityOnThisRow || flightHandOff)
       && !historicalExternalSessions.some((session) => session.status === 'running')
       ? {
+          actionLabel: activityOnThisRow ? ACTIVITY_CHIP[activity.kind].title : flightStageLabel(stage.key),
           clientKind: externalClientKind(flight.externalAgentSession?.clientKind),
           ...(flight.externalAgentSession?.sessionId
             ? { sessionId: flight.externalAgentSession.sessionId }
@@ -466,10 +486,7 @@ export function StageDetail({
   const flightOwnsPortify = portifyId != null
     && recordedPortifyId === portifyId
     && (flight.status === 'running' || checkpointStage?.checkpoint?.kind === 'portify-apply')
-  const standalonePortifyActionable = band.portify?.status === 'ready-to-save'
-    || band.portify?.status === 'planning'
-    || band.portify?.status === 'editing'
-    || band.portify?.status === 'verifying'
+  const standalonePortifyActionable = isActionablePortifyStatus(band.portify?.status)
   const evaluationLive = activityEvalTask?.status === 'running'
   const localActivitySource: AgentSessionSource | undefined =
     activityEvalTask?.sessionRef
@@ -525,7 +542,11 @@ export function StageDetail({
       {/* R66: header, facts and stage panels scroll here; the activity band
           below fills the rest of the pane so a long transcript scrolls in
           place instead of the whole stage view running off the bottom. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* The padding lives on an inner block, not on the scroller: a flex item
+          can't shrink below its own padding, so a padded scroller kept 24px of
+          the panes showing above an Activity band dragged all the way up. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      <div className="flex flex-1 flex-col p-3">
       {/* R85: the chip + actions share a top edge with the first card instead of
           sitting on a row of their own above it. The cards are capped at
           STAGE_COLUMN (92ch) while the pane is wider, so the leftover width to
@@ -615,7 +636,7 @@ export function StageDetail({
             </ModelPlanPopover>
           </div>
         )}
-        <StageStatusChip status={row.status} waiting={activity && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key ? activity.waiting : undefined} />
+        <StageStatusChip status={row.status} rowKey={stageRowKey(stage.key)} activity={activity && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stageRowKey(stage.key) ? activity : undefined} />
         {/* Advanced setup appears once the config EXISTS on disk — approved
             (done) or pre-existing (skipped, the scaffold had nothing to do).
             Not while generating, and not at the approval checkpoint: there the
@@ -822,6 +843,14 @@ export function StageDetail({
           to get there. */}
       {stage.key === 'portify' && (
         <>
+          {(band.portifyRecovery?.error || band.portifyRecovery?.missing) && (
+            <StageColumn>
+              <div role="alert" className="text-sm text-[var(--muted)]">
+                {band.portifyRecovery.error ?? 'Port work is no longer available.'}
+                <button type="button" className="cl-button ml-2 px-2 py-1" onClick={band.portifyRecovery.retry}>Retry</button>
+              </div>
+            </StageColumn>
+          )}
           <DoubleBootPanel portify={band.portify ?? null} awaiting={awaitingData} />
           <OverlayPanel portify={band.portify ?? null} awaiting={awaitingData} />
           {band.portify && standalonePortifyActionable && !flightOwnsPortify && (
@@ -881,6 +910,7 @@ export function StageDetail({
       </div>
       </div>
       </div>
+      </div>
       {/* R66: one activity rail per stage — the conductor's tagged system lines
           and the stage's agent timeline (if any) on a single block. The run
           stage is agentless at the flight level (its repair agent's timeline is
@@ -898,6 +928,8 @@ export function StageDetail({
           externalSessions={externalSessions}
           open={activityOpen}
           onOpenChange={onActivityOpenChange}
+          openLogId={openLogId}
+          onOpenLogChange={onOpenLogChange}
           {...(stage.key === 'portify' ? { empty: EMPTY_COPY.portifyNoTranscript } : {})}
         />
       )}

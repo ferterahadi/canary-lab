@@ -1,20 +1,10 @@
+import type { SabotageLevel, BenchmarkStatus } from '../../../../../../../shared/benchmark-index'
 import type { ArmIterationResult, BenchmarkReport } from './report'
-import type { LocalHealAgent } from '../../../runs/logic/runtime/manifest'
-
-export type SabotageLevel = 'min' | 'med' | 'max'
+import type { LocalHealAgent } from '../../../../../../../shared/run-manifest'
 
 /** Arm 'A' = Canary harness, arm 'B' = baseline (Playwright MCP only). */
 export type BenchmarkArm = 'A' | 'B'
 export type ArmMode = 'harness' | 'baseline'
-
-export type BenchmarkStatus =
-  | 'sabotaging' // worktree + sabotage agent + freeze
-  | 'ready' // frozen, arms set up, awaiting the race
-  | 'running' // arms racing
-  | 'done' // all iterations complete, report written
-  | 'invalid' // the frozen sabotage broke no test (caught in race iter 1) — re-run
-  | 'aborted'
-  | 'error'
 
 export interface BenchmarkArmState {
   arm: BenchmarkArm
@@ -61,15 +51,6 @@ export interface BenchmarkManifest {
   worktreesCleared?: boolean
   /** Disk reclaimed by the clear, for the post-clear receipt line. */
   worktreesClearedBytes?: number
-}
-
-export interface BenchmarkIndexEntry {
-  benchmarkId: string
-  feature: string
-  level: SabotageLevel
-  status: BenchmarkStatus
-  startedAt: string
-  endedAt?: string
 }
 
 /** Request body for starting a benchmark (POST /api/benchmarks). */

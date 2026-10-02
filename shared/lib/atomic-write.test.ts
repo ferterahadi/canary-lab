@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { atomicWrite } from './atomic-write'
+import { atomicWrite, atomicWriteJson } from './atomic-write'
 
 describe('atomicWrite', () => {
   let dir: string
@@ -49,6 +49,13 @@ describe('atomicWrite', () => {
     const file = path.join(dir, 'private.json')
     fs.writeFileSync(`${file}.tmp`, 'interrupted write', { mode: 0o644 })
     atomicWrite(file, '{}', 0o600)
+    if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+  })
+
+  it('writes JSON with two-space indent and a trailing newline', () => {
+    const file = path.join(dir, 'state.json')
+    atomicWriteJson(file, { a: [1] }, 0o600)
+    expect(fs.readFileSync(file, 'utf8')).toBe('{\n  "a": [\n    1\n  ]\n}\n')
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600)
   })
 })

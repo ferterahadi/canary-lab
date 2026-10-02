@@ -9,9 +9,13 @@
  * R38: the trigger is all that lives here — the export's progress and output are
  * watched via the Flights pill and the flight's Evaluation Report stage.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
-import { useEvaluationExports } from '@/features/evaluation'
+import { useCallback, useRef, useState } from 'react'
+import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import type {
+  EvaluationExportMode,
+  EvaluationExportTaskView,
+} from '@shared/evaluation-export-types'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 
 export function ReviewEvaluationMenu({
@@ -21,7 +25,7 @@ export function ReviewEvaluationMenu({
   runId: string
   /** The export now lives on Flight's Report stage. Navigation waits for the
    *  task response so a failed start leaves the reader on the run that failed. */
-  onExportStarted?: (task: EvaluationExportTask) => void
+  onExportStarted?: (task: EvaluationExportTaskView) => void
 }) {
   const [open, setOpen] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -42,14 +46,7 @@ export function ReviewEvaluationMenu({
   // An open menu in a tab row has to close on an outside click — it overlays the
   // pane below it, and leaving it open makes the next click land on the menu
   // instead of what the user aimed at.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  useDismissOnOutsideMousedown(() => setOpen(false), open, [wrapRef])
 
   return (
     <div ref={wrapRef} className="relative shrink-0">

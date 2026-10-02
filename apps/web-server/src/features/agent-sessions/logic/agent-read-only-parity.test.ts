@@ -1,52 +1,66 @@
-import fs from 'fs'
-import path from 'path'
-import { describe, expect, it } from 'vitest'
+import { ChildProcess } from 'child_process'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { runAgentProcess, CLAUDE_READ_ONLY_TOOLS } from './agent-process'
+import { runCommitMessageAgent } from '../../runs/logic/pr/commit-message-agent'
+import { runEvaluationAgent } from '../../evaluation/logic/test-review/rewrite-agent'
+import { summarizePrd } from '../../coverage/logic/coverage/prd-summary'
+import { proposeCoverageMappings } from '../../coverage/logic/coverage/annotate-engine'
+import type { HealAgent } from './agent-binary'
 
-// Read-only parity between the two agent arms.
-//
-// Three features spawn an agent whose whole job is to read and answer with
-// JSON — a PRD summary, a coverage annotation set, a report rewrite. Each has
-// always declared that on its codex arm with `--sandbox read-only`, while the
-// claude arm right beside it got `--dangerously-skip-permissions` and nothing
-// else. Same prompt, same cwd, full write access — and the agent resolver
-// prefers claude, so the declared posture was the one that almost never ran.
-//
-// The claude arm now passes `readOnly: true` (an argv `--tools` allowlist, so
-// the write tools are absent rather than merely discouraged). Nothing in the
-// type system keeps the two arms in step: a new spawn, or a refactor that drops
-// the flag, would silently re-open the gap. Hence this file.
-//
-// A feature that stops being read-only should be REMOVED from this list in the
-// same change that grants it write access — deliberately, not by accident.
+vi.mock('./agent-process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./agent-process')>(),
+  runAgentProcess: vi.fn(),
+}))
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..', '..')
+const requirements = [{ id: 'R1', title: 'Add items', text: 'Add item prices', pathTypes: ['happy' as const] }]
+const output = JSON.stringify({
+  requirements,
+  mappings: [{ testName: 'adds items', requirements: ['R1'], pathTypes: ['happy'], confidence: 1 }],
+  unmappable: [],
+})
 
-const READ_ONLY_SPAWNS = [
-  {
-    what: 'coverage PRD summary',
-    file: 'apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts',
-  },
-  {
-    what: 'coverage annotate',
-    file: 'apps/web-server/src/features/coverage/logic/coverage/annotate-engine.ts',
-  },
-  {
-    what: 'evaluation report rewrite',
-    file: 'apps/web-server/src/features/evaluation/logic/test-review/rewrite-agent.ts',
-  },
-] as const
+beforeEach(() => {
+  vi.mocked(runAgentProcess).mockReset().mockReturnValue({
+    child: new ChildProcess(), stop: vi.fn(),
+    done: Promise.resolve({ code: 0, signal: null, stdout: output, stderr: '' }),
+  })
+})
 
-describe('read-only agent spawns keep both arms in step', () => {
-  for (const { what, file } of READ_ONLY_SPAWNS) {
-    const source = fs.readFileSync(path.join(REPO_ROOT, file), 'utf-8')
+const adapters = [
+  { name: 'commit message', schema: 'fix-commit-message.schema.json', run: (agent: HealAgent) => runCommitMessageAgent(agent, 'Describe patch') },
+  { name: 'evaluation', schema: 'evaluation-rewrite.schema.json', run: (agent: HealAgent) => runEvaluationAgent(agent, 'Rewrite evaluation') },
+  { name: 'requirements', schema: 'prd-summary.schema.json', run: (agent: HealAgent) => summarizePrd({
+    collection: { docsDir: '/tmp/read-only-parity/docs', entries: [{ relPath: 'requirements.md', content: '# Add items\nAdd item prices' }], docsHash: 'fixture' },
+  }, { resolveAgents: () => [agent] }) },
+  { name: 'coverage', schema: 'coverage-annotate.schema.json', run: (agent: HealAgent) => proposeCoverageMappings({
+    requirements, tests: [{ name: 'adds items' }],
+  }, { resolveAgents: () => [agent] }) },
+]
 
-    it(`${what}: the codex arm still declares --sandbox read-only`, () => {
-      expect(source).toMatch(/'--sandbox',\s*\n?\s*'read-only'|'--sandbox', 'read-only'/)
-    })
+// Capture the real adapter arguments: a source-text check would miss a helper
+// called incorrectly, or fail simply because the permission flags moved there.
+describe.each(adapters)('$name read-only launch', ({ schema, run }) => {
+  it('launches Codex with a read-only sandbox, answer file and feature schema', async () => {
+    await run('codex')
+    expect(runAgentProcess).toHaveBeenCalledTimes(1)
+    const launch = vi.mocked(runAgentProcess).mock.calls[0][0]
+    expect(launch.command).toBe('codex')
+    expect(launch.stdin).toBeTruthy()
+    expect(launch.args).toEqual([
+      'exec', '--skip-git-repo-check', '--sandbox', 'read-only',
+      '--output-last-message', expect.stringMatching(/\/last-message\.txt$/),
+      '--output-schema', expect.stringContaining(schema), '-',
+    ])
+  })
 
-    it(`${what}: the claude arm asks for the same posture`, () => {
-      const call = source.match(/buildClaudeAgenticArgs\([\s\S]*?\)\n/)?.[0] ?? ''
-      expect(call, `${file} builds claude args without readOnly`).toContain('readOnly: true')
-    })
-  }
+  it('keeps Claude tools read-only and user MCP servers disabled', async () => {
+    await run('claude')
+    expect(runAgentProcess).toHaveBeenCalledTimes(1)
+    const launch = vi.mocked(runAgentProcess).mock.calls[0][0]
+    expect(launch.command).toBe('claude')
+    const toolsIndex = launch.args.indexOf('--tools')
+    expect(toolsIndex).toBeGreaterThan(-1)
+    expect(launch.args[toolsIndex + 1]).toBe(CLAUDE_READ_ONLY_TOOLS.join(','))
+    expect(launch.args).toContain('--strict-mcp-config')
+  })
 })

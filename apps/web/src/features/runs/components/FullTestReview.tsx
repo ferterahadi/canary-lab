@@ -1,16 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { TestFileReview } from '@shared/test-review'
-import * as api from '@/shared/api/client'
+import type { TestFileReview, VersionTest } from '@shared/test-review'
+import * as featuresApi from '@/shared/api/features'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { SourceComparisonTable, type ReviewSourceSelection } from '@/shared/ui/SourceComparisonTable'
 import { TestLanguageSwitch } from '@/shared/ui/TestLanguageSwitch'
-import { assessmentsForRows, comparedTestRows, englishLines, englishSourceRange, sourceRows, rowsForTest, type ContextRow } from '@/shared/lib/test-review-model'
+import { assessmentsForRows, comparedTestRows } from '@/shared/lib/test-review-model'
+import { englishLines, englishSourceRange } from '@shared/readable-tests/source-lines'
+import { sourceRows, rowsForTest, type ContextRow } from '@shared/test-source-diff'
 import { noTestAssessmentCopy, testAssessmentFinding, testAssessmentReason } from '@/shared/lib/test-assessment-copy'
-import type { VersionTest } from '@/shared/lib/test-versions'
 import type { ReviewFocus } from '@/shared/lib/workspace-view-state'
-export type { ReviewFocus } from '@/shared/lib/workspace-view-state'
-
 interface EnglishReturnPoint {
   selection: ReviewSourceSelection
   top: number
@@ -44,7 +43,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     let cancelled = false
     setLoading(true)
     setError(null)
-    api.getTestFileReview(feature, file, runId).then((result) => { if (!cancelled) { setData(result); setLoading(false) } })
+    featuresApi.getTestFileReview(feature, file, runId).then((result) => { if (!cancelled) { setData(result); setLoading(false) } })
       .catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not load test source'); setLoading(false) } })
     return () => { cancelled = true }
   }, [feature, file, runId, refresh, revision, retry])

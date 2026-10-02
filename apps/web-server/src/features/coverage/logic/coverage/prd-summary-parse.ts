@@ -1,3 +1,4 @@
+import { canonicalPathTypes } from '../../../../../../../shared/coverage/path-types'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type {
   PathType,
@@ -13,7 +14,7 @@ import { fingerprintRequirement, withFingerprints } from './fingerprints'
 import { summarizePrd } from './prd-summary'
 import { locateRequirementSource, type RequirementSourceHint } from './requirement-source'
 
-export const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
+export { PATH_TYPES } from '../../../../../../../shared/coverage/path-types'
 
 export const TIERS: StrictnessTier[] = [1, 2, 3, 4]
 
@@ -125,15 +126,7 @@ export function normalizeTitle(title: string): string {
 }
 
 export function normalizePathTypes(value: unknown): PathType[] {
-  if (!Array.isArray(value)) return ['happy']
-  const seen = new Set<PathType>()
-  for (const item of value) {
-    if (typeof item === 'string' && (PATH_TYPES as string[]).includes(item)) {
-      seen.add(item as PathType)
-    }
-  }
-  // Order canonically; default to happy when the agent gave nothing usable.
-  const ordered = PATH_TYPES.filter((p) => seen.has(p))
+  const ordered = canonicalPathTypes(value)
   return ordered.length ? ordered : ['happy']
 }
 

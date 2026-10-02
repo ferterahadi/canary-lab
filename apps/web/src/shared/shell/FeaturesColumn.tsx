@@ -1,14 +1,27 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import * as api from '../api/client'
-import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
+import type { Feature } from '../api/types'
+import type { VersionStatus } from '@shared/version-status'
+import type { ExecutionType } from '@shared/verification'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunStatus } from '@shared/run-state'
 import { useMcpPromo } from './McpPromoContext'
-import { SettingsModal } from '@/features/config'
-import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
-import { SPEC_TONE, featureTone, type RunWaitingState } from '@/features/runs'
+import { SettingsModal } from '@/features/config/components/SettingsModal'
+import {
+  FeatureChipBadge,
+  FlightStatusChip,
+  type FeatureFlightAction,
+} from '@/features/flights/components/FlightChipState'
+import { presentActivityRunStatus, type FeatureActivity } from '@/features/flights/state/feature-activity'
+import { readGroupOpen, writeGroupOpen } from '@/features/flights/lib/group-open-state'
+import { SPEC_TONE, featureTone } from '@/features/runs/utils/spec-integrity'
+import { presentRunStatus } from '@/features/runs/utils/run-presentation'
+import type { RunWaitingState } from '@/features/runs/utils/run-waiting-state'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
-import { ChevronRightIcon } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { shortDateTime } from '../lib/format'
 import { Tooltip } from '../ui/Tooltip'
 import { useLiveCoverageStates } from '../state/use-live-coverage'
 import type { ModelsAgent } from '../lib/workspace-view-state'
@@ -16,6 +29,10 @@ import type { ModelsAgent } from '../lib/workspace-view-state'
 interface Props {
   features: Feature[]
   selectedFeature: string | null
+  activity?: Map<string, FeatureActivity>
+  /** Each suite's last finished test run (passed/failed/aborted), for the row's
+   *  leading dot. Absent for a suite that has never run. */
+  lastRuns?: ReadonlyMap<string, RunIndexEntry>
   /** Feature whose run is currently active (running or healing), or null. */
   activeRunFeature?: string | null
   /** Status of that active run — drives the chip label/color. */
@@ -57,10 +74,10 @@ interface Props {
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
 // setup-needed / no-coverage / unknown so the column stays calm until there's
-// real signal; green when mapped, amber when stale. Generating belongs to the
-// Flight shortcut, so the Coverage action is absent in that state.
+// real signal; green when mapped, amber when stale, sky while generating.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
+  if (headline === 'Generating') return 'var(--running)'
   if (headline.startsWith('Mapped') || headline.startsWith('Covered')) return 'var(--success)'
   if (headline === 'Freshness unconfirmed') return 'var(--warning)'
   if (headline === 'Stale') return 'var(--warning)'
@@ -73,60 +90,41 @@ function coverageHeadlineColor(headline: string | null | undefined): string | un
 // flights picker's map). Default OPEN.
 const FEATURE_GROUPS_OPEN_STORAGE_KEY = 'cl-feature-groups-open'
 
-/** Attention rank for a feature row — worst floats to the top (0 = needs the
- *  human most). An active run outranks a dirty-tests flag outranks a resting
- *  row; groups order by their worst member so a group with a running/dirty
- *  feature sorts above a calm one. */
-function featureRowRank(
-  f: Feature,
-  activeRunFeature: string | null | undefined,
-): number {
-  if (activeRunFeature && f.name === activeRunFeature) return 0
-  if (f.dirty?.status === 'dirty') return 1
-  // A pending placeholder parked on approval needs the human — it ranks with
-  // dirty; otherwise it rests with a settled feature so the column stays calm.
-  // A hand-off to the user's own agent asks nothing of this reader, so it rests
-  // too — floating it to the top would nag about work already under way.
-  if (f.pending) return flightAwaitsUser(f.pending) ? 1 : 2
-  return 2
-}
+/** Suites keep a fixed place: a run, dirty tests, or a parked flight shows on
+ *  the row's own badge and never moves the row or its group. */
+const byName = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true })
 
 export interface FeatureGroupSection {
   group: string
   features: Feature[]
-  /** The worst (lowest) row rank in the group — orders the sections. */
-  worstRank: number
 }
 
 /** Split features into the flat top-level bucket (no group) + one section per
- *  group (R55). Rows keep their incoming order within each section; sections
- *  order by their worst member, then group name. A blank/whitespace group is
- *  treated as ungrouped. */
+ *  group (R55). Sections order by group name and rows by suite name. A
+ *  blank/whitespace group is treated as ungrouped. */
 export function groupFeatures(
   features: Feature[],
-  activeRunFeature: string | null | undefined,
 ): { ungrouped: Feature[]; groups: FeatureGroupSection[] } {
   const ungrouped: Feature[] = []
   const byGroup = new Map<string, Feature[]>()
-  for (const f of features) {
+  for (const f of [...features].sort((a, b) => byName(a.name, b.name))) {
     const group = f.group?.trim()
     if (!group) { ungrouped.push(f); continue }
     const bucket = byGroup.get(group) ?? []
     bucket.push(f)
     byGroup.set(group, bucket)
   }
-  const groups: FeatureGroupSection[] = [...byGroup.entries()].map(([group, groupFeatures]) => ({
-    group,
-    features: groupFeatures,
-    worstRank: Math.min(...groupFeatures.map((f) => featureRowRank(f, activeRunFeature))),
-  }))
-  groups.sort((a, b) => a.worstRank - b.worstRank || a.group.localeCompare(b.group))
+  const groups: FeatureGroupSection[] = [...byGroup.entries()]
+    .map(([group, groupFeatures]) => ({ group, features: groupFeatures }))
+    .sort((a, b) => byName(a.group, b.group))
   return { ungrouped, groups }
 }
 
 export function FeaturesColumn({
   features,
   selectedFeature,
+  activity,
+  lastRuns,
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
@@ -165,14 +163,15 @@ export function FeaturesColumn({
     coverage.confirmed ? state.headline : 'Freshness unconfirmed'])), [coverage.value, coverage.confirmed])
 
   // R55: features declaring a `group` collapse under an accordion; the rest
-  // stay flat. Sections order worst-first (a group with a running/dirty
-  // feature above a calm one).
-  const { ungrouped, groups } = groupFeatures(features, activeRunFeature)
+  // stay flat. Everything sorts by name so a row never jumps.
+  const { ungrouped, groups } = groupFeatures(features)
   const renderFeatureRow = (feature: Feature): ReactNode => (
     <FeatureRow
       key={feature.name}
       feature={feature}
       selectedFeature={selectedFeature}
+      activity={activity?.get(feature.name)}
+      lastRun={lastRuns?.get(feature.name)}
       activeRunFeature={activeRunFeature}
       activeRunStatus={activeRunStatus}
       activeRunExecutionType={activeRunExecutionType}
@@ -259,6 +258,8 @@ export function FeaturesColumn({
 function FeatureRow({
   feature: f,
   selectedFeature,
+  activity,
+  lastRun,
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
@@ -273,6 +274,8 @@ function FeatureRow({
 }: {
   feature: Feature
   selectedFeature: string | null
+  activity?: FeatureActivity
+  lastRun?: RunIndexEntry
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
@@ -291,15 +294,17 @@ function FeatureRow({
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
   const tone = featureTone(f)
-  const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
-  const runState = isActive
-    ? (activeRunStatus === 'queued' ? 'queued' : activeRunExecutionType === 'boot'
-        ? 'booted'
-        : activeRunStatus === 'healing' ? 'healing' : 'running')
-    : null
+  const activityRunPresentation = presentActivityRunStatus(activity)
+  const isActive = activityRunPresentation != null || (!activity && Boolean(activeRunFeature) && f.name === activeRunFeature)
+  const runWaiting = activityRunPresentation ? activity?.waiting : activeRunWaiting
+  const runPresentation = activityRunPresentation
+    ?? (isActive ? presentRunStatus({ status: activeRunStatus ?? 'running', executionType: activeRunExecutionType, waiting: runWaiting }) : null)
+  const runState = activityRunPresentation && activity
+    ? activity.waiting?.kind === 'queued' ? 'queued' : activity.kind === 'healing' ? 'healing' : 'running'
+    : isActive ? activeRunStatus === 'running' && activeRunExecutionType === 'boot' ? 'booted' : activeRunStatus ?? 'running' : null
   const runCue = !runState || runState === 'queued'
     ? ''
-    : activeRunWaiting
+    : runWaiting
       ? ' cl-list-row-waiting'
       : runState ? ` cl-list-row-${runState}` : ''
   // The Review action carries modified-test attention while an execution cue
@@ -317,25 +322,21 @@ function FeatureRow({
   // A resting/finished flight gets nothing — every flown suite carrying a
   // permanent tint would make the column noise again.
   const inFlight = Boolean(flight?.live || flight?.attention)
-  const showFlightChip = inFlight || flight?.queued === true
-  const showRunWaitingChip = isActive && activeRunWaiting != null
-  // The Coverage shortcut is for the resting ledger. While its job runs, Flight
-  // owns the live work and is already the adjacent shortcut. Hiding this action
-  // avoids two icons that describe the same work but open different surfaces.
-  const coverageAction = coverageHeadline === 'Generating' ? undefined : onOpenCoverage
+  const showFlightChip = (inFlight || flight?.queued === true) && flight != null
+  const showRunChip = !showFlightChip && runPresentation != null
   // The action cluster FLOATS over the row's right edge instead of sitting in
   // flow, so three icons cost the suite name zero width at rest — in a column
   // of long `cns_*` names that width is the column's actual content. The name
   // only makes room (padding-right) while the row is hovered/focused, so
   // nothing ever moves: the ellipsis just lands earlier. Width is computed from
   // the visible count so a 1-action row doesn't reserve space for three.
-  const actionCount = 1 + (coverageAction ? 1 : 0) + (flight ? 1 : 0)
+  const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
   // The at-rest status chip already sits in flow at that same right edge, so it
   // has ALREADY cost the name its width — reserving the full cluster on top of it
   // left an in-flight row with ~18px of readable name on hover (204px row − 72px
   // chip − 100px reservation). Subtract what the chip yields; the cluster floats
   // over the chip's box as it fades, so the icons still land clear of the text.
-  const chipWidth = showRunWaitingChip || showFlightChip ? 72 + 6 : 0
+  const chipWidth = showFlightChip ? (flight?.chipWidth ?? 72) + 6 : showRunChip ? (runPresentation?.chipWidth ?? 72) + 6 : 0
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
@@ -348,67 +349,59 @@ function FeatureRow({
         fontWeight: isSelected ? 500 : 400,
         ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={isActive && activeRunWaiting ? activeRunWaiting.label : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
+      title={showFlightChip ? flight?.title : runPresentation?.title}
     >
+      <LastRunDot feature={f.name} run={lastRun} />
       {tone && (
         <Tooltip label={`${SPEC_TONE[tone].title} Click to review.`}>
           <button type="button" onClick={() => { onSelectFeature(f.name); onReviewFeature?.(f.name) }}
             aria-label={`Review test changes in ${f.name}`}
             data-testid={`dirty-badge-${f.name}`}
             data-tone={tone}
-            className="ml-1.5 flex shrink-0 items-center justify-center self-center rounded px-1 py-1 text-[10px] leading-none"
+            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded"
             style={{
               color: 'var(--warning)',
               background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--warning) 35%, transparent)',
             }}
           >
-            Review
+            {/* A file with a +/− — "the tests changed", in a 16px box. */}
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+              <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z" />
+              <path d="M12 10v4M10 12h4M10 17h4" />
+            </svg>
           </button>
-        </Tooltip>
-      )}
-      {f.portified && (
-        <Tooltip label="Ready for parallel runs.">
-          <span
-            aria-label="Portified"
-            data-testid={`portified-badge-${f.name}`}
-            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
-            style={{
-              color: 'var(--success)',
-              background: 'color-mix(in srgb, var(--success) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
-            }}
-          >
-            ⇄
-          </span>
         </Tooltip>
       )}
       <button
         type="button"
         onClick={() => onSelectFeature(f.name)}
         title={f.name}
-        className="feature-row__name min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        className="feature-row__name flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-2 text-left"
         style={{ color: 'inherit', fontWeight: 'inherit' }}
       >
-        {f.name}
+        <span className="min-w-0 truncate">{f.name}</span>
+        {/* A capability, not a status — so it trails the name in muted text
+            rather than wearing the success hue beside the last-run dot. */}
+        {f.portified && (
+          <Tooltip label="Ready for parallel runs.">
+            <span
+              aria-label="Portified"
+              data-testid={`portified-badge-${f.name}`}
+              className="shrink-0 text-[11px] leading-none"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              ⇄
+            </span>
+          </Tooltip>
+        )}
       </button>
-      {runState && !showRunWaitingChip && (
-        <span className="sr-only">{runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
-      )}
-      {showRunWaitingChip && activeRunWaiting && (
-        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" aria-label={activeRunWaiting.label}>
-          <Chip
-            tone={activeRunWaiting.kind === 'queued' ? 'var(--text-muted)' : 'var(--warning)'}
-            background={activeRunWaiting.kind === 'queued' ? 'var(--bg-elevated)' : undefined}
-            chrome="fill"
-            label={activeRunWaiting.shortLabel}
-            uppercase
-            fontSize={10}
-            testId={`run-waiting-${f.name}`}
-          />
+      {showRunChip && runPresentation && (
+        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" aria-label={runPresentation.label}>
+          <Chip testId={runWaiting ? `run-waiting-${f.name}` : undefined} tone={runPresentation.tone} background={runPresentation.background} chrome="fill" label={runPresentation.label} width={runPresentation.chipWidth ?? 72} uppercase fontSize={10} title={runPresentation.title} />
         </span>
       )}
-      {!showRunWaitingChip && showFlightChip && flight && (
+      {showFlightChip && flight && (
         /* In flow, not floating — it keeps its box while fading under the hover
            action cluster, so the row can't reflow as the pointer arrives. */
         <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
@@ -440,11 +433,11 @@ function FeatureRow({
             </button>
           </Tooltip>
         )}
-        {coverageAction && (
-          <Tooltip label="Coverage">
+        {onOpenCoverage && (
+          <Tooltip label={coverageHeadline === 'Generating' ? 'Coverage · updating' : 'Coverage'}>
             <button
               type="button"
-              onClick={() => { onSelectFeature(f.name); coverageAction(f.name) }}
+              onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
               aria-label={`Open coverage for ${f.name}`}
               data-testid={`coverage-action-${f.name}`}
               data-headline={coverageHeadline ?? ''}
@@ -474,6 +467,49 @@ function FeatureRow({
         </Tooltip>
       </span>
     </li>
+  )
+}
+
+/** The suite's last finished run as one dot, so names line up whether or not a
+ *  suite has run. A live run keeps showing the previous result; the chip on the
+ *  right says what is happening now. A pass that needed repair cycles wears a
+ *  ring: it is a different story from a clean pass. No run on record — never
+ *  run, or its runs were cleaned up — is an unfilled hairline circle, so the
+ *  slot reads as "no result" rather than a missing mark. */
+function LastRunDot({ feature, run }: { feature: string; run?: RunIndexEntry }) {
+  if (!run) {
+    return (
+      <Tooltip label="No runs on record">
+        <span
+          role="img"
+          aria-label="No runs on record"
+          data-testid={`last-run-${feature}`}
+          data-status="none"
+          className="ml-2 flex shrink-0 self-center"
+        >
+          <span aria-hidden="true" className="cl-status-dot border border-line" />
+        </span>
+      </Tooltip>
+    )
+  }
+  const cycles = run.status === 'passed' ? run.healCycles ?? 0 : 0
+  const outcome = cycles > 0 ? `passed after ${cycles} repair cycle${cycles === 1 ? '' : 's'}` : run.status
+  const label = [`Last run ${outcome}`, shortDateTime(run.endedAt ?? run.startedAt), run.env].filter(Boolean).join(' · ')
+  return (
+    <Tooltip label={label}>
+      <span
+        role="img"
+        aria-label={label}
+        data-testid={`last-run-${feature}`}
+        data-status={cycles > 0 ? 'repaired' : run.status}
+        className="ml-2 flex shrink-0 self-center"
+      >
+        <StatusDot
+          state={run.status === 'passed' ? 'success' : run.status === 'failed' ? 'failed' : 'idle'}
+          className={cycles > 0 ? 'outline outline-1 outline-offset-[1.5px] outline-success' : ''}
+        />
+      </span>
+    </Tooltip>
   )
 }
 
@@ -541,6 +577,8 @@ function PendingFeatureRow({
       data-testid={`pending-feature-${f.name}`}
       style={{ color: 'var(--text-muted)' }}
     >
+      {/* Holds the last-run slot so the name lines up with its neighbours. */}
+      <span aria-hidden="true" className="ml-2 w-[0.55rem] shrink-0" />
       <button
         type="button"
         onClick={() => onOpenFlight?.(pending.flightId)}

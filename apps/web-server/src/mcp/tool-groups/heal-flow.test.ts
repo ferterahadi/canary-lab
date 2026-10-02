@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerHealFlowTools } from './heal-flow'
 import { captureTools } from './__fixtures__/tool-group-harness'
 

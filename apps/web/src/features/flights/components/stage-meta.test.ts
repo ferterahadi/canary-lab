@@ -1,10 +1,21 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, runHistoryFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
-import { agentActivityLine } from './StageStatusLines'
+import { portifyWorkflowId } from './stage-meta'
+import { evaluationTaskId, stageFacts, runHistoryFacts } from './StageFacts'
+import {
+  agentActivityLine,
+  stageStateLine,
+  healEndLine,
+  healEndShort,
+  formatStageDuration,
+  stageWorkMs,
+} from './StageStatusLines'
 import type { StageBandData } from './StageFacts'
 
-import type { FlightManifest, FlightStage, FlightStageStatus } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, HealEnd, RunIndexEntry } from '@/shared/api/types'
+import type { FlightManifest, FlightStage, FlightStageStatus } from '@shared/flights/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { CoverageLedger } from '@shared/coverage/types'
+import type { HealEnd } from '@shared/run-state'
+import type { RunIndexEntry } from '@shared/run-index'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {
@@ -671,7 +682,7 @@ describe('stageFacts — evaluation report keeps deliverable metadata out of At 
     downloadReady: true,
     createdAt: '2026-07-01T02:45:00Z',
     updatedAt: '2026-07-01T02:50:00Z',
-  } as EvaluationExportTask
+  } as EvaluationExportTaskView
   const expectEmptyReportContract = (facts: ReturnType<typeof stageFacts>): void => {
     expect(facts.map((fact) => fact.label)).toEqual([
       'Requirements with tests',
@@ -735,7 +746,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     // An archive IS recorded on every test here: the band must still not report
     // its weight, which now lives on the deliverable card as "Size".
     archive: { bytes: 105_472, videos: 2, assets: 3 },
-  } as EvaluationExportTask
+  } as EvaluationExportTaskView
   const stage = { key: 'evaluation-export', status: 'done', evidence: { taskId: 'eval-x' } } as FlightStage
   /** 6 requirements all CLAIMED covered, none proven — the split the band exists
    *  to expose. Three mapped specs behind them: one passed, one failed, one the
@@ -1115,4 +1126,15 @@ describe('stageWorkMs / formatStageDuration — the work clock', () => {
     expect(formatStageDuration(undefined, undefined)).toBeNull()
     expect(formatStageDuration({}, {})).toBeNull()
   })
+})
+
+it('uses live Portify counts including zero instead of an old attempt diff, and reserves patch statistics for completed editing', () => {
+  const stage: FlightStage = { key: 'portify', status: 'running', progress: { workflowId: 'wf', status: 'editing', editedFiles: 2 } }
+  const files = (s: FlightStage, band?: StageBandData) => stageFacts(s, flight(), undefined, band).find((fact) => fact.label === 'Files edited')
+  const staleDiff: StageBandData = { portify: { workflowId: 'wf', feature: 'suite', agent: 'claude', branch: 'main', attempt: 1, maxAttempts: 3, startedAt: 'now', status: 'editing', repos: [], diff: 'diff --git a/old b/old\n--- a/old\n+++ b/old\n@@ -1 +1 @@\n-before\n+after\n' } }
+  expect(files(stage, staleDiff)).toMatchObject({ value: '2', sub: 'current working-tree changes' })
+  expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing', editedFiles: 0 } })).toMatchObject({ value: '0' })
+  expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing' } })).toMatchObject({ awaiting: true })
+  expect(files({ ...stage, status: 'done', evidence: { workflowId: 'wf', edits: true } }, staleDiff)?.sub).toContain('lines')
+  expect(files({ ...stage, status: 'done', evidence: { workflowId: 'wf', edits: false } })?.sub).toBe('ports were already swappable')
 })

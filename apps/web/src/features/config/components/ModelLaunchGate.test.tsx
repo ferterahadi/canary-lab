@@ -3,17 +3,15 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
+import * as configApi from '@/shared/api/config'
+import { recommendedChoice } from '@shared/agent-models'
 import { defaultsByChoice, ModelLaunchGate, savedModelsSummary } from './ModelLaunchGate'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getAgentProbe: vi.fn(),
-    putProjectConfig: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getAgentProbe: vi.fn(),
+  putProjectConfig: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root
@@ -23,7 +21,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   // The gate defers this cached read until Customize is opened.
-  vi.mocked(api.getAgentProbe).mockReset().mockResolvedValue({
+  vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue({
     probedAt: 'now',
     claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', models: [], remedy: null },
     codex: {
@@ -35,7 +33,7 @@ beforeEach(() => {
       ],
     },
   })
-  vi.mocked(api.putProjectConfig).mockReset().mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+  vi.mocked(configApi.putProjectConfig).mockReset().mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
 })
 
 afterEach(() => {
@@ -149,7 +147,7 @@ describe('ModelLaunchGate', () => {
     const props = await mount()
     await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
     expect(props.onConfirm).toHaveBeenCalledWith(null)
-    expect(api.putProjectConfig).not.toHaveBeenCalled()
+    expect(configApi.putProjectConfig).not.toHaveBeenCalled()
   })
 
   it('Change swaps the confirmation for the grid, seeded from resolved defaults; edits ride the confirm', async () => {
@@ -167,7 +165,40 @@ describe('ModelLaunchGate', () => {
     })
   })
 
-  it('Use saved models discards the edits and confirms on the saved plan', async () => {
+  it('Change → Reset all overrides exactly this launch\'s stages', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    await act(async () => {})
+    await act(async () => { byTestId<HTMLButtonElement>('model-plan-reset-all').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith({
+      heal: recommendedChoice('claude', 'heal'),
+      commit: recommendedChoice('claude', 'commit'),
+    })
+    // Settings is untouched — the reset belongs to this launch only.
+    expect(configApi.putProjectConfig).not.toHaveBeenCalled()
+  })
+
+  it('setting a pinned stage back to Agent default sends it explicitly, so it beats the saved pin', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!, '')
+    setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!, '')
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith({
+      heal: { model: null, effort: null },
+      commit: { model: 'haiku', effort: null },
+    })
+  })
+
+  it('opening Change without editing still confirms on the saved plan', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith(null)
+  })
+
+  it('Use saved discards the edits and confirms on the saved plan', async () => {
     const props = await mount()
     await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
     setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!, 'max')
@@ -183,10 +214,10 @@ describe('ModelLaunchGate', () => {
 
   it('loads the installed Codex model catalog only when Customize is opened', async () => {
     await mount({ agent: 'codex', stages: ['heal'], config: { claude: {}, codex: {} } })
-    expect(api.getAgentProbe).not.toHaveBeenCalled()
+    expect(configApi.getAgentProbe).not.toHaveBeenCalled()
     await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
     await act(async () => {})
-    expect(api.getAgentProbe).toHaveBeenCalledWith(false)
+    expect(configApi.getAgentProbe).toHaveBeenCalledWith(false)
     expect([...document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!.options]
       .map((option) => [option.value, option.textContent])).toEqual([
       ['', 'Agent default'],
@@ -201,11 +232,11 @@ describe('ModelLaunchGate', () => {
     await mount()
     const box = byTestId<HTMLInputElement>('gate-dont-ask-again')
     await act(async () => { box.click() })
-    expect(api.putProjectConfig).toHaveBeenCalledWith({ askModelsOnLaunch: false })
+    expect(configApi.putProjectConfig).toHaveBeenCalledWith({ askModelsOnLaunch: false })
   })
 
   it('a failed don’t-ask-again write is swallowed — the launch flow is unaffected', async () => {
-    vi.mocked(api.putProjectConfig).mockRejectedValue(new Error('offline'))
+    vi.mocked(configApi.putProjectConfig).mockRejectedValue(new Error('offline'))
     const props = await mount()
     await act(async () => { byTestId<HTMLInputElement>('gate-dont-ask-again').click() })
     await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
@@ -220,11 +251,10 @@ describe('ModelLaunchGate', () => {
     expect(props.onConfirm).not.toHaveBeenCalled()
   })
 
-  it('names the launch and locks the plan in copy', async () => {
+  it('names the launch in the title and the action in the confirm', async () => {
     await mount({ launchNoun: 'flight', confirmLabel: 'Start flight' })
     const dialog = byTestId('model-launch-gate')
     expect(dialog.textContent).toContain('Models for this flight')
-    expect(dialog.textContent).toContain('Locked once started')
     expect(byTestId('gate-confirm').textContent).toBe('Start flight')
   })
 })

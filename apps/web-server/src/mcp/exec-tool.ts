@@ -5,15 +5,14 @@ import type {
   ServerContext,
 } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+import { asJsonResult, errorResult } from './tool-support'
 import {
   EXEC_TOOL_NAME,
   FULL_TOOLS,
-  asJsonResult,
-  errorResult,
   type CanaryLabMcpExecCallEvent,
   type CanaryLabMcpExecCommand,
   type CanaryLabMcpToolName,
-} from './tool-support'
+} from './tool-profiles'
 import type {
   CanaryLabToolConfig,
   CanaryLabToolDefinition,

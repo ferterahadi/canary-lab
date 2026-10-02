@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
+import { chromium } from '@playwright/test'
 import { extractTraceSummary } from './trace-enrichment'
 
 vi.mock('child_process', () => ({
@@ -10,13 +11,6 @@ vi.mock('child_process', () => ({
 }))
 
 const execFileMock = vi.mocked(execFile)
-
-// Integration test against a real trace.zip. Skipped unless CANARY_LAB_TRACE_FIXTURE
-// points to one — keeps CI hermetic while letting devs validate end-to-end
-// against their own canary-lab-workspace artifacts.
-const FIXTURE = process.env.CANARY_LAB_TRACE_FIXTURE
-
-const itIfFixture = FIXTURE ? it : it.skip
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -61,15 +55,27 @@ describe('extractTraceSummary', () => {
     try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
   })
 
-  itIfFixture('writes a self-contained trace-extract/ from a real trace', async () => {
+  it('writes a self-contained trace-extract/ from a real trace', async () => {
     // Integration test runs the actual Playwright CLI; the module-level
     // child_process mock would short-circuit it. Delegate the mock to the
     // real execFile for this test only.
     const realCp = await vi.importActual<typeof import('child_process')>('child_process')
     execFileMock.mockImplementation(realCp.execFile as unknown as typeof execFile)
+    const traceZipPath = path.join(tmp, 'trace.zip')
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const context = await browser.newContext()
+      await context.tracing.start({ snapshots: true, screenshots: true })
+      const page = await context.newPage()
+      await page.goto('data:text/html,<button>Fixture button</button>')
+      await expect(page.getByRole('button', { name: 'Missing button' }).click({ timeout: 100 })).rejects.toThrow()
+      await context.tracing.stop({ path: traceZipPath })
+    } finally {
+      await browser.close()
+    }
     const outputDir = path.join(tmp, 'out')
     const result = await extractTraceSummary({
-      traceZipPath: FIXTURE!,
+      traceZipPath,
       outputDir,
       testName: 'fixture test',
     })

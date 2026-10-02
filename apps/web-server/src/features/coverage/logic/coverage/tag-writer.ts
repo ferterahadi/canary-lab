@@ -1,3 +1,4 @@
+import { isTestCall } from '../../../../shared/test-declaration'
 import ts from 'typescript'
 import type { PathType } from '../../../../../../../shared/coverage/types'
 
@@ -28,24 +29,6 @@ export function coversTagTokens(tag: CoversTag): string[] {
   for (const p of tag.pathTypes ?? []) tokens.push(`@path-${p}`)
   for (const v of tag.variants ?? []) tokens.push(`@variant-${v}`)
   return tokens
-}
-
-function getCalleeChain(expr: ts.Expression): string[] {
-  if (ts.isIdentifier(expr)) return [expr.text]
-  if (ts.isPropertyAccessExpression(expr)) {
-    const head = getCalleeChain(expr.expression)
-    if (head.length === 0) return []
-    return [...head, expr.name.text]
-  }
-  return []
-}
-
-function isTestCall(call: ts.CallExpression): boolean {
-  const chain = getCalleeChain(call.expression)
-  if (chain.length === 0 || chain[0] !== 'test') return false
-  if (chain.length === 1) return true
-  if (chain[1] === 'step' || chain[1] === 'describe') return false
-  return true
 }
 
 function getStringArg(node: ts.CallExpression): string | null {

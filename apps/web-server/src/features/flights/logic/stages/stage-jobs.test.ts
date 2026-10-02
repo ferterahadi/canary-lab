@@ -8,7 +8,7 @@ import { runAgentProcess } from '../../../agent-sessions/logic/agent-process'
 import { agentSpawnJob, evaluationExportJob, portifyJob, runJob } from './stage-jobs'
 import type { FlightInject, FlightStageDeps } from './context'
 import { stageContextStub } from './__fixtures__/stage-context'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 import { buildFlightStageAdapters } from './index'
 
 // The four job factories, tested at the level that matters: what each one asks

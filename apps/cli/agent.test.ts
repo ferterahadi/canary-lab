@@ -221,6 +221,24 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('Do not substitute `npx canary-lab export`')
     }
 
+    // A run against a host the suite does not boot can only go green by editing
+    // the test, so both skills route a deployed target to Verify and never let
+    // the agent answer the remote-target choice itself.
+    for (const skillPath of mirrors('canary-lab-run')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('use canary-lab-verify instead')
+      expect(body).toContain('`type: "verify_instead"`')
+      expect(body).toContain('re-call `start_run` with `remote_target: "run"`. Never pass it on your own.')
+    }
+    for (const skillPath of mirrors('canary-lab-verify')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('## When to choose Verify')
+      expect(body).toContain('Choose Verify, not `start_run`, whenever the target is a deployed, staging or\nlive host the suite does not boot.')
+    }
+    for (const skill of ['canary-lab-run', 'canary-lab-verify']) {
+      expect(fs.readFileSync(mirrors(skill)[2])).toEqual(fs.readFileSync(mirrors(skill)[1]))
+    }
+
     // A run handoff names its exact run, while Getting Started may still name
     // a feature. The export skill must resolve both without guessing a newer run.
     for (const skillPath of mirrors('canary-lab-export')) {

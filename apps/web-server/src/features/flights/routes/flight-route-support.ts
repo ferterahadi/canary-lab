@@ -1,10 +1,17 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
-import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
-import { STAGE_DEPENDS_ON, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { type PlannedFeature } from '../../../../../../shared/flights/types'
+import { startFlight, type FlightConductorDeps } from '../logic/conductor'
+import { FlightConflictError } from '../logic/flight-errors'
+import { enqueueFlight } from '../logic/flight-queue'
+import {
+  type PlannedFeature,
+  STAGE_DEPENDS_ON,
+  type FlightExternalAgentSession,
+  type FlightManifest,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
 import { isClientKind } from '../../../../../../shared/run-mode'
 import { flightStageLabel } from '../../../../../../shared/flights/stage-labels'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
@@ -13,7 +20,13 @@ import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
-import { normalizeStagePlans, type AgentStagePlans, type ModelAgentKind } from '../../agent-sessions/logic/agent-models'
+import {
+  normalizeLaunchPlans,
+  stageChoiceValue,
+  type AgentStagePlans,
+  type ModelAgentKind,
+  type ModelStageKey,
+} from '../../../../../../shared/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { isAuxiliaryExecution } from '../../../../../../shared/verification'
@@ -147,24 +160,26 @@ export function buildStageEntryLinkResolver(logsDir?: string) {
   }
 }
 
-/** Expand a leading `~` the way the entry prefill does — feature configs (and
- *  therefore the dialog's repo picker) may declare repos home-relative. */
 /** The plan a new flight (or a redo) runs its internal stage spawns on:
  *  launch-gate override entries laid over the workspace `agentModels` config
  *  for the conducting agent. Callers persist the result on the record, so a
  *  later config edit never changes a flight mid-pipeline. `{}` is a real
- *  answer — every stage on the agent default. */
+ *  answer — every stage on the agent default. An explicit agent-default
+ *  override removes the saved pin, so the stored plan keeps the "absent =
+ *  agent default" shape `stageModels` reads. */
 export function resolveFlightModels(
   projectRoot: string,
   agent: ModelAgentKind,
   override: unknown,
 ): AgentStagePlans {
-  const configured = loadProjectConfig(projectRoot).agentModels[agent]
-  return { ...configured, ...normalizeStagePlans(agent, override) }
-}
-
-export function expandHome(p: string): string {
-  return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
+  const merged: AgentStagePlans = {
+    ...loadProjectConfig(projectRoot).agentModels[agent],
+    ...normalizeLaunchPlans(agent, override),
+  }
+  for (const stage of Object.keys(merged) as ModelStageKey[]) {
+    if (stageChoiceValue(merged[stage]) === null) delete merged[stage]
+  }
+  return merged
 }
 
 /** Validate the untrusted REST form of an MCP-owned Flight session. The ID is

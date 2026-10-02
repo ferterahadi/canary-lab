@@ -1,15 +1,19 @@
+import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildRunScheduling } from './run-scheduling'
-import { createRegistry, RunStore } from './logic/run-store'
+import { RunStore } from './logic/run-store'
+import { createRegistry } from './logic/run-registry'
 import { DirtySpecStore } from './logic/dirty-specs/store'
-import { readManifest, writeManifest, writeRunsIndex, type RunIndexEntry, type RunManifest } from './logic/runtime/manifest'
+import { readManifest, writeManifest, writeRunsIndex } from './logic/runtime/manifest'
+import type { RunManifest } from '../../../../../shared/run-manifest'
+import type { RunIndexEntry } from '../../../../../shared/run-index'
 import { runDirFor } from './logic/runtime/run-paths'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
-import type { WorkspaceEvent } from '../../shared/workspace-events'
+
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 
 let tmpDir: string

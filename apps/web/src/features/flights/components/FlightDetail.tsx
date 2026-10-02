@@ -1,21 +1,31 @@
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { coverageJobStage } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import { isActivePortify, usePortify } from '@/features/portify'
+import * as flightsApi from '@/shared/api/flights'
+import type {
+  ExternalWorkCheckpointData,
+  FlightEntryOptions,
+  FlightIndexEntry,
+  FlightManifest,
+  FlightStage,
+  FlightStageKey,
+} from '@shared/flights/types'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import { usePortify } from '@/features/portify/state/PortifyContext'
 import { capitalizeFirst } from '@/shared/lib/format'
-import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { useEscapeToClose } from '@/shared/ui/Overlays'
 import { Chip } from '@/shared/ui/StatusChip'
 import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
 import { AlertCircleIcon } from '@/shared/ui/Icons'
-import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { ACTIVITY_CHIP, featureChipState } from './FlightChipState'
-import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
-import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
+import { ACTIVITY_CHIP, featureChipState, FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightChipState'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternalWorkPark, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
+import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
+import { STAGE_BLURB, STAGE_ICON, presentStageStatus } from './stage-meta'
+import { STAGE_COMPANION, stageRowKey } from './StageRail'
+import { formatStageDuration } from './StageStatusLines'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -27,8 +37,10 @@ import { ContinueMenu, FlightMenu } from './FlightControls'
 import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
-import { StageDetail, truncate } from './StageDetail'
+import { StageDetail } from './StageDetail'
+import { truncate } from './StageActivity'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
+import { useFlightRecord } from '../state/use-flight-record'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { coverageStageWarning, isCoverageWarningRow } from './coverage-stage-warning'
@@ -57,6 +69,7 @@ export const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
 
 export function FlightDetail({
   flightId,
+  activityRequest,
   refreshKey,
   liveFlight,
   onBackToList,
@@ -74,9 +87,14 @@ export function FlightDetail({
   drill,
   stage: routedStage,
   onSelectStage,
+  log,
+  onOpenLog,
   indexEntry,
+  missing = false,
+  onFlightMissing,
 }: {
   flightId: string
+  activityRequest?: number
   refreshKey: number
   /** The manifest `/ws/flights` pushed for this flight. When present it IS the
    *  record — the fetch below is only how a settled flight (which the server
@@ -105,6 +123,10 @@ export function FlightDetail({
    *  it standalone. */
   stage?: FlightStageKey | null
   onSelectStage?: (stage: FlightStageKey | null) => void
+  /** The open Activity log entry, when App routes it (`?log=…`). Same hybrid
+   *  contract as `stage`; without them the stage's Activity keeps it locally. */
+  log?: string | null
+  onOpenLog?: (id: string | null) => void
   /** The flight's row from the `/ws/flights` index, when the caller holds it.
    *  A settled flight is not snapshotted on the push channel, so a cold open
    *  used to blank the WHOLE page behind "Loading flight…" until REST resolved
@@ -112,6 +134,8 @@ export function FlightDetail({
    *  status. The seed renders the header, strip and rail immediately; only the
    *  stage pane waits for the manifest. */
   indexEntry?: FlightIndexEntry | null
+  missing?: boolean
+  onFlightMissing?: (id: string) => void
 }) {
   // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
   // record to GET. The rail comes from live workspace evidence and everything
@@ -119,8 +143,13 @@ export function FlightDetail({
   const derivedFeature = derivedFlightFeature(flightId)
   const derivedRail = derivedFeature ? derivedStages?.get(derivedFeature) : undefined
   const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; description: string; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
-  const [fetched, setFlight] = useState<FlightManifest | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const record = useFlightRecord(derivedFeature ? null : flightId, liveFlight, !derivedFeature && missing, refreshKey)
+  useEffect(() => {
+    // A REST 404 can recover a lost removal frame for every index consumer too.
+    if (record.missing && !missing) onFlightMissing?.(flightId)
+  }, [record.missing, missing, flightId, onFlightMissing])
+  const fetched = record.manifest
+  const error = record.error
   const [ownStage, setOwnStage] = useState<FlightStageKey | null>(null)
   const selectedStage = onSelectStage ? routedStage ?? null : ownStage
   const setSelectedStage = onSelectStage ?? setOwnStage
@@ -137,6 +166,9 @@ export function FlightDetail({
       return { ...current, [flightId]: { ...flightState, [stageKey]: open } }
     })
   }, [flightId])
+  useEffect(() => {
+    if (activityRequest !== undefined) setStageActivityOpen('docs', true)
+  }, [activityRequest, setStageActivityOpen])
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
@@ -150,35 +182,22 @@ export function FlightDetail({
     loadPortify,
   } = usePortify()
 
-  // Read through a ref so `refetch` keeps a stable identity across pushes (it
-  // is an effect dep and a control-call callback; churning it would re-run both
-  // on every frame).
-  const hasLiveRef = useRef(liveFlight != null)
-  hasLiveRef.current = liveFlight != null
-
-  const refetch = useCallback((): void => {
-    // The push channel is already carrying this flight — asking REST for what
-    // the server just sent is the round trip this channel exists to remove.
-    if (hasLiveRef.current) return
-    if (derivedFeature) {
-      // No record to load. One entry call supplies the repo/env prefill the
-      // panels show — and answers "has a record appeared since?", which is how
-      // the token self-heals: the moment a flight is minted for this feature
-      // (conducted from here, or from anywhere else), we hand over to it so the
-      // URL can never point at a stale derived view.
-      api.getFlightEntryOptions(derivedFeature)
-        .then((o) => {
-          setError(null)
-          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
-          if (o.flight) onNavigateFlight?.(o.flight.flightId)
-        })
-        .catch(() => { /* prefill is best-effort — the rail stands on its own */ })
-      return
-    }
-    api.getFlight(flightId)
-      .then((m) => { setFlight(m); setError(null) })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }, [flightId, derivedFeature, onNavigateFlight])
+  const [entryRefresh, setEntryRefresh] = useState(0)
+  const refreshRecord = record.refresh
+  const refetch = useCallback(() => {
+    if (derivedFeature) setEntryRefresh((version) => version + 1)
+    else refreshRecord()
+  }, [derivedFeature, refreshRecord])
+  useEffect(() => {
+    if (!derivedFeature) return
+    let current = true
+    flightsApi.getFlightEntryOptions(derivedFeature).then((o) => {
+      if (!current) return
+      setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
+      if (o.flight) onNavigateFlight?.(o.flight.flightId)
+    }).catch(() => { /* prefill is best-effort — the rail stands on its own */ })
+    return () => { current = false }
+  }, [derivedFeature, onNavigateFlight, refreshKey, docsRefreshKey, configRefreshKey, entryRefresh])
 
   const derivedManifest = useMemo(
     () => (derivedFeature && derivedRail ? buildDerivedManifest(derivedFeature, derivedRail, derivedPrefill ?? undefined) : null),
@@ -206,7 +225,7 @@ export function FlightDetail({
       ...(indexEntry.endedAt ? { endedAt: indexEntry.endedAt } : {}),
     }
   }, [indexEntry, flightId])
-  const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
+  const flight = derivedManifest ?? (derivedFeature ? null : (record.missing ? null : fetched ?? seed))
   const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
   const coverageWarningText = coverageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
   const stageCoverageWarning = coverageStageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
@@ -256,36 +275,16 @@ export function FlightDetail({
     })
   }, [setSelectedStage])
 
-  // R71/W2: switching flights returns selection to follow-mode — a stage pick
-  // made on flight A must not survive onto flight B. Guarded on an actual
-  // CHANGE rather than firing on mount: the pick is routed now, and a mount is
-  // exactly what a refresh or a drill-through's way back produces — clearing
-  // there would wipe the stage the URL just restored.
+  // Keep an explicit recalculation destination and the derived-to-recorded
+  // redirect pinned. Ordinary flight switches still return to follow-mode.
   const seenFlightRef = useRef(flightId)
   useEffect(() => {
-    if (seenFlightRef.current === flightId) return
+    const previous = seenFlightRef.current
+    if (previous === flightId) return
     seenFlightRef.current = flightId
+    if (onSelectStage && (activityRequest !== undefined || derivedFlightFeature(previous) !== null)) return
     setSelectedStage(null)
-  }, [flightId, setSelectedStage])
-
-  // WS `flights-changed` bumps refreshKey — still worth a re-read for a flight
-  // the push channel is not carrying (a settled one that an MCP tool just
-  // rewrote). A DERIVED flight has no flight record; its live facts come from
-  // the workspace-entry probe, so coverage invalidation must re-read that
-  // evidence too. Portify saves change feature config/evidence, so the repos
-  // topic joins coverage here. Reconnect invalidates all topics, providing
-  // reconciliation when a best-effort event was dropped.
-  const derivedEvidenceRefreshKey = derivedFeature ? docsRefreshKey : undefined
-  const derivedConfigRefreshKey = derivedFeature ? configRefreshKey : undefined
-  useEffect(() => { refetch() }, [refetch, refreshKey, derivedEvidenceRefreshKey, derivedConfigRefreshKey])
-  const active = flight?.status === 'running' || flight?.status === 'waiting-for-approval'
-  useEffect(() => {
-    // Only when the push channel is NOT carrying this flight: no socket (a
-    // component test), or a server too old to serve the channel.
-    if (!active || liveFlight) return
-    const id = setInterval(refetch, 2000)
-    return () => clearInterval(id)
-  }, [active, liveFlight, refetch])
+  }, [activityRequest, flightId, onSelectStage, setSelectedStage])
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
@@ -372,10 +371,10 @@ export function FlightDetail({
   // A read failure only blanks the view when there is nothing else to show.
   // With a pushed manifest in hand the record is NOT missing, and a transient
   // GET failure must not replace a live flight with "could not be loaded".
-  if (error && !flight) {
+  if ((record.missing || error) && !flight) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
-        <div>Couldn't open this flight. {error}</div>
+        <div>{record.missing ? 'This flight no longer exists.' : `Couldn't open this flight. ${error}`}</div>
         <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1">All flights</button>
       </div>
     )
@@ -425,11 +424,14 @@ export function FlightDetail({
     && externalMutationOwner == null
   const takeoverRequested = externalWorkCheckpoint != null
     && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
-  const waitingChip = featureActivity?.waiting ? featureChipState(flight, featureActivity) : null
+  const genuineCheckpoint = flight.status === 'waiting-for-approval' && !isExternalWorkPark(flight) && !externallyDriven
+  const waitingChip = featureActivity?.waiting && !genuineCheckpoint ? featureChipState(flight, featureActivity) : null
+  const runActivityChip = runLive && !genuineCheckpoint ? featureChipState(flight, featureActivity) : null
+  const runPresentation = runActivityChip ? presentActivityRunStatus(featureActivity) : null
   const suiteActivityChip = activeCoverageJob
     ? ACTIVITY_CHIP[activeCoverageJob.kind === 'summary' ? 'condensing' : 'mapping']
-    : externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
-  const tone = waitingChip?.tone ?? (agentHolding
+    : runActivityChip ?? (externalSuiteWork && featureActivity && !genuineCheckpoint ? ACTIVITY_CHIP[featureActivity.kind] : null)
+  const tone = waitingChip?.tone ?? runActivityChip?.tone ?? (agentHolding
     ? FLIGHT_STATUS_TONE['running']
     : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status])
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
@@ -469,7 +471,7 @@ export function FlightDetail({
             // R81: a derived flight was never paused or interrupted — its steps
             // were simply completed outside the conductor, so it must not
             // borrow the record-only "paused by you / a stage failed" copy.
-            title={waitingChip ? waitingChip.title : agentHolding
+            title={waitingChip ? waitingChip.title : runActivityChip ? runActivityChip.title : agentHolding
               ? EXTERNAL_WORK_COPY.headerTitle
               : suiteActivityChip
               ? suiteActivityChip.title
@@ -482,8 +484,8 @@ export function FlightDetail({
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A step failed — Continue retries it')
               : undefined}
-            icon={waitingChip ? <StatusDot state={featureActivity?.waiting?.kind === 'queued' ? 'idle' : 'warning'} className="shrink-0" /> : flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={waitingChip ? capitalizeFirst(waitingChip.label) : agentHolding
+            icon={runPresentation ? <StatusDot state={runPresentation.dot} pulse={runPresentation.pulse} className="shrink-0" /> : waitingChip ? <StatusDot state={featureActivity?.waiting?.kind === 'queued' ? 'idle' : 'warning'} className="shrink-0" /> : flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            label={waitingChip ? capitalizeFirst(waitingChip.label) : runActivityChip ? capitalizeFirst(runActivityChip.label) : agentHolding
               ? EXTERNAL_WORK_COPY.headerLabel
               : suiteActivityChip
               ? capitalizeFirst(suiteActivityChip.label)
@@ -528,7 +530,7 @@ export function FlightDetail({
             <button
               type="button"
               data-testid="flight-pause"
-              onClick={() => act(() => api.pauseFlight(flightId))}
+              onClick={() => act(() => flightsApi.pauseFlight(flightId))}
               // Nothing here can stop work running inside the user's own agent:
               // pausing from this side would park the flight while the agent kept
               // going, and its result would then be discarded as stale. Kept
@@ -650,7 +652,7 @@ export function FlightDetail({
         // R81: no record → nothing to toggle. Autopilot is chosen in the
         // launcher when this suite is actually conducted. A seed doesn't know
         // the stored value, so the toggle waits for the manifest too.
-        onToggleAutopilot={derivedFeature || seeded ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
+        onToggleAutopilot={derivedFeature || seeded ? undefined : (next) => act(() => flightsApi.setFlightAutopilot(flight.flightId, next))}
         // Autopilot decides checkpoints — flipping it changes what the agent's
         // flight answers for itself, so it is the agent's setting while the
         // agent is driving. Disabled with a reason, not hidden: the toggle's
@@ -708,10 +710,10 @@ export function FlightDetail({
           {railRows.map((s) => {
             const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const selected = s.key === stageKey
-            const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
-            const displayStatus = stagePresentationStatus(s.status, rowWaiting)
+            const presentation = presentStageStatus(s.status, s.key, s.key === activityRowKey ? featureActivity : undefined)
+            const displayStatus = presentation.status
             const warning = isCoverageWarningRow(s.key, stageCoverageWarning) ? stageCoverageWarning?.message : undefined
-            const t = warning ? 'var(--warning)' : stageStatusTone(displayStatus)
+            const t = warning ? 'var(--warning)' : presentation.tone
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
             // time, not wall clock: checkpoint parks and pauses don't count.
@@ -721,7 +723,7 @@ export function FlightDetail({
             // One custom tooltip owns the rail row. Status remains visible in its
             // icon and the selected-stage pane; folding it into the short stage
             // explanation made the hover copy needlessly dense.
-            const tooltip = warning ?? (rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key])
+            const tooltip = warning ?? presentation.title ?? STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
                 {section && (
@@ -736,7 +738,7 @@ export function FlightDetail({
                   type="button"
                   data-testid={`stage-rail-${s.key}`}
                   aria-current={selected ? 'true' : undefined}
-                  aria-label={warning ? `${s.label} — ${warning}` : undefined}
+                  aria-label={warning ? `${s.label} — ${warning}` : `${s.label} — ${presentation.label}`}
                   onClick={() => setSelectedStage(s.key)}
                   className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
                 >
@@ -764,8 +766,8 @@ export function FlightDetail({
                       {duration}
                     </span>
                   )}
-                  {rowWaiting && <span className="shrink-0 text-[10px]" style={{ color: t }}>{rowWaiting.label}</span>}
-                  {displayStatus === 'running' && <StatusDot state="running" className="shrink-0" />}
+                  {s.key === activityRowKey && (featureActivity?.runId || featureActivity?.waiting) && <span className="shrink-0 text-[10px]" style={{ color: t }}>{presentation.label}</span>}
+                  {presentation.dot && <StatusDot state={presentation.dot} pulse={presentation.pulse} className="shrink-0" />}
                 </button></Tooltip>
               </Fragment>
             )
@@ -797,6 +799,16 @@ export function FlightDetail({
               coverageJobs={featureCoverageJobs}
               activityOpen={activityOpenByFlight[flightId]?.[stage.key]}
               onActivityOpenChange={(open) => setStageActivityOpen(stage.key, open)}
+              {...(onOpenLog ? {
+                openLogId: log ?? null,
+                // A log entry names a row of THIS stage, so opening one in
+                // follow-mode pins the stage too — otherwise a refresh could
+                // auto-pick a different stage and lose the entry.
+                onOpenLogChange: (id: string | null) => {
+                  if (id && selectedStage === null) setSelectedStage(stage.key)
+                  onOpenLog(id)
+                },
+              } : {})}
               externalMutationOwner={externalMutationOwner}
               onResponded={refetch}
               onActionError={setActionError}

@@ -7,7 +7,7 @@ import { type RunContext } from './run-context'
 import { runPlaywright, verificationPlanForSummary } from './run-playwright'
 import { captureHealAgentCause, cleanupHealAgentPty, emitAgentSystemMessage, persistAgentSessionRef, recordHealEnd, runHealAgent, waitForHealSignal } from './run-heal-agent'
 import { type HealEnd } from '../../../../../../../shared/run-state'
-import { type RunManifest } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { ESCALATION_THRESHOLD } from './heal-escalation'
 import {
@@ -16,15 +16,20 @@ import {
   snapshotFeatureRepos,
 } from './feature-repo-diff'
 import { planRestart } from './restart-planner'
-import { computeVerificationPlan, decideRunStatus, extractFailedSlugs, nonPassedSignatureFromPlan, readSummary, selectionForPlan, summarizeFailures, summaryHasPassingEvidence } from './run-verdict'
+import {
+  computeVerificationPlan,
+  decideRunStatus,
+  extractFailedSlugs,
+  readSummary,
+  summarizeFailures,
+} from './run-verdict'
+import { nonPassedSignatureFromPlan, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 import { healAgentCauseSuffix } from './heal-agent-text'
 import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
 import { adoptTestHealSpecEdits } from './run-suite-snapshot'
 import type { RunOrchestrator } from './orchestrator'
 import { finishClaimedAttempt } from './run-single-attempt'
-
-export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 
 /** The two class methods the loop still drives — they are the orchestrator's
  *  public surface, so they stay on it and arrive here as a handle. */

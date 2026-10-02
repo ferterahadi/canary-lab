@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { dirtySummaryView } from './review-view'
 import { testRequirementsOf, testRequirementsReader } from './test-requirements'
-import type { DirtySpec, SpecStrength } from './detect'
+import type { DirtySpec, SpecStrength } from '../../../../../../../shared/run-manifest'
 
 let featureDir: string
 

@@ -8,22 +8,22 @@ import {
   listVerificationConfigs,
   createVerificationConfig,
   updateVerificationConfig,
-} from '@/shared/api/client'
+} from '@/shared/api/verification'
+import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { VerificationDialog, reseedTargetUrls } from './VerificationDialog'
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    getVerificationTargets: vi.fn(),
-    listVerificationConfigs: vi.fn(),
-    createVerificationConfig: vi.fn(),
-    updateVerificationConfig: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/verification', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/verification')>()),
+  getVerificationTargets: vi.fn(),
+  listVerificationConfigs: vi.fn(),
+  createVerificationConfig: vi.fn(),
+  updateVerificationConfig: vi.fn(),
+}))
 
 let container: HTMLDivElement
 let root: Root
+let invalidate: ReturnType<typeof useInvalidation>['invalidate']
+function Bus() { invalidate = useInvalidation().invalidate; return null }
 
 const TARGETS = {
   targets: [
@@ -49,13 +49,13 @@ function savedConfig(over: Partial<Parameters<typeof createVerificationConfig>[1
 function render(props: Partial<Parameters<typeof VerificationDialog>[0]> = {}) {
   return act(async () => {
     root.render(
-      <VerificationDialog
+      <InvalidationProvider><Bus /><VerificationDialog
         feature="merchant-pass-fnb"
         envs={['local', 'staging']}
         onClose={props.onClose ?? (() => {})}
         onStart={props.onStart ?? (async () => {})}
         {...props}
-      />,
+      /></InvalidationProvider>,
     )
   })
 }
@@ -82,6 +82,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('VerificationDialog', () => {
@@ -271,4 +272,127 @@ describe('reseedTargetUrls', () => {
   it('treats a cleared field as untouched and re-seeds it', () => {
     expect(reseedTargetUrls({ api: '', oms: 'http://localhost:4000' }, LOCAL, STAGING)).toEqual(STAGING)
   })
+})
+
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((yes) => { resolve = yes })
+  return { promise, resolve }
+}
+const typeInto = async (label: string, value: string) => act(async () => {
+  const input = dialog().querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+})
+const saveButton = () => [...dialog().querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Save')!
+
+it('rejects the reproduced late initial list after an event accepts newer configurations', async () => {
+  const old = deferred<ReturnType<typeof savedConfig>[]>()
+  vi.mocked(listVerificationConfigs).mockReturnValueOnce(old.promise)
+  await render({ refreshKey: 0 })
+  vi.mocked(listVerificationConfigs).mockResolvedValue([{ ...savedConfig(), id: 'new', name: 'Newest' }])
+  await render({ refreshKey: 1 })
+  expect(dialog().textContent).toContain('Newest')
+  await act(async () => old.resolve([savedConfig()]))
+  expect(dialog().textContent).toContain('Newest')
+  expect(dialog().querySelector<HTMLSelectElement>('select[aria-label="Start from"]')?.value).toBe('new')
+})
+
+it('initializes from matching targets and rejects a late initial envset target response', async () => {
+  const old = deferred<typeof TARGETS>()
+  vi.mocked(getVerificationTargets).mockReturnValueOnce(old.promise).mockResolvedValue({ targets: [{ id: 'other', name: 'Current target' }], targetUrls: { other: 'https://current.test' } })
+  vi.mocked(listVerificationConfigs).mockResolvedValue([savedConfig({ playwrightEnvsetId: 'staging' })])
+  await render()
+  expect(getVerificationTargets).toHaveBeenLastCalledWith('merchant-pass-fnb', 'staging')
+  expect(dialog().textContent).toContain('Current target')
+  await act(async () => old.resolve(TARGETS))
+  expect(dialog().textContent).toContain('Current target')
+  expect(dialog().querySelector('input[aria-label="Health-check URL for acme-merchant-pass"]')).toBeNull()
+})
+
+it.each(['failed', 'hung'])('recovers %s initial reads every five seconds, including after empty lists', async (kind) => {
+  vi.useFakeTimers()
+  if (kind === 'failed') vi.mocked(listVerificationConfigs).mockRejectedValueOnce(new Error('offline'))
+  else vi.mocked(listVerificationConfigs).mockReturnValueOnce(new Promise(() => {}))
+  await render()
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(dialog().textContent).toContain('Save this setup')
+  vi.mocked(listVerificationConfigs).mockResolvedValue([savedConfig()])
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(dialog().textContent).toContain('Staging')
+})
+
+it('keeps edits and clears a removed selection instead of selecting another configuration', async () => {
+  vi.mocked(listVerificationConfigs).mockResolvedValue([savedConfig()])
+  const onStart = vi.fn(async () => {})
+  await render({ onStart })
+  await typeInto('Configuration name', 'My unsaved name')
+  await typeInto('Health-check URL for acme-merchant-pass', 'https://mine.test')
+  vi.mocked(listVerificationConfigs).mockResolvedValue([{ ...savedConfig(), id: 'other', name: 'Other' }])
+  await act(async () => invalidate('verification'))
+  expect(dialog().querySelector<HTMLSelectElement>('select[aria-label="Start from"]')?.value).toBe('')
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Configuration name"]')?.value).toBe('My unsaved name')
+  await act(async () => dialog().querySelector<HTMLButtonElement>('[data-testid="verification-start"]')!.click())
+  expect(onStart).toHaveBeenCalledWith({ playwrightEnvsetId: 'local', targetUrls: { api: 'https://mine.test' } })
+})
+
+it('accepts saves over in-flight reads without overwriting edits entered during the save', async () => {
+  await render()
+  await typeInto('Configuration name', 'Staging')
+  const saved = deferred<ReturnType<typeof savedConfig>>()
+  vi.mocked(createVerificationConfig).mockReturnValue(saved.promise)
+  await act(async () => saveButton().click())
+  await typeInto('Configuration name', 'Still typing')
+  const old = deferred<ReturnType<typeof savedConfig>[]>()
+  vi.mocked(listVerificationConfigs).mockReturnValueOnce(old.promise)
+  await act(async () => invalidate('verification'))
+  await act(async () => saved.resolve(savedConfig()))
+  await act(async () => old.resolve([]))
+  expect(dialog().querySelector<HTMLSelectElement>('select[aria-label="Start from"]')?.value).toBe('cfg_1')
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Configuration name"]')?.value).toBe('Still typing')
+})
+
+it('refreshes targets on configuration and reconnect invalidations while retaining edits', async () => {
+  await render()
+  await typeInto('Configuration name', 'Draft')
+  const before = vi.mocked(getVerificationTargets).mock.calls.length
+  await act(async () => invalidate('configuration', 'merchant-pass-fnb'))
+  await act(async () => invalidate('verification'))
+  expect(getVerificationTargets).toHaveBeenCalledTimes(before + 2)
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Configuration name"]')?.value).toBe('Draft')
+})
+
+it.each(['replacement', 'teardown'])('guards late launch completion after feature %s', async (mode) => {
+  const pending = deferred<void>()
+  const onClose = vi.fn()
+  await render({ onClose, onStart: () => pending.promise })
+  await act(async () => dialog().querySelector<HTMLButtonElement>('[data-testid="verification-start"]')!.click())
+  if (mode === 'replacement') await render({ feature: 'other' })
+  else await act(async () => root.render(null))
+  await act(async () => pending.resolve())
+  expect(onClose).not.toHaveBeenCalled()
+})
+
+
+it('keeps cleared user URLs through target reconciliation in the same envset', async () => {
+  vi.useFakeTimers()
+  await render()
+  await typeInto('Health-check URL for acme-merchant-pass', '')
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acme-merchant-pass"]')?.value).toBe('')
+})
+
+
+it('preserves edits entered after initial failure when recovery discovers saved configurations', async () => {
+  vi.useFakeTimers()
+  vi.mocked(listVerificationConfigs).mockRejectedValueOnce(new Error('offline')).mockResolvedValue([savedConfig({ playwrightEnvsetId: 'staging' })])
+  await render()
+  await typeInto('Configuration name', 'Draft during failure')
+  await typeInto('Health-check URL for acme-merchant-pass', 'https://mine.test')
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Configuration name"]')?.value).toBe('Draft during failure')
+  expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acme-merchant-pass"]')?.value).toBe('https://mine.test')
+  expect(dialog().querySelector<HTMLSelectElement>('select[aria-label="Start from"]')?.value).toBe('')
+  expect(dialog().querySelector<HTMLSelectElement>('select[aria-label="Envset"]')?.value).toBe('local')
 })

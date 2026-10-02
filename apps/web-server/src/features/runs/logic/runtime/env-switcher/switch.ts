@@ -2,37 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { spawn } from 'child_process';
-import type { EnvSetsConfig, BackupRecord } from './types';
-import { getFeaturesDir, getProjectRoot } from '../../../../../../../../shared/runtime/project-root';
-
-
-export function resolveVars(str: string, appRoots: Record<string, string>): string {
-  return str.replace(/\$([A-Z_]+)/g, (_, key) => appRoots[key] ?? `$${key}`);
-}
-
-export function getEnvSetsDir(featureName: string): string {
-  if (path.isAbsolute(featureName)) {
-    return path.join(featureName, 'envsets');
-  }
-  return path.join(getFeaturesDir(), featureName, 'envsets');
-}
-
-export function loadConfig(featureName: string): EnvSetsConfig {
-  const envSetsDir = getEnvSetsDir(featureName);
-  const configPath = path.join(envSetsDir, 'envsets.config.json');
-
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`Missing envsets config for "${featureName}" at ${configPath}`);
-  }
-
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const config = JSON.parse(raw) as EnvSetsConfig;
-  config.appRoots = {
-    CANARY_LAB_PROJECT_ROOT: getProjectRoot(),
-    ...config.appRoots,
-  };
-  return config;
-}
+import type { BackupRecord } from './types';
+import { getEnvSetsDir, loadConfig, resolveVars, getSlotFilesInSet } from '../../../../config/logic/envset-runtime';
 
 export function listEnvSets(envSetsDir: string): string[] {
   return fs
@@ -40,24 +11,6 @@ export function listEnvSets(envSetsDir: string): string[] {
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .sort();
-}
-
-export function getSlotFilesInSet(envSetsDir: string, setName: string, slots: string[]): string[] {
-  const setDir = path.join(envSetsDir, setName);
-  return slots.filter((slot) => fs.existsSync(path.join(setDir, slot)));
-}
-
-export function resolveSetTargets(
-  featureDir: string,
-  setName: string,
-): Array<{ slot: string; targetPath: string }> {
-  const envSetsDir = getEnvSetsDir(featureDir);
-  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return [];
-  const config = loadConfig(featureDir);
-  return getSlotFilesInSet(envSetsDir, setName, config.feature.slots).map((slot) => ({
-    slot,
-    targetPath: resolveVars(config.slots[slot].target, config.appRoots),
-  }));
 }
 
 export function backup(

@@ -1,7 +1,7 @@
 // Pure naming rules for the portify overlay — the ephemeral patch set saved
 // under `<featureDir>/portify/`. One home for the layout so the server (which
 // writes the files: apps/web-server .../runtime/overlay.ts) and the web UI
-// (which tells the user where they live: PortifyWizard's "Stored in" row)
+// (which tells the user where they live: SavedOverlayPanel's "Stored in" row)
 // can never drift on a filename.
 
 export const OVERLAY_DIRNAME = 'portify'

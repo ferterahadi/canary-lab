@@ -1,4 +1,5 @@
-import { transition, type DraftRecord } from '../logic/draft-store'
+import { transition } from '../logic/draft-store'
+import type { DraftRecord } from '../../../../../../shared/draft-types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import type { TestsDraftRouteDeps } from './tests-draft'
 

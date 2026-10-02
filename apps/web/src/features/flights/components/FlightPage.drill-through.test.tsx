@@ -3,8 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(async () => {}),
+  loadPortify: vi.fn(async (_id: string) => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -48,13 +47,11 @@ const mocks = vi.hoisted(() => ({
   evaluationTasks: vi.fn(() => []),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/flights', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
   getFlightRemedy: mocks.getFlightRemedy,
   applyFlightRemedy: mocks.applyFlightRemedy,
-  getRunDetail: mocks.getRunDetail,
-  listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
@@ -62,25 +59,37 @@ vi.mock('@/shared/api/client', () => ({
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
-  listRuns: mocks.listRuns,
-  getEnvsetSlot: mocks.getEnvsetSlot,
-  getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getFeatureCoverage: mocks.getFeatureCoverage,
-  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
-  getPlaywrightConfig: mocks.getPlaywrightConfig,
-  getRepoGitStatus: mocks.getRepoGitStatus,
-  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
-  putPlaywrightConfig: mocks.putPlaywrightConfig,
-  listFeatureDocs: mocks.listFeatureDocs,
   getFlightEntryOptions: mocks.getFlightEntryOptions,
-  importFeatureDoc: mocks.importFeatureDoc,
-  deleteFeatureDoc: mocks.deleteFeatureDoc,
-  deleteFeature: mocks.deleteFeature,
   linkFeatureDocPath: mocks.linkFeatureDocPath,
-  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/runs', () => ({
+  getRunDetail: mocks.getRunDetail,
+  listJournal: mocks.listJournal,
+  listRuns: mocks.listRuns,
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+}))
+vi.mock('@/shared/api/config', () => ({
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
+  getPlaywrightConfig: mocks.getPlaywrightConfig,
+  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
+  putPlaywrightConfig: mocks.putPlaywrightConfig,
+  deleteFeature: mocks.deleteFeature,
+}))
+vi.mock('@/shared/api/coverage', () => ({
+  getFeatureCoverage: mocks.getFeatureCoverage,
+  listFeatureDocs: mocks.listFeatureDocs,
+  importFeatureDoc: mocks.importFeatureDoc,
+  deleteFeatureDoc: mocks.deleteFeatureDoc,
+}))
+vi.mock('@/shared/api/workspace', () => ({
+  getRepoGitStatus: mocks.getRepoGitStatus,
+  openEditor: mocks.openEditor,
+}))
+vi.mock('@/shared/api/internal', () => ({
   ApiError: class ApiError extends Error {
     constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
   },
@@ -116,10 +125,13 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
-vi.mock('@/features/portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => {
+  const { detailFixture } = await import('../../portify/state/portify-detail.fixture')
+  return ({
   usePortify: () => ({ loadPortify: mocks.loadPortify }),
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
-}))
+  usePortifyDetail: detailFixture(async (id) => { await mocks.loadPortify(id); return mocks.portifyWorkflow(id) }, (id) => mocks.portifyWorkflow(id)),
+}) })
 
 // TestRunPanel reads the run detail + the run index off the shared runs store
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks

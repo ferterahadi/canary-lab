@@ -3,10 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest } from '@shared/flights/types'
 import { useFlightsStream } from './use-flights-stream'
-import { flightIndexEntry } from './flights-stream-state'
-
+import { flightIndexEntry } from '@shared/flights/index-entry'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // Minimal socket stand-in: the test drives `onmessage` / `onclose` directly.
@@ -133,4 +132,14 @@ describe('useFlightsStream', () => {
 
     expect(FakeSocket.opened.at(-1)).toBe(`ws://${window.location.host}/ws/flights`)
   })
+})
+
+it('reconciles a confirmed detail 404 through the same removal reducer without reconnecting', async () => {
+  await act(async () => { root.render(<Probe />) })
+  const flight = manifest()
+  await push({ type: 'snapshot', flights: [flightIndexEntry(flight)], details: { fl_1: flight } })
+  await act(async () => { seen.at(-1)!.forgetFlight('fl_1') })
+  expect(rows()).toBe('')
+  expect(seen.at(-1)?.details).toEqual({})
+  expect(FakeSocket.opened).toEqual(['ws://test/ws/flights'])
 })

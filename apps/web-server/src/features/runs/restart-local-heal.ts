@@ -1,3 +1,4 @@
+import { prepareRestartResources } from './logic/restart-preparation'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
 // Restarting a LOCAL (PTY) heal agent on a terminal run: rebuild the
 // orchestrator, re-attach the streams, and hand the user's guidance to the fresh
@@ -6,21 +7,19 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 // it, so it always needed to be shared.
 import path from 'path'
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
-import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import type { ServerContext } from '../../server-context'
-import { loadFeatures } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
-import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder } from './logic/runtime/auto-heal'
+import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
+import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
 import { reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
 import {
   restore,
 } from './logic/runtime/env-switcher/switch'
-import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { makeAttachRunStreams } from './run-stream-wiring'
 import { settleOrchestratorRun } from './logic/settle-run'
 import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
@@ -58,8 +57,7 @@ export function makeRestartLocalHeal(
       }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
-      const features = loadFeatures(featuresDir)
-      const feature = features.find((f) => f.name === manifest.feature)
+      const feature = findFeature(featuresDir, manifest.feature)
       if (!feature) return { ok: false, reason: 'not-restartable' as const }
 
       const runDir = runDirFor(logsDir, runId)
@@ -82,27 +80,19 @@ export function makeRestartLocalHeal(
       if (!manifest.env && env) {
         runnerLog.warn(`Restarting heal for legacy run without persisted env; defaulting to "${env}".`)
       }
-      const portMap = await allocateRunPorts(feature, env)
-      let backups: BackupRecord[] | null = null
-      if (env) {
-        try {
-          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
-          if (backups) runnerLog.info(`Applied envset "${env}" for restarted heal ${feature.name}`)
-        } catch (err) {
-          runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
+      const prepared = await prepareRestartResources({
+        feature, env, runnerLog,
+        envsetAppliedMessage: `Applied envset "${env}" for restarted heal ${feature.name}`,
+      })
+      if (!prepared.ok) {
+        if (prepared.stage === 'envset') {
+          runnerLog.warn(`envset apply failed: ${(prepared.error as Error).message}`)
           return { ok: false, reason: 'spawn-failed' as const }
         }
-      }
-
-      let repoBranchSnapshots
-      try {
-        await validateConfiguredRepoBranches(feature)
-        repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
-      } catch (err) {
-        if (backups) restore(backups)
-        runnerLog.warn(`Heal restart rejected: ${(err as Error).message}`)
+        runnerLog.warn(`Heal restart rejected: ${(prepared.error as Error).message}`)
         return { ok: false, reason: 'not-restartable' as const }
       }
+      const { portMap, backups, repoBranchSnapshots } = prepared
 
       let orch: RunOrchestrator
       try {

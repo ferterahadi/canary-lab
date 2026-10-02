@@ -1,18 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import {
-  activeBodyLineForTest,
-  executionLineHighlightForTest,
-  slugify,
-  summaryEntryName,
-  statusForTest,
-  statusFromPlaybackResult,
-  colorClassForStatus,
-  statusLabel,
-  statusPillClassForStatus,
-} from './test-step-status'
+import { activeBodyLineForTest, executionLineHighlightForTest, statusForTest, statusFromPlaybackResult, colorClassForStatus, statusLabel, statusPillClassForStatus } from './test-step-status'
+import { slugify, summaryEntryName } from '@shared/test-names'
 
 import { sourceLineForBodyLine } from './editor-location'
-import type { RunSummary } from '@/shared/api/types'
+import type { RunSummary } from '@shared/run-detail'
 
 describe('activeBodyLineForTest', () => {
   const summary: RunSummary = {

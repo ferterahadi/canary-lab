@@ -6,8 +6,9 @@ import {
   runsReducer,
   type RunsState,
 } from './runs-state'
-import { ApiError } from '@/shared/api/client'
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import { ApiError } from '@/shared/api/internal'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 
 // Helpers — small constructors for the shapes the reducer tests need.
 
@@ -282,6 +283,16 @@ describe('runsReducer', () => {
       runs: [entry({ runId: 'x' })],
     })
     expect(next.runs.map((r) => r.runId)).toEqual(['x'])
+  })
+
+  it.each(['boot', 'verify', undefined] as const)('HTTP recovery and stream updates share index derivation for %s runs', (executionType) => {
+    const start: RunsState = { ...initialRunsState, runs: [entry(), entry({ runId: 'older', startedAt: '2025-01-01T00:00:00Z' })], transients: { r1: 'aborting' } }
+    const recovered = detail({ executionType, status: 'aborted', endedAt: '2026-01-01T00:01:00Z', env: 'local' })
+    const next = runsReducer(start, { type: 'http-detail', runId: 'r1', detail: recovered })
+    expect(next).toEqual(runsReducer(start, { type: 'update', runId: 'r1', detail: recovered }))
+    expect(next.runs.map((run) => run.runId)).toEqual(['r1', 'older'])
+    expect(next.runs[0]).toMatchObject({ status: 'aborted', env: 'local', endedAt: '2026-01-01T00:01:00Z' })
+    expect(next.transients).toEqual({})
   })
 
   it('http-detail merges a single run detail (HTTP fallback path)', () => {

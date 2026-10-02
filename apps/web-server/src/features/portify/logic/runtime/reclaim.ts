@@ -1,10 +1,13 @@
+import { isTerminalPortifyStatus } from '../../../../../../../shared/portify-index'
 import fs from 'fs'
 import path from 'path'
-import { getGitRoot, resolveRepoPath, runGit } from '../../../../shared/git-repo'
+import { getGitRoot, runGit } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { removeWorktree } from '../../../runs/logic/runtime/repo-worktree'
 import { buildPortifyPaths, portifyDir } from './paths'
 import type { PortifyRunStore } from './store'
-import type { PortifyManifest, PortifyStatus } from './types'
+import type { PortifyManifest } from './types'
+import { INTERRUPTED_BY_RESTART } from '../../../../../../../shared/lib/file-backed-task-store'
 
 // Startup reclaim for port-ification workflows orphaned by a dead process
 // (crash, or Ctrl-C of the UI mid-run). The normal exit paths (commit/cancel/
@@ -27,15 +30,13 @@ import type { PortifyManifest, PortifyStatus } from './types'
 // This supersedes the store's pure-manifest `reconcileInterrupted` at startup;
 // it does the disk cleanup the store can't (the store does no git/fs I/O).
 
-const TERMINAL: ReadonlySet<PortifyStatus> = new Set<PortifyStatus>(['saved', 'failed', 'aborted'])
-
 export async function reclaimOrphanedPortify(
   store: PortifyRunStore,
   logsDir: string,
   now: () => string,
 ): Promise<void> {
   for (const entry of store.list()) {
-    if (TERMINAL.has(entry.status)) continue
+    if (isTerminalPortifyStatus(entry.status)) continue
     const m = store.get(entry.workflowId)
     if (!m) continue
     const { pendingOverlayPath } = buildPortifyPaths(portifyDir(logsDir, m.workflowId))
@@ -49,7 +50,7 @@ export async function reclaimOrphanedPortify(
       ...m,
       status: 'aborted',
       endedAt: m.endedAt ?? now(),
-      error: m.error ?? 'Interrupted by server restart',
+      error: m.error ?? INTERRUPTED_BY_RESTART,
     })
   }
 }

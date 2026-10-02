@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CopyFromModal } from './CopyFromModal'
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/config', () => ({
   getEnvsetSlot: vi.fn(async () => ({ entries: [{ key: 'PORT', value: '4000' }, { key: 'NEW', value: '' }] })),
 }))
 

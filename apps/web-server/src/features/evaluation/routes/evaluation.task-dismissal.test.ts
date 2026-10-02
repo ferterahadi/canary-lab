@@ -1,14 +1,16 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { evaluationRoutes } from './evaluation'
-import { createRegistry, RunStore } from '../../runs/logic/run-store'
+import { RunStore } from '../../runs/logic/run-store'
+import { createRegistry } from '../../runs/logic/run-registry'
 import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportLog, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { resolveManifestSessionRef, loadAgentSession } from '../../agent-sessions/logic/agent-session-log'
 
 vi.mock('../logic/evaluation-export-store', async (importOriginal) => {

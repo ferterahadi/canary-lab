@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { commitModelPlans, resolveRunModelPlan, reuseRunModelPlan } from './run-model-plan'
-import { EMPTY_AGENT_MODELS, type AgentModelsConfig } from '../../../agent-sessions/logic/agent-models'
+import { EMPTY_AGENT_MODELS, type AgentModelsConfig } from '../../../../../../../shared/agent-models'
 
 const config: AgentModelsConfig = {
   claude: {
@@ -36,6 +36,11 @@ describe('resolveRunModelPlan', () => {
     expect(plan.heal).toEqual({ model: 'sonnet', effort: 'medium' })
     // The override named only heal — commit still resolves from config.
     expect(plan.commit).toEqual({ model: 'haiku', effort: 'low' })
+  })
+
+  it('an explicit agent-default override beats the saved pin', () => {
+    expect(resolveRunModelPlan('claude', config, { heal: { model: null, effort: null } }).heal)
+      .toEqual({ model: null, effort: null })
   })
 
   it('degrades a junk override to config instead of failing the launch', () => {

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -11,6 +10,7 @@ import {
   updateReposToUpstream,
   type RepoUpdateReport,
 } from './repo-upstream-update'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
 
 // The per-run policy over `fastForwardToUpstream`: which repos, what an active
 // run means, and the one 409 that names every refusal. The git edge cases
@@ -22,10 +22,6 @@ const made: string[] = []
 afterEach(() => {
   for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
 })
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-}
 
 /** A clone one commit behind its bare origin. */
 function behindClone(): { clone: string; from: string; to: string } {

@@ -12,3 +12,9 @@ export function atomicWrite(file: string, body: string, mode?: number): void {
   fs.writeFileSync(tmp, body, { mode })
   fs.renameSync(tmp, file)
 }
+
+// The JSON every store here writes: two-space indent plus a trailing newline,
+// so a file diffs cleanly and matches what an editor would save.
+export function atomicWriteJson(file: string, value: unknown, mode?: number): void {
+  atomicWrite(file, JSON.stringify(value, null, 2) + '\n', mode)
+}

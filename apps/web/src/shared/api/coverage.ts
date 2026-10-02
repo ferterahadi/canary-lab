@@ -3,14 +3,14 @@
 
 import type { StageModelChoice } from '@shared/agent-models'
 import type { CoverageFreshness } from '@shared/coverage/freshness'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import type {
   CoverageLedger,
   CoverageJobIndexEntry,
   CoverageJobKind,
   CoverageJobManifest,
-  FeatureDocsListing,
   PrdSummary,
-} from './types'
+} from '@shared/coverage/types'
 import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 

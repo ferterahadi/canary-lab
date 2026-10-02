@@ -1,4 +1,5 @@
 import { CLIENT_KIND, type ToolGroupContext } from '../../tool-support'
+import { toolResultText } from '../../__fixtures__/tool-result'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../../client-surface'
 import type { GettingStartedBusyActive, GettingStartedDemoClaim, GettingStartedDemoTarget } from '../../tool-schemas'
@@ -104,8 +105,7 @@ export function captureTools(
     const handler = handlers.get(tool)
     if (!handler) throw new Error(`tool-group harness: no such tool "${tool}"`)
     const result = await handler(args)
-    const content = result.content as CallToolResult['content'] | undefined
-    return content?.[0]?.type === 'text' ? content[0].text : ''
+    return toolResultText(result)
   }
   return {
     raw,

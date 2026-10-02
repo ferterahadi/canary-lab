@@ -1,8 +1,10 @@
+import type { RepositoryObserver } from './shared/repository-observer'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
 import type { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
-import type { OrchestratorRegistry, RunStore } from './features/runs/logic/run-store'
+import type { RunStore } from './features/runs/logic/run-store'
+import type { OrchestratorRegistry } from './features/runs/logic/run-registry'
 import type { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import type { PortifyRunStore } from './features/portify/logic/runtime/store'
 import type { CoverageJobRunStore } from './features/coverage/logic/coverage/jobs/store'
@@ -87,6 +89,7 @@ export interface ServerContext {
   dirtySpecStore: DirtySpecStore
   updateStore: UpdateJobStore
   versionState: VersionState
+  repositoryObserver?: RepositoryObserver
   workspaceEvents: WorkspaceEventBus
   gettingStarted: GettingStartedSessionStore
   externalHealBroker: ExternalHealBroker

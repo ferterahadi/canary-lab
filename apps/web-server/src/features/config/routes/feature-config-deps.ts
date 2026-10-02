@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from '../../../shared/repository-observer'
 
 import fs from 'fs'
 import os from 'os'
@@ -5,6 +6,7 @@ import path from 'path'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FeatureConfigRouteDeps {
+  repositoryObserver?: RepositoryObserver
   featuresDir: string
   isRepoActive?: (feature: string, repo: string) => boolean
   workspaceEvents?: WorkspaceEventPublisher

@@ -10,6 +10,28 @@ afterEach(() => {
 })
 
 describe('suite single-attempt receipt', () => {
+  it('selects and reloads legacy policies by existence, without falling back past invalid configuration', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-legacy-order-'))
+    dirs.push(root)
+    const featureDir = path.join(root, 'demo')
+    fs.mkdirSync(featureDir)
+    const manifest = { feature: 'demo', featureDir }
+    for (const format of ['ts', 'js', 'cjs']) {
+      fs.writeFileSync(path.join(featureDir, `feature.config.${format}`),
+        `exports.config = { name: 'demo', singleAttempt: { receipt: '${format}.json' } }`)
+    }
+    for (const format of ['cjs', 'js', 'ts']) {
+      const file = path.join(featureDir, `feature.config.${format}`)
+      expect(policyForRunManifest(manifest)).toEqual({ receipt: `${format}.json` })
+      fs.writeFileSync(file, "exports.config = { name: 'demo', singleAttempt: { receipt: 'rewritten.json' } }")
+      expect(policyForRunManifest(manifest)).toEqual({ receipt: 'rewritten.json' })
+      fs.writeFileSync(file, 'throw new Error("invalid first candidate")')
+      expect(policyForRunManifest(manifest)).toBeUndefined()
+      fs.unlinkSync(file)
+    }
+    expect(policyForRunManifest(manifest)).toBeUndefined()
+  })
+
   it('accepts a run-relative receipt and observes the suite claim', () => {
     const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-attempt-'))
     dirs.push(runDir)

@@ -1,5 +1,6 @@
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import type { PortifyStatus } from '../../../../../../../shared/portify-index'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../../../../shared/run-mode'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
@@ -7,24 +8,6 @@ import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../.
 // PROVEN by booting the stack twice concurrently on different ports. The flow
 // edits the product repo on a dedicated branch in a git worktree, verifies, and
 // ends at a user-confirmed commit. Modeled on the benchmark subsystem.
-
-// Ephemeral-overlay model: the workflow parks at `ready-to-save` and ends at
-// `saved` (the captured patch is written to features/<feature>/portify/, never
-// committed/merged).
-export type PortifyStatus =
-  | 'planning'
-  | 'editing'
-  | 'verifying'
-  | 'ready-to-save'
-  | 'saved'
-  | 'failed'
-  | 'aborted'
-
-/** A workflow the user or a Flight can still follow or act on. */
-export function isActivePortifyStatus(status: PortifyStatus): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying'
-    || status === 'ready-to-save'
-}
 
 export interface PortifyBootInstance {
   /** Slot name → port this boot was assigned. */
@@ -113,22 +96,6 @@ export interface PortifyManifest {
   diff?: string
   verification?: PortifyVerification
   error?: string
-}
-
-export interface PortifyIndexEntry {
-  workflowId: string
-  feature: string
-  status: PortifyStatus
-  /** Ephemeral scratch-branch name — surfaced in the history list. Optional:
-   *  index entries persisted before this field existed deserialize without it. */
-  branch?: string
-  startedAt: string
-  endedAt?: string
-  /** Mirrored from the manifest so the activity map can tell an external
-   *  (MCP-client-driven) workflow from a spawned one off the index alone.
-   *  Absent on entries written before the mirror existed — those all predate
-   *  external portify, so absent = internal. */
-  producer?: PortifyProducer
 }
 
 export interface StartPortifyInput {

@@ -1,8 +1,6 @@
 import net from 'net'
 import type { PortSlot } from '../../../../../../../shared/launcher/types'
 
-export type { PortSlot }
-
 /**
  * Per-run port allocation. Concurrent runs of the same app would otherwise
  * fight over a hardcoded port (e.g. both binding :4100). The allocator hands

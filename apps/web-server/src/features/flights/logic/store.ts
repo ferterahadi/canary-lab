@@ -1,8 +1,17 @@
 import path from 'path'
-import type { FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey, FlightStatus } from './types'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, isTerminalFlightStatus } from './types'
-import { stageHasEvidence } from '../../../../../../shared/flights/types'
-import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
+import { resolveRepoIdentity } from '../../../shared/repo-identity'
+import { flightIndexEntry } from '../../../../../../shared/flights/index-entry'
+import {
+  stageHasEvidence,
+  type FlightIndexEntry,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStatus,
+  FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
+  isTerminalFlightStatus,
+} from '../../../../../../shared/flights/types'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the flight-specific
@@ -49,44 +58,8 @@ export interface FlightStore {
   offEvent(fn: (event: FlightStoreEvent) => void): void
 }
 
-function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
-  // Clearable keys (group / pauseReason / checkpointKind / endedAt) are ALWAYS present — as
-  // `undefined` when the manifest has none — because the index upsert is a
-  // shallow merge (`{ ...oldRow, ...entry }`): a merge can overwrite a key but
-  // never delete one, so omitting a cleared key would leave the previous
-  // value stuck on the row forever (a resumed flight showing `running` WITH
-  // its old `pauseReason: "stage-failed"`). An explicit `undefined` overrides
-  // the stale value in the merge, and JSON.stringify drops the key on write.
-  return {
-    id: m.flightId,
-    createdAt: m.createdAt,
-    flightId: m.flightId,
-    feature: m.feature,
-    repoPaths: m.repoPaths,
-    group: m.opts.group,
-    status: m.status,
-    pauseReason: m.pauseReason,
-    // Which kind of stop a parked flight is on, so the slim consumers can tell
-    // a question for the human from an `external-work` hand-off without
-    // loading the manifest. Only one stage can be parked at a time.
-    checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
-    // Who drives the flight, so the slim consumers can tell an externally
-    // driven flight (read-only here — every decision belongs to the MCP client
-    // that started it) from one this UI may act on.
-    stageProducer: m.opts.stageProducer,
-    currentStage: m.currentStage,
-    stages: m.stages.map((s) => ({
-      key: s.key, status: s.status,
-      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
-      ...(stageHasEvidence(s.evidence) ? { hasEvidence: true } : {}),
-    })),
-    updatedAt: m.updatedAt,
-    endedAt: m.endedAt,
-  }
-}
-
 function repoSetsIntersect(a: string[], b: string[]): boolean {
-  const norm = (p: string) => path.resolve(p)
+  const norm = (p: string) => resolveRepoIdentity(p, 'best-effort')
   const set = new Set(a.map(norm))
   return b.some((p) => set.has(norm(p)))
 }
@@ -143,7 +116,7 @@ function settleLegacyTerminalStages(stages: FlightStage[], status: FlightStatus)
 }
 
 export class FlightRunStore implements FlightStore {
-  private readonly listeners = new Set<(event: FlightStoreEvent) => void>()
+  private readonly events = new TaskListeners<FlightStoreEvent>()
   private readonly store: FileBackedTaskStore<FlightManifest>
 
   constructor(public readonly logsDir: string) {
@@ -152,7 +125,7 @@ export class FlightRunStore implements FlightStore {
       dirName: 'flights',
       recordFile: 'flight.json',
       idOf: (m) => m.flightId,
-      indexEntryOf: indexEntryFromManifest,
+      indexEntryOf: flightIndexEntry,
       featureOf: (m) => m.feature,
       withFeature: (m, feature) => ({ ...m, feature }),
       sortNewestFirst: true,
@@ -186,7 +159,7 @@ export class FlightRunStore implements FlightStore {
       },
     })
     this.repairLegacyRecords()
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, flightId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, flightId: e.id }))
   }
 
   /** Bring persisted records up to today's shape at open, before anything
@@ -254,18 +227,10 @@ export class FlightRunStore implements FlightStore {
   }
 
   onEvent(fn: (event: FlightStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: FlightStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: FlightStoreEvent): void {
-    for (const fn of this.listeners) {
-      try { fn(event) } catch { /* a bad listener must not break persistence */ }
-    }
+    this.events.delete(fn)
   }
 }
-
-export type { FlightManifest, FlightIndexEntry, FlightStageKey }

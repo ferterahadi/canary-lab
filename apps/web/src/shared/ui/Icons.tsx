@@ -149,6 +149,38 @@ export function AlertCircleIcon({ size = 13 }: { size?: number } = {}) {
   )
 }
 
+/** A still frame — the screenshot tab of a played-back test's evidence. */
+export function ImageIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="m21 16-5-5-9 9" />
+    </svg>
+  )
+}
+
+/** A recording — the video tab of a played-back test's evidence. */
+export function VideoIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path d="m16 10 5-3v10l-5-3" />
+    </svg>
+  )
+}
+
+/** A numbered list — the steps tab of a played-back test's evidence. */
+export function StepsIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 6h11M10 12h11M10 18h11" />
+      <path d="M4 6h1v4M4 10h2" />
+      <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+    </svg>
+  )
+}
+
 /** A test file in the working tree — the "current source" half of the tests
  *  header. Paired with `PlayIcon`, the two glyphs carry a distinction the
  *  words "Source" and "Run" used to spend a third of the bar spelling out. */

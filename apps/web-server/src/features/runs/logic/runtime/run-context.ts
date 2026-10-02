@@ -17,10 +17,17 @@ import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, type RunPaths } from './run-paths'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
-import { HealSignalGate, type RunBootFailure, type RunServiceFailure } from '../../../../../../../shared/run-state'
+import {
+  HealSignalGate,
+  type RunBootFailure,
+  type RunServiceFailure,
+  type RunLifecyclePhase,
+  type RunLifecycleAbortReason,
+} from '../../../../../../../shared/run-state'
 import { AgentSessionRefStore } from './agent-session-refs'
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import { isHealthy } from '../../../../shared/launcher-startup'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../../shared/config-file'
 import { defaultPlaywrightSpawner } from './run-spawn'
 import { buildServiceSpecs } from './service-specs'
 import type { ServiceSpec, OrchestratorOptions, OrchestratorEventMap, AutoHealConfig, DirtySpecHooks } from './run-orchestrator-types'
@@ -30,15 +37,13 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { WorktreeHandle } from './repo-worktree'
 import type {
   RunManifest,
-  RunLifecyclePhase,
-  RunLifecycleAbortReason,
   RepoBranchSnapshot,
   StoppedEarlyReason,
   ExternalHealSession,
-} from './manifest'
+} from '../../../../../../../shared/run-manifest'
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
-import type { RunModelPlan } from './run-model-plan'
+import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
@@ -214,8 +219,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     portMap: opts.portMap,
     worktreeHandles,
     repoPathOverrides,
-    dependencyConfigPath: ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-      .map((name) => path.join(opts.feature.featureDir, name)).find((candidate) => fs.existsSync(candidate)),
+    dependencyConfigPath: findExistingConfig(opts.feature.featureDir, FEATURE_CONFIG_NAMES)?.path,
     dependencyProvenance: opts.dependencyProvenance ?? [],
     portified: overlayExists(opts.feature.featureDir),
     services: buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
@@ -247,7 +251,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     manualHeal: opts.manualHeal ?? false,
     externalHeal: opts.externalHeal ?? false,
     externalHealSession: opts.externalHealSession,
-    healSignalPollMs: opts.healSignalPollMs ?? healthPollIntervalMs,
+    healSignalPollMs: opts.healSignalPollMs ?? opts.healthPollIntervalMs ?? 100,
     // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
     // off mid-work for a hard, agent-blind reason — the idle timeout below
     // is the primary safety net.

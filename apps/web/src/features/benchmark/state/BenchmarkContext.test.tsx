@@ -3,9 +3,12 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { BenchmarkIndexEntry, BenchmarkManifest } from '../api/benchmark-types'
-import { BenchmarkProvider, useBenchmark, useBenchmarks } from './BenchmarkContext'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import { ApiError } from '@/shared/api/internal'
+import { BenchmarkDetail } from '../components/BenchmarkDetail'
+import type { BenchmarkManifest } from '../api/benchmark-types'
+import type { BenchmarkIndexEntry } from '@shared/benchmark-index'
+import { BenchmarkProvider, useBenchmark, useBenchmarkDetail, useBenchmarks } from './BenchmarkContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -13,15 +16,12 @@ import { BenchmarkProvider, useBenchmark, useBenchmarks } from './BenchmarkConte
 // benchmark-state.test.ts. This suite owns the provider: the socket lifecycle
 // (connect, reconnect backoff, teardown), the one-shot actions, and the two
 // read hooks — none of which the pure module can reach.
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    startBenchmark: vi.fn(),
-    abortBenchmark: vi.fn(),
-    getBenchmark: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/benchmark', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/benchmark')>()),
+  startBenchmark: vi.fn(),
+  abortBenchmark: vi.fn(),
+  getBenchmark: vi.fn(),
+}))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -29,6 +29,7 @@ class FakeWebSocket {
   onmessage: ((event: { data: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   closed = false
+  readyState = 0
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this)
@@ -36,6 +37,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 
@@ -99,9 +101,9 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.startBenchmark).mockReset().mockResolvedValue({ benchmarkId: 'bm-new' } as never)
-  vi.mocked(api.abortBenchmark).mockReset().mockResolvedValue({ ok: true } as never)
-  vi.mocked(api.getBenchmark).mockReset()
+  vi.mocked(benchmarkApi.startBenchmark).mockReset().mockResolvedValue({ benchmarkId: 'bm-new' } as never)
+  vi.mocked(benchmarkApi.abortBenchmark).mockReset().mockResolvedValue({ ok: true } as never)
+  vi.mocked(benchmarkApi.getBenchmark).mockReset()
 })
 
 afterEach(() => {
@@ -200,6 +202,62 @@ describe('BenchmarkProvider — socket lifecycle', () => {
     expect(benchmarks.connection).toBe('disconnected')
   })
 
+  it('preserves exact label timing, keeps retrying at the cap, and resets on open', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream' })
+    act(() => { socket().onopen?.() })
+    for (const [index, delay] of [500, 1000, 2000, 4000, 8000, 10000, 10000].entries()) {
+      act(() => { socket().onclose?.() })
+      expect(benchmarks.connection).toBe('reconnecting')
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1) })
+      expect(benchmarks.connection).toBe('reconnecting')
+      expect(FakeWebSocket.instances).toHaveLength(index + 1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(FakeWebSocket.instances).toHaveLength(index + 2)
+      expect(benchmarks.connection).toBe(delay === 10000 ? 'disconnected' : 'reconnecting')
+    }
+    act(() => { socket().onopen?.() })
+    expect(benchmarks.connection).toBe('live')
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(499) })
+    expect(FakeWebSocket.instances).toHaveLength(8)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(FakeWebSocket.instances).toHaveLength(9)
+  })
+
+  it('keeps the initial label during constructor failures until the capped retry fires', async () => {
+    vi.useFakeTimers()
+    const Broken = function Broken() { throw new Error('offline') } as unknown as typeof WebSocket
+    mount({ wsUrl: 'ws://test/stream', WebSocketImpl: Broken })
+    expect(benchmarks.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(25_499) })
+    expect(benchmarks.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(benchmarks.connection).toBe('disconnected')
+  })
+
+  it('recovers missed changes from a new snapshot and preserves frame coercion', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream', detailId: 'bm-1' })
+    act(() => { socket().fire({ type: 'snapshot', benchmarks: [entry()], details: { 'bm-1': manifest() } }) })
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    const recovered = manifest({ status: 'aborted' })
+    act(() => {
+      socket().onopen?.()
+      socket().onmessage?.({ data: { toString: () => JSON.stringify({
+        type: 'snapshot', benchmarks: [entry({ status: 'aborted' })], details: { 'bm-1': recovered },
+      }) } })
+    })
+    expect(benchmarks.connection).toBe('live')
+    expect(benchmarks.benchmarks).toHaveLength(1)
+    expect(benchmarks.benchmarks[0].status).toBe('aborted')
+    expect(detail?.status).toBe('aborted')
+    act(() => { socket().fire({ type: 'removed', benchmarkId: 'bm-1' }) })
+    expect(benchmarks.benchmarks).toEqual([])
+    expect(detail).toBeUndefined()
+  })
+
   it('schedules a reconnect when the socket cannot even be constructed', async () => {
     vi.useFakeTimers()
     let attempts = 0
@@ -252,7 +310,7 @@ describe('BenchmarkProvider — actions', () => {
       })
     })
 
-    expect(api.startBenchmark).toHaveBeenCalledWith({
+    expect(benchmarkApi.startBenchmark).toHaveBeenCalledWith({
       feature: 'checkout', skill: 'canary-lab-run', level: 'med', iterations: 3, agent: 'claude',
     })
     expect(id).toBe('bm-new')
@@ -263,11 +321,11 @@ describe('BenchmarkProvider — actions', () => {
 
     await act(async () => { await benchmarks.abortBenchmark('bm-1') })
 
-    expect(api.abortBenchmark).toHaveBeenCalledWith('bm-1')
+    expect(benchmarkApi.abortBenchmark).toHaveBeenCalledWith('bm-1')
   })
 
   it('hydrates a terminal benchmark the snapshot left out', async () => {
-    vi.mocked(api.getBenchmark).mockResolvedValue(manifest({ benchmarkId: 'bm-old', status: 'done' }) as never)
+    vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ benchmarkId: 'bm-old', status: 'done' }) as never)
     mount({ wsUrl: 'ws://test/ws/benchmark', detailId: 'bm-old' })
     expect(detail).toBeUndefined()
 
@@ -277,7 +335,7 @@ describe('BenchmarkProvider — actions', () => {
   })
 
   it('leaves the detail unhydrated when the fetch fails', async () => {
-    vi.mocked(api.getBenchmark).mockRejectedValue(new Error('404'))
+    vi.mocked(benchmarkApi.getBenchmark).mockRejectedValue(new Error('404'))
     mount({ wsUrl: 'ws://test/ws/benchmark', detailId: 'bm-old' })
 
     await act(async () => { await benchmarks.loadBenchmark('bm-old') })
@@ -286,7 +344,7 @@ describe('BenchmarkProvider — actions', () => {
   })
 
   it('leaves the detail unhydrated when the server answers with nothing', async () => {
-    vi.mocked(api.getBenchmark).mockResolvedValue(undefined as never)
+    vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(undefined as never)
     mount({ wsUrl: 'ws://test/ws/benchmark', detailId: 'bm-old' })
 
     await act(async () => { await benchmarks.loadBenchmark('bm-old') })
@@ -311,4 +369,92 @@ describe('BenchmarkProvider — read hooks', () => {
     expect(() => act(() => { root.render(<Outside />) }))
       .toThrow(/useBenchmarks must be used inside <BenchmarkProvider>/)
   })
+})
+
+let hydrated: ReturnType<typeof useBenchmarkDetail>
+function Demand({ id = 'bm-1' }: { id?: string }) { hydrated = useBenchmarkDetail(id); return null }
+const demand = (id = 'bm-1', count = 1) => act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+  {Array.from({ length: count }, (_, key) => <Demand key={key} id={id} />)}
+</BenchmarkProvider>) })
+function delayed() { let resolve!: (value: BenchmarkManifest) => void; const promise = new Promise<BenchmarkManifest>((yes) => { resolve = yes }); return { promise, resolve } }
+
+it('recovers a failed detail read shared by two consumers and rehydrates terminal reconnect snapshots', async () => {
+  vi.useFakeTimers()
+  vi.mocked(benchmarkApi.getBenchmark).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(manifest({ status: 'done' }))
+  await demand('bm-1', 2)
+  expect(hydrated.error).toBe('offline')
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(1)
+  await demand('bm-1', 1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+  expect(hydrated.manifest?.status).toBe('done')
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(2)
+  await act(async () => { socket().onclose?.(); await vi.advanceTimersByTimeAsync(500) })
+  await act(async () => { socket().fire({ type: 'snapshot', benchmarks: [entry({ status: 'done' })], details: {} }) })
+  expect(hydrated.manifest?.status).toBe('done')
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(3)
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(3)
+})
+
+it('supersedes hung detail reads and cancels demand on identity replacement and teardown', async () => {
+  vi.useFakeTimers()
+  const old = delayed()
+  const current = delayed()
+  const replacement = delayed()
+  vi.mocked(benchmarkApi.getBenchmark).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise).mockReturnValueOnce(replacement.promise)
+  await demand()
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+  await act(async () => { current.resolve(manifest({ status: 'done' })); old.resolve(manifest()) })
+  expect(hydrated.manifest?.status).toBe('done')
+  await demand('bm-next')
+  expect(hydrated.manifest).toBeUndefined()
+  await act(async () => { root.render(null) })
+  await act(async () => { replacement.resolve(manifest({ benchmarkId: 'bm-next' })); await vi.advanceTimersByTimeAsync(10000) })
+  expect(hydrated.manifest).toBeUndefined()
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(3)
+})
+
+it.each(['update', 'removed', 'snapshot'] as const)('rejects HTTP after a newer %s observation', async (type) => {
+  vi.useFakeTimers()
+  const old = delayed(); vi.mocked(benchmarkApi.getBenchmark).mockReturnValue(old.promise)
+  await demand()
+  await act(async () => {
+    if (type === 'update') socket().fire({ type, benchmarkId: 'bm-1', manifest: manifest({ status: 'done' }) })
+    else if (type === 'removed') socket().fire({ type, benchmarkId: 'bm-1' })
+    else socket().fire({ type, benchmarks: [], details: {} })
+    old.resolve(manifest()); await vi.advanceTimersByTimeAsync(10000)
+  })
+  expect(hydrated.manifest?.status).toBe(type === 'update' ? 'done' : undefined)
+  expect(hydrated.missing).toBe(type !== 'update')
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(1)
+})
+
+it('stops at 404, supports Retry, and accepts stream reappearance', async () => {
+  vi.useFakeTimers()
+  vi.mocked(benchmarkApi.getBenchmark).mockRejectedValue(new ApiError(404, {}))
+  await demand()
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(hydrated.missing).toBe(true)
+  expect(benchmarkApi.getBenchmark).toHaveBeenCalledTimes(1)
+  vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'done' }))
+  await act(async () => { hydrated.retry() })
+  expect(hydrated.manifest?.status).toBe('done')
+  await act(async () => { socket().fire({ type: 'removed', benchmarkId: 'bm-1' }) })
+  expect(hydrated.missing).toBe(true)
+  await act(async () => { socket().fire({ type: 'update', benchmarkId: 'bm-1', manifest: manifest() }) })
+  expect(hydrated.missing).toBe(false)
+  expect(hydrated.manifest?.status).toBe('running')
+})
+
+it('the actual detail view replaces indefinite loading with failure, missing, and Retry', async () => {
+  vi.mocked(benchmarkApi.getBenchmark).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new ApiError(404, {}))
+  await act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+    <BenchmarkDetail id="bm-1" onClose={vi.fn()} onNew={vi.fn()} />
+  </BenchmarkProvider>) })
+  expect(container.textContent).toContain('offline')
+  await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
+  expect(container.textContent).toContain('no longer available')
+  vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Synthetic outcome', startedAt: '2026-01-01', arms: [], results: [] }))
+  await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
+  expect(container.textContent).toContain('Synthetic outcome')
 })

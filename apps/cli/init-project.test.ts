@@ -1,23 +1,19 @@
+import { resolveFirstExisting } from './package-assets'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const execFileSync = vi.fn(() => Buffer.from(''))
 const setupProject = vi.fn()
 vi.mock('child_process', () => ({ execFileSync }))
 vi.mock('./setup', () => ({ setup: setupProject }))
 
-const { main, parseArgs, copyDir, resolveFirstExisting, buildPackageJson } = await import(
+const { main, parseArgs, copyDir, buildPackageJson } = await import(
   './init-project'
 )
 
-const tmpDirs: string[] = []
-function mkTmp(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-init-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
-}
+const mkTmp = trackTempDirs('cl-init-')
 
 let originalCwd: string
 beforeEach(() => {
@@ -29,7 +25,6 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(originalCwd)
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 
@@ -445,4 +440,24 @@ describe('main (init-project orchestration)', () => {
     expect(messages.join('\n')).toContain('Canary Lab setup skipped: setup failed')
     expect(messages.join('\n')).toContain('npx canary-lab setup')
   })
+})
+
+it.each(['', { alternate: 'cli.js' }])('keeps initialization fallback for bin %j', async (bin) => {
+  const workspace = mkTmp()
+  process.chdir(workspace)
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  const target = path.join(workspace, 'lookup-policy')
+  execFileSync.mockImplementation((cmd: string) => {
+    if (cmd === 'npm') {
+      const pkgRoot = path.join(target, 'node_modules', 'canary-lab')
+      fs.mkdirSync(pkgRoot, { recursive: true })
+      fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin }))
+      fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '')
+    }
+    return Buffer.from('')
+  })
+  await main(['lookup-policy', '--package-spec', '^9.9.9'])
+  expect(setupProject).toHaveBeenCalledWith(
+    { workspace: target, agent: 'auto', dryRun: false, force: false, implicit: true }, {},
+  )
 })

@@ -1,10 +1,19 @@
 import { useMemo } from 'react'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
-import type { FlightStageKey, FlightStageStatus, PortifyIndexEntry } from '@/shared/api/client'
-import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
-import { useEvaluationExports } from '@/features/evaluation'
-import { useRuns } from '@/features/runs'
-import { isActivePortify, usePortify } from '@/features/portify'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStageKey,
+  type FlightStageStatus,
+} from '@shared/flights/types'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { Feature } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunStatus } from '@shared/run-state'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { useRuns } from '@/features/runs/state/RunsContext'
+import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
+import { usePortify } from '@/features/portify/state/PortifyContext'
 import type { FeatureExternalHistory, StageExternalHistory } from '../state/feature-activity'
 import { isAuxiliaryExecution } from '@shared/verification'
 
@@ -204,19 +213,23 @@ export function derivedEntryStage(stages: DerivedStage[]): FlightStageKey | null
 }
 
 /** The latest settled test run per feature (boots/benchmarks/verifies are not
- *  feature runs; active runs surface via the activity overlay instead). */
-export function latestTerminalRunByFeature(runs: RunIndexEntry[]): Map<string, RunIndexEntry> {
+ *  feature runs; active runs surface via the activity overlay instead). Stage
+ *  evidence counts only a verdict; the suites column also shows an abort. */
+export function latestTerminalRunByFeature(
+  runs: RunIndexEntry[],
+  statuses: readonly RunStatus[] = ['passed', 'failed'],
+): Map<string, RunIndexEntry> {
   const map = new Map<string, RunIndexEntry>()
   for (const r of runs) {
     if (isAuxiliaryExecution(r.executionType) || r.executionType === 'verify') continue
-    if (r.status !== 'passed' && r.status !== 'failed') continue
+    if (!statuses.includes(r.status)) continue
     const prev = map.get(r.feature)
     if (!prev || r.startedAt.localeCompare(prev.startedAt) > 0) map.set(r.feature, r)
   }
   return map
 }
 
-function hasDoneExport(tasks: EvaluationExportTask[], feature: string): boolean {
+function hasDoneExport(tasks: EvaluationExportTaskView[], feature: string): boolean {
   return tasks.some((t) => t.feature === feature && t.status === 'completed')
 }
 

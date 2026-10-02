@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { CoverageLedger } from '@/shared/api/types'
+import type { CoverageLedger } from '@shared/coverage/types'
 import { CoverageHeader, CoverageRing } from './CoverageHeader'
 import { LEDGER } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
 

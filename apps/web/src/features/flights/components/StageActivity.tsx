@@ -1,12 +1,13 @@
-import { useEffect, type ReactNode } from 'react'
-import type { FlightStageKey, SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
-import { AgentSessionView, type AgentSessionSegmentSource, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import { useCallback, useEffect, useRef, type ReactNode } from 'react'
+import type { FlightStageKey, SpecsCoverageProgress as SpecsCoverageProgressT } from '@shared/flights/types'
+import { AgentSessionView, type AgentSessionSegmentSource, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import type { ExternalSessionActivity } from '@/shared/ui/activity-log'
 import { EMPTY_COPY, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { StatusDot } from '@/shared/ui/atoms'
 import { useResizableHeight } from '@/shared/ui/use-resizable-height'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
-import { useEvaluationExportLog } from '@/features/evaluation'
+import { useEvaluationExportLog } from '@/features/evaluation/state/EvaluationExportContext'
 import { StageColumn } from './stage-meta'
 
 interface StageActivityRailProps {
@@ -41,6 +42,9 @@ interface StageActivityRailProps {
    *  client, or its log was cleaned — and saying nothing ran contradicts the
    *  panels above it. */
   empty?: EmptyCopy
+  /** The routed id of the log entry open in the Activity modal (`?log=`). */
+  openLogId?: string | null
+  onOpenLogChange?: (id: string | null) => void
 }
 
 /** The stage's activity band (R66): ONE consolidated block, identical for every
@@ -68,6 +72,8 @@ export function StageActivityRail({
   open: controlledOpen,
   onOpenChange,
   empty,
+  openLogId,
+  onOpenLogChange,
 }: StageActivityRailProps) {
   // Report activity belongs to the export task, not any flight pass sidecars.
   const isReport = stageKey === 'evaluation-export'
@@ -76,31 +82,50 @@ export function StageActivityRail({
   // The Activity boundary is stable for the lifetime of a stage. Before the
   // first run it stays collapsed with an honest empty state; once work starts it
   // opens in place instead of appearing as a new piece of page chrome.
-  const open = controlledOpen ?? live
+  // A routed log entry (a refresh, a shared link) opens the band too: the
+  // entry's modal lives inside the timeline, which a folded band doesn't mount.
+  // Opening it is recorded as the reader's choice, so closing the modal leaves
+  // the band where the entry was.
+  const open = Boolean(openLogId) || (controlledOpen ?? live)
+  const restingOpen = controlledOpen ?? live
+  useEffect(() => {
+    if (openLogId && !restingOpen) onOpenChange(true)
+  }, [openLogId, restingOpen, onOpenChange])
   // One height for every stage's Activity band: it is a reading preference, not
   // a property of the stage, so switching stages must not reset it. Collapse is
   // the same gesture's end stop rather than a button — see the bar below.
+  // The band may grow until it meets the stage header: its ceiling is the
+  // whole column it shares with the stage panes, measured when the edge moves.
+  // The panes' scroller carries no padding of its own, so it can shrink to
+  // nothing and the band's top edge reaches the flight's facts strip.
+  const sectionRef = useRef<HTMLElement>(null)
+  const ceilingPx = useCallback(() => {
+    const room = sectionRef.current?.parentElement?.clientHeight ?? 0
+    return room > 0 ? room : null
+  }, [])
   const { height: activityHeight, dragging, handleProps } = useResizableHeight({
     storageKey: 'cl-activity-height',
     defaultPx: 208,
     minPx: 104,
-    maxPx: 560,
+    maxPx: 4000,
     collapsePx: 72,
     collapsed: !open,
     onCollapsedChange: (next) => onOpenChange(!next),
+    ceilingPx,
   })
   const { pre, between, post } = splitSystemRows(log, { source, sessions, live })
 
   return (
     <section
+      ref={sectionRef}
       data-testid="stage-activity"
       /* Open, the band holds a height the reader chose — NOT `flex-1`, which
          gave a one-row hand-off the same ~400px box a hundred-row transcript
          gets, and NOT the content's height, which would creep down the page as
-         an agent appends rows mid-stream. `max-h-[70%]` is the relative cap the
-         pixel clamp can't express: a height dragged tall on a big window must
-         not swallow a short pane. */
-      className={`flex flex-col bg-elevated/22 ${open ? 'min-h-0 max-h-[70%] shrink-0' : 'shrink-0'}`}
+         an agent appends rows mid-stream. The drag stops at the column's
+         height (`ceilingPx`), and `max-h-full` keeps a height dragged tall on a
+         big window inside a shorter one. */
+      className={`flex flex-col bg-elevated/22 ${open ? 'min-h-0 max-h-full shrink-0' : 'shrink-0'}`}
       style={open ? { height: activityHeight } : undefined}
     >
       {/* R88: the labelled bar IS the panel's movable top edge — there is no
@@ -150,6 +175,8 @@ export function StageActivityRail({
               systemRows={{ pre: [...exportRows, ...leadingSystemRows, ...pre], between, post }}
               externalSessions={externalSessions}
               empty={empty ?? noActivityCopy(live, settled)}
+              openLogId={openLogId}
+              onOpenLogChange={onOpenLogChange}
             />
           </AgentBlock>
         </div>

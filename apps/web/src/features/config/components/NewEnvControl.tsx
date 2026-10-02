@@ -1,4 +1,5 @@
-import { PlusIcon, TextInput } from '@/shared/ui/atoms'
+import { PlusIcon } from '@/shared/ui/Icons'
+import { TextInput } from '@/shared/ui/FormFields'
 
 export function NewEnvControl({
   adding,

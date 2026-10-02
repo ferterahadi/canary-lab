@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 
 import { ExternalHealBroker, type ExternalHealBrokerDeps, type ExternalHealAuditEntry } from './external-heal-broker'
 
-import type { ExternalHealSession } from '../runtime/manifest'
+import type { ExternalHealSession } from '../../../../../../../shared/run-manifest'
 
 import type { RunStoreEvent } from '../run-store'
 
@@ -62,6 +62,24 @@ describe('ExternalHealBroker.claim', () => {
     expect(captured.events.map((e) => e.kind)).toContain('external-claim-changed')
     expect(captured.audit).toHaveLength(1)
     expect(captured.audit[0].entry.action).toBe('claim')
+  })
+
+  it('retains defined empty metadata and preserves the initial claim on reconnect', () => {
+    const { deps, captured } = makeDeps(() => now)
+    const broker = new ExternalHealBroker(deps)
+    const input = { sessionId: 'sess-A', clientKind: 'claude' as const, clientVersion: '', conversationName: '' }
+    const initial = broker.claim('run-1', input)
+    expect(initial).toMatchObject({ accepted: true, session: { clientVersion: '', conversationName: '', cycleCount: 0 } })
+    broker.bumpCycle('run-1')
+    now += 5000
+    const reconnect = broker.claim('run-1', input)
+    expect(reconnect).toMatchObject({ accepted: true, session: {
+      claimedAt: '2026-05-18T10:00:00.000Z', lastHeartbeatAt: '2026-05-18T10:00:05.000Z',
+      clientVersion: '', conversationName: '', cycleCount: 1,
+    } })
+    expect(captured.manifestPatches.at(-1)?.externalHealSession).toEqual(broker.getSession('run-1'))
+    expect(captured.events.at(-1)).toEqual({ kind: 'external-claim-changed', runId: 'run-1' })
+    expect(captured.audit.at(-1)?.entry.action).toBe('claim-reconnect')
   })
 
   it('is idempotent when the same sessionId reclaims', () => {

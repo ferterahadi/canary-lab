@@ -88,6 +88,80 @@ describe('connectReconnectingSocket', () => {
     expect(received).toEqual([])
   })
 
+  it('coerces non-string frames only when requested', () => {
+    const received: string[] = []
+    connectReconnectingSocket({
+      url: 'ws://host/test', WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+      coerceMessageData: true, onMessage: (data) => received.push(data),
+    })
+    const ws = FakeWebSocket.instances[0]
+    ws.onmessage?.({ data: { toString: () => '{"type":"snapshot"}' } as unknown as string })
+    ws.onmessage?.({ data: 'unchanged' })
+    expect(received).toEqual(['{"type":"snapshot"}', 'unchanged'])
+  })
+
+  it('preserves exponential delays, callback order and reset after opening', () => {
+    const events: unknown[] = []
+    class ObservedSocket extends FakeWebSocket {
+      constructor(url: string) { super(url); events.push('constructed') }
+    }
+    connectReconnectingSocket({
+      url: 'ws://host/test', WebSocketImpl: ObservedSocket as unknown as typeof WebSocket,
+      maxReconnects: Infinity, onMessage: () => {},
+      reconnectDelayMs: (attempt) => Math.min(500 * 2 ** (attempt - 1), 10_000),
+      onReconnect: (attempt, reason) => events.push(['scheduled', attempt, reason]),
+      onReconnectAttempt: (attempt, delay) => events.push(['retry', attempt, delay]),
+    })
+    events.length = 0
+    const delays = [500, 1000, 2000, 4000, 8000, 10000, 10000]
+    for (const [index, delay] of delays.entries()) {
+      FakeWebSocket.instances.at(-1)!.onclose?.()
+      expect(events).toEqual([['scheduled', index + 1, 'close']])
+      vi.advanceTimersByTime(delay - 1)
+      expect(FakeWebSocket.instances).toHaveLength(index + 1)
+      vi.advanceTimersByTime(1)
+      expect(events).toEqual([['scheduled', index + 1, 'close'], ['retry', index + 1, delay], 'constructed'])
+      events.length = 0
+    }
+    FakeWebSocket.instances.at(-1)!.onopen?.()
+    FakeWebSocket.instances.at(-1)!.onclose?.()
+    vi.advanceTimersByTime(500)
+    expect(events).toEqual([['scheduled', 1, 'close'], ['retry', 1, 500], 'constructed'])
+  })
+
+  it('distinguishes constructor failures and cancels their pending retry callback', () => {
+    class BrokenSocket { constructor() { throw new Error('unavailable') } }
+    const scheduled = vi.fn()
+    const retry = vi.fn()
+    const connection = connectReconnectingSocket({
+      url: 'ws://host/test', WebSocketImpl: BrokenSocket as unknown as typeof WebSocket,
+      maxReconnects: Infinity, reconnectDelayMs: (attempt) => attempt * 500,
+      onMessage: () => {}, onReconnect: scheduled, onReconnectAttempt: retry,
+    })
+    expect(scheduled).toHaveBeenLastCalledWith(1, 'setup-error')
+    vi.advanceTimersByTime(500)
+    expect(retry).toHaveBeenCalledWith(1, 500)
+    expect(scheduled).toHaveBeenLastCalledWith(2, 'setup-error')
+    connection.close()
+    vi.advanceTimersByTime(1000)
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a finite retry budget across successful opens and supports immediate retry callbacks', () => {
+    const retry = vi.fn()
+    connectReconnectingSocket({
+      url: 'ws://host/test', WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+      onMessage: () => {}, onReconnectAttempt: retry,
+    })
+    FakeWebSocket.instances[0].onopen?.()
+    FakeWebSocket.instances[0].onclose?.()
+    expect(retry).toHaveBeenCalledWith(1, 0)
+    FakeWebSocket.instances[1].onopen?.()
+    FakeWebSocket.instances[1].onclose?.()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
+
   it('reconnects once on unexpected close (default maxReconnects=1)', () => {
     connectReconnectingSocket({
       url: 'ws://host/test',

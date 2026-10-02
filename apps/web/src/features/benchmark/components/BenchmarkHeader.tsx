@@ -1,5 +1,12 @@
+import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
 
 // Lifecycle → stepper index. 0 Sabotage (config) · 1 Progress (sabotaging) ·
 // 2 Race (running) · 3 Report (terminal).
@@ -11,7 +18,7 @@ export function lifecycleStage(status?: BenchmarkManifest['status']): number {
 }
 
 export function isTerminal(status?: string): boolean {
-  return status === 'done' || status === 'aborted' || status === 'error' || status === 'invalid'
+  return isTerminalBenchmarkStatus(status)
 }
 
 export const STAGE_LABELS = ['Sabotage', 'Progress', 'Race', 'Report'] as const
@@ -114,7 +121,7 @@ export function BenchmarkHeader({
   onNew?: () => void
   onClose: () => void
 }) {
-  const active = status === 'sabotaging' || status === 'ready' || status === 'running'
+  const active = isActiveBenchmarkStatus(status)
   const dot = !status
     ? 'var(--accent)'
     : status === 'done'

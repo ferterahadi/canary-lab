@@ -154,3 +154,8 @@ describe('summarizeUnifiedDiff', () => {
     expect(summarizeUnifiedDiff('')).toEqual({ files: 0, additions: 0, deletions: 0 })
   })
 })
+
+it('counts header-looking source changes inside hunks without counting headers', () => {
+  expect(summarizeUnifiedDiff('diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n--- old\n+++ new\n')).toEqual({ files: 1, additions: 1, deletions: 1 })
+  expect(summarizeUnifiedDiff('diff --git a/image b/image\nBinary files differ\n')).toEqual({ files: 1, additions: 0, deletions: 0 })
+})

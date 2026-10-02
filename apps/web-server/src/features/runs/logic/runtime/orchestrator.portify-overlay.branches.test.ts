@@ -10,6 +10,7 @@ import { runDirFor } from './run-paths'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { addWorktree, type WorktreeHandle } from './repo-worktree'
 import { writeOverlay, captureTouchedFiles } from '../../../portify/logic/runtime/overlay'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 
 // Phase C: the run-time apply-before-boot / reverse-at-teardown hook. These
 // drive a REAL git repo + worktree + saved overlay through the orchestrator's
@@ -63,11 +64,7 @@ beforeEach(async () => {
   repoRoot = path.join(tmpDir, 'repo')
   fs.mkdirSync(repoRoot, { recursive: true })
   fs.writeFileSync(path.join(repoRoot, 'app.js'), BASE)
-  await runGit(repoRoot, ['init', '-q'])
-  await runGit(repoRoot, ['config', 'user.email', 't@t'])
-  await runGit(repoRoot, ['config', 'user.name', 'test'])
-  await runGit(repoRoot, ['add', '-A'])
-  await runGit(repoRoot, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(repoRoot)
 })
 
 afterEach(() => {

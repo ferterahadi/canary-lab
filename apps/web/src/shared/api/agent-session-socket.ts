@@ -1,27 +1,13 @@
+import type { AgentSessionIdentity } from './agent-session-source'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
+import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/agent-sessions'
 
 // WebSocket wrapper for live structured agent-session events. Each source kind
 // names one per-subsystem server stream (/ws/runs/:runId/agent-session and
 // friends), which emit messages of the form { type: 'session', ... } |
 // { type: 'event', event } | { type: 'error', error }.
 //
-// This union must stay in step with `AgentSessionSource` in
-// `@/shared/ui/AgentSessionView` — that is the type hosts actually construct,
-// and this is what it is translated into. They had drifted: this one still
-// carried a `draft` kind after the Add Test wizard was retired and
-// `/api/tests/draft/:id/agent-session` was deleted server-side, so `urlFor`
-// silently routed a draft source to the flight-plan endpoint.
-
-export type AgentSessionSocketSource =
-  | { kind: 'discovery-repair'; taskId: string }
-  | { kind: 'run'; runId: string }
-  | { kind: 'benchmark'; benchmarkId: string }
-  | { kind: 'portify'; workflowId: string }
-  | { kind: 'coverage'; jobId: string }
-  | { kind: 'evaluation'; taskId: string }
-  | { kind: 'flight'; flightId: string; stage: string }
-  | { kind: 'flight-plan'; taskId: string }
+export type AgentSessionSocketSource = AgentSessionIdentity
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'subagent' | 'error' | 'done'

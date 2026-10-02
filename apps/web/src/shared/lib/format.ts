@@ -1,24 +1,10 @@
 // Pure formatting helpers used by the read-only views.
 
-/** The evaluation archive's filename — the `<feature>-<runId>` shape the server
- *  mints as the task's `archiveBase`. One home so the name the browser saves, the
- *  name a UI shows and the name the download header carries cannot drift; the
- *  internal `export.zip` inside the logs dir is never a user-facing name. */
-export function evaluationArchiveFilename(feature: string, runId: string): string {
-  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
-}
-
 /** Sentence-case a state word for display: only the FIRST character is raised,
  *  so a two-word label stays "Needs approval" rather than the title-cased
  *  "Needs Approval" a CSS `text-transform: capitalize` would produce. */
 export function capitalizeFirst(input: string): string {
   return input.charAt(0).toUpperCase() + input.slice(1)
-}
-
-/** Filesystem-safe segment for a download name — anything outside
- *  `[A-Za-z0-9._-]` collapses to a single dash. */
-export function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
 // Format a duration (in milliseconds) as a short human string. Examples:
@@ -108,6 +94,15 @@ export function shortTime(iso: string): string {
   const d = new Date(t)
   const pad = (n: number): string => n.toString().padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** Short date + time ("Oct 1, 14:02") in the viewer's locale — a stable stamp
+ *  for a label that stays on screen, where a relative age would go stale.
+ *  Falls back to the raw input if it doesn't parse. */
+export function shortDateTime(iso: string): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso
+  return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 /** Short, stable run reference for an identity line — the trailing token of

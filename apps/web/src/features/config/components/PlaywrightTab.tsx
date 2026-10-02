@@ -1,13 +1,7 @@
-import * as api from '@/shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
-import {
-  ComplexValueBadge,
-  FieldRow,
-  NumberInput,
-  Section,
-  Select,
-  Toggle,
-} from '@/shared/ui/atoms'
+import * as configApi from '@/shared/api/config'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import { Section } from '@/shared/ui/atoms'
+import { ComplexValueBadge, FieldRow, NumberInput, Select, Toggle } from '@/shared/ui/FormFields'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
   PLAYWRIGHT_SCREENSHOT_MODES,
@@ -50,7 +44,7 @@ function asMaybeString(v: ConfigValue | undefined): string | undefined {
 export function PlaywrightTab({ feature }: { feature: string }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
     cacheKey: `playwright:${feature}`,
-    load: () => api.getPlaywrightConfig(feature),
+    load: () => configApi.getPlaywrightConfig(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
       const u = (v.use && typeof v.use === 'object' && !Array.isArray(v.use))
@@ -92,10 +86,10 @@ export function PlaywrightTab({ feature }: { feature: string }) {
       next.use = nextUse
       return next
     },
-    save: (payload) => api.putPlaywrightConfig(feature, payload as ConfigValue),
+    save: (payload) => configApi.putPlaywrightConfig(feature, payload as ConfigValue),
   })
 
-  if (ed.error) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
+  if (ed.error && !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
   if (ed.loading || !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
 
   const numberOrExprField = (

@@ -1,6 +1,8 @@
-import { ApiError } from '@/shared/api/client'
-import type { RunDetail, RunIndexEntry, TransientAction } from '@/shared/api/types'
-import { isTerminalRunStatus } from '@shared/run-state'
+import { runIndexEntry, type RunIndexEntry } from '@shared/run-index'
+import { ApiError } from '@/shared/api/internal'
+import type { RunDetail } from '@shared/run-detail'
+import { isTerminalRunStatus, type TransientAction } from '@shared/run-state'
+import type { ConnectionState } from '@/shared/state/record-stream'
 
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives
 // outside the .tsx file so it can be unit-tested in the existing
@@ -15,12 +17,6 @@ export type RunsStreamFrame =
   | { type: 'list-changed'; runs: RunIndexEntry[] }
 
 // ─── State + actions ─────────────────────────────────────────────────────
-
-export type ConnectionState =
-  | 'connecting'      // initial, before the first WS open
-  | 'live'            // WS open, push frames flowing
-  | 'reconnecting'    // WS dropped after being live; fixed-delay recovery is in progress
-  | 'disconnected'    // gave up — surfaced to the user as a banner
 
 export interface RunsState {
   runs: RunIndexEntry[]
@@ -55,30 +51,11 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
   switch (action.type) {
     case 'snapshot':
       return { ...state, runs: action.runs, details: action.details }
+    case 'http-detail':
     case 'update': {
-      // Update both list and details. The list entry is derived from the
-      // manifest so the badge stays in sync without a separate poll. It MUST
-      // mirror the backend's index entry (indexEntryFromManifest) field-for-
-      // field — in particular `executionType`, or an active boot/verify run
-      // loses its identity on every heartbeat `update` frame (it would fall
-      // back to looking like a plain test run, leak into the Runs list, and
-      // never reach the Services pill).
-      const m = action.detail.manifest
-      const entry: RunIndexEntry = {
-        runId: m.runId,
-        ...(m.executionType ? { executionType: m.executionType } : {}),
-        feature: m.feature,
-        ...(m.env ? { env: m.env } : {}),
-        startedAt: m.startedAt,
-        status: m.status,
-        ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-        ...(m.verification?.configName ? { verificationConfigName: m.verification.configName } : {}),
-        ...(m.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: m.verification.playwrightEnvsetId } : {}),
-        ...(m.verification?.targetUrls ? { verificationTargetUrls: m.verification.targetUrls } : {}),
-        ...(m.specEdits?.pending.length ? { pendingSpecEdits: m.specEdits.pending.length } : {}),
-        ...(m.integrity?.hints.length ? { integrityHints: m.integrity.hints.length } : {}),
-        ...(action.detail.newRunRequired || m.healEnd?.reason === 'new-run-required' ? { newRunRequired: true as const } : {}),
-      }
+      const entry = runIndexEntry(action.detail.manifest)
+      // The server may enrich historical single-attempt records on read.
+      if (action.detail.newRunRequired) entry.newRunRequired = true
       const others = state.runs.filter((r) => r.runId !== action.runId)
       const transients = isTerminalRunStatus(entry.status)
         ? omitRun(state.transients, action.runId)
@@ -120,8 +97,6 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
     }
     case 'http-list':
       return { ...state, runs: action.runs }
-    case 'http-detail':
-      return { ...state, details: { ...state.details, [action.runId]: action.detail } }
   }
 }
 

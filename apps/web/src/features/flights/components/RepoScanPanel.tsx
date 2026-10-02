@@ -1,4 +1,4 @@
-import type { FlightManifest, FlightStageStatus } from '@/shared/api/client'
+import type { FlightManifest, FlightStageStatus } from '@shared/flights/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'

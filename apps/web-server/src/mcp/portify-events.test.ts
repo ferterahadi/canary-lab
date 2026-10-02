@@ -1,12 +1,15 @@
+import type { WorkspaceEvent } from '../../../../shared/workspace-events'
 import { describe, it, expect } from 'vitest'
-import { registerCanaryLabTools, type CanaryLabMcpDeps } from './tools'
-import type { WorkspaceEvent, WorkspaceEventPublisher } from '../shared/workspace-events'
+import { registerCanaryLabTools } from './tools'
+import type { CanaryLabMcpDeps } from './tool-schemas'
+import type { WorkspaceEventPublisher } from '../shared/workspace-events'
 
 // The MCP portify tools mutate feature state (save_portify writes an overlay;
 // remove_portification reverts the config + deletes it). When driven from an
 // external client (Claude Desktop) the open web UI only learns about the change
 // via a workspace event — without one, the portified badge stays stale until a
-// manual refresh. These tests pin that each tool emits `features-changed`.
+// manual refresh. These tests pin one announcement per operation; the removal
+// writer owns its event, while save retains its existing tool-owned event.
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>
 
@@ -43,10 +46,13 @@ describe('MCP portify tools emit workspace events', () => {
     expect(events).toEqual([{ type: 'features-changed' }])
   })
 
-  it('remove_portification publishes features-changed so the badge clears live', async () => {
+  it('remove_portification preserves the writer event without adding another', async () => {
     const { events, publisher } = recordingPublisher()
     const handlers = captureTools({
-      removePortification: () => ({ name: 'cns_better_auth', portified: false, reverted: true }),
+      removePortification: () => {
+        publisher.publish({ type: 'features-changed' })
+        return { name: 'cns_better_auth', portified: false, reverted: true }
+      },
       workspaceEvents: publisher,
     })
 

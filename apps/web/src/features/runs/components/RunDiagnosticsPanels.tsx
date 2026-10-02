@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunLifecycleEvent, RunSummary, VerificationDiagnostics } from '@/shared/api/types'
+import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
+import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
+import type { RunLifecycleEvent } from '@shared/run-state'
+import type { VerificationDiagnostics } from '@shared/verification'
 import { isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timeline'
 import { PaneTerminal } from './PaneTerminal'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -167,32 +170,34 @@ export function RecoveryTimeline({
           {alert.message}
         </div>
       )}
-      <ol className="space-y-2">
+      {/* One connected rail: a hairline runs behind the dots so the rows read
+          as one sequence, and each dot is ringed in the pane's own colour so
+          the line breaks around it instead of striking through. Four fixed
+          columns — dot, time, body, duration — so headlines start on one edge,
+          durations end on the other, and a long detail wraps inside the body
+          column instead of running under the durations. */}
+      <ol className="relative space-y-2.5">
+        {rows.length > 1 && (
+          <span aria-hidden="true" className="absolute bottom-2 left-[3.5px] top-2 w-px" style={{ background: 'var(--border-default)' }} />
+        )}
         {rows.map((row) => {
           const event = row.event
           const showRunningTest = row.isLastEngine && summary?.running && event != null && isPlaywrightLifecyclePhase(event.phase)
           return (
-            <li key={row.key} className="grid grid-cols-[12px_minmax(0,1fr)] gap-2 text-xs">
-              <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClass(row.severity)}`} />
+            <li key={row.key} className="grid grid-cols-[8px_52px_minmax(0,1fr)_72px] items-baseline gap-x-2 text-xs">
+              <span className={`relative mt-1.5 h-2 w-2 self-start rounded-full ring-2 ring-[var(--bg-base)] ${dotClass(row.severity)}`} />
+              <time
+                className="tabular-nums text-[10px]"
+                dateTime={row.ts}
+                title={formatLifecycleDateTime(row.ts)}
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {formatLifecycleTime(row.ts)}
+              </time>
               <span className="min-w-0">
-                <span className="flex min-w-0 items-baseline gap-2">
-                  <time
-                    className="shrink-0 tabular-nums text-[10px]"
-                    dateTime={row.ts}
-                    title={formatLifecycleDateTime(row.ts)}
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    {formatLifecycleTime(row.ts)}
-                  </time>
-                  <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{row.headline}</span>
-                  {row.durationLabel && (
-                    <span className="shrink-0 tabular-nums text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {row.durationLabel}
-                    </span>
-                  )}
-                </span>
+                <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{row.headline}</span>
                 {(row.clientLabel || row.detail) && (
-                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                  <span className="mt-0.5 block break-words" style={{ color: 'var(--text-muted)' }}>
                     {row.clientLabel && (
                       <span style={{ color: 'var(--text-secondary)' }}>{row.clientLabel}</span>
                     )}
@@ -201,7 +206,7 @@ export function RecoveryTimeline({
                   </span>
                 )}
                 {showRunningTest && summary?.running && (
-                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                  <span className="mt-0.5 block break-words" style={{ color: 'var(--text-muted)' }}>
                     Now running: {formatSummaryTestName(summary.running.name)}
                     {summary.running.step?.location
                       ? ` · ${shortLocation(summary.running.step.location)}`
@@ -211,13 +216,16 @@ export function RecoveryTimeline({
                   </span>
                 )}
                 {event?.restartPlan && (
-                  <span className="block" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
+                  <span className="mt-0.5 block break-words" style={{ color: 'var(--text-muted)' }}>{formatRestartPlan(event.restartPlan)}</span>
                 )}
                 {event?.targetedRerun && (
-                  <span className="block" style={{ color: 'var(--text-muted)' }}>
+                  <span className="mt-0.5 block" style={{ color: 'var(--text-muted)' }}>
                     {event.targetedRerun.selected}/{event.targetedRerun.total} selected
                   </span>
                 )}
+              </span>
+              <span className="text-right tabular-nums text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                {row.durationLabel}
               </span>
             </li>
           )
@@ -252,6 +260,12 @@ export function formatLifecycleTime(iso: string): string {
     second: '2-digit',
     hour12: false,
   }).format(new Date(time))
+}
+
+export function formatLifecycleDate(iso: string): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(time))
 }
 
 export function formatLifecycleDateTime(iso: string): string {

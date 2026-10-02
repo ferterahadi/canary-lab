@@ -1,5 +1,5 @@
-import type { CoverageJobIndexEntry } from '@/shared/api/types'
-import type { FlightStageKey } from '@/shared/api/client'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { FlightStageKey } from '@shared/flights/types'
 import type { AgentSessionSegmentSource } from '@/shared/ui/AgentSessionView'
 
 export function coverageJobStage(job: CoverageJobIndexEntry): FlightStageKey {

@@ -3,8 +3,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import * as runsApi from '@/shared/api/runs'
+import * as verificationApi from '@/shared/api/verification'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
 import {
   RunsProvider,
   useActiveBootSessions,
@@ -22,20 +24,20 @@ import {
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    listRuns: vi.fn(),
-    startRun: vi.fn(),
-    getRunDetail: vi.fn(),
-    stopRun: vi.fn(),
-    deleteRun: vi.fn(),
-    pauseHealRun: vi.fn(),
-    cancelHealRun: vi.fn(),
-    executeVerification: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  listRuns: vi.fn(),
+  startRun: vi.fn(),
+  getRunDetail: vi.fn(),
+  stopRun: vi.fn(),
+  deleteRun: vi.fn(),
+  pauseHealRun: vi.fn(),
+  cancelHealRun: vi.fn(),
+}))
+vi.mock('@/shared/api/verification', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/verification')>()),
+  executeVerification: vi.fn(),
+}))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -67,14 +69,14 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.listRuns).mockReset()
-  vi.mocked(api.startRun).mockReset()
-  vi.mocked(api.getRunDetail).mockReset()
-  vi.mocked(api.stopRun).mockReset()
-  vi.mocked(api.deleteRun).mockReset()
-  vi.mocked(api.pauseHealRun).mockReset()
-  vi.mocked(api.cancelHealRun).mockReset()
-  vi.mocked(api.executeVerification).mockReset()
+  vi.mocked(runsApi.listRuns).mockReset()
+  vi.mocked(runsApi.startRun).mockReset()
+  vi.mocked(runsApi.getRunDetail).mockReset()
+  vi.mocked(runsApi.stopRun).mockReset()
+  vi.mocked(runsApi.deleteRun).mockReset()
+  vi.mocked(runsApi.pauseHealRun).mockReset()
+  vi.mocked(runsApi.cancelHealRun).mockReset()
+  vi.mocked(verificationApi.executeVerification).mockReset()
 })
 
 afterEach(() => {
@@ -139,7 +141,8 @@ function Probe({
   captured.run = useRun(runId)
   captured.actions = useRunActions(runId ?? 'missing')
   captured.active = useGlobalActiveRun()
-  return null
+  const { count } = useActiveBootSessions()
+  return <span>{count ? `Services up: ${count}` : 'No active services'}</span>
 }
 
 function entry(overrides: Partial<RunIndexEntry> = {}): RunIndexEntry {
@@ -179,9 +182,111 @@ function deferred<T>() {
 }
 
 describe('RunsProvider', () => {
+  it.each(['update', 'removed', 'snapshot', 'list-changed'] as const)('ignores an old detail response after a newer %s frame', async (type) => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(runsApi.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => {
+      socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot',
+        runs: [entry({ executionType: 'boot' })], details: { r1: detail({ executionType: 'boot' }) },
+      }) })
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    const frames = {
+      update: { type, runId: 'r1', detail: detail({ executionType: 'boot', status: 'aborted' }) },
+      removed: { type, runId: 'r1' },
+      snapshot: { type, runs: [], details: {} },
+      'list-changed': { type, runs: [] },
+    }
+    act(() => { socket.onmessage?.({ data: JSON.stringify(frames[type]) }) })
+    await act(async () => { pending.resolve(detail({ executionType: 'boot' })); await pending.promise })
+    expect(container.textContent).toBe('No active services')
+    expect(captured.active?.entry).toBeNull()
+    expect(captured.runs?.runs.some((run) => run.status === 'running')).toBe(false)
+    if (type === 'update') expect(captured.run?.status).toBe('aborted')
+    if (type === 'removed' || type === 'snapshot') expect(captured.run?.detail).toBeUndefined()
+  })
+
+  it('does not discard recovery because an unrelated run changed', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(runsApi.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'update', runId: 'other', detail: detail({ runId: 'other', status: 'passed' }) }) }) })
+    await act(async () => { pending.resolve(detail({ status: 'aborted' })); await pending.promise })
+    expect(captured.run?.status).toBe('aborted')
+    expect(captured.runs?.runs.map((run) => run.status)).toEqual(['aborted', 'passed'])
+  })
+
+  it('keeps the newer load guard when a superseded request finishes', async () => {
+    vi.useFakeTimers()
+    const old = deferred<RunDetail>()
+    const current = deferred<RunDetail>()
+    vi.mocked(runsApi.getRunDetail).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'update', runId: 'r1', detail: detail({ status: 'healing' }) }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    await act(async () => { old.resolve(detail()); await old.promise })
+    expect(captured.run?.status).toBe('healing')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(2)
+    await act(async () => { current.resolve(detail({ status: 'passed' })); await current.promise })
+    expect(captured.run?.status).toBe('passed')
+    expect(captured.runs?.runs[0].status).toBe('passed')
+  })
+
+  it('releases recovery work on unmount, including an outstanding read', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(runsApi.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    act(() => { FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { root.unmount() })
+    await act(async () => { pending.resolve(detail({ status: 'passed' })); await pending.promise; await vi.advanceTimersByTimeAsync(5000) })
+    expect(captured.run?.status).toBe('running')
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
+    expect(FakeWebSocket.instances[0].closed).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('settles the sidebar and active-run consumers when a stop event is lost', async () => {
+    vi.useFakeTimers()
+    vi.mocked(runsApi.getRunDetail).mockRejectedValueOnce(new Error('temporary read failure'))
+      .mockResolvedValue(detail({ executionType: 'boot', status: 'aborted' }))
+    const captured = renderProbe()
+    act(() => {
+      FakeWebSocket.instances[0].onopen?.()
+      FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({
+        type: 'snapshot', runs: [entry({ executionType: 'boot' })],
+        details: { r1: detail({ executionType: 'boot' }) },
+      }) })
+    })
+    expect(container.textContent).toBe('Services up: 1')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(container.textContent).toBe('Services up: 1')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(captured.run?.status).toBe('aborted')
+    expect(captured.runs?.runs[0]).toMatchObject({ status: 'aborted', executionType: 'boot' })
+    expect(captured.active?.entry).toBeNull()
+    expect(container.textContent).toBe('No active services')
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(2)
+    expect(runsApi.listRuns).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
   it('loads missing run details once and clears the in-flight guard after completion', async () => {
     const first = deferred<RunDetail>()
-    vi.mocked(api.getRunDetail).mockReturnValueOnce(first.promise)
+    vi.mocked(runsApi.getRunDetail).mockReturnValueOnce(first.promise)
     const captured = renderProbe('lazy-r1')
 
     act(() => {
@@ -193,12 +298,12 @@ describe('RunsProvider', () => {
         }),
       })
     })
-    expect(api.getRunDetail).toHaveBeenCalledTimes(1)
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
 
     act(() => {
       root.render(<ProbeHarness captured={captured} runId="lazy-r1" />)
     })
-    expect(api.getRunDetail).toHaveBeenCalledTimes(1)
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       first.resolve(detail({ runId: 'lazy-r1', status: 'passed' }))
@@ -209,7 +314,7 @@ describe('RunsProvider', () => {
 
   it('deduplicates concurrent missing detail loads across consumers', () => {
     const first = deferred<RunDetail>()
-    vi.mocked(api.getRunDetail).mockReturnValueOnce(first.promise)
+    vi.mocked(runsApi.getRunDetail).mockReturnValueOnce(first.promise)
     const capturedA = emptyCapture()
     const capturedB = emptyCapture()
 
@@ -231,12 +336,12 @@ describe('RunsProvider', () => {
       })
     })
 
-    expect(api.getRunDetail).toHaveBeenCalledTimes(1)
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('polls running run details while the run remains active', async () => {
     vi.useFakeTimers()
-    vi.mocked(api.getRunDetail).mockResolvedValue(detail({ runId: 'poll-r1', status: 'running' }))
+    vi.mocked(runsApi.getRunDetail).mockResolvedValue(detail({ runId: 'poll-r1', status: 'running' }))
     const captured = renderProbe('poll-r1')
 
     act(() => {
@@ -254,14 +359,14 @@ describe('RunsProvider', () => {
       await Promise.resolve()
     })
 
-    expect(api.getRunDetail).toHaveBeenCalledWith('poll-r1')
+    expect(runsApi.getRunDetail).toHaveBeenCalledWith('poll-r1')
     expect(captured.run?.status).toBe('running')
   })
 
   it('surfaces action errors, clears them, and refreshes while disconnected', async () => {
     const captured = renderProbe('r-action')
-    vi.mocked(api.stopRun).mockRejectedValue(new Error('stop failed'))
-    vi.mocked(api.listRuns).mockResolvedValue([entry({ runId: 'r-action', status: 'running' })])
+    vi.mocked(runsApi.stopRun).mockRejectedValue(new Error('stop failed'))
+    vi.mocked(runsApi.listRuns).mockResolvedValue([entry({ runId: 'r-action', status: 'running' })])
 
     act(() => {
       FakeWebSocket.instances[0].onmessage?.({
@@ -276,8 +381,8 @@ describe('RunsProvider', () => {
     await act(async () => {
       await captured.runs?.abort('r-action')
     })
-    expect(api.stopRun).toHaveBeenCalledWith('r-action')
-    expect(api.listRuns).toHaveBeenCalledTimes(1)
+    expect(runsApi.stopRun).toHaveBeenCalledWith('r-action')
+    expect(runsApi.listRuns).toHaveBeenCalledTimes(1)
     expect(captured.runs?.errors['r-action']).toBe('stop failed')
 
     act(() => {
@@ -288,11 +393,11 @@ describe('RunsProvider', () => {
 
   it('exposes per-run action callbacks', async () => {
     const captured = renderProbe('r-actions')
-    vi.mocked(api.stopRun).mockResolvedValue(undefined)
-    vi.mocked(api.deleteRun).mockResolvedValue(undefined)
-    vi.mocked(api.pauseHealRun).mockResolvedValue({ status: 'healing', failureCount: 1 })
-    vi.mocked(api.cancelHealRun).mockResolvedValue({ status: 'cancelled' })
-    vi.mocked(api.listRuns).mockResolvedValue([])
+    vi.mocked(runsApi.stopRun).mockResolvedValue(undefined)
+    vi.mocked(runsApi.deleteRun).mockResolvedValue(undefined)
+    vi.mocked(runsApi.pauseHealRun).mockResolvedValue({ status: 'healing', failureCount: 1 })
+    vi.mocked(runsApi.cancelHealRun).mockResolvedValue({ status: 'cancelled' })
+    vi.mocked(runsApi.listRuns).mockResolvedValue([])
 
     await act(async () => {
       await captured.actions?.abort()
@@ -304,10 +409,10 @@ describe('RunsProvider', () => {
       captured.actions?.clearError()
     })
 
-    expect(api.stopRun).toHaveBeenCalledWith('r-actions')
-    expect(api.deleteRun).toHaveBeenCalledWith('r-actions')
-    expect(api.pauseHealRun).toHaveBeenCalledWith('r-actions')
-    expect(api.cancelHealRun).toHaveBeenCalledWith('r-actions')
+    expect(runsApi.stopRun).toHaveBeenCalledWith('r-actions')
+    expect(runsApi.deleteRun).toHaveBeenCalledWith('r-actions')
+    expect(runsApi.pauseHealRun).toHaveBeenCalledWith('r-actions')
+    expect(runsApi.cancelHealRun).toHaveBeenCalledWith('r-actions')
   })
 
   it('invokes the websocket onerror handler without scheduling a reconnect', () => {

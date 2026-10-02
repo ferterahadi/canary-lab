@@ -4,7 +4,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeaturesColumn } from './FeaturesColumn'
-import type { FeatureFlightAction } from '@/features/flights'
+import {
+  resolveFeatureFlightAction,
+  type FeatureFlightAction,
+} from '@/features/flights/components/FlightChipState'
+import type { FeatureActivity } from '@/features/flights/state/feature-activity'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -23,8 +27,8 @@ function InvalidationTap() {
   return null
 }
 
-vi.mock('../api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../api/client')>()),
+vi.mock('../api/coverage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/coverage')>()),
   listCoverageStates,
 }))
 
@@ -114,7 +118,33 @@ describe('FeaturesColumn MCP promo gate', () => {
 describe('FeaturesColumn active-run highlight', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
 
-  it('highlights the active row when healing and drops the visible chip', () => {
+  it('shows each suite’s selected run status even when the global run belongs to another suite', () => {
+    const activity = new Map<string, FeatureActivity>([
+      ['alpha', { kind: 'running', runId: 'run-alpha' }],
+      ['beta', { kind: 'healing', runId: 'run-beta' }],
+    ])
+    act(() => root.render(<FeaturesColumn onOpenConfig={onOpenConfig}
+      features={[feature('alpha'), feature('beta')]} selectedFeature="alpha"
+      activeRunFeature="alpha" activeRunStatus="running" activity={activity}
+      onSelectFeature={() => {}} onOpenFlight={() => {}}
+      flightAction={(name) => resolveFeatureFlightAction(name, [], activity.get(name))} />))
+    expect(featureRow('alpha').querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
+    expect(featureRow('beta').querySelector('[aria-label="Healing"]')?.textContent).toBe('Healing')
+    expect(featureRow('beta').classList.contains('cl-list-row-healing')).toBe(true)
+    const nextActivity = new Map<string, FeatureActivity>([
+      ['alpha', { kind: 'running', runId: 'run-alpha' }],
+      ['beta', { kind: 'running', runId: 'run-beta' }],
+    ])
+    act(() => root.render(<FeaturesColumn onOpenConfig={onOpenConfig}
+      features={[feature('alpha'), feature('beta')]} selectedFeature="alpha"
+      activeRunFeature="alpha" activeRunStatus="running" activity={nextActivity}
+      onSelectFeature={() => {}} onOpenFlight={() => {}}
+      flightAction={(name) => resolveFeatureFlightAction(name, [], nextActivity.get(name))} />))
+    expect(featureRow('beta').querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
+    expect(featureRow('beta').classList.contains('cl-list-row-running')).toBe(true)
+  })
+
+  it('highlights the active row and labels it Healing', () => {
     act(() => {
       root.render(
         <FeaturesColumn
@@ -133,9 +163,7 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(beta.classList.contains('cl-list-row-running')).toBe(false)
     // The selected-but-idle row carries no run-state class.
     expect(featureRow('alpha').classList.contains('cl-list-row-healing')).toBe(false)
-    // The chip is gone, but the status stays available to screen readers.
-    expect(container.querySelector('.cl-run-chip')).toBeNull()
-    expect(beta.querySelector('.sr-only')?.textContent).toBe('Healing')
+    expect(beta.querySelector('[aria-label="Healing"]')?.textContent).toBe('Healing')
   })
 
   it('uses the running class for a non-healing active run', () => {
@@ -154,14 +182,13 @@ describe('FeaturesColumn active-run highlight', () => {
 
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-running')).toBe(true)
-    expect(row.querySelector('.sr-only')?.textContent).toBe('Running')
+    expect(row.querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
   })
 
   it('keeps a waiting heal visible with a steady row cue and compact label', () => {
     const waiting = {
       kind: 'agent' as const,
-      label: 'Waiting for agent',
-      shortLabel: 'waiting',
+      label: 'Awaiting Agent',
       detail: 'Resume the external repair session.',
     }
     act(() => {
@@ -183,8 +210,9 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(beta.classList.contains('cl-list-row-healing')).toBe(false)
     expect(beta.style.color).toBe('var(--text-primary)')
     expect(featureRow('alpha').classList.contains('cl-list-row-waiting')).toBe(false)
-    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('waiting')
-    expect(beta.querySelector('[aria-label="Waiting for agent"]')).toBeTruthy()
+    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('Awaiting Agent')
+    expect(beta.querySelector<HTMLElement>('[data-testid="run-waiting-beta"]')?.style.width).toBe('120px')
+    expect(beta.querySelector('[aria-label="Awaiting Agent"]')).toBeTruthy()
 
     // The run detail stream updates this prop in place. The open Suites column
     // must return to the animated healing cue without a remount or refresh.
@@ -224,7 +252,6 @@ describe('FeaturesColumn active-run highlight', () => {
           activeRunWaiting={{
             kind: 'test-review',
             label: 'Awaiting test review',
-            shortLabel: 'to review',
             detail: 'Review the unexecuted test edits.',
           }}
           onSelectFeature={() => {}}
@@ -235,8 +262,8 @@ describe('FeaturesColumn active-run highlight', () => {
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-waiting')).toBe(true)
     expect(row.classList.contains('cl-list-row-changed')).toBe(false)
-    expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.textContent).toBe('Review')
-    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('to review')
+    expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.getAttribute('aria-label')).toBe('Review test changes in alpha')
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('Awaiting test review')
   })
 
   it('labels a queued run without applying the amber waiting wash', () => {
@@ -251,7 +278,6 @@ describe('FeaturesColumn active-run highlight', () => {
           activeRunWaiting={{
             kind: 'queued',
             label: 'Queued',
-            shortLabel: 'queued',
             detail: 'Services and tests have not started.',
           }}
           onSelectFeature={() => {}}
@@ -262,7 +288,7 @@ describe('FeaturesColumn active-run highlight', () => {
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-waiting')).toBe(false)
     expect(row.classList.contains('cl-list-row-running')).toBe(false)
-    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('queued')
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('Queued')
     expect(row.querySelector<HTMLElement>('[data-testid="run-waiting-alpha"]')?.style.color).toBe('var(--text-muted)')
   })
 })
@@ -300,7 +326,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
     expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
   })
 
-  it('hides Coverage while generation runs and keeps Flight as the progress destination', async () => {
+  it('keeps Coverage clickable while generation runs alongside Flight progress', async () => {
     listCoverageStates.mockResolvedValueOnce([{
       feature: 'alpha',
       headline: 'Generating',
@@ -331,16 +357,29 @@ describe('FeaturesColumn coverage action (R8)', () => {
       )
     })
 
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+    const coverage = container.querySelector<HTMLButtonElement>('[data-testid="coverage-action-alpha"]')
+    expect(coverage).toBeTruthy()
+    expect(coverage?.style.color).toBe('var(--running)')
+    act(() => { coverage?.focus() })
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage · updating')
+    act(() => { coverage?.click() })
+    expect(onOpenCoverage).toHaveBeenCalledWith('alpha')
     const flight = container.querySelector<HTMLButtonElement>('[data-testid="flight-shortcut-alpha"]')
     expect(flight).toBeTruthy()
     act(() => { flight?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(onOpenFlight).toHaveBeenCalledWith('fl_alpha')
-    expect(onOpenCoverage).not.toHaveBeenCalled()
+    expect(onOpenCoverage).toHaveBeenCalledTimes(1)
   })
 
-  it('restores the Coverage destination when the live job refresh reports completion', async () => {
+  it('keeps the same Coverage button through live generation and completion updates', async () => {
     listCoverageStates
+      .mockResolvedValueOnce([{
+        feature: 'alpha',
+        headline: 'Mapped 80%',
+        summary: 'fresh',
+        coverage: 'fresh',
+        coveragePct: 80,
+      }])
       .mockResolvedValueOnce([{
         feature: 'alpha',
         headline: 'Generating',
@@ -369,12 +408,24 @@ describe('FeaturesColumn coverage action (R8)', () => {
         </InvalidationProvider>,
       )
     })
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+    const coverage = container.querySelector<HTMLButtonElement>('[data-testid="coverage-action-alpha"]')
+    expect(coverage?.style.color).toBe('var(--success)')
+    act(() => { coverage?.focus() })
 
     await act(async () => invalidateCoverage())
 
-    expect(listCoverageStates).toHaveBeenCalledTimes(2)
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBe(coverage)
+    expect(coverage?.dataset.headline).toBe('Generating')
+    expect(coverage?.style.color).toBe('var(--running)')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage · updating')
+
+    await act(async () => invalidateCoverage())
+
+    expect(listCoverageStates).toHaveBeenCalledTimes(3)
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBe(coverage)
+    expect(coverage?.dataset.headline).toBe('Mapped 80%')
+    expect(coverage?.style.color).toBe('var(--success)')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage')
   })
 })
 
@@ -428,7 +479,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     const section = container.querySelector('[data-testid="feature-group-shop"]')
     expect(section).toBeTruthy()
     // Both grouped rows live under the shop accordion; the ungrouped one does not.
-    expect(section!.querySelector('li.feature-row')?.textContent).toContain('checkout')
+    expect(section!.querySelector('li.feature-row')?.textContent).toContain('cart')
     expect([...section!.querySelectorAll('li.feature-row')]).toHaveLength(2)
     const admin = featureRow('admin')
     expect(section!.contains(admin)).toBe(false)
@@ -471,12 +522,15 @@ describe('FeaturesColumn grouping (R55)', () => {
     expect(container.querySelector('[data-testid="feature-group-toggle-shop"]')?.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('orders groups worst-first — a group with an active run sorts above a calm one', () => {
+  it('orders groups, then rows, by name — an active run moves nothing', () => {
     act(() => {
       root.render(
         <FeaturesColumn
           onOpenConfig={onOpenConfig}
-          features={[feature('calm', 'zzz-calm'), feature('busy', 'aaa-active')]}
+          features={[
+            feature('zeta', 'shop'), feature('busy', 'zzz-calm'), feature('alpha', 'shop'),
+            feature('item10', 'shop'), feature('item2', 'shop'), feature('solo', 'CNS-A'), feature('base', 'CNS'),
+          ]}
           selectedFeature={null}
           activeRunFeature="busy"
           activeRunStatus="running"
@@ -485,9 +539,15 @@ describe('FeaturesColumn grouping (R55)', () => {
       )
     })
     const groups = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
-    // The active group floats above the calm one despite the reverse alphabetical names.
-    expect(groups[0]?.getAttribute('data-testid')).toBe('feature-group-toggle-aaa-active')
-    expect(groups[1]?.getAttribute('data-testid')).toBe('feature-group-toggle-zzz-calm')
+      .map((el) => el.getAttribute('data-testid'))
+    expect(groups).toEqual([
+      'feature-group-toggle-CNS', 'feature-group-toggle-CNS-A',
+      'feature-group-toggle-shop', 'feature-group-toggle-zzz-calm',
+    ])
+    const shopRows = [...container.querySelectorAll('[data-testid="feature-group-shop"] li.feature-row')]
+      .map((li) => li.textContent)
+    expect(shopRows.map((text) => ['alpha', 'item2', 'item10', 'zeta'].find((name) => text?.includes(name))))
+      .toEqual(['alpha', 'item2', 'item10', 'zeta'])
   })
 })
 
@@ -547,19 +607,16 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     expect(container.querySelector('[data-testid="feature-group-toggle-Auth"]')?.textContent).toContain('2')
   })
 
-  it('floats a group with a real question above one whose step runs in the user\'s agent', () => {
-    // Both flights wear `waiting-for-approval`. Only the second asks anything of
-    // this reader, so only it should pull its group to the top — otherwise the
-    // column nags about work that is already under way somewhere else.
-    const parked = (name: string, group: string, checkpointKind: 'external-work' | 'missing-env') => ({
+  it('keeps a group with a parked question in its name position', () => {
+    const parked = (name: string, group: string) => ({
       ...pendingFeature(name, group),
-      pending: { flightId: `fl_${name}`, status: 'waiting-for-approval' as const, currentStage: null, checkpointKind },
+      pending: { flightId: `fl_${name}`, status: 'waiting-for-approval' as const, currentStage: null, checkpointKind: 'missing-env' as const },
     })
     act(() => {
       root.render(
         <FeaturesColumn
           onOpenConfig={onOpenConfig}
-          features={[parked('scan', 'Alpha', 'external-work'), parked('keys', 'Beta', 'missing-env')]}
+          features={[parked('keys', 'Beta'), pendingFeature('scan', 'Alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
         />,
@@ -567,7 +624,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     })
     const sections = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
       .map((el) => el.getAttribute('data-testid'))
-    expect(sections).toEqual(['feature-group-toggle-Beta', 'feature-group-toggle-Alpha'])
+    expect(sections).toEqual(['feature-group-toggle-Alpha', 'feature-group-toggle-Beta'])
   })
 })
 
@@ -793,6 +850,24 @@ describe('FeaturesColumn in-flight row cue', () => {
     expect(row?.className).toContain('cl-list-row-inflight')
     expect(row?.className).toContain('cl-list-row-running')
   })
+
+  it('uses the shared Flight chip for an actively healing run', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          onOpenConfig={onOpenConfig}
+          features={[feature('alpha')]}
+          selectedFeature="alpha"
+          activeRunFeature="alpha"
+          activeRunStatus="healing"
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => flight({ live: true, label: 'healing' })}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-chip-alpha"]')?.textContent).toBe('Healing')
+  })
 })
 
 describe('FeaturesColumn coverage-headline fetching', () => {
@@ -872,7 +947,9 @@ describe('FeaturesColumn modified-tests badge', () => {
   it('shows an amber review action for weaker hints without a failure outline', () => {
     render([dirty('shop', ['equivalent', 'weaker'])])
     const b = badge('shop')!
-    expect(b.textContent).toBe('Review')
+    // An icon, not a word: the 16px box is the whole badge.
+    expect(b.textContent).toBe('')
+    expect(b.querySelector('svg')).toBeTruthy()
     expect(b.getAttribute('data-tone')).toBe('weaker')
     expect(b.getAttribute('aria-label')).toBe('Review test changes in shop')
     expect(b.getAttribute('style')).toContain('--warning')
@@ -883,7 +960,6 @@ describe('FeaturesColumn modified-tests badge', () => {
     render([dirty('a', ['equivalent']), dirty('b', ['unclassifiable']), dirty('c', [undefined]), dirty('d', ['stronger', 'equivalent'])])
     for (const name of ['a', 'b', 'c', 'd']) {
       const b = badge(name)!
-      expect(b.textContent, name).toBe('Review')
       expect(b.getAttribute('style'), name).not.toContain('--danger')
       expect(b.getAttribute('style'), name).toContain('--warning')
       expect(featureRow(name).className, name).toContain('cl-list-row-changed')
@@ -894,7 +970,6 @@ describe('FeaturesColumn modified-tests badge', () => {
   it('keeps stronger edits amber because they still need review', () => {
     render([dirty('up', ['stronger', 'stronger'])])
     const b = badge('up')!
-    expect(b.textContent).toBe('Review')
     expect(b.getAttribute('style')).toContain('--warning')
     expect(b.getAttribute('aria-label')).toBe('Review test changes in up')
     expect(featureRow('up').className).toContain('cl-list-row-changed')
@@ -907,5 +982,79 @@ describe('FeaturesColumn modified-tests badge', () => {
     act(() => { badge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
 
     expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Ready for parallel runs.')
+  })
+})
+
+describe('FeaturesColumn last-run dot', () => {
+  const suite = (name: string, extra: Record<string, unknown> = {}) => ({ name, repos: [], envs: [], ...extra })
+  const entry = (feature: string, status: 'passed' | 'failed' | 'aborted', extra: Record<string, unknown> = {}) => ({
+    runId: `run-${feature}`, feature, status, startedAt: '2026-10-01T06:00:00Z', endedAt: '2026-10-01T06:05:00Z', ...extra,
+  })
+  const render = (features: unknown[], lastRuns: Map<string, unknown>, extra: Record<string, unknown> = {}) => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          onOpenConfig={onOpenConfig}
+          features={features as never}
+          lastRuns={lastRuns as never}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          {...extra}
+        />,
+      )
+    })
+  }
+  const dot = (name: string) => container.querySelector<HTMLElement>(`[data-testid="last-run-${name}"]`)
+
+  it('shows passed, failed, aborted, and repaired passes, and a hollow circle for a suite with no run', () => {
+    render(
+      [suite('clean'), suite('broken'), suite('stopped'), suite('fixed'), suite('fresh')],
+      new Map([
+        ['clean', entry('clean', 'passed')],
+        ['broken', entry('broken', 'failed', { env: 'staging' })],
+        ['stopped', entry('stopped', 'aborted')],
+        ['fixed', entry('fixed', 'passed', { healCycles: 2 })],
+      ]),
+    )
+    expect(dot('clean')?.dataset.status).toBe('passed')
+    expect(dot('clean')?.querySelector('.bg-success')).toBeTruthy()
+    expect(dot('broken')?.dataset.status).toBe('failed')
+    expect(dot('broken')?.querySelector('.bg-danger')).toBeTruthy()
+    expect(dot('broken')?.getAttribute('aria-label')).toMatch(/^Last run failed · .+ · staging$/)
+    expect(dot('stopped')?.dataset.status).toBe('aborted')
+    expect(dot('stopped')?.querySelector('.bg-idle')).toBeTruthy()
+    expect(dot('fixed')?.dataset.status).toBe('repaired')
+    expect(dot('fixed')?.getAttribute('aria-label')).toMatch(/^Last run passed after 2 repair cycles · /)
+    expect(dot('fixed')?.querySelector('.outline-success')).toBeTruthy()
+    expect(dot('fresh')?.dataset.status).toBe('none')
+    expect(dot('fresh')?.getAttribute('aria-label')).toBe('No runs on record')
+    expect(dot('fresh')?.querySelector('.border-line')).toBeTruthy()
+    expect(dot('fresh')?.querySelector('[class*="bg-"]')).toBeNull()
+  })
+
+  it('names a single repair cycle in the singular', () => {
+    render([suite('once')], new Map([['once', entry('once', 'passed', { healCycles: 1 })]]))
+    expect(dot('once')?.getAttribute('aria-label')).toMatch(/^Last run passed after 1 repair cycle · /)
+  })
+
+  it('keeps the previous result beside a live run chip', () => {
+    render([suite('busy')], new Map([['busy', entry('busy', 'failed')]]), { activeRunFeature: 'busy', activeRunStatus: 'running' })
+    expect(dot('busy')?.dataset.status).toBe('failed')
+    expect(featureRow('busy').textContent).toContain('Running')
+  })
+
+  it('repaints when a newer run settles, without remounting the column', () => {
+    render([suite('shop')], new Map([['shop', entry('shop', 'failed')]]))
+    const row = featureRow('shop')
+    render([suite('shop')], new Map([['shop', entry('shop', 'passed')]]))
+    expect(featureRow('shop')).toBe(row)
+    expect(dot('shop')?.dataset.status).toBe('passed')
+  })
+
+  it('puts the portified mark after the name, inside the row\'s click target', () => {
+    render([suite('parallel', { portified: true })], new Map())
+    const mark = container.querySelector('[data-testid="portified-badge-parallel"]')!
+    expect(mark.closest('button.feature-row__name')).toBeTruthy()
+    expect(mark.previousElementSibling?.textContent).toBe('parallel')
   })
 })

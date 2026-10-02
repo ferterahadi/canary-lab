@@ -1,12 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
-import {
-  readJournal,
-  filterSections,
-  newestFirst,
-  type JournalSection,
-} from '../logic/journal-store'
+import { readJournal, filterSections, newestFirst } from '../logic/journal-store'
+import type { JournalSection } from '../../../../../../shared/run-detail'
 
 export interface JournalRouteDeps {
   logsDir: string

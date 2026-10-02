@@ -1,23 +1,27 @@
 import crypto from 'crypto'
+import { featureExists, FeatureNotFoundError } from '../service'
 import {
   applyExternalCoverageMappings,
-  applyExternalSummary,
   buildCoverageMappingContext,
-  buildSummaryAuthoringContext,
-  featureExists,
   hasPrdSummary,
-  FeatureNotFoundError,
   type ApplyExternalCoverageResult,
-  type ApplyExternalSummaryResult,
   type CoverageMappingContext,
+} from '../coverage-engine'
+import {
+  applyExternalSummary,
+  buildSummaryAuthoringContext,
+  type ApplyExternalSummaryResult,
   type SummaryAuthoringContext,
-} from '../service'
+} from '../feature-docs'
 import { CoverageJobConflictError } from './runner'
 import { IncompleteCoverageAnswerError, missingFromRoster } from '../external-submissions'
 import type { CoverageJobStore } from './store'
-import type { CoverageJobManifest } from './types'
-import type { ParsedRequirement } from '../prd-summary'
-import type { ProposedMapping, VariantDimension } from '../../../../../../../../shared/coverage/types'
+import type { ParsedRequirement } from '../prd-summary-parse'
+import type {
+  ProposedMapping,
+  VariantDimension,
+  CoverageJobManifest,
+} from '../../../../../../../../shared/coverage/types'
 
 // Offloaded ("external") coverage + PRD summary: the calling MCP client does the
 // agent work itself — Canary spawns NO local agent. The start_* tool hands the
@@ -122,10 +126,6 @@ export interface SubmitExternalCoverageArgs {
   unmappable?: string[]
   now?: () => string
 }
-
-// Moved to external-submissions.ts so the flight's mapping hand-off words its
-// re-park identically; re-exported to keep this module's public surface.
-export { IncompleteCoverageAnswerError }
 
 export interface SubmitExternalCoverageResult {
   manifest: CoverageJobManifest

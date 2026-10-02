@@ -17,8 +17,8 @@ import {
 // Everything between them — argv shape, the codex output file, the idle clock,
 // abort — is this module's own logic and runs for real.
 const hmock = vi.hoisted(() => ({ agent: 'claude' as string | null }))
-vi.mock('../runtime/auto-heal', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../runtime/auto-heal')>(),
+vi.mock('../runtime/heal-agent-spawn', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../runtime/heal-agent-spawn')>()),
   pickAvailableHealAgent: vi.fn(() => hmock.agent),
 }))
 

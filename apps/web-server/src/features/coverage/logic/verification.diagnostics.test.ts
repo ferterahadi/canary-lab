@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
-import type { RunSummaryFailedEntry } from '../../runs/logic/run-store'
+import type { RunSummaryFailedEntry } from '../../../../../../shared/run-detail'
 import {
   buildVerificationDiagnostics,
   createVerificationConfig,

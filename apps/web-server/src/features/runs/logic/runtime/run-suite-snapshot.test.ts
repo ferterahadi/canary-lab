@@ -9,7 +9,8 @@ import { createHash } from 'crypto'
 import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreReviewedSuiteFiles, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { hashFeatureSpecs } from '../dirty-specs/detect'
 import { suiteReviewRevision } from './suite-review'
-import { writeManifest, type RunManifest } from './manifest'
+import { writeManifest } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
@@ -306,8 +307,7 @@ describe('snapshotSuite', () => {
     fs.rmSync(path.join(ctx.paths.suiteRuntimeInputsDir, '000.input'))
 
     expect(() => materializeSuiteRuntimeInputs(ctx)).toThrow(/runtime inputs are unavailable/)
-    const noEnv = ctxFor().ctx
-    noEnv.env = undefined
+    const noEnv = ctxFor({}, { env: undefined }).ctx
     expect(materializeSuiteRuntimeInputs(noEnv)).toEqual([])
     const liveEnv = ctxFor({}, { env: 'local' }).ctx
     liveEnv.suiteDir = liveEnv.feature.featureDir

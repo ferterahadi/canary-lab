@@ -1,8 +1,10 @@
+import { testLogicalKey } from '../test-identity'
+import { normalizeKnownTestRecord } from './known-test-record'
 import fs from 'fs'
 import type { TestCase } from '@playwright/test/reporter'
-import { type SummaryForJournalOutcome } from './log-enrichment'
+import type { SummaryForJournalOutcome } from './heal-journal'
 import { getSummaryPath } from './paths'
-import { slugify } from './summary-reporter'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 
 export interface KnownTestEntry {
   id: string
@@ -68,7 +70,7 @@ export function knownTestFromTest(test: TestCase): KnownTestEntry {
       ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
       ...(location ? { location } : {}),
     }),
-    name: `test-case-${slugify(test.title)}`,
+    name: summaryEntryName(test.title),
     title: test.title,
     ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
     ...(listLine ? { listLine } : {}),
@@ -80,31 +82,13 @@ export function knownTestsFromExistingSummary(summary: ExistingSummary | null): 
   const raw = Array.isArray(summary?.knownTests) ? summary.knownTests : []
   const out: KnownTestEntry[] = []
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const value = entry as {
-      id?: unknown
-      name?: unknown
-      title?: unknown
-      titlePath?: unknown
-      listLine?: unknown
-      location?: unknown
-    }
-    if (typeof value.name !== 'string' || value.name.length === 0) continue
-    if (typeof value.title !== 'string' || value.title.length === 0) continue
-    const explicitId = typeof value.id === 'string' && value.id.length > 0
-    const id = explicitId ? value.id as string : legacyTestIdForName(value.name)
-    const titlePath = Array.isArray(value.titlePath)
-      ? value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0)
-      : undefined
-    const listLine = typeof value.listLine === 'string' && value.listLine.length > 0 ? value.listLine : undefined
-    const location = typeof value.location === 'string' && value.location.length > 0 ? value.location : undefined
+    const record = normalizeKnownTestRecord(entry)
+    if (!record) continue
+    const { titlePath, ...fields } = record.fields
     mergeKnownTest(out, {
-      id,
-      name: value.name,
-      title: value.title,
+      id: record.id ?? legacyTestIdForName(fields.name),
+      ...fields,
       ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
-      ...(listLine ? { listLine } : {}),
-      ...(location ? { location } : {}),
     })
   }
   return out
@@ -133,7 +117,7 @@ export function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEnt
 }
 
 export function knownTestLogicalKey(entry: Pick<KnownTestEntry, 'title' | 'titlePath'>): string | undefined {
-  return entry.titlePath?.length ? [...entry.titlePath, entry.title].join('\u001f') : undefined
+  return testLogicalKey(entry)
 }
 
 export function legacyTestIdForName(name: string): string {

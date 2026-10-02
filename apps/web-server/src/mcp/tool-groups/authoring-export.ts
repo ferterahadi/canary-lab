@@ -11,14 +11,34 @@ import {
   readEvaluationExportCertificate,
   readEvaluationExportTask,
   readEvaluationExportZip,
-  type EvaluationExportTaskRecord,
-  type EvaluationExportTaskView,
 } from '../../features/evaluation/logic/evaluation-export-store'
+import type {
+  EvaluationExportTaskRecord,
+  EvaluationExportTaskView,
+} from '../../../../../shared/evaluation-export-types'
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
-import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
+import {
+  applyEvaluationTextSlotRewrite,
+  deterministicEvaluationRewrite,
+  normalizeEvaluationRewrite,
+} from '../../features/evaluation/logic/test-review/rewrite'
+import { buildTestReviewPacket } from '../../features/evaluation/logic/test-review/packet'
+import type { EvaluationRewrite } from '../../features/evaluation/logic/test-review/types'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
 import type { BehaviorCertificate } from '../../../../../shared/verification-strength/certificate'
-import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
+import {
+  type ToolGroupContext,
+  asJsonResult,
+  asToonResult,
+  errorResult,
+  failureResult,
+  gettingStartedBusyResult,
+} from '../tool-support'
+import {
+  evaluationRewriteInput,
+  evaluationTextSlotInput,
+  externalEvaluationReportSchema,
+} from '../tool-schemas'
 import { isAuxiliaryExecution } from '../../../../../shared/verification'
 
 type EvaluationExportToolView = EvaluationExportTaskView & {

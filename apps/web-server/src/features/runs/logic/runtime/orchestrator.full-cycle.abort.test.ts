@@ -8,7 +8,8 @@ import { RunOrchestrator } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
-import { readManifest, readRunsIndex, type RunLifecycleEvent } from './manifest'
+import { readManifest, readRunsIndex } from './manifest'
+import type { RunLifecycleEvent } from '../../../../../../../shared/run-state'
 
 interface FakeProcess {
   pid: number

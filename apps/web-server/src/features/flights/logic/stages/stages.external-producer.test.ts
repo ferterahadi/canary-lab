@@ -7,8 +7,13 @@ import { docsStage } from './docs'
 import { specsCoverageStage } from './specs-coverage'
 import { prdSummaryStage } from './prd-summary'
 import type { FlightStageDeps } from './context'
-import type { StageContext, StageOutcome } from '../conductor'
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import type { StageContext, StageOutcome } from '../flight-stages'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 import { stageContextStub } from './__fixtures__/stage-context'
 import { readDocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 

@@ -4,10 +4,10 @@ import {
   attentionKey,
   attentionKeyMap,
   diffFlightToasts,
-  flightNeedsAttention,
   type FlightAttentionInput,
 } from './flight-toasts'
-import type { FlightPauseReason, FlightStatus } from '@/shared/api/client'
+import { flightNeedsAttention } from '@shared/flights/attention'
+import type { FlightPauseReason, FlightStatus } from '@shared/flights/types'
 
 // Stage-label resolver stub — the real STAGE_LABEL map lives on the component
 // side and is injected into the pure diff, so the test supplies its own.

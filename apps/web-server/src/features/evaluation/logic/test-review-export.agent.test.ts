@@ -52,12 +52,12 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
   }
 
   function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; child: FakeChild }) => void): void {
-    vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
-      pickAvailableHealAgent: (preferred?: string) => {
-        if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
-        return availableAgents[0] ?? null
-      },
-    }))
+    vi.doMock('../../runs/logic/runtime/heal-agent-spawn', () => ({
+  pickAvailableHealAgent: (preferred?: string) => {
+    if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
+    return availableAgents[0] ?? null
+  },
+}))
     // Prevent path resolution so spawn receives bare agent names.
     vi.doMock('../../agent-sessions/logic/agent-binary', () => ({
       resolveAgentBinary: (agent: string) => agent,
@@ -86,6 +86,23 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
     cases: [{ title: 't', whatWasChecked: 'w', whyItMatters: 'm', confidence: 'c' }],
   })
 
+  it.each(['auto', 'manual', undefined] as const)('preserves auto selection for %s', async (adapter) => {
+    availableAgents = ['codex', 'claude']
+    mockAgentModules()
+    const { resolveEvaluationAgents } = await import('./test-review/rewrite-agent')
+    expect(resolveEvaluationAgents(adapter)).toEqual(['codex', 'claude'])
+  })
+
+  it('does not discover agents for deterministic evaluation', async () => {
+    const pick = vi.fn(() => { throw new Error('must not discover') })
+    vi.doMock('../../runs/logic/runtime/heal-agent-spawn', () => ({
+  pickAvailableHealAgent: pick,
+}))
+    const { resolveEvaluationAgents } = await import('./test-review/rewrite-agent')
+    expect(resolveEvaluationAgents('deterministic')).toEqual([])
+    expect(pick).not.toHaveBeenCalled()
+  })
+
   it('surfaces the pinned claude session ref to onSession', async () => {
     availableAgents = ['claude']
     const sessions: Array<{ agent: string; sessionId: string }> = []
@@ -93,7 +110,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { onSession: (s) => sessions.push(s) })
 
@@ -110,7 +127,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       fs.writeFileSync(outputPath, JSON.stringify({ slots: [{ id: 'summary', text: 'localized' }] }))
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'codex', tmpDir, { onSession: (s) => sessions.push(s) })
 
@@ -123,7 +140,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       idleHandlers.onIdle?.(300000)
       child.close(null, 'SIGTERM')
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir))
       .rejects.toThrow(/idle for \d+ms/)
@@ -140,7 +157,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       fs.writeFileSync(outputPath, JSON.stringify({ slots: [{ id: 'summary', text: 'localized' }] }))
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'codex', tmpDir, { onOutput })
 
@@ -159,7 +176,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
       child.close(0)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { signal: controller.signal }))
       .rejects.toThrow('evaluation rewrite cancelled')
@@ -173,7 +190,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
       child.stderr.emit('data', 'boom')
       child.close(2)
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { signal: controller.signal }))
       .rejects.toThrow('evaluation rewrite cancelled')
@@ -184,7 +201,7 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
     mockAgentModules(({ child }) => {
       child.emit('error', new Error('spawn failed to launch'))
     })
-    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review/rewrite-agent')
 
     await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir))
       .rejects.toThrow('evaluation rewrite agent failed: spawn failed to launch')

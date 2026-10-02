@@ -1,9 +1,10 @@
+import { runManifest } from './__fixtures__/run-manifest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import type { RunIndexEntry } from './runtime/manifest'
-import type { RunDetail } from './run-detail'
+import type { RunIndexEntry } from '../../../../../../shared/run-index'
+import type { RunDetail } from '../../../../../../shared/run-detail'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from './single-attempt-view'
 
 let root: string
@@ -19,7 +20,7 @@ it('keeps the list and detail in sync when an older run claims its receipt', () 
   fs.mkdirSync(runDir, { recursive: true })
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'),
     "module.exports = { config: { name: 'demo', singleAttempt: { receipt: 'runtime/attempt.json' } } }\n")
-  const manifest = { runId: 'run-1', feature: 'demo', featureDir, startedAt: 'now', status: 'failed', healCycles: 0, services: [] } as const
+  const manifest = runManifest({ runId: 'run-1', feature: 'demo', featureDir, startedAt: 'now', status: 'failed' })
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest))
   const entry: RunIndexEntry = { runId: 'run-1', feature: 'demo', startedAt: 'now', status: 'failed' }
   const detail: RunDetail = { runId: 'run-1', manifest }
@@ -42,10 +43,10 @@ it('uses a run-pinned receipt when the current suite config no longer declares t
   fs.mkdirSync(featureDir, { recursive: true })
   fs.mkdirSync(path.join(runDir, 'runtime'), { recursive: true })
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'demo' } }\n")
-  const manifest = {
-    runId: 'run-2', feature: 'demo', featureDir, startedAt: 'now', status: 'failed', healCycles: 0, services: [],
+  const manifest = runManifest({
+    runId: 'run-2', feature: 'demo', featureDir, startedAt: 'now', status: 'failed',
     singleAttempt: { receipt: 'runtime/attempt.json' },
-  } as const
+  })
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest))
   fs.writeFileSync(path.join(runDir, 'runtime', 'attempt.json'), '{}')
   const entry: RunIndexEntry = { runId: 'run-2', feature: 'demo', startedAt: 'now', status: 'failed' }
@@ -63,12 +64,12 @@ it('leaves an older run restartable when its suite has no receipt policy', () =>
   fs.mkdirSync(featureDir, { recursive: true })
   fs.mkdirSync(runDir, { recursive: true })
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'demo' } }\n")
-  const manifest = { runId: 'run-3', feature: 'demo', featureDir, startedAt: 'now', status: 'failed', healCycles: 0, services: [] } as const
+  const manifest = runManifest({ runId: 'run-3', feature: 'demo', featureDir, startedAt: 'now', status: 'failed' })
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest))
   const entry: RunIndexEntry = { runId: 'run-3', feature: 'demo', startedAt: 'now', status: 'failed' }
 
   expect(withSingleAttemptIndexState([entry, entry], logsDir, featuresDir)).toEqual([entry, entry])
-  const alreadyRequired = { ...entry, newRunRequired: true }
+  const alreadyRequired: RunIndexEntry = { ...entry, newRunRequired: true }
   expect(withSingleAttemptIndexState([alreadyRequired], logsDir, featuresDir)).toEqual([alreadyRequired])
   expect(withSingleAttemptDetailState({ runId: 'run-3', manifest }, logsDir).newRunRequired).toBeUndefined()
 })

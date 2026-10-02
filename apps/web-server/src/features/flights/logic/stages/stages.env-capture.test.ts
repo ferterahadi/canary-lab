@@ -33,9 +33,14 @@ import { envCaptureStage } from './env-capture'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../conductor'
+import type { StageContext, StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightManifest,
+  type FlightStage,
+  type FlightStageKey,
+} from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
@@ -146,9 +151,36 @@ describe('env-capture stage', () => {
     const envFile = path.join(repoDir, '.env')
     fs.writeFileSync(envFile, 'API_KEY=secret\n')
     const calls: InjectCall[] = []
-    const outcome = await envCaptureStage(deps({ inject: bootInject(calls) })).run(ctxFor(withScout(manifest(), [envFile])).ctx)
+    const publish = vi.fn()
+    const outcome = await envCaptureStage(deps({ inject: bootInject(calls), workspaceEvents: { publish } })).run(ctxFor(withScout(manifest(), [envFile])).ctx)
+    expect(publish.mock.calls).toEqual([[{ type: 'envsets-changed', feature: 'checkout' }], [{ type: 'features-changed' }]])
     expect(outcome).toMatchObject({ kind: 'done', evidence: { captured: 1, boot: { runId: 'boot-1' } } })
     expect(calls.some((c) => c.url === '/api/runs/boot-1/abort')).toBe(true)
+  })
+
+  it('announces persisted capture even when the later boot is refused', async () => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout' })
+    const source = path.join(repoDir, 'app.env')
+    fs.writeFileSync(source, 'TOKEN=synthetic\n')
+    const publish = vi.fn()
+    const outcome = await envCaptureStage(deps({ workspaceEvents: { publish },
+      inject: makeInject(() => ({ statusCode: 400, body: { error: 'boot refused' } })),
+    })).run(ctxFor(withScout(manifest(), [source])).ctx)
+    expect(outcome).toMatchObject({ kind: 'failed', error: 'boot request rejected (400): boot refused' })
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'envsets', 'local', 'app.env'), 'utf8')).toBe('TOKEN=synthetic\n')
+    expect(publish.mock.calls).toEqual([[{ type: 'envsets-changed', feature: 'checkout' }], [{ type: 'features-changed' }]])
+  })
+
+  it('does not announce or boot when capture is refused', async () => {
+    const source = path.join(repoDir, 'app.env')
+    fs.writeFileSync(source, 'TOKEN=synthetic\n')
+    const publish = vi.fn()
+    const calls: InjectCall[] = []
+    const outcome = await envCaptureStage(deps({ inject: bootInject(calls), workspaceEvents: { publish } }))
+      .run(ctxFor(withScout(manifest(), [source])).ctx)
+    expect(outcome).toMatchObject({ kind: 'failed', error: 'feature not found' })
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
   })
 
   it('pins the boot runId as live progress the moment the run exists', async () => {

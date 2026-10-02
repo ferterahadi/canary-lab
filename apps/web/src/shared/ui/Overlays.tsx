@@ -77,12 +77,16 @@ export function useDismissOnOutsideMousedown(
   onDismiss: () => void,
   enabled: boolean,
   refs: ReadonlyArray<RefObject<HTMLElement | null>>,
+  isInside?: (target: EventTarget | null) => boolean,
 ): void {
   const onDismissRef = useRef(onDismiss)
   onDismissRef.current = onDismiss
+  const isInsideRef = useRef(isInside)
+  isInsideRef.current = isInside
   useEffect(() => {
     if (!enabled) return
     const onDown = (event: MouseEvent): void => {
+      if (isInsideRef.current?.(event.target)) return
       if (refs.some((ref) => ref.current?.contains(event.target as Node))) return
       onDismissRef.current()
     }

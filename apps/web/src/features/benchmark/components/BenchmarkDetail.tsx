@@ -1,8 +1,15 @@
+import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
-import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
-import { RunDetailColumn } from '@/features/runs'
+import * as benchmarkApi from '@/shared/api/benchmark'
+import type {
+  BenchmarkArm,
+  BenchmarkManifest,
+  BenchmarkReport,
+  SabotageSkillSummary,
+} from '../api/benchmark-types'
+import type { SabotageLevel } from '@shared/benchmark-index'
+import { useBenchmarkDetail, useBenchmarks } from '../state/BenchmarkContext'
+import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
@@ -12,17 +19,11 @@ import { ReportView } from './BenchmarkReport'
 // ─── Detail (setup / race / report) ─────────────────────────────────────────
 
 export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => void; onNew: () => void }) {
-  const m = useBenchmark(id)
-  const { abortBenchmark, loadBenchmark } = useBenchmarks()
+  const detail = useBenchmarkDetail(id)
+  const m = detail.manifest
+  const { abortBenchmark } = useBenchmarks()
   const [tab, setTab] = useState<'race' | 'report'>('race')
   const [armFocus, setArmFocus] = useState<BenchmarkArm>('A')
-
-  // The WS snapshot only carries details for ACTIVE benchmarks, so a terminal
-  // one (resumed on open, or any finished run) won't be in `details` and no
-  // `update` will ever arrive for it — fetch its manifest once to hydrate.
-  useEffect(() => {
-    if (!m) void loadBenchmark(id)
-  }, [id, m, loadBenchmark])
 
   // When the run reaches a terminal state, land on the Report (the payoff) —
   // once, on the transition, so a manual switch back to Race is respected.
@@ -34,11 +35,16 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
   }, [m?.status])
 
   if (!m) {
-    return (<><BenchmarkHeader stage={1} title="Benchmark" onClose={onClose} /><Centered>Loading…</Centered></>)
+    return (<><BenchmarkHeader stage={1} title="Benchmark" onClose={onClose} /><Centered>
+      {detail.loading ? 'Loading…' : <div role="status">
+        <p>{detail.missing ? 'This benchmark is no longer available.' : detail.error ?? 'Could not load benchmark'}</p>
+        <button type="button" className="cl-button" onClick={detail.retry}>Retry</button>
+      </div>}
+    </Centered></>)
   }
 
   const sabotaging = m.status === 'sabotaging' || m.status === 'ready'
-  const terminal = m.status === 'done' || m.status === 'aborted' || m.status === 'error' || m.status === 'invalid'
+  const terminal = isTerminalBenchmarkStatus(m.status)
   // Worktrees are kept after a run so these stay usable; clearing is the user's
   // call (Report tab). Once cleared, the open actions are gone — show a receipt.
   const showFrozen = !!m.sabotageSha && !m.worktreesCleared && !sabotaging && m.status !== 'error'
@@ -215,7 +221,7 @@ export function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; acce
   const isHarness = arm === 'A'
   const label = isHarness ? 'Harness arm' : 'Baseline arm'
   const emoji = isHarness ? '🐤' : '⚙'
-  const waiting = status === 'running' || status === 'sabotaging' || status === 'ready'
+  const waiting = isActiveBenchmarkStatus(status)
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 11, padding: 24, textAlign: 'center' }}>
       <div style={{
@@ -237,7 +243,7 @@ export function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; acce
 // couldn't be launched, surface the path so it can be opened by hand.
 export async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B'): Promise<void> {
   try {
-    const r = await api.openBenchmarkWorktree(id, target)
+    const r = await benchmarkApi.openBenchmarkWorktree(id, target)
     if (!r.opened) {
       window.prompt('Could not launch your editor automatically — copy this path:', r.path)
     }
@@ -252,14 +258,14 @@ export async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B
 // hide on their own — nothing to refresh here.
 export async function clearWorktreesAction(id: string): Promise<void> {
   try {
-    const preview = await api.clearBenchmarkWorktrees(id, false)
+    const preview = await benchmarkApi.clearBenchmarkWorktrees(id, false)
     if (preview.alreadyCleared) return
     const size = formatBytes(preview.freedBytes)
     const ok = window.confirm(
       `Clear all worktrees for this benchmark? "Open frozen bug" and the arm checkouts will no longer be available. Reclaims ${size}.`,
     )
     if (!ok) return
-    await api.clearBenchmarkWorktrees(id, true)
+    await benchmarkApi.clearBenchmarkWorktrees(id, true)
   } catch (e) {
     window.alert(e instanceof Error ? e.message : String(e))
   }

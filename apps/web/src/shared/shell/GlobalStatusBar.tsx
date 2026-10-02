@@ -1,16 +1,16 @@
 import type { ReviewFocus } from '../lib/workspace-view-state'
 import { useEffect, useRef, useState } from 'react'
-import type { Feature, RunDetail } from '../api/types'
-import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
-import { CleanupPill } from '@/features/cleanup'
-import { type FlightsPillProps, FlightsPill, summarizeFlightActivity } from '@/features/flights'
-import {
-  DirtyReviewDialog,
-  ServicesDialog,
-  useActiveBootSessions,
-  useActiveVerifyRuns,
-  useRuns,
-} from '@/features/runs'
+import type { Feature } from '../api/types'
+import type { RunDetail } from '@shared/run-detail'
+import { BenchmarkPill } from '@/features/benchmark/components/BenchmarkPill'
+import { BenchmarkWindow } from '@/features/benchmark/components/BenchmarkWindow'
+import { useBenchmarks } from '@/features/benchmark/state/BenchmarkContext'
+import { CleanupPill } from '@/features/cleanup/components/CleanupPill'
+import { type FlightsPillProps, FlightsPill } from '@/features/flights/components/FlightsPill'
+import { summarizeFlightActivity } from '@/features/flights/components/FlightChipState'
+import { DirtyReviewDialog } from '@/features/runs/components/DirtyReviewDialog'
+import { ServicesDialog } from '@/features/runs/components/ServicesDialog'
+import { useActiveBootSessions, useActiveVerifyRuns, useRuns } from '@/features/runs/state/RunsContext'
 import { StatusPill } from '../ui/StatusPill'
 import { isActiveRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { TestReviewAcceptedToast } from '@/features/runs/components/TestReviewAcceptedToast'
@@ -36,6 +36,7 @@ interface ReviewControl {
 interface Props {
   activeRunDetail: RunDetail | null
   notificationControl?: React.ReactNode
+  recordSyncControl?: React.ReactNode
   onRunLatestTests?: (feature: string) => void
   runStartPending?: boolean
   onOpenCleanup?: () => void
@@ -71,6 +72,7 @@ const EMPTY_FLIGHT_PILL: FlightsPillProps = { flights: [], onOpenFlight: () => {
 // features column / config editor).
 export function GlobalStatusBar({
   notificationControl,
+  recordSyncControl,
   review,
   activeRunDetail,
   onRunLatestTests,
@@ -184,6 +186,7 @@ export function GlobalStatusBar({
       </span>
         <ConnectionBadge state={connection} />
       <McpHealthBadge />
+      {recordSyncControl}
       {services.length > 0 && (
         <div className="shrink-0">
           <StatusChip

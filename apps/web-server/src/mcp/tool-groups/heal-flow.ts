@@ -8,7 +8,22 @@ import { writeHealSignal } from '../../features/runs/logic/heal/external-heal-su
 import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../shared/single-attempt'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext, HEAL_STATUS, SIGNAL_KIND, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, hasText, healWaitNext, waitForHealTask } from '../tool-support'
+import {
+  type ToolGroupContext,
+  HEAL_STATUS,
+  SIGNAL_KIND,
+  asJsonResult,
+  ensureExternalClaimForMcpCall,
+  errorResult,
+  failureResult,
+  hasText,
+} from '../tool-support'
+import {
+  WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS,
+  WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS,
+  healWaitNext,
+  waitForHealTask,
+} from '../heal-task-wait'
 
 export function registerHealFlowTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx

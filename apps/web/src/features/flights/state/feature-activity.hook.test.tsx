@@ -3,8 +3,12 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { DraftRecord } from '@shared/draft-types'
+import type { RunDetail } from '@shared/run-detail'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { FeatureActivity } from './feature-activity'
 
 // The hook's only job is to compose the live stores and memoize the
@@ -21,22 +25,28 @@ const stores = {
   workflows: [] as PortifyIndexEntry[],
   drafts: [] as DraftRecord[],
   records: [] as DraftRecord[] | undefined,
-  tasks: [] as EvaluationExportTask[],
+  tasks: [] as EvaluationExportTaskView[],
   coverageJobs: null as CoverageJobIndexEntry[] | null,
 }
 
-vi.mock('@/features/runs', async () => ({
+vi.mock('@/features/runs/utils/run-waiting-state', async () => ({
   runWaitingState: (await import('../../runs/utils/run-waiting-state')).runWaitingState,
+}))
+vi.mock('@/features/runs/state/RunsContext', async () => ({
   useActiveRuns: () => ({ runs: stores.runs }),
   useRuns: () => ({ runs: stores.allRuns }),
   useRunDetails: () => stores.runDetails,
 }))
-vi.mock('@/features/evaluation', () => ({ useEvaluationExports: () => ({ tasks: stores.tasks }) }))
-vi.mock('@/features/portify', async () => ({
-  usePortify: () => ({ workflows: stores.workflows }),
-  isActivePortify: (status: string) => status === 'editing' || status === 'running',
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExports: () => ({ tasks: stores.tasks }),
 }))
-vi.mock('@/features/wizard', async () => ({
+vi.mock('@/features/portify/state/PortifyContext', async () => ({
+  usePortify: () => ({ workflows: stores.workflows }),
+}))
+vi.mock('@shared/portify-index', async () => ({
+  isActionablePortifyStatus: (status: string) => status === 'editing' || status === 'running',
+}))
+vi.mock('@/features/wizard/state/WizardDraftContext', async () => ({
   useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.records }),
   isActiveWizardTask: (status: string) => status === 'generating',
 }))
@@ -57,12 +67,12 @@ vi.mock('@/shared/state/use-live-resource', () => ({
     return { value: stores.coverageJobs }
   },
 }))
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/coverage', () => ({
   listAllCoverageJobs: vi.fn(async () => []),
 }))
 
 const { useFeatureActivity } = await import('./feature-activity')
-const { listAllCoverageJobs } = await import('@/shared/api/client')
+const { listAllCoverageJobs } = await import('@/shared/api/coverage')
 
 let container: HTMLDivElement
 let root: Root
@@ -128,7 +138,7 @@ describe('useFeatureActivity', () => {
     stores.runs = [{ runId: 'r-a', feature: 'a', startedAt: '2026-01-01T00:00:00Z', status: 'running' }]
     stores.workflows = [{ workflowId: 'wf-b', feature: 'b', status: 'editing', startedAt: '2026-01-01T00:00:00Z' } as PortifyIndexEntry]
     stores.drafts = [{ draftId: 'd-c', featureName: 'c', status: 'generating' } as DraftRecord]
-    stores.tasks = [{ taskId: 't-d', runId: 'r-d', feature: 'd', status: 'running' } as EvaluationExportTask]
+    stores.tasks = [{ taskId: 't-d', runId: 'r-d', feature: 'd', status: 'running' } as EvaluationExportTaskView]
     stores.coverageJobs = [{ jobId: 'j-e', feature: 'e', kind: 'coverage', status: 'running' } as CoverageJobIndexEntry]
 
     render()

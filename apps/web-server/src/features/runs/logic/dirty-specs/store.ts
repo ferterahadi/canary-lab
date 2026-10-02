@@ -1,15 +1,6 @@
-import {
-  FileBackedTaskStore,
-  type TaskStoreEvent,
-} from '../../../../../../../shared/lib/file-backed-task-store'
-import {
-  computeDirty,
-  hashFeatureSpecs,
-  hashFeatureSpecTests,
-  promoteGreen,
-  type DirtySpec,
-  type SpecHashes,
-} from './detect'
+import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners } from '../../../../../../../shared/lib/file-backed-task-store'
+import { computeDirty, hashFeatureSpecs, hashFeatureSpecTests, promoteGreen, type SpecHashes } from './detect'
+import type { DirtySpec } from '../../../../../../../shared/run-manifest'
 import type { TestReviewReceipt } from '../../../../../../../shared/test-review'
 
 // Feature-scoped, file-backed store of test-file integrity ("dirty") state. One
@@ -76,7 +67,7 @@ function emptyRecord(featureId: string, now: string): DirtySpecRecord {
 }
 
 export class DirtySpecStore {
-  private readonly listeners = new Set<(event: DirtySpecStoreEvent) => void>()
+  private readonly events = new TaskListeners<DirtySpecStoreEvent>()
   private readonly store: FileBackedTaskStore<DirtySpecRecord>
 
   constructor(logsDir: string, private readonly now: () => string = () => new Date().toISOString()) {
@@ -97,7 +88,7 @@ export class DirtySpecStore {
       featureOf: (r) => r.featureId,
       withFeature: (r, feature) => ({ ...r, id: feature, featureId: feature }),
     })
-    this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, featureId: e.id }))
+    this.store.onEvent((e: TaskStoreEvent) => this.events.emit({ kind: e.kind, featureId: e.id }))
   }
 
   get(featureId: string): DirtySpecRecord | null {
@@ -227,20 +218,10 @@ export class DirtySpecStore {
   }
 
   onEvent(fn: (event: DirtySpecStoreEvent) => void): void {
-    this.listeners.add(fn)
+    this.events.add(fn)
   }
 
   offEvent(fn: (event: DirtySpecStoreEvent) => void): void {
-    this.listeners.delete(fn)
-  }
-
-  private emit(event: DirtySpecStoreEvent): void {
-    for (const fn of this.listeners) {
-      try {
-        fn(event)
-      } catch {
-        /* a bad listener must not break persistence */
-      }
-    }
+    this.events.delete(fn)
   }
 }

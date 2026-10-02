@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
@@ -5,11 +6,12 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike } from '../logic/run-store'
+import { RunStore } from '../logic/run-store'
+import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
 import { assertNoPendingRunReview } from '../logic/runtime/run-review-gate'
 import type { RunsRouteDeps } from './runs-route-deps'
 import type { RunStartRequest, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { RunStartRequests } from '../logic/run-start-requests'
 
 const apps: FastifyInstance[] = []
@@ -47,10 +49,11 @@ async function fixture() {
   })
   const starts: Parameters<RunsRouteDeps['startRun']>[] = []
   const startRun: RunsRouteDeps['startRun'] = async (...args) => {
+    const [feature, env, , , , , options] = args
     assertNoPendingRunReview(store, 'checkout', featureDir)
     starts.push(args)
-    const runId = args[8]?.runId ?? `started-${starts.length}`
-    store.bootstrap({ runId, feature: 'checkout', featureDir, env: args[1], startedAt: new Date().toISOString(), status: 'running', services: [], healCycles: 0 })
+    const runId = options?.runId ?? `started-${starts.length}`
+    store.bootstrap({ runId, feature, featureDir, env, startedAt: new Date().toISOString(), status: 'running', services: [], healCycles: 0 })
     return { kind: 'started', orch: { runId, stop: async () => {} } as OrchestratorLike }
   }
   const events: WorkspaceEvent[] = []
@@ -104,7 +107,7 @@ describe('blocked run request ownership', () => {
     await vi.waitFor(() => expect(error).toHaveBeenCalled())
   })
   it('persists an internal request and automatically starts its original options once after browser approval', async () => {
-    const { begin, read, decide, starts, events } = await fixture()
+    const { begin, read, decide, starts, events, store } = await fixture()
     const models = { heal: { model: 'test-model' } }
     const blocked = await begin({ isolation: 'worktree', models, updateRepos: false })
     expect(blocked).toMatchObject({ type: 'test_review_required', changedFileCount: 1, reviewUrl: expect.stringContaining('reviewBase=run'), request: { owner: { kind: 'internal' }, status: 'awaiting-review' } })
@@ -113,6 +116,9 @@ describe('blocked run request ownership', () => {
     await vi.waitFor(async () => expect(await read(blocked.request.requestId)).toMatchObject({ status: 'started', runId: expect.any(String) }))
     expect(starts).toHaveLength(1)
     expect(starts[0]).toMatchObject(['checkout', 'dev', undefined, 'worktree', 'run', models, { updateRepos: false, runId: expect.any(String) }])
+    const [, , , , , , options] = starts[0]
+    expect(store.list().map((run) => run.runId)).toContain(options?.runId)
+    expect(await read(blocked.request.requestId)).toMatchObject({ runId: options?.runId })
     expect(events.some((event) => event.type === 'tests-changed')).toBe(true)
   })
 

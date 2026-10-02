@@ -1,15 +1,25 @@
+import type { GettingStartedOwner, GettingStartedWorkflow } from '../../../../../../shared/getting-started'
 // Flights REST — starting a flight and the plan-features task surface.
 // Split out of flights.ts; handler bodies are unchanged.
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import { resolveRepoPaths } from '../../../shared/repo-identity'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { expandHome, parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
-import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
+import { startFlight } from '../logic/conductor'
+import {
+  FlightConflictError,
+  FlightExistsError,
+  FlightFrozenError,
+  FlightStageEntryError,
+} from '../logic/flight-errors'
+import type { FlightEntryMode } from '../logic/flight-stages'
+import {
+  FLIGHT_STAGE_KEYS,
+  type FlightOptions,
+  type FlightStageKey,
+} from '../../../../../../shared/flights/types'
+import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
+import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
  *  the flight-start claim must land under the DEMO's workflow key, not
@@ -127,15 +137,12 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     // Realpath the repo set: it is the single-flight key, so two spellings of
     // the same directory must collide, not slip past each other. Configs may
     // declare repos as `~/...` — expand like the entry prefill does.
-    const resolved: string[] = []
-    for (const p of repoPaths) {
-      try {
-        resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
-      } catch {
-        reply.code(400)
-        return { error: `repo path does not exist: ${p}` }
-      }
+    const resolution = resolveRepoPaths(repoPaths)
+    if (!resolution.ok) {
+      reply.code(400)
+      return { error: `repo path does not exist: ${resolution.path}` }
     }
+    const resolved = resolution.paths
 
     const agent = body.agent === 'claude' || body.agent === 'codex' ? body.agent : undefined
     const opts: FlightOptions = {

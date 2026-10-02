@@ -1,3 +1,4 @@
+import { runIndexEntry, type RunIndexEntry } from '../../../../../../../shared/run-index'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -8,13 +9,15 @@ import {
   readRunsIndex,
   writeManifest,
   readManifest,
-  type RunLifecycleEvent,
-  type RunIndexEntry,
-  type RunManifest,
-  type ServiceStatus,
 } from './manifest'
+import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
-import { reduceRunLifecycleSnapshot } from '../../../../../../../shared/run-state'
+import {
+  reduceRunLifecycleSnapshot,
+  type RunLifecycleEvent,
+  type ServiceStatus,
+} from '../../../../../../../shared/run-state'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // `RunStateSink` is the interface the orchestrator uses to persist its own
 // state. The default implementation (`FileRunStateSink`) writes the same
@@ -168,23 +171,7 @@ function indexEntryFromManifest(
   status: RunManifest['status'],
   endedAt?: string,
 ): RunIndexEntry {
-  return {
-    runId: manifest.runId,
-    ...(manifest.executionType ? { executionType: manifest.executionType } : {}),
-    feature: manifest.feature,
-    ...(manifest.env ? { env: manifest.env } : {}),
-    startedAt: manifest.startedAt,
-    status,
-    ...(endedAt ? { endedAt } : {}),
-    ...(manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
-    ...(manifest.healMode ? { healMode: manifest.healMode } : {}),
-    ...(manifest.healEnd?.reason === 'new-run-required' ? { newRunRequired: true as const } : {}),
-    ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
-    ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
-    ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),
-    ...(manifest.specEdits?.pending.length ? { pendingSpecEdits: manifest.specEdits.pending.length } : {}),
-    ...(manifest.integrity?.hints.length ? { integrityHints: manifest.integrity.hints.length } : {}),
-  }
+  return runIndexEntry({ ...manifest, status, endedAt })
 }
 
 function clearRunningFromSummary(summaryPath: string): void {
@@ -207,7 +194,5 @@ function clearRunningFromSummary(summaryPath: string): void {
   const summary = { ...(parsed as Record<string, unknown>) }
   delete summary.running
   delete summary.runningTests
-  const tmpPath = `${summaryPath}.tmp`
-  fs.writeFileSync(tmpPath, JSON.stringify(summary, null, 2) + '\n')
-  fs.renameSync(tmpPath, summaryPath)
+  atomicWriteJson(summaryPath, summary)
 }

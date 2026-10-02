@@ -1,3 +1,4 @@
+import { reviewReceipt } from '../../../../../../shared/__fixtures__/test-review'
 // GET /api/runs/:runId/test-review — the patch a human is shown before deciding
 // whether a mid-run spec edit gets into the run. Both arms here refuse to answer
 // at all: an id that could escape the logs directory, and a suite that moved
@@ -10,7 +11,8 @@ import path from 'path'
 import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runsRoutes } from './runs'
-import { createRegistry, RunStore } from '../logic/run-store'
+import { RunStore } from '../logic/run-store'
+import { createRegistry } from '../logic/run-registry'
 import { updateManifest, writeManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 
@@ -161,13 +163,13 @@ describe('GET /api/runs/:runId/test-review', () => {
     updateManifest(manifestPath, {
       specEdits: {
         checkedAt: 'later', pending: [], adopted: [],
-        reviewDecisions: [{ revision, decision: 'approved-for-new-run', receipt: { decision: 'accepted', review_revision: revision, files: [], git: { status: 'not-requested' }, execution: { status: 'none' } } }],
+        reviewDecisions: [{ at: 'later', revision, decision: 'approved-for-new-run', receipt: reviewReceipt({ decision: 'accepted', review_revision: revision, files: [], git: { status: 'not-requested' }, execution: { status: 'none' } }) }],
       },
     })
     const settled = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
     expect(settled.json()).toMatchObject({ reviewState: 'settled', nextAction: 'start-new-run', receipt: { decision: 'accepted' } })
     updateManifest(manifestPath, {
-      specEdits: { checkedAt: 'later', pending: [], adopted: [], reviewDecisions: [{ revision, decision: 'restored' }] },
+      specEdits: { checkedAt: 'later', pending: [], adopted: [], reviewDecisions: [{ at: 'later', revision, decision: 'restored' }] },
     })
     const receiptless = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
     expect(receiptless.json()).toMatchObject({ reviewState: 'settled', nextAction: 'none' })

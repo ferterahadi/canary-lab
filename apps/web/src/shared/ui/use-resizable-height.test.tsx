@@ -12,7 +12,8 @@ const KEY = 'test-panel-height'
 /** Renders the hook onto a handle + a height readout, and OWNS the collapsed
  *  flag the way the real consumer does — so every assertion reads what a reader
  *  would see after the controlled round trip, not the hook's internals. */
-function Harness({ defaultPx = 200, minPx = 100, maxPx = 500, collapsePx = 68, startCollapsed = false }: {
+function Harness({ defaultPx = 200, minPx = 100, maxPx = 500, collapsePx = 68, startCollapsed = false, ceilingPx }: {
+  ceilingPx?: () => number | null
   defaultPx?: number
   minPx?: number
   maxPx?: number
@@ -21,7 +22,7 @@ function Harness({ defaultPx = 200, minPx = 100, maxPx = 500, collapsePx = 68, s
 }) {
   const [collapsed, setCollapsed] = useState(startCollapsed)
   const { height, dragging, handleProps } = useResizableHeight({
-    storageKey: KEY, defaultPx, minPx, maxPx, collapsePx, collapsed, onCollapsedChange: setCollapsed,
+    storageKey: KEY, defaultPx, minPx, maxPx, collapsePx, collapsed, onCollapsedChange: setCollapsed, ceilingPx,
   })
   return (
     <div>
@@ -230,6 +231,28 @@ describe('useResizableHeight', () => {
     press('Escape')
     expect(height()).toBe(200)
     expect(collapsed()).toBe(false)
+  })
+
+  it('stops a drag and a key step at the live room the container reports', () => {
+    render({ ceilingPx: () => 320 })
+    drag(400, 100)
+    expect(height()).toBe(320)
+    press('Home')
+    expect(height()).toBe(320)
+  })
+
+  it('starts a drag from the height actually shown, so the edge has no dead travel', () => {
+    localStorage.setItem(KEY, '450')
+    render({ ceilingPx: () => 300 })
+    // Shown capped at 300: a 50px pull down lands at 250, not at 400.
+    drag(400, 450)
+    expect(height()).toBe(250)
+  })
+
+  it('falls back to maxPx while the room cannot be measured', () => {
+    render({ ceilingPx: () => null })
+    drag(400, 0)
+    expect(height()).toBe(500)
   })
 
   it('persists the chosen height and restores it on the next mount', () => {

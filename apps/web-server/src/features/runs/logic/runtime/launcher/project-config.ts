@@ -1,10 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import {
-  normalizeAgentModels,
-  type AgentModelsConfig,
-} from '../../../../agent-sessions/logic/agent-models'
+import { normalizeAgentModels, type AgentModelsConfig } from '../../../../../../../../shared/agent-models'
 
 // `external` was retired in 2.2.0: whether a run parks for an external client
 // is decided by the request's MCP origin, not by workspace config, so the

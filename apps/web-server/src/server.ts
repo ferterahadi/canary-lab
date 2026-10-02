@@ -1,16 +1,21 @@
+import { bridgeCleanupEvents } from './shared/cleanup-events'
+import { createRepositoryObserver } from './shared/repository-observer'
 import path from 'path'
 import fs from 'fs'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../shared/run-state'
-import { runsRoutes, type ExternalHealAgentRequest } from './features/runs/routes/runs'
+import { runsRoutes } from './features/runs/routes/runs'
+import type { ExternalHealAgentRequest } from './features/runs/routes/runs-route-support'
 import { makeExternalHealAuditLogger } from './features/runs/routes/external-heal'
 import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
+import { createMcpRestAdapters } from './mcp/rest-adapters'
 import { register as registerAgentSessions } from './features/agent-sessions/index'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry } from './features/runs/logic/run-store'
+import { RunStore } from './features/runs/logic/run-store'
+import { createRegistry, type OrchestratorRegistry } from './features/runs/logic/run-registry'
 import { bridgeDirtySpecsToActiveRuns } from './features/runs/logic/runtime/run-spec-edits-bridge'
 import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
@@ -26,21 +31,18 @@ import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
-import { isActiveFlightStatus, type FlightStatus } from '../../../shared/flights/types'
-import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
-import { MCP_ORIGIN_HEADER } from './features/flights/routes/flight-decision-origin'
+import { removeFlightRecordsForFeature } from './features/flights/logic/flight-queue'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
 import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
 import { startDirtySpecWatcher } from './features/runs/logic/dirty-specs/watcher'
 import { reclaimOrphanedPortify } from './features/portify/logic/runtime/reclaim'
-import {
-  buildAgentSessionResponse,
-  resolveWorkflowAgentRef,
-} from './features/agent-sessions/logic/agent-session-log'
+import { resolveWorkflowAgentRef } from './features/agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse } from './features/agent-sessions/logic/agent-session-subagents'
 import { WorkspaceEventBus } from './shared/workspace-events'
 import { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
-import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
+import { GettingStartedBusyError } from './features/config/logic/getting-started-session'
 import { WORKBENCH_SUITE, gettingStartedRunWorkflow, isGettingStartedFlightStart } from './features/config/routes/onboarding'
+import { createGettingStartedRuntime } from './features/config/logic/getting-started-runtime'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
@@ -53,22 +55,26 @@ import { agentJobStore as sharedAgentJobStore, bridgeAgentJobEvents } from './fe
 import { bridgeEvaluationExportEvents, readEvaluationExportTask } from './features/evaluation/logic/evaluation-export-store'
 import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
+import { RunOrchestrator } from './features/runs/logic/runtime/orchestrator'
+import {
+  collectPortSlots,
+  buildServiceSpecs,
+  buildQueuedServiceEntries,
+} from './features/runs/logic/runtime/service-specs'
 import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
-import type { RepoUpdateRefusal } from './features/runs/logic/runtime/repo-upstream-update'
-import { overlayExists as portifyOverlayExists } from './features/portify/logic/runtime/overlay'
-import { revertPortification } from './features/portify/logic/runtime/unportify'
+import { removeFeaturePortification } from './features/portify/logic/remove-portification'
+import {
+  buildOrchestratorHealPrompt,
+  type BuildHealCyclePrompt,
+} from './features/runs/logic/runtime/auto-heal'
 import {
   buildAgentSpawnCommand,
-  buildOrchestratorHealPrompt,
   pickAvailableHealAgent,
-  resolveAgentBinary,
-  type BuildHealCyclePrompt,
-  type HealAgent,
-} from './features/runs/logic/runtime/auto-heal'
+} from './features/runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentBinary, type HealAgent } from './features/agent-sessions/logic/agent-binary'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './shared/git-repo'
 import { realPtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import {
@@ -91,8 +97,6 @@ import {
 // registrars have to import from. Re-exported to keep the published surface of
 // `createServer` where callers already expect it.
 import type { CreateServerOptions } from './server-context'
-export type { CreateServerOptions }
-
 export interface CreateServerResult {
   app: FastifyInstance
   registry: OrchestratorRegistry
@@ -161,43 +165,22 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  bridgeCleanupEvents(runStore, workspaceEvents, ['runs', 'worktrees'])
+  bridgeCleanupEvents(benchmarkStore, workspaceEvents, ['worktrees'])
+  bridgeCleanupEvents(portifyStore, workspaceEvents, ['portify', 'worktrees'])
+  const repositoryObserver = createRepositoryObserver({ events: workspaceEvents, log: (message, error) => app.log.warn({ err: error }, message) })
+  app.addHook('onClose', async () => repositoryObserver.dispose())
   const coverageMonitor = new CoverageFreshnessMonitor({ featuresDir, logsDir }, workspaceEvents, (error) => app.log.warn({ error }, 'Coverage freshness reconciliation failed'))
   const refreshRunCoverage = () => coverageMonitor.schedule()
   runStore.onEvent(refreshRunCoverage)
   app.addHook('onListen', () => coverageMonitor.start())
   app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
-  const gettingStarted = new GettingStartedSessionStore(logsDir, {
-    status: (target) => {
-      switch (target.kind) {
-        case 'run': return runStore.get(target.id)?.manifest.status ?? null
-        case 'flight': return flightStore.get(target.id)?.status ?? null
-        case 'draft': return readDraft(logsDir, target.id)?.status ?? null
-        case 'coverage-job': return coverageJobStore.get(target.id)?.status ?? null
-        case 'portify': return portifyStore.get(target.id)?.status ?? null
-        case 'export': return readEvaluationExportTask(logsDir, target.id)?.status ?? null
-      }
-    },
-    isActive: (target, status) => {
-      switch (target.kind) {
-        // NOT bare isActiveRunStatus: a queued demo run is still the demo's
-        // target (see isGettingStartedRunActive) — the bare predicate settled
-        // it as "completed: queued" and dropped the one-demo lock mid-run.
-        case 'run': return isGettingStartedRunActive(status)
-        // The cast is sound: a flight target's status comes from flightStore
-        // (typed FlightStatus); the resolver's 'missing' fallback simply isn't
-        // in ACTIVE_FLIGHT_STATUSES, so it reads as settled — the intent.
-        case 'flight': return isActiveFlightStatus(status as FlightStatus)
-        // Terminal draft statuses only — 'spec-ready' still awaits apply, so
-        // the author demo stays claimed until the tests actually land.
-        case 'draft': return !['accepted', 'cancelled', 'error'].includes(status)
-        case 'coverage-job': return status === 'running'
-        // 'ready-to-save' still awaits the save/cancel decision — the portify
-        // demo isn't done until the overlay is captured or discarded.
-        case 'portify': return !['saved', 'failed', 'aborted'].includes(status)
-        case 'export': return status === 'running'
-      }
-    },
-  }, () => workspaceEvents.publish({ type: 'getting-started-changed' }))
+  const gettingStartedRuntime = createGettingStartedRuntime({
+    logsDir, runStore, flightStore, portifyStore, coverageJobStore, workspaceEvents,
+    readDraft: (id) => readDraft(logsDir, id),
+    readExport: (id) => readEvaluationExportTask(logsDir, id),
+  })
+  const gettingStarted = gettingStartedRuntime.store
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
   // Its change events drive the live red cue; the watcher recomputes on spec
@@ -259,23 +242,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
-  gettingStarted.reconcileInterrupted()
-  runStore.onEvent(() => gettingStarted.reconcile())
-  flightStore.onEvent(() => gettingStarted.reconcile())
-  portifyStore.onEvent(() => gettingStarted.reconcile())
-  // Draft, coverage-job, and export-task mutations already reach the workspace
-  // bus through their store bridges (both the GUI and MCP write through the
-  // same shared stores), so the settle trigger rides those events instead of a
-  // second per-store subscription. `getting-started-changed` itself is filtered
-  // out — reconcile publishes it, so reacting to it would ping-pong (harmlessly,
-  // since a settled state reconciles to a no-op, but pointlessly).
-  workspaceEvents.subscribe((event) => {
-    if (
-      event.type === 'draft-created' || event.type === 'draft-updated' || event.type === 'draft-deleted'
-      || event.type === 'coverage-changed'
-      || event.type === 'evaluation-export-created' || event.type === 'evaluation-export-updated' || event.type === 'evaluation-export-deleted'
-    ) gettingStarted.reconcile()
-  })
+  gettingStartedRuntime.start()
+  app.addHook('onClose', async () => gettingStartedRuntime.dispose())
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.
@@ -326,6 +294,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     updateStore,
     versionState,
     workspaceEvents,
+    repositoryObserver,
     gettingStarted,
     externalHealBroker,
     brokers,
@@ -336,7 +305,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // Feature registration. Order is Fastify plugin order; the static fallback
   // and the MCP mount below must stay last. Each feature reads what it needs
   // from `ctx` — adding or removing one should not touch anything else here.
-  await registerConfig(app, ctx)
+  const config = await registerConfig(app, ctx)
   await registerFlights(app, ctx)
   await registerNotifications(app, ctx)
   await registerVersion(app, ctx)
@@ -364,149 +333,23 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // registered above; for `start_run` we reuse `app.inject()` rather than
   // duplicating the 270-line orchestrator-construction code.
   await app.register(registerMcpRoutes, {
-    coverageRequest: async (request) => {
-      const response = await app.inject(request)
-      return { statusCode: response.statusCode, body: response.json() }
-    },
-    testReviewRequest: async (request) => {
-      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined, headers: { [MCP_ORIGIN_HEADER]: 'mcp' } })
-      return { statusCode: response.statusCode, body: response.json() }
-    },
-    discoveryRepairRequest: async (request) => {
-      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
-      return { statusCode: response.statusCode, body: response.json() }
-    },
+    ...createMcpRestAdapters({
+      inject: (request) => app.inject(request),
+      gettingStartedRunWorkflow, isGettingStartedFlightStart,
+    }),
     store: runStore,
     broker: externalHealBroker,
     featuresDir,
     projectRoot: opts.projectRoot,
     workspaceEvents,
     dirtySpecStore,
+    isRepoActive: config.isRepoActive,
+    repositoryObserver,
     // R76: deleting a suite deletes its flight history with it.
     removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
-    // Flight over MCP: reuse the flights REST routes so the MCP surface
-    // shares the store + conductor (and single-flight guard) with the UI/CLI.
-    flightsRequest: async (o) => {
-      const originalPayload = o.payload as Record<string, unknown> | undefined
-      const isGettingStartedFlight = o.method === 'POST'
-        && o.url === '/api/flights'
-        && isGettingStartedFlightStart(originalPayload)
-      const payload = isGettingStartedFlight
-        ? { ...originalPayload, gettingStartedSource: 'external' }
-        : originalPayload
-      const resp = await app.inject({
-        method: o.method,
-        url: o.url,
-        // Marks this as the MCP client acting, not the browser. An externally
-        // driven flight hands every decision to that client, so the lifecycle
-        // routes refuse the same calls when they arrive from the web UI — and
-        // MCP and the UI post to the identical endpoints, so without this the
-        // guard could not tell them apart. See requireFlightDecisionOrigin.
-        headers: { [MCP_ORIGIN_HEADER]: 'mcp' },
-        ...(payload !== undefined ? { payload } : {}),
-      })
-      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
-      return { statusCode: resp.statusCode, body }
-    },
-	    startRun: async (feature, env, healAgent, isolation, executionType, updateRepos) => {
-	      const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
-	      const resp = await app.inject({
-	        method: 'POST',
-	        url: '/api/runs',
-	        payload: {
-            feature,
-            env,
-            ...(healAgent ? { healAgent } : {}),
-            ...(isolation ? { isolation } : {}),
-            ...(executionType === 'boot' ? { mode: 'boot' } : {}),
-            ...(updateRepos !== undefined ? { updateRepos } : {}),
-            ...(demoWorkflow
-              ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }
-              : {}),
-          },
-	      })
-	      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as Record<string, unknown>
-	      if (resp.statusCode === 201 || resp.statusCode === 200) {
-	        return { kind: 'started', runId: String(body.runId) }
-	      }
-	      if (resp.statusCode === 202) {
-	        return { kind: 'queued', runId: String(body.runId), reason: body.queueReason === 'repo-collision' ? 'repo-collision' : 'resources' }
-	      }
-	      if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
-	        return {
-	          kind: 'collision',
-	          conflictingRunId: String(body.conflictingRunId),
-	          conflictingFeature: String(body.conflictingFeature),
-	          repoPaths: Array.isArray(body.repoPaths) ? body.repoPaths as string[] : [],
-	          options: ['worktree', 'queue'],
-	          message: String(body.message ?? 'Same-app collision.'),
-	        }
-	      }
-	      if (resp.statusCode === 409 && body.type === 'repo_update_refused') {
-	        return {
-	          kind: 'repo-update-refused',
-	          repos: Array.isArray(body.repos) ? body.repos as RepoUpdateRefusal[] : [],
-	          message: String(body.error ?? 'Repo upstream update refused.'),
-	        }
-	      }
-	      if (resp.statusCode === 409 && body.type === 'getting_started_busy') {
-          return {
-            kind: 'getting-started-busy',
-            active: body.active as {
-              sessionId: string
-              workflow: string
-              owner: 'internal' | 'external'
-              target: { kind: string; id: string } | null
-            },
-            message: String(body.error ?? 'Another Getting Started demo is already running.'),
-          }
-        }
-	      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
-	      if (body.type === 'test_review_required') throw Object.assign(new Error(message), { testReviewRequired: body })
-	      throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
-	    },
     restartExternalRun: async (runId, healAgent, guidance) => {
       const orch = await runs.restartExternalRun(runId, healAgent, guidance)
       return { runId: orch.runId, mode: 'remaining' }
-    },
-    startVerification: async (feature, input) => {
-      const resp = await app.inject({
-        method: 'POST',
-        url: `/api/features/${encodeURIComponent(feature)}/verifications`,
-        payload: input,
-      })
-      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
-        const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
-        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
-        throw new Error(`execute_verification failed (${resp.statusCode}): ${message}`)
-      }
-      return JSON.parse(resp.payload) as { runId: string }
-    },
-    writeEnvsetSlot: async (feature, env, slot, entries) => {
-      const resp = await app.inject({
-        method: 'PUT',
-        url: `/api/features/${encodeURIComponent(feature)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`,
-        payload: { entries },
-      })
-      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
-      if (resp.statusCode !== 200 && resp.statusCode !== 201) {
-        const message = typeof body === 'object' && body && 'error' in body ? String((body as { error: unknown }).error) : String(body)
-        throw new Error(`write_envset failed (${resp.statusCode}): ${message}`)
-      }
-      return body as { path: string; entries: Array<{ key: string; value: string }>; unparsedLines: number[] }
-    },
-    handoffHeal: async (runId, to, sessionId, guidance) => {
-      const resp = await app.inject({
-        method: 'POST',
-        url: `/api/runs/${encodeURIComponent(runId)}/heal-agent/handoff`,
-        payload: {
-          to,
-          ...(sessionId ? { sessionId } : {}),
-          ...(guidance ? { guidance } : {}),
-        },
-      })
-      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
-      return { statusCode: resp.statusCode, body }
     },
     // Port-ification workflow — reuse the in-process runner + store (the same
     // ones behind routes/portify.ts). save/cancel throw with a statusCode the
@@ -540,14 +383,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       attach: (sessionId, target) => gettingStarted.attach(sessionId, target),
       abandon: (sessionId) => gettingStarted.abandon(sessionId),
     },
-    // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
-    // delete the overlay, then emit so live clients update. Mirrors the REST route.
     removePortification: (feature) => {
-      const f = loadFeatures(featuresDir).find((x) => x.name === feature)
-      if (!f?.featureDir) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
-      const { reverted } = revertPortification(f.featureDir)
-      workspaceEvents.publish({ type: 'features-changed' })
-      return { name: f.name, portified: portifyOverlayExists(f.featureDir), reverted }
+      const result = removeFeaturePortification({ featuresDir, workspaceEvents }, feature)
+      if (!result.ok) throw Object.assign(new Error(result.error), { statusCode: result.statusCode })
+      return result.value
     },
 	  })
 

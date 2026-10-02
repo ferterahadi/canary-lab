@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import { linkFeatureDoc, writeFeatureDoc } from '../features/config/logic/feature-authoring'
+import { linkFeatureDoc, writeFeatureDoc } from '../features/config/logic/feature-docs-authoring'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
 import { resolveFeatureDir } from '../features/coverage/logic/coverage/service'
 import path from 'path'

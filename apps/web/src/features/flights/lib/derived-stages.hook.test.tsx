@@ -3,8 +3,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
-import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { Feature } from '@/shared/api/types'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { FeatureExternalHistory } from '../state/feature-activity'
 
 // The two stores this hook reads own a WebSocket and a fetch loop apiece, which
@@ -12,14 +14,20 @@ import type { FeatureExternalHistory } from '../state/feature-activity'
 // — picking the latest terminal run per feature, folding in a completed export,
 // dropping features with no evidence — runs for real against these values.
 const runsValue: { runs: RunIndexEntry[] } = { runs: [] }
-const exportsValue: { tasks: EvaluationExportTask[] } = { tasks: [] }
+const exportsValue: { tasks: EvaluationExportTaskView[] } = { tasks: [] }
 const portifyValue: { workflows: PortifyIndexEntry[] } = { workflows: [] }
 
-vi.mock('@/features/runs', () => ({ useRuns: () => runsValue }))
-vi.mock('@/features/evaluation', () => ({ useEvaluationExports: () => exportsValue }))
-vi.mock('@/features/portify', () => ({
-  isActivePortify: (status: PortifyIndexEntry['status']) =>
+vi.mock('@/features/runs/state/RunsContext', () => ({
+  useRuns: () => runsValue,
+}))
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExports: () => exportsValue,
+}))
+vi.mock('@shared/portify-index', () => ({
+  isActionablePortifyStatus: (status: PortifyIndexEntry['status']) =>
     status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-save',
+}))
+vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortify: () => portifyValue,
 }))
 
@@ -59,12 +67,13 @@ const run = (over: Partial<RunIndexEntry> = {}): RunIndexEntry => ({
   ...over,
 })
 
-const task = (over: Partial<EvaluationExportTask> = {}): EvaluationExportTask => ({
+const task = (over: Partial<EvaluationExportTaskView> = {}): EvaluationExportTaskView => ({
   taskId: 't1',
   runId: 'r1',
   feature: 'checkout',
-  mode: 'deterministic' as EvaluationExportTask['mode'],
-  status: 'completed' as EvaluationExportTask['status'],
+  mode: 'deterministic' as EvaluationExportTaskView['mode'],
+  producer: 'internal',
+  status: 'completed' as EvaluationExportTaskView['status'],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
   downloadReady: true,
@@ -111,7 +120,7 @@ describe('useDerivedFeatureStages', () => {
   })
 
   it('marks the export stage done only for a completed export of that feature', () => {
-    exportsValue.tasks = [task({ feature: 'other', status: 'completed' as EvaluationExportTask['status'] })]
+    exportsValue.tasks = [task({ feature: 'other', status: 'completed' as EvaluationExportTaskView['status'] })]
     render([feature()])
     expect(statusOf('checkout', 'evaluation-export')).not.toBe('done')
 
@@ -121,7 +130,7 @@ describe('useDerivedFeatureStages', () => {
   })
 
   it('does not count a still-running export as done', () => {
-    exportsValue.tasks = [task({ status: 'running' as EvaluationExportTask['status'] })]
+    exportsValue.tasks = [task({ status: 'running' as EvaluationExportTaskView['status'] })]
     render([feature()])
     expect(statusOf('checkout', 'evaluation-export')).not.toBe('done')
   })

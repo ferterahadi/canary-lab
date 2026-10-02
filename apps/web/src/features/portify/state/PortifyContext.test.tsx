@@ -3,13 +3,15 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/shared/api/client'
-import type { PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
+import * as portifyApi from '@/shared/api/portify'
+import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest } from '@/shared/api/portify'
 import {
   PortifyProvider,
   useActivePortify,
   usePortify,
   usePortifyWorkflow,
+  usePortifyDetail,
 } from './PortifyContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -18,16 +20,13 @@ import {
 // real rules in portify-state.test.ts. This suite owns the provider: the socket
 // lifecycle (connect, reconnect backoff, teardown), the one-shot actions, and
 // the three read hooks — none of which the pure module can reach.
-vi.mock('@/shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
-  return {
-    ...actual,
-    startPortify: vi.fn(),
-    getPortify: vi.fn(),
-    savePortify: vi.fn(),
-    cancelPortify: vi.fn(),
-  }
-})
+vi.mock('@/shared/api/portify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/portify')>()),
+  startPortify: vi.fn(),
+  getPortify: vi.fn(),
+  savePortify: vi.fn(),
+  cancelPortify: vi.fn(),
+}))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -35,6 +34,7 @@ class FakeWebSocket {
   onmessage: ((event: { data: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   closed = false
+  readyState = 0
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this)
@@ -42,6 +42,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 
@@ -99,10 +100,10 @@ beforeEach(() => {
   root = createRoot(container)
   FakeWebSocket.instances = []
   vi.useRealTimers()
-  vi.mocked(api.startPortify).mockReset().mockResolvedValue({ workflowId: 'wf-new' } as never)
-  vi.mocked(api.getPortify).mockReset()
-  vi.mocked(api.savePortify).mockReset().mockResolvedValue(manifest() as never)
-  vi.mocked(api.cancelPortify).mockReset().mockResolvedValue(manifest() as never)
+  vi.mocked(portifyApi.startPortify).mockReset().mockResolvedValue({ workflowId: 'wf-new' } as never)
+  vi.mocked(portifyApi.getPortify).mockReset()
+  vi.mocked(portifyApi.savePortify).mockReset().mockResolvedValue(manifest() as never)
+  vi.mocked(portifyApi.cancelPortify).mockReset().mockResolvedValue(manifest() as never)
 })
 
 afterEach(() => {
@@ -206,6 +207,62 @@ describe('PortifyProvider — socket lifecycle', () => {
     expect(portify.connection).toBe('disconnected')
   })
 
+  it('preserves exact label timing, keeps retrying at the cap, and resets on open', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream' })
+    act(() => { socket().onopen?.() })
+    for (const [index, delay] of [500, 1000, 2000, 4000, 8000, 10000, 10000].entries()) {
+      act(() => { socket().onclose?.() })
+      expect(portify.connection).toBe('reconnecting')
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1) })
+      expect(portify.connection).toBe('reconnecting')
+      expect(FakeWebSocket.instances).toHaveLength(index + 1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(FakeWebSocket.instances).toHaveLength(index + 2)
+      expect(portify.connection).toBe(delay === 10000 ? 'disconnected' : 'reconnecting')
+    }
+    act(() => { socket().onopen?.() })
+    expect(portify.connection).toBe('live')
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(499) })
+    expect(FakeWebSocket.instances).toHaveLength(8)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(FakeWebSocket.instances).toHaveLength(9)
+  })
+
+  it('keeps the initial label during constructor failures until the capped retry fires', async () => {
+    vi.useFakeTimers()
+    const Broken = function Broken() { throw new Error('offline') } as unknown as typeof WebSocket
+    mount({ wsUrl: 'ws://test/stream', WebSocketImpl: Broken })
+    expect(portify.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(25_499) })
+    expect(portify.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(portify.connection).toBe('disconnected')
+  })
+
+  it('recovers missed changes from a new snapshot and preserves frame coercion', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream', detailId: 'wf-1' })
+    act(() => { socket().fire({ type: 'snapshot', workflows: [entry()], details: { 'wf-1': manifest() } }) })
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    const recovered = manifest({ status: 'aborted' })
+    act(() => {
+      socket().onopen?.()
+      socket().onmessage?.({ data: { toString: () => JSON.stringify({
+        type: 'snapshot', workflows: [entry({ status: 'aborted' })], details: { 'wf-1': recovered },
+      }) } })
+    })
+    expect(portify.connection).toBe('live')
+    expect(portify.workflows).toHaveLength(1)
+    expect(portify.workflows[0].status).toBe('aborted')
+    expect(workflow?.status).toBe('aborted')
+    act(() => { socket().fire({ type: 'removed', workflowId: 'wf-1' }) })
+    expect(portify.workflows).toEqual([])
+    expect(workflow).toBeUndefined()
+  })
+
   it('schedules a reconnect when the socket cannot even be constructed', async () => {
     vi.useFakeTimers()
     let attempts = 0
@@ -255,7 +312,7 @@ describe('PortifyProvider — actions', () => {
     let id: string | undefined
     await act(async () => { id = await portify.startPortify({ feature: 'checkout', agent: 'claude' }) })
 
-    expect(api.startPortify).toHaveBeenCalledWith({ feature: 'checkout', agent: 'claude' })
+    expect(portifyApi.startPortify).toHaveBeenCalledWith({ feature: 'checkout', agent: 'claude' })
     expect(id).toBe('wf-new')
   })
 
@@ -265,12 +322,12 @@ describe('PortifyProvider — actions', () => {
     await act(async () => { await portify.savePortify('wf-1') })
     await act(async () => { await portify.cancelPortify('wf-1') })
 
-    expect(api.savePortify).toHaveBeenCalledWith('wf-1')
-    expect(api.cancelPortify).toHaveBeenCalledWith('wf-1')
+    expect(portifyApi.savePortify).toHaveBeenCalledWith('wf-1')
+    expect(portifyApi.cancelPortify).toHaveBeenCalledWith('wf-1')
   })
 
   it('hydrates a terminal workflow the snapshot left out', async () => {
-    vi.mocked(api.getPortify).mockResolvedValue(manifest({ workflowId: 'wf-old', status: 'saved' }) as never)
+    vi.mocked(portifyApi.getPortify).mockResolvedValue(manifest({ workflowId: 'wf-old', status: 'saved' }) as never)
     mount({ wsUrl: 'ws://test/ws/portify', detailId: 'wf-old' })
     expect(workflow).toBeUndefined()
 
@@ -280,7 +337,7 @@ describe('PortifyProvider — actions', () => {
   })
 
   it('leaves the detail unhydrated when the fetch fails', async () => {
-    vi.mocked(api.getPortify).mockRejectedValue(new Error('404'))
+    vi.mocked(portifyApi.getPortify).mockRejectedValue(new Error('404'))
     mount({ wsUrl: 'ws://test/ws/portify', detailId: 'wf-old' })
 
     await act(async () => { await portify.loadPortify('wf-old') })
@@ -289,7 +346,7 @@ describe('PortifyProvider — actions', () => {
   })
 
   it('leaves the detail unhydrated when the server answers with nothing', async () => {
-    vi.mocked(api.getPortify).mockResolvedValue(undefined as never)
+    vi.mocked(portifyApi.getPortify).mockResolvedValue(undefined as never)
     mount({ wsUrl: 'ws://test/ws/portify', detailId: 'wf-old' })
 
     await act(async () => { await portify.loadPortify('wf-old') })
@@ -331,4 +388,25 @@ describe('PortifyProvider — read hooks', () => {
     expect(() => act(() => { root.render(<Outside />) }))
       .toThrow(/usePortify must be used inside <PortifyProvider>/)
   })
+})
+
+
+it('shares provider-owned demand across two mounted detail consumers through retry and reconnect', async () => {
+  vi.useFakeTimers()
+  const details: Array<ReturnType<typeof usePortifyDetail>> = []
+  function Detail({ slot }: { slot: number }) { details[slot] = usePortifyDetail('wf-1'); return null }
+  const renderDetails = (second: boolean) => root.render(<PortifyProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><Detail slot={0} />{second && <Detail slot={1} />}</PortifyProvider>)
+  vi.mocked(portifyApi.getPortify).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(manifest({ status: 'saved' }))
+  await act(async () => renderDetails(true))
+  expect(portifyApi.getPortify).toHaveBeenCalledTimes(1)
+  expect(details[0].error).toBe('offline')
+  await act(async () => renderDetails(false))
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(details[0].manifest?.status).toBe('saved')
+  expect(portifyApi.getPortify).toHaveBeenCalledTimes(2)
+  await act(async () => socket().fire({ type: 'snapshot', workflows: [entry({ status: 'saved' })], details: {} }))
+  expect(details[0].manifest?.status).toBe('saved')
+  expect(portifyApi.getPortify).toHaveBeenCalledTimes(3)
+  await act(async () => root.render(null))
+  expect(vi.getTimerCount()).toBe(0)
 })

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { CopyField } from '@/shared/ui/CopyField'
-import { Modal, Section } from '@/shared/ui/atoms'
+import { Section } from '@/shared/ui/atoms'
+import { Modal } from '@/shared/ui/Overlays'
 
 export type McpPromoAction = 'create-feature' | 'run-test' | 'export-evaluation'
 

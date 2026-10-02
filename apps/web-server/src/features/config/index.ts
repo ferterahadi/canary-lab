@@ -7,52 +7,14 @@ import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
 import { agentProbeRoutes } from './routes/agent-probe'
 import { onboardingRoutes } from './routes/onboarding'
-import { runsRoutes, type ExternalHealAgentRequest } from '../runs/routes/runs'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from '../wizard/routes/tests-draft'
-import { externalHealRoutes, makeExternalHealAuditLogger } from '../runs/routes/external-heal'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from '../runs/logic/run-store'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmark/logic/runtime/skills'
-import { removeFlightRecordsForFeature } from '../flights/logic/conductor'
+
+import { removeFlightRecordsForFeature } from '../flights/logic/flight-queue'
 import { isActiveFlightStatus } from '../../../../../shared/flights/types'
 import { renameFeatureRecords } from './logic/feature-rename'
 import { runStartRequestStore } from '../runs/logic/run-start-requests'
 import { agentJobStore as sharedAgentJobStore } from '../agent-sessions/logic/agent-jobs/store'
-import {
-  buildAgentSessionResponse,
-  resolveWorkflowAgentRef,
-} from '../agent-sessions/logic/agent-session-log'
-import { allocateRunPorts, applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
+
 import type { ServerContext } from '../../server-context'
-import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
-import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../runs/logic/runtime/orchestrator'
-import { RunScheduler, type SchedulerActiveRun } from '../runs/logic/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from '../runs/logic/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from '../runs/logic/runtime/repo-collision'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from '../runs/logic/runtime/repo-worktree'
-import {
-  buildAgentSpawnCommand,
-  buildOrchestratorHealPrompt,
-  pickAvailableHealAgent,
-  resolveAgentBinary,
-  type BuildHealCyclePrompt,
-  type HealAgent,
-} from '../runs/logic/runtime/auto-heal'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
-import { realPtyFactory, type PtyFactory } from '../runs/logic/runtime/pty-spawner'
-import {
-  applySet,
-  backup,
-  getEnvSetsDir,
-  loadConfig,
-  resolveVars,
-  restore,
-} from '../runs/logic/runtime/env-switcher/switch'
-import {
-  buildVerificationDiagnostics,
-  resolveVerificationRun,
-  type ResolveVerificationInput,
-} from '../coverage/logic/verification'
 
 /**
  * Feature and project configuration: the suite list, per-feature config authoring (incl. rename, which must carry every record that stamped the old name), and project-level settings.
@@ -98,12 +60,14 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     if (flight) return `flight ${flight.flightId} is ${flight.status} — pause it before renaming the suite`
     return null
   }
+  const isRepoActive = (featureName: string): boolean => Boolean(activeDiscoveryRepair(featureName)) || runStore
+    .list({ feature: featureName })
+    .some((run) => isActiveRunStatus(run.status))
   await app.register(featureConfigRoutes, {
     featuresDir,
+    repositoryObserver: ctx.repositoryObserver,
     workspaceEvents,
-    isRepoActive: (featureName) => Boolean(activeDiscoveryRepair(featureName)) || runStore
-      .list({ feature: featureName })
-      .some((run) => isActiveRunStatus(run.status)),
+    isRepoActive,
     // R76: deleting a suite deletes its flight history with it.
     removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
     featureRename: {
@@ -123,4 +87,5 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   })
   await app.register(agentProbeRoutes)
   await app.register(onboardingRoutes, { projectRoot, featuresDir, sessionStore: ctx.gettingStarted })
+  return { isRepoActive }
 }

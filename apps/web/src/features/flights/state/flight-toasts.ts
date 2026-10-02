@@ -24,9 +24,13 @@
  *  - An individual flight's toast is suppressed only while THAT flight's detail
  *    view is on screen; the aggregate + other flights' toasts still show.
  */
-import type { FlightCheckpointKind, FlightIndexEntry, FlightPauseReason, FlightStatus } from '@/shared/api/client'
+import type {
+  FlightCheckpointKind,
+  FlightIndexEntry,
+  FlightPauseReason,
+  FlightStatus,
+} from '@shared/flights/types'
 import { flightNeedsAttention } from '@shared/flights/attention'
-export { flightNeedsAttention } from '@shared/flights/attention'
 
 export const AGGREGATE_TOAST_ID = 'flights-need-input'
 

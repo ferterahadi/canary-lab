@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../features/runs/logic/run-store'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import type { RunDetail } from '../../../../../shared/run-detail'
+import { toolResultText } from '../__fixtures__/tool-result'
+import type { CanaryLabMcpDeps } from '../tool-schemas'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'
 import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../client-surface'
@@ -124,7 +129,7 @@ describe.each([
     expect(startRun.mock.calls.every((callArgs) => callArgs[3] === undefined)).toBe(true)
 
     const answered = await raw(tool, args, context(opened.requestState, { action: 'accept', content: { isolation: 'worktree' } }))
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({ runId })
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId })
     expect(startRun.mock.lastCall?.[0]).toBe('checkout')
     expect(startRun.mock.lastCall?.[3]).toBe('worktree')
   })
@@ -133,7 +138,7 @@ describe.each([
     const startRun = vi.fn(async () => collision)
     const { raw } = harness({ startRun }, eliciting)
     const forged = await raw(tool, args, context('not-a-real-handle', { action: 'accept', content: { isolation: 'queue' } }))
-    expect(JSON.parse((forged.content as Array<{ text: string }>)[0].text)).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('belongs to a different operation') })
+    expect(JSON.parse(toolResultText(forged))).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('belongs to a different operation') })
     expect(startRun).not.toHaveBeenCalled()
   })
 })
@@ -446,7 +451,7 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
 
 describe('start_run: starting fresh', () => {
   it('starts nothing and tells a form-less client to ask when coverage mapping is stale', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun, coverageRequest: coverageRequest() })
 
     expect(await call('start_run', START)).toMatchObject({
@@ -459,7 +464,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('elicits stale coverage and leaves the run stopped when the user chooses the update', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
 
     const opened = await raw('start_run', START, context()) as InputRequiredResult
@@ -471,7 +476,7 @@ describe('start_run: starting fresh', () => {
       action: 'accept', content: { choice: 'Update coverage first' },
     }))
 
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
       type: 'coverage_update_required', runStarted: false,
     })
     expect(startRun).not.toHaveBeenCalled()
@@ -479,14 +484,14 @@ describe('start_run: starting fresh', () => {
 
   it('points update-first at the existing coverage owner instead of duplicating work', async () => {
     const body = coverageChange('stale', 'coverage-v1', { activeJobId: 'coverage-job-1', activeJobOwner: 'session-2' })
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest(body) }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
     const answered = await raw('start_run', START, context(opened.requestState, {
       action: 'accept', content: { choice: 'Update coverage first' },
     }))
-    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+    const result = JSON.parse(toolResultText(answered))
 
     expect(result).toMatchObject({
       type: 'coverage_update_required', activeJobId: 'coverage-job-1', activeJobOwner: 'session-2',
@@ -496,7 +501,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('identifies a flight owner and an ownerless active coverage job without duplicating either', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     for (const body of [
       coverageChange('stale', 'coverage-flight', { flightId: 'flight-1', flightStatus: 'running' }),
       coverageChange('stale', 'coverage-job', { activeJobId: 'coverage-job-1' }),
@@ -506,14 +511,14 @@ describe('start_run: starting fresh', () => {
       const answered = await raw('start_run', START, context(opened.requestState, {
         action: 'accept', content: { choice: 'Update coverage first' },
       }))
-      const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+      const result = JSON.parse(toolResultText(answered))
       expect(result.nextSteps).toEqual(['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'])
     }
     expect(startRun).not.toHaveBeenCalled()
   })
 
   it('tells the caller to follow a Flight even when its status is not currently reported', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({
       startRun,
       coverageRequest: coverageRequest(coverageChange('stale', 'coverage-flight-no-status', { flightId: 'flight-1' })),
@@ -528,7 +533,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it.each(['decline', 'cancel'])('starts nothing when the client answers %s on the stale-coverage question', async (action) => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
@@ -537,21 +542,21 @@ describe('start_run: starting fresh', () => {
     // Reported as the CLIENT's answer: a client that declares elicitation and
     // wires no handler declines by itself, so naming the human here would invent
     // a decision about running against stale coverage that nobody made.
-    const { reason } = JSON.parse((answered as { content: [{ text: string }] }).content[0].text)
+    const { reason } = JSON.parse(toolResultText(answered))
     expect(reason).toContain(`The client answered "${action}"`)
     expect(reason).not.toMatch(/the user chose/i)
     expect(startRun).not.toHaveBeenCalled()
   })
 
   it('starts a diagnostic run only after the user accepts stale coverage, and qualifies the result', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
     const answered = await raw('start_run', START, context(opened.requestState, {
       action: 'accept', content: { choice: 'Run now with stale coverage' },
     }))
-    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+    const result = JSON.parse(toolResultText(answered))
 
     expect(result).toMatchObject({
       runId: 'run-new', coverageStale: true, coverageRevision: 'coverage-v1',
@@ -577,7 +582,7 @@ describe('start_run: starting fresh', () => {
     const answered = await raw('start_run', START, context(isolationOpened.requestState, {
       action: 'accept', content: { isolation: 'worktree' },
     }))
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
       runId: 'run-new', coverageStale: true,
     })
     expect(startRun).toHaveBeenCalledTimes(2)
@@ -585,7 +590,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('rejects an approval when the coverage revision changes while the form is open', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const read = vi.fn()
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
       .mockResolvedValue({ statusCode: 200, body: coverageChange('stale', 'coverage-v2') })
@@ -601,7 +606,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('rejects a stale-coverage answer when the current check no longer requires a choice', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const read = vi.fn()
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('current', 'coverage-v1') })
@@ -660,7 +665,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('starts normally when coverage is current', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun, coverageRequest: coverageRequest(coverageChange('current')) })
 
     expect(await call('start_run', START)).toMatchObject({ runId: 'run-new' })
@@ -668,7 +673,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('forwards the session, the claimability and the isolation choice', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     const out = await call('start_run', {
@@ -687,7 +692,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('starts a blocked client\'s run unclaimed, so it waits for a Desktop/UI drive', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     const out = await call('start_run', { ...START, client_kind: 'claude-pty' })
@@ -712,7 +717,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('forwards the update_repos choice as the sixth factory argument', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     await call('start_run', { ...START, update_repos: false })
@@ -800,6 +805,141 @@ describe('start_run: starting fresh', () => {
     })
 
     expect(await text('start_run', START)).toBe('no envset named local')
+  })
+})
+
+// A suite that boots nothing and whose envset names a deployed host is a
+// Verify: its repair cycle would edit a worktree no target reads. The fixture
+// is a real feature.config + envset on disk because the predicate is the same
+// loader and envset reader Verify uses, not a mocked flag.
+describe('start_run: a suite that boots nothing and targets a deployed host', () => {
+  let featuresDir: string
+  const writeSuite = (envset: string, repo: Record<string, unknown> = {}): void => {
+    const dir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(path.join(dir, 'envsets', 'staging'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'feature.config.cjs'), `module.exports = { config: { featureDir: __dirname, ...${JSON.stringify({
+      name: 'checkout', description: 'checkout', envs: ['staging'],
+      repos: [{ name: 'shop', localPath: '/repo/shop', ...repo }],
+    })} } }`)
+    fs.writeFileSync(path.join(dir, 'envsets', 'staging', 'checkout.env'), envset)
+  }
+  const remote = (over: Record<string, unknown> = {}, facts?: McpClientFacts) => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    return { startRun, ...harness({ startRun, featuresDir, ...over }, facts) }
+  }
+
+  beforeEach(() => {
+    featuresDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-remote-target-'))
+    writeSuite('API_BASE_URL=https://user:secret@api.staging.example.com/v1\nGATEWAY_URL=http://localhost:3000\n')
+  })
+  afterEach(() => fs.rmSync(featuresDir, { recursive: true, force: true }))
+
+  it('starts nothing and tells a form-less client to ask, naming only the deployed origin', async () => {
+    const { call, startRun } = remote()
+
+    const out = await call('start_run', START)
+
+    expect(out).toMatchObject({
+      type: 'remote_target_requires_choice',
+      runStarted: false,
+      env: 'staging',
+      targetOrigins: { API_BASE_URL: 'https://api.staging.example.com' },
+      options: ['Verify the deployed target', 'Run with repair anyway'],
+      nextSteps: ['ask_user_verify_or_run'],
+    })
+    expect(JSON.stringify(out)).not.toContain('secret')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('starts the run when the caller relays the user\'s run-anyway choice', async () => {
+    const { call, startRun } = remote()
+
+    expect(await call('start_run', { ...START, remote_target: 'run' })).toMatchObject({ runId: 'run-new', reused: false })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('never asks when a service boots in that env', async () => {
+    writeSuite('API_BASE_URL=https://api.staging.example.com\n', { startCommands: ['npm run dev'] })
+    const { call, startRun } = remote()
+
+    expect(await call('start_run', START)).toMatchObject({ runId: 'run-new' })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a run_ref restart ungated: that run already chose its mode', async () => {
+    const restartExternalRun = vi.fn(async () => ({ runId: 'run-1', mode: 'remaining' as const }))
+    const { call } = remote({ store: storeOf([runDetail({ status: 'failed' })]), restartExternalRun })
+
+    expect(await call('start_run', { ...START, run_ref: 'run-1' })).toMatchObject({ restarted: true })
+    expect(restartExternalRun).toHaveBeenCalledOnce()
+  })
+
+  it('elicits the choice and points Verify at the verification tools without starting a run', async () => {
+    const { raw, startRun } = remote({}, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    expect(opened.inputRequests).toMatchObject({ answer: { params: {
+      message: expect.stringContaining('targets deployed hosts (https://api.staging.example.com)'),
+      requestedSchema: { properties: { choice: { enum: ['Verify the deployed target', 'Run with repair anyway'] } } },
+    } } })
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Verify the deployed target' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
+      type: 'verify_instead', runStarted: false, env: 'staging',
+      targetOrigins: { API_BASE_URL: 'https://api.staging.example.com' },
+      nextSteps: ['list_verification_configs', expect.stringContaining('never invent them')],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('asks the remote target before coverage, and never re-asks it once answered', async () => {
+    const { raw, startRun } = remote({ coverageRequest: coverageRequest() }, eliciting)
+    const remoteOpened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const coverageOpened = await raw('start_run', START, context(remoteOpened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    })) as InputRequiredResult
+    expect(coverageOpened.inputRequests).toMatchObject({ answer: { params: {
+      requestedSchema: { properties: { choice: { enum: ['Update coverage first', 'Run now with stale coverage'] } } },
+    } } })
+
+    const answered = await raw('start_run', START, context(coverageOpened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    }))
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId: 'run-new', coverageStale: true })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('carries the answered remote choice through the isolation question too', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const { raw } = harness({ startRun, featuresDir }, eliciting)
+    const remoteOpened = await raw('start_run', START, context()) as InputRequiredResult
+    const isolationOpened = await raw('start_run', START, context(remoteOpened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    })) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(isolationOpened.requestState, {
+      action: 'accept', content: { isolation: 'worktree' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId: 'run-new' })
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('applies nothing when the target changes while the question is open', async () => {
+    const { raw, startRun } = remote({}, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    writeSuite('API_BASE_URL=https://api.other.example.com\n')
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ status: 'needs-input' })
+    expect(startRun).not.toHaveBeenCalled()
   })
 })
 
@@ -960,7 +1100,7 @@ describe('abort_run', () => {
     expect(abort).not.toHaveBeenCalled()
     const accepted = context(question.requestState, { action: 'accept', content: { action: 'abort' } })
     const result = await raw('abort_run', args, accepted)
-    expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toEqual({ aborted: true, runId: 'run-1' })
+    expect(JSON.parse(toolResultText(result))).toEqual({ aborted: true, runId: 'run-1' })
     expect(await raw('abort_run', args, accepted)).toEqual(result)
     expect(abort).toHaveBeenCalledTimes(1)
     expect(abort).toHaveBeenCalledWith('run-1')

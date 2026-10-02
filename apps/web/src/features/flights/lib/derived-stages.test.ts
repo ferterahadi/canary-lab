@@ -8,7 +8,7 @@ import {
   latestTerminalRunByFeature,
 } from './derived-stages'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
-import type { RunIndexEntry } from '@/shared/api/types'
+import type { RunIndexEntry } from '@shared/run-index'
 
 function run(over: Partial<RunIndexEntry>): RunIndexEntry {
   return {
@@ -158,6 +158,15 @@ describe('latestTerminalRunByFeature', () => {
       run({ runId: 'older', startedAt: '2026-02-01T00:00:00Z', status: 'failed' }),
     ])
     expect(map.get('f')?.runId).toBe('newest')
+  })
+
+  it('counts an abort only when the caller asks for it', () => {
+    const runs = [
+      run({ runId: 'aborted', startedAt: '2026-03-02T00:00:00Z', status: 'aborted' }),
+      run({ runId: 'passed', startedAt: '2026-03-01T00:00:00Z', status: 'passed' }),
+    ]
+    expect(latestTerminalRunByFeature(runs).get('f')?.runId).toBe('passed')
+    expect(latestTerminalRunByFeature(runs, ['passed', 'failed', 'aborted']).get('f')?.runId).toBe('aborted')
   })
 })
 

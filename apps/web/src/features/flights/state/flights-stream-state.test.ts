@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { FlightIndexEntry, FlightManifest } from '@/shared/api/client'
-import {
-  EMPTY_FLIGHTS_STREAM,
-  flightIndexEntry,
-  flightsStreamReducer,
-  parseFlightsFrame,
-} from './flights-stream-state'
+import type { FlightIndexEntry, FlightManifest } from '@shared/flights/types'
+import { EMPTY_FLIGHTS_STREAM, flightsStreamReducer, parseFlightsFrame } from './flights-stream-state'
+import { flightIndexEntry } from '@shared/flights/index-entry'
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   return {

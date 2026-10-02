@@ -1,149 +1,11 @@
+import type { RunIndexEntry } from '../../../../../../../shared/run-index'
+import { normalizeFixCaptureNames } from '../fix-capture-names'
 import fs from 'fs'
 import path from 'path'
 import { runsIndexPath } from './run-paths'
-import type {
-  HealEnd,
-  QueueReason,
-  RunBootFailure,
-  RunServiceFailure,
-  RunFixCapture,
-  RunPrAttempt,
-  RunProposedPr,
-  RunLifecycleSnapshot,
-  RunStatus,
-  ServiceStatus,
-} from '../../../../../../../shared/run-state'
-import type {
-  ExecutionType,
-  VerificationRunMetadata,
-} from '../../../../../../../shared/verification'
-import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
-import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
-import type { RunModelPlan } from './run-model-plan'
-import type { PendingSpecEdit } from '../dirty-specs/detect'
-import type { IntegrityHint } from './run-integrity-hints'
-import type { TestReviewDecision } from '../../../../../../../shared/test-review'
-import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
-import type { SingleAttemptPolicy } from '../../../../../../../shared/launcher/types'
-import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
-export type {
-  HealEnd,
-  QueueReason,
-  RunBootFailure,
-  RunFixCapture,
-  RunFixCaptureRepo,
-  RunPrAttempt,
-  RunProposedPr,
-  RunLifecycleAbortReason,
-  RunLifecycleEvent,
-  RunLifecyclePhase,
-  RunLifecycleRestartPlan,
-  RunLifecycleSeverity,
-  RunLifecycleSignal,
-  RunLifecycleSignalStatus,
-  RunLifecycleSnapshot,
-  RunLifecycleTargetedRerun,
-  RunStatus,
-  ServiceStatus,
-} from '../../../../../../../shared/run-state'
-
-// Per-run manifest written at start and updated at finish. Kept narrow and
-// JSON-shaped so the future server can read it without parsing logs.
-
-export interface ServiceManifestEntry {
-  /** Repo identity from feature.config repos[].name. Older manifests omit it. */
-  repoName?: string
-  name: string
-  safeName: string
-  command: string
-  cwd: string
-  logPath: string
-  healthUrl?: string
-  status?: ServiceStatus
-  /** Per-run allocated ports keyed by the service's declared port-slot name
-   *  (feature.config startCommands[].ports[].name). Empty/omitted when the
-   *  service declares no ports. The UI surfaces these so concurrent runs are
-   *  distinguishable. */
-  allocatedPorts?: Record<string, number>
-  /** When the service was spawned (status → `starting`). */
-  startingAt?: string
-  /** When its readiness probe first passed (status → `ready`). Together with
-   *  `startingAt` this gives per-service time-to-ready, which is what the
-   *  Suite setup boot rows report. Stamped here rather than derived from the
-   *  run's own start/end, which also spans queue wait and teardown. */
-  readyAt?: string
-}
-
-export interface RepoBranchSnapshot {
-  name: string
-  path: string
-  branch: string | null
-  expectedBranch?: string
-  detached: boolean
-  dirty: boolean
-  /** Commit the checkout sat on when the run launched — what the run booted.
-   *  Absent on records written before it was recorded; null on an unborn branch. */
-  sha?: string | null
-  /** Set when run start fast-forwarded the checkout to its upstream first. */
-  updatedFromUpstream?: { upstream: string; from: string; to: string }
-}
-
-// Imported for local use below and re-exported so existing `from './manifest'`
-// imports keep working; the modes themselves live in one shared place because
-// six copies had drifted.
-import type {
-  PlaywrightArtifactPolicy,
-  PlaywrightRetainedArtifactMode,
-  PlaywrightScreenshotMode,
-} from '../../../../../../../shared/configs/playwright-modes'
-
-export type { PlaywrightArtifactPolicy, PlaywrightRetainedArtifactMode, PlaywrightScreenshotMode }
-
-// Mid-Run Heal: populated when Playwright was halted before completing the
-// suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
-// user-invoked Pause & Heal. Heal-index rendering uses this so the agent
-// doesn't assume the suite size from the partial summary.
-export type StoppedEarlyReason = 'max-failures' | 'user-pause' | 'user-cancel-heal'
-
-export interface StoppedEarlyInfo {
-  reason: StoppedEarlyReason
-  failuresAtStop: number
-  suiteTotal: number
-}
-
-/** Whether this run executes a run-start copy of its suite (D9). `taken` names
- *  the copy and a digest of the spec content it held; `unavailable` means the
- *  copy failed and the run fell back to the live feature dir — said out loud so
- *  no surface claims a boundary that was never there. */
-export type RunSuiteSnapshot =
-  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
-  | { kind: 'unavailable'; at: string; reason: string }
-
-/** Who took a live spec edit into the run. `human`: the adopt route in Canary
- *  Lab. `test-heal`: the runner itself, only for a run with zero editable repos
- *  — there the spec is the only fixable code and Canary told the agent to edit
- *  it, so its own signal is the adopt. Never a verdict, never an MCP tool. */
-export type SpecEditsAdoptedBy = 'human' | 'test-heal'
-
-/** Live spec edits measured against the run-start copy. `pending` is what the
- *  run has NOT executed; adopting an edit re-takes the snapshot and appends to
- *  `adopted`. Re-checked after every Playwright exit, and whenever a live spec
- *  of the feature changes while the run is waiting between executions. */
-export interface RunSpecEdits {
-  checkedAt: string
-  pending: PendingSpecEdit[]
-  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[]; reviewRevision?: string }>
-  reviewDecisions?: TestReviewDecision[]
-}
-
-/** What the strength differential says about `specEdits.pending` (D13).
- *  Advisory: a hint informs whoever reads the run, it never changes a status.
- *  `disclosure` travels with the hints so no surface quotes the detection
- *  without saying how it was checked. */
-export interface RunIntegrity {
-  hints: IntegrityHint[]
-  disclosure: string
-}
+import type { ServiceStatus } from '../../../../../../../shared/run-state'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import type { ServiceManifestEntry, RunManifest } from '../../../../../../../shared/run-manifest'
 
 /** The directory a READER of this run should take the suite's content from: the
  *  run-start copy while it exists (the verdict executed it — D9), else the live
@@ -156,141 +18,22 @@ export function suiteDirForReading(manifest: Pick<RunManifest, 'featureDir' | 's
   return manifest.featureDir
 }
 
-export type LocalHealAgent = 'claude' | 'codex'
-
-export type ExternalHealSessionStatus =
-  | 'connected'
-  | 'waiting'
-  | 'healing'
-  | 'running-tests'
-  | 'paused'
-  | 'disconnected'
-
-/**
- * Identity + liveness record for an external AI client (Claude Desktop, Codex
- * CLI, etc.) that has claimed heal duty for this run via MCP. Populated only
- * when `healMode === 'external'`. The orchestrator no longer spawns a heal
- * agent PTY in that mode — it parks at `waiting-for-signal` and lets the
- * external client write signals through `POST /api/runs/:runId/signal`.
- */
-export interface ExternalHealSession extends ExternalSessionMeta {
-  clientVersion?: string
-  claimedAt: string
-  lastHeartbeatAt: string
-  status: ExternalHealSessionStatus
-  cycleCount: number
-}
-
-export interface RunManifest {
-  runId: string
-  executionType?: ExecutionType
-  feature: string
-  featureDir?: string
-  env?: string
-  startedAt: string
-  endedAt?: string
-  status: RunStatus
-  healCycles: number
-  services: ServiceManifestEntry[]
-  repoPaths?: string[]
-  repoBranches?: RepoBranchSnapshot[]
-  /** Dependency paths and compatibility evidence captured before service boot. */
-  dependencyProvenance?: RunDependencyProvenance[]
-  /** When this run isolated one or more repos in a per-run git worktree
-   *  (opted in after a same-repo collision), maps repo name → worktree path.
-   *  Omitted/empty when the run uses repos in place. */
-  worktrees?: Record<string, string>
-  /** Set only while `status === 'queued'`. Explains why the run is parked so
-   *  the UI can show "waiting for resources" vs "waiting for <feature> to
-   *  finish". Cleared when the run is admitted. */
-  queueReason?: QueueReason
-  playwrightArtifacts?: PlaywrightArtifactPolicy
-  stoppedEarly?: StoppedEarlyInfo
-  /** The run-start suite copy the verdict rests on. Absent on runs recorded
-   *  before the snapshot boundary existed and on boot-only sessions. */
-  suiteSnapshot?: RunSuiteSnapshot
-  /** Absent until the first Playwright exit, and on runs without a snapshot —
-   *  no copy means no boundary to measure against, and `pending: []` would
-   *  then read as "no edits" when the truth is "cannot tell". */
-  specEdits?: RunSpecEdits
-  /** A terminal run approved this exact suite revision for this new run. The
-   * approval is provenance only; the new run still needs its own verdict. */
-  testReviewApproval?: RunTestReviewApproval
-  /** Written together with `specEdits`; same absence rule. */
-  integrity?: RunIntegrity
-  /**
-   * Per heal-cycle record of which services were restarted vs kept warm.
-   * Populated when the orchestrator processes a `.restart` signal whose body
-   * carries a non-empty `filesChanged`. The heal-index footer surfaces the
-   * most recent entry to the next agent invocation.
-   */
-  healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
-  /** ISO timestamp updated every few seconds while the orchestrator is alive.
-   *  Consumers compare against `Date.now()` to detect stale/orphaned runs. */
-  heartbeatAt?: string
-  /** Per-run signal file paths surfaced to the UI so the manual heal banner
-   *  can show the user exactly where to write `.rerun` / `.restart`. */
-  signalPaths?: { rerun: string; restart: string }
-  /** When the run is heal-paused under manual mode, the UI renders a banner
-   *  pointing the user at the signal paths above. Only set during the heal
-   *  phase of a manual run; cleared when the run leaves the heal state.
-   *
-   *  `'external'` means an external AI client (Claude/Codex CLI or Desktop,
-   *  connected via MCP) owns the heal loop for this run. See
-   *  `externalHealSession` below for identity + heartbeat state. */
-  healMode?: 'auto' | 'manual' | 'external'
-  /** Resolved local CLI used for auto-heal. Locks the run to the agent that
-   *  was chosen when the run started, even if project settings change later. */
-  healAgent?: LocalHealAgent
-  /** Model+effort plan for the run's own agent spawns (heal REPL, commit
-   *  message), resolved at launch for `healAgent` and locked like it — restart
-   *  reuses this instead of re-reading config. Absent on pre-2.2.0 records and
-   *  on runs that never chose a local agent (external / manual / boot). */
-  models?: RunModelPlan
-  /** Populated when `healMode === 'external'`. Tracks the single external
-   *  client that holds the heal claim for this run. */
-  externalHealSession?: ExternalHealSession
-  /** Latest structured lifecycle state. This is the UI source of truth for
-   *  recovery flow narration; runner.log remains the human-readable audit. */
-  lifecycle?: RunLifecycleSnapshot
-  /** Set when a service failed to come up on a normal run, so the run was
-   *  declared `failed` and (if heal is configured) routed into heal with the
-   *  service log as context. Absent on healthy/boot-only runs; cleared on a
-   *  successful reboot during a heal cycle. */
-  bootFailure?: RunBootFailure
-  /** Confirmed failure of a service after readiness, independent of test counts. */
-  serviceFailure?: RunServiceFailure
-  /** Why the auto-heal loop stopped without passing. Written at every give-up
-   *  site in `runAutoHealLoop`; absent on passing/boot-only/manual runs and on
-   *  runs that never entered heal. */
-  healEnd?: HealEnd
-  /** Pinned at run start so a suite config edit cannot change retry safety
-   *  for an attempt that has already begun. The receipt belongs to the suite. */
-  singleAttempt?: SingleAttemptPolicy
-  /** The heal agent's edits from the per-run worktree. Provisional while the
-   *  run is active; final capture is written at teardown. */
-  fixCapture?: RunFixCapture
-  /** PRs opened from this run's captured fix, per repo — by the user's own
-   *  request, or automatically when the run healed green. */
-  proposedPrs?: RunProposedPr[]
-  /** The last PR attempt including its failures, so a run that captured a fix
-   *  but opened nothing can say why. */
-  prAttempt?: RunPrAttempt
-  verification?: VerificationRunMetadata
-}
-
 /** Older Lab runs cannot be replayed after the perturbation runtime is retired. */
 export function hasRetiredPerturbation(manifest: RunManifest): boolean {
   return Object.prototype.hasOwnProperty.call(manifest, 'perturbation')
 }
 
 export function writeManifest(manifestPath: string, manifest: RunManifest): void {
-  atomicWrite(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  atomicWriteJson(manifestPath, manifest)
 }
 
 export function readManifest(manifestPath: string): RunManifest | null {
   try {
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as RunManifest
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as RunManifest
+    if (manifest.fixCapture) {
+      manifest.fixCapture.repos = manifest.fixCapture.repos.map(normalizeFixCaptureNames)
+    }
+    return manifest
   } catch {
     return null
   }
@@ -349,44 +92,6 @@ export function updateAllServicesStatus(
 // runs/index.json — array of {runId, feature, startedAt, status, endedAt?}.
 // Atomically rewritten on every change. Tiny file, dozens of entries max.
 
-export interface RunIndexEntry {
-  runId: string
-  executionType?: ExecutionType
-  feature: string
-  /** The envset this run used, mirrored from the manifest. Spec selection is
-   *  constant across envsets, so two runs of one suite declare the SAME roster
-   *  and differ only in which tests the environment let execute — 41 passed / 4
-   *  skipped under one envset, 4 passed / 41 skipped under another. Without the
-   *  envset on the row those read as one run having gone badly. Carried on the
-   *  index so the runs list needs no manifest read per row; absent on entries
-   *  written before the field existed (backfilled read-time) and on runs that
-   *  named no envset. */
-  env?: string
-  startedAt: string
-  status: RunStatus
-  endedAt?: string
-  /** Repair cycles this run consumed. Mirrored from the manifest on every
-   *  index write so a feature's repair total reads off the index alone,
-   *  without opening one manifest per run. Absent on pre-existing entries and
-   *  on runs that never healed. */
-  healCycles?: number
-  /** The compact index also carries who owns repair work. Flight Activity
-   *  cold-loads terminal runs from this index, while full manifests are sent
-   *  only for active runs. */
-  healMode?: RunManifest['healMode']
-  /** Terminal single-attempt run whose repair still needs a fresh run. */
-  newRunRequired?: true
-  verificationConfigName?: string
-  verificationPlaywrightEnvsetId?: string
-  verificationTargetUrls?: Record<string, string>
-  /** Live spec edits still pending against this run's suite copy, and the
-   *  integrity hints on them — counts only, so `list_runs` can flag a run
-   *  without a manifest read. Mirrored on every status write; absent when
-   *  zero, and on entries written before the fields existed. */
-  pendingSpecEdits?: number
-  integrityHints?: number
-}
-
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {
   try {
     const raw = fs.readFileSync(runsIndexPath(logsDir), 'utf-8')
@@ -398,7 +103,7 @@ export function readRunsIndex(logsDir: string): RunIndexEntry[] {
 }
 
 export function writeRunsIndex(logsDir: string, entries: RunIndexEntry[]): void {
-  atomicWrite(runsIndexPath(logsDir), JSON.stringify(entries, null, 2) + '\n')
+  atomicWriteJson(runsIndexPath(logsDir), entries)
 }
 
 /** Merge `entry` over the run's existing row (a caller rarely knows every

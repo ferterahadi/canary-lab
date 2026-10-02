@@ -5,9 +5,11 @@ import os from 'os'
 import Fastify from 'fastify'
 import { createServer } from '../server'
 import { registerMcpRoutes } from './server'
-import { createRegistry, RunStore } from '../features/runs/logic/run-store'
+import { RunStore } from '../features/runs/logic/run-store'
+import { createRegistry } from '../features/runs/logic/run-registry'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
+import type { ElicitResult } from '@modelcontextprotocol/client'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
@@ -182,7 +184,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      const answer = vi.fn(async ({ params }: { params: Record<string, unknown> }) => {
+      const answer = vi.fn(async ({ params }: { params: Record<string, unknown> }): Promise<ElicitResult> => {
         const schema = params.requestedSchema as { properties?: Record<string, unknown> } | undefined
         return schema?.properties?.choice
           ? { action: 'accept' as const, content: { choice: 'Run now with stale coverage' } }

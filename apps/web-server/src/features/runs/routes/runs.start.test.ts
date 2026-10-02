@@ -1,14 +1,23 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
-import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../logic/run-store'
-import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import { runsRoutes } from './runs'
+import type { ExternalHealAgentRequest } from './runs-route-support'
+import { RunStore } from '../logic/run-store'
+import {
+  createRegistry,
+  type OrchestratorLike,
+  type RestartHealResult,
+  type RestartRunResult,
+} from '../logic/run-registry'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
@@ -352,7 +361,7 @@ describe('POST /api/runs', () => {
 
   it('forwards a boolean updateRepos as the start option, and nothing when it is absent or malformed', async () => {
     writeFeature('foo')
-    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('run-u') }))
+    const startRun = vi.fn<RunsRouteDeps['startRun']>(async () => ({ kind: 'started', orch: makeStub('run-u') }))
     const { app } = await build({ startRun })
 
     await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: true } })
@@ -749,3 +758,4 @@ describe('POST /api/runs', () => {
     expect(res.json().error).toContain('Repo branch check failed')
   })
 })
+import type { RunsRouteDeps } from './runs-route-deps'

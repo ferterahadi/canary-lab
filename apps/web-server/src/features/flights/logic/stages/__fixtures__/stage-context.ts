@@ -1,5 +1,5 @@
-import type { FlightManifest } from '../../types'
-import type { StageContext } from '../../conductor'
+import type { FlightManifest } from '../../../../../../../../shared/flights/types'
+import type { StageContext } from '../../flight-stages'
 
 // One StageContext test double for every stage suite.
 //

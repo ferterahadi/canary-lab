@@ -51,10 +51,11 @@ export function useInvalidation(): InvalidationDispatch {
  *  dep exactly where a `refreshKey` prop used to sit; it changes only when that
  *  topic (+ scope) is invalidated, so it triggers a refetch and nothing else.
  *
+ *  A null topic explicitly opts out and always returns 0.
  *  With no provider above it (an isolated component unit test) this reads 0 —
  *  "no bus wired, so never invalidated" — which matches the `useState(0)` the
  *  refresh keys defaulted to, so leaves stay mountable without the provider. */
-export function useInvalidationKey(topic: InvalidationTopic, scope?: string): number {
+export function useInvalidationKey(topic: InvalidationTopic | null, scope?: string): number {
   const state = useContext(InvalidationStateContext)
-  return state ? readInvalidation(state, topic, scope) : 0
+  return state && topic !== null ? readInvalidation(state, topic, scope) : 0
 }

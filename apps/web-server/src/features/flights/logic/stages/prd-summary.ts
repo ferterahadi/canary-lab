@@ -1,11 +1,16 @@
 import fs from 'fs'
 import path from 'path'
-import { applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, regeneratePrdSummary } from '../../../coverage/logic/coverage/service'
+import {
+  applyExternalSummary,
+  buildSummaryAuthoringContext,
+  clearPrdSummary,
+  regeneratePrdSummary,
+} from '../../../coverage/logic/coverage/feature-docs'
 import { parseSummarySubmission } from '../../../coverage/logic/coverage/external-submissions'
-import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
+import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary-render'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
-import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { agentSpawnJob } from './stage-jobs'
 import { decodeSubmission, featureDirFor, stageModelPlan, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'

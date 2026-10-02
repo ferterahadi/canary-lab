@@ -12,11 +12,11 @@ import { flightsRoutes } from './flights'
 
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 
-import type { StageAdapters } from '../logic/conductor'
+import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
 import type { PlanFeaturesTask, PlannedFeature } from '../../../../../../shared/flights/types'
 
@@ -506,4 +506,32 @@ describe('~-relative repo paths (dialog picker parity)', () => {
       fs.rmSync(abs, { recursive: true, force: true })
     }
   })
+})
+
+
+it.each(['/api/flights', '/api/flights/plan-features'])('resolves aliases in order and preserves duplicate paths through %s', async (url) => {
+  const alias = path.join(tmpDir, 'alias')
+  fs.symlinkSync(repoDir, alias, 'dir')
+  app = await buildApp(allDone(), undefined, agentReturning(planText([
+    { name: 'first', description: 'one' }, { name: 'second', description: 'two' },
+  ])))
+  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [alias, tmpDir, repoDir] }) })
+  expect(result.statusCode, result.payload).toBe(url === '/api/flights' ? 201 : 202)
+  expect(result.json().repoPaths).toEqual([repoDir, tmpDir, repoDir])
+  if (url.endsWith('plan-features')) {
+    await vi.waitFor(async () => {
+      const read = await app.inject({ url: `${url}/${result.json().taskId}` })
+      expect(read.json().status).not.toBe('running')
+    })
+  }
+})
+
+it.each(['/api/flights', '/api/flights/plan-features'])('retains the unresolved-path error through %s', async (url) => {
+  const missing = path.join(tmpDir, 'missing')
+  const alias = path.join(tmpDir, 'dangling')
+  fs.symlinkSync(missing, alias)
+  app = await buildApp(allDone())
+  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [repoDir, alias, missing] }) })
+  expect(result.statusCode).toBe(400)
+  expect(result.json()).toEqual({ error: `repo path does not exist: ${alias}` })
 })

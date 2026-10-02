@@ -9,6 +9,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(0)
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -18,6 +20,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => { root.unmount() })
   container.remove()
+  vi.useRealTimers()
 })
 
 /** Records the `loading` flag of EVERY render, not just the settled one — the
@@ -86,6 +89,34 @@ describe('useCachedDoc', () => {
       )
     })
     expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares recovery reads, refreshes on focus/online and revalidates a dormant cached tab', async () => {
+    const load = vi.fn().mockResolvedValue({ value: 'initial' })
+    const readers = () => <ConfigDocCacheProvider>
+      <Probe cacheKey="doc:a" load={load} seen={[]} />
+      <Probe cacheKey="doc:a" load={load} seen={[]} />
+    </ConfigDocCacheProvider>
+    await act(async () => { root.render(readers()) })
+    load.mockResolvedValue({ value: 'recovered' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(shown()).toBe('recovered')
+    load.mockResolvedValue({ value: 'focused' })
+    await act(async () => { window.dispatchEvent(new Event('focus')) })
+    expect(load).toHaveBeenCalledTimes(3)
+    expect(shown()).toBe('focused')
+    load.mockResolvedValue({ value: 'online' })
+    await act(async () => { window.dispatchEvent(new Event('online')) })
+    expect(load).toHaveBeenCalledTimes(4)
+    expect(shown()).toBe('online')
+    await act(async () => { root.render(<ConfigDocCacheProvider><div /></ConfigDocCacheProvider>) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+    expect(load).toHaveBeenCalledTimes(4)
+    load.mockResolvedValue({ value: 'changed while away' })
+    await act(async () => { root.render(readers()) })
+    expect(load).toHaveBeenCalledTimes(5)
+    expect(shown()).toBe('changed while away')
   })
 
   it('refresh() drops the entry so the next read re-reads the file', async () => {

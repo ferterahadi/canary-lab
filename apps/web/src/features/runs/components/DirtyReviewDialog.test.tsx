@@ -1,37 +1,62 @@
 // @vitest-environment happy-dom
+import { activeRunReview, settledRunReview, reviewReceipt } from '@shared/__fixtures__/test-review'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { Feature, RunIndexEntry, RunDetail } from '@/shared/api/types'
-import * as api from '@/shared/api/client'
+import type { Feature } from '@/shared/api/types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { RunDetail } from '@shared/run-detail'
+import * as configApi from '@/shared/api/config'
+import * as featuresApi from '@/shared/api/features'
+import * as runsApi from '@/shared/api/runs'
+import * as workspaceApi from '@/shared/api/workspace'
 import { ApiError } from '@/shared/api/internal'
 import { multilineImportReview, testFileReview } from '@/shared/api/__fixtures__/test-review'
 import { DirtyReviewDialog } from './DirtyReviewDialog'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-vi.mock('@/shared/api/client', async (original) => ({ ...await original<typeof api>(),
-  getTestFileReview: vi.fn(), getTestSourceComparison: vi.fn(), getFeatureTests: vi.fn(), getRunTestReview: vi.fn(), getFeatureTestReview: vi.fn(), acceptFeatureTestReview: vi.fn(), restoreFeatureTestReview: vi.fn(), acceptRunTestReview: vi.fn(), restoreSpecEdits: vi.fn(), openEditor: vi.fn(), openWorkspace: vi.fn(),
+vi.mock('@/shared/api/features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/features')>()),
+  getTestFileReview: vi.fn(),
+  getTestSourceComparison: vi.fn(),
+  getFeatureTestReview: vi.fn(),
+  acceptFeatureTestReview: vi.fn(),
+  restoreFeatureTestReview: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getFeatureTests: vi.fn(),
+}))
+vi.mock('@/shared/api/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/runs')>()),
+  getRunTestReview: vi.fn(),
+  acceptRunTestReview: vi.fn(),
+  restoreSpecEdits: vi.fn(),
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
+  openEditor: vi.fn(),
+  openWorkspace: vi.fn(),
 }))
 vi.mock('../state/RunsContext', () => ({ useRun: () => ({ detail: undefined, error: null }) }))
 let root: Root
 let container: HTMLDivElement
 const feature = (name = 'alpha', files = ['e2e/a.spec.ts']): Feature => ({ name, description: '', envs: [], repos: [], dirty: { status: 'dirty', specs: files.map((file) => ({ file, affectedTests: ['a'] })) } })
-const run = { runId: 'run-1', feature: 'alpha', status: 'healing', pendingSpecEdits: 1 } as RunIndexEntry
-const detail = { manifest: { runId: 'run-1', feature: 'alpha', specEdits: { pending: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }] } } } as RunDetail
+const run: RunIndexEntry = { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', pendingSpecEdits: 1 }
+const detail: RunDetail = { runId: 'run-1', manifest: { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', healCycles: 0, services: [], suiteSnapshot: { kind: 'taken', dir: '/recorded', takenAt: 'now', digest: 'd' }, specEdits: { checkedAt: 'now', adopted: [], pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }] } } }
 const reviewRevision = 'a'.repeat(64)
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.mocked(api.getFeatureTests).mockResolvedValue([])
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
-  vi.mocked(api.getTestFileReview).mockResolvedValue(testFileReview())
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: true })
-  vi.mocked(api.getFeatureTestReview).mockImplementation(async (name) => ({ feature: name, baseline: 'head', review_revision: reviewRevision,
+  vi.mocked(configApi.getFeatureTests).mockResolvedValue([])
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(testFileReview())
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue(activeRunReview())
+  vi.mocked(featuresApi.getFeatureTestReview).mockImplementation(async (name) => ({ feature: name, baseline: 'head', review_revision: reviewRevision,
     files: name === 'alpha' ? [{ file: 'e2e/a.spec.ts', change: 'modified' }] : [] }))
-  vi.mocked(api.acceptFeatureTestReview).mockResolvedValue({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'none' } })
-  vi.mocked(api.restoreFeatureTestReview).mockResolvedValue({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'none' } })
-  vi.mocked(api.acceptRunTestReview).mockResolvedValue({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'rerun-requested', runId: 'run-1' } })
-  vi.mocked(api.restoreSpecEdits).mockResolvedValue({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'none' } })
+  vi.mocked(featuresApi.acceptFeatureTestReview).mockResolvedValue(reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed', commit: 'abc' }, execution: { status: 'none' } }))
+  vi.mocked(featuresApi.restoreFeatureTestReview).mockResolvedValue(reviewReceipt({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'not-requested' }, execution: { status: 'none' } }))
+  vi.mocked(runsApi.acceptRunTestReview).mockResolvedValue(reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed', commit: 'abc' }, execution: { status: 'rerun-requested', runId: 'run-1' } }))
+  vi.mocked(runsApi.restoreSpecEdits).mockResolvedValue(reviewReceipt({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'not-requested' }, execution: { status: 'none' } }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
@@ -43,13 +68,13 @@ async function render(props: Partial<Parameters<typeof DirtyReviewDialog>[0]> = 
 const click = async (label: string) => act(async () => button(label).click())
 it('shows a readable fixture in English and Code with visible edits, not an empty test comparison', async () => {
   const fixture = 'e2e/fixture.ts'
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
-  vi.mocked(api.getTestFileReview).mockResolvedValue({ file: fixture, currentPath: `/suite/${fixture}`, baseline: 'run-start', supportingFile: true,
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue({ file: fixture, currentPath: `/suite/${fixture}`, baseline: 'run-start', supportingFile: true,
     before: { source: 'export const ready = false\n', tests: [], story: { steps: [{ id: 'before', role: 'setup', text: 'Export ready as false', spans: [{ text: 'Export ready as false' }], fidelity: 'derived', source: { file: fixture, startLine: 1, endLine: 1, snippet: 'export const ready = false' } }] } },
     after: { source: 'export const ready = true\n', tests: [], story: { steps: [{ id: 'after', role: 'setup', text: 'Export ready as true', spans: [{ text: 'Export ready as true' }], fidelity: 'derived', source: { file: fixture, startLine: 1, endLine: 1, snippet: 'export const ready = true' } }] } },
     patch: '@@ -1 +1 @@\n-export const ready = false\n+export const ready = true\n', assessment: { verdict: 'unclassifiable', tests: [] } })
   await render({ focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, focus: { file: fixture, baseline: 'run' } })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', fixture, 'run-1')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', fixture, 'run-1')
   expect(button('English')).not.toBeUndefined()
   expect(button('Code')).not.toBeUndefined()
   expect(document.body.textContent).not.toContain('Supporting file · Code')
@@ -63,7 +88,7 @@ it('shows a readable fixture in English and Code with visible edits, not an empt
 })
 it('returns from a deep-linked import continuation to its English range and highlights that range in Code', async () => {
   const review = multilineImportReview()
-  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   const onFocus = vi.fn()
   await render({ focus: { file: review.file, line: 10, mode: 'code' }, onFocus })
   expect(document.querySelectorAll('tbody tr')).toHaveLength(19)
@@ -78,7 +103,7 @@ it('returns from a deep-linked import continuation to its English range and high
 })
 it('anchors the format toggle to the visible code line after scrolling into a multiline import', async () => {
   const review = multilineImportReview()
-  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   const onFocus = vi.fn()
   await render({ focus: { file: review.file, line: 1, mode: 'code' }, onFocus })
   const visible = document.querySelector<HTMLElement>('[data-side="after"][data-source-line="12"]')!
@@ -92,29 +117,29 @@ it('anchors the format toggle to the visible code line after scrolling into a mu
 it('opens a clean suite against its selected historical run and lists files from both versions', async () => {
   const clean = { ...feature(), dirty: undefined }
   const historical = { manifest: { ...detail.manifest, runId: 'old-run', featureDir: '/source', suiteSnapshot: { kind: 'taken', dir: '/recorded', takenAt: 'now', digest: 'd' } } } as RunDetail
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/deleted.spec.ts', 'e2e/new.spec.ts'], differences: [], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/deleted.spec.ts', 'e2e/new.spec.ts'], differences: [], changes: { added: [], changed: [], removed: [] } })
   const onFocus = vi.fn()
   await render({ features: [clean], focusFeature: 'alpha', focusRunId: 'old-run', focusRunDetail: historical,
     focus: { file: 'e2e/new.spec.ts', line: 20, baseline: 'run' }, onFocus })
-  expect(api.getTestFileReview).toHaveBeenCalledWith('alpha', 'e2e/new.spec.ts', 'old-run')
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledWith('alpha', 'e2e/new.spec.ts', 'old-run')
   expect([...document.querySelectorAll('.cl-review-file')].map((item) => item.textContent)).toEqual(expect.arrayContaining(['new.spec.ts', expect.stringContaining('deleted.spec.ts')]))
   expect([...document.querySelectorAll('.cl-review-file')].some((item) => item.textContent?.includes('0 tests'))).toBe(false)
   const deleted = [...document.querySelectorAll<HTMLButtonElement>('.cl-review-file')].find((item) => item.textContent?.startsWith('deleted.spec.ts'))!
   await act(async () => deleted.click())
   expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/deleted.spec.ts', mode: undefined, baseline: 'run' })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/deleted.spec.ts', 'old-run')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/deleted.spec.ts', 'old-run')
 })
 
 it('marks only files that differ from the selected recorded tests', async () => {
   const historical = { manifest: { ...detail.manifest, runId: 'old-run', featureDir: '/source', suiteSnapshot: { kind: 'taken', dir: '/recorded', takenAt: 'now', digest: 'd' } } } as RunDetail
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/changed.spec.ts'], differences: [{ file: 'e2e/changed.spec.ts', affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/changed.spec.ts'], differences: [{ file: 'e2e/changed.spec.ts', affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
   await render({ focusFeature: 'alpha', focusRunId: 'old-run', focusRunDetail: historical,
     focus: { file: 'e2e/changed.spec.ts', baseline: 'run' } })
   const rows = [...document.querySelectorAll<HTMLButtonElement>('.cl-review-file')]
   expect(rows.find((row) => row.textContent === 'changed.spec.ts')).toMatchObject({ dataset: { changed: 'true' } })
   expect(rows.find((row) => row.textContent === 'changed.spec.ts')?.getAttribute('aria-label')).toContain('changed compared with the recorded tests')
   expect(rows.find((row) => row.textContent === 'a.spec.ts')?.dataset.changed).toBeUndefined()
-  expect(api.getTestSourceComparison).toHaveBeenCalledTimes(1)
+  expect(featuresApi.getTestSourceComparison).toHaveBeenCalledTimes(1)
 })
 
 it('marks only known dirty files when comparing with Git HEAD', async () => {
@@ -128,12 +153,14 @@ it('marks only known dirty files when comparing with Git HEAD', async () => {
 it('does not replace an explicitly selected historical baseline with another pending run', async () => {
   await render({ focusFeature: 'alpha', focusRunId: 'old-run', focus: { file: 'e2e/a.spec.ts', baseline: 'run' },
     focusRunDetail: { ...detail, manifest: { ...detail.manifest, runId: 'old-run' } }, pendingRuns: [run] })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'old-run')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'old-run')
   expect(button('Accept & commit')).toBeUndefined()
   expect(button('Restore recorded files')).toBeUndefined()
 })
 
 it('scopes the rail to the entry suite and keeps its file positions when the baseline changes', async () => {
+  // This run has settled; a pending alpha review would pin beta to run-start.
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue(settledRunReview({ feature: 'beta' }))
   const features = [feature('beta', ['e2e/z.spec.ts', 'e2e/a.spec.ts']), feature('alpha')]
   const betaRun = { ...run, feature: 'beta', status: 'passed' as const, pendingSpecEdits: 0 }
   const betaDetail = { manifest: { runId: 'run-1', feature: 'beta', specEdits: { pending: [] } } } as unknown as RunDetail
@@ -147,27 +174,26 @@ it('scopes the rail to the entry suite and keeps its file positions when the bas
   expect(selectedFile()).toBe('e2e/z.spec.ts')
   expect(document.querySelector('[data-testid="dirty-review-suite-beta"]')?.textContent).toContain('Changed')
   await act(async () => { const select = document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')!; select.value = 'head'; select.dispatchEvent(new Event('change', { bubbles: true })) })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('beta', 'e2e/z.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('beta', 'e2e/z.spec.ts', undefined)
   expect(positions()).toEqual(['e2e/a.spec.ts', 'e2e/z.spec.ts'])
   expect(selectedFile()).toBe('e2e/z.spec.ts')
   await render({ ...props, pendingRuns: [], focusFeature: 'alpha', focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
   expect(suites()).toEqual(['dirty-review-suite-alpha'])
   expect(positions()).toEqual(['e2e/a.spec.ts'])
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
   expect(document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')?.value).toBe('head')
   expect(document.querySelector<HTMLOptionElement>('option[value="run"]')?.disabled).toBe(true)
 })
 
 it('follows baseline navigation from the URL without moving the selected file', async () => {
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [], canAdopt: false, reviewState: 'settled', allowedActions: [], nextAction: 'none' })
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue(settledRunReview())
   const props = { pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1', focusFeature: 'alpha' }
   await render({ ...props, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
   await render({ ...props, focus: { file: 'e2e/a.spec.ts' } })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
   await render({ ...props, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
 })
 
 it('shows a whole test with equal before/after columns, unchanged context and exact source edits', async () => {
@@ -199,7 +225,7 @@ it.each(['before', 'after'] as const)('opens the exact %s source range when an E
   // The click must follow its own source range, not jump to the diff cursor.
   review[side].story = { steps: [{ id: 'setup', role: 'setup', text: 'Set up x and check it', spans: [{ text: 'Set up x and check it' }], fidelity: 'derived',
     source: { file: review.file, startLine: 6, endLine: 7, snippet: review[side].source.split('\n').slice(5, 7).join('\n') } }] }
-  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   const onFocus = vi.fn()
   const scrolled: Element[] = []
   const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolled.push(this) })
@@ -262,7 +288,7 @@ it('returns from the original code line to the saved English place after browsin
 it('opens the requested suite and source line and keeps file focus on live refresh', async () => {
   const onFocus = vi.fn()
   await render({ features: [feature('beta'), feature('alpha', ['e2e/a.spec.ts', 'e2e/b.spec.ts'])], focusFeature: 'alpha', focus: { file: 'e2e/b.spec.ts', line: 3 }, onFocus })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/b.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/b.spec.ts', undefined)
   await click('Code')
   expect(onFocus).toHaveBeenCalledWith({ file: 'e2e/b.spec.ts', line: 3, mode: 'code' })
 })
@@ -270,18 +296,18 @@ it('re-fetches changed source rather than retaining cached line highlights', asy
   await render()
   const next = feature(); next.dirty!.specs[0].affectedTests.push('new')
   await render({ features: [next] })
-  expect(api.getTestFileReview).toHaveBeenCalledTimes(2)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledTimes(2)
 })
 it('refreshes an open run review when its pushed manifest records a decision', async () => {
   const props = { pendingRuns: [run], focusRunId: 'run-1', focusFeature: 'alpha' }
   await render({ ...props, focusRunDetail: detail })
-  expect(api.getRunTestReview).toHaveBeenCalledTimes(1)
+  expect(runsApi.getRunTestReview).toHaveBeenCalledTimes(1)
   const decided = { manifest: { ...detail.manifest, specEdits: {
     ...detail.manifest.specEdits,
     reviewDecisions: [{ at: '2026-09-19T00:00:00.000Z', revision: reviewRevision, decision: 'adopted' as const }],
   } } } as RunDetail
   await render({ ...props, focusRunDetail: decided })
-  expect(api.getRunTestReview).toHaveBeenCalledTimes(2)
+  expect(runsApi.getRunTestReview).toHaveBeenCalledTimes(2)
 })
 it('shows only the two review decisions for a suite and accepts the exact revision', async () => {
   const onClose = vi.fn()
@@ -291,7 +317,7 @@ it('shows only the two review decisions for a suite and accepts the exact revisi
   expect(document.body.textContent).not.toContain('Commits 2 reviewed files')
   expect(document.body.textContent).not.toContain('Accepts these files')
   await click('Accept & commit')
-  expect(api.acceptFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
+  expect(featuresApi.acceptFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
   expect(onFeaturesChanged).toHaveBeenCalledExactlyOnceWith()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
@@ -300,14 +326,14 @@ it('restores the exact suite review revision', async () => {
   const onAccepted = vi.fn()
   await render({ onClose, onAccepted })
   await click('Restore recorded files')
-  expect(api.restoreFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
-  expect(api.acceptFeatureTestReview).not.toHaveBeenCalled()
+  expect(featuresApi.restoreFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
+  expect(featuresApi.acceptFeatureTestReview).not.toHaveBeenCalled()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
   expect(onAccepted).not.toHaveBeenCalled()
 })
 it('surfaces a failed suite acceptance and allows retry', async () => {
   const onAccepted = vi.fn()
-  vi.mocked(api.acceptFeatureTestReview).mockRejectedValue(new Error('Git rejected the commit'))
+  vi.mocked(featuresApi.acceptFeatureTestReview).mockRejectedValue(new Error('Git rejected the commit'))
   await render({ onAccepted }); await click('Accept & commit')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Git rejected the commit')
   expect(button('Accept & commit').disabled).toBe(false)
@@ -318,8 +344,8 @@ it('uses the same two decisions for an active run and accepts through one server
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
   expect([...document.querySelectorAll('.cl-review-commit-buttons button')].map((item) => item.textContent)).toEqual(['Restore recorded files', 'Accept & commit'])
   await click('Accept & commit')
-  expect(api.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
-  expect(api.restoreSpecEdits).not.toHaveBeenCalled()
+  expect(runsApi.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
+  expect(runsApi.restoreSpecEdits).not.toHaveBeenCalled()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it('restores the selected run tests on no without committing or accepting changes', async () => {
@@ -327,14 +353,14 @@ it('restores the selected run tests on no without committing or accepting change
   const onFeaturesChanged = vi.fn()
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose, onFeaturesChanged })
   await click('Restore recorded files')
-  expect(api.restoreSpecEdits).toHaveBeenCalledWith('run-1', { expectedRevision: reviewRevision })
-  expect(api.acceptRunTestReview).not.toHaveBeenCalled()
+  expect(runsApi.restoreSpecEdits).toHaveBeenCalledWith('run-1', { expectedRevision: reviewRevision })
+  expect(runsApi.acceptRunTestReview).not.toHaveBeenCalled()
   expect(onFeaturesChanged).toHaveBeenCalledExactlyOnceWith()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it('keeps the decision open when restoring fails', async () => {
   const onClose = vi.fn()
-  vi.mocked(api.restoreSpecEdits).mockRejectedValue(new Error('tests-running'))
+  vi.mocked(runsApi.restoreSpecEdits).mockRejectedValue(new Error('tests-running'))
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
   await click('Restore recorded files')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('tests-running')
@@ -343,7 +369,7 @@ it('keeps the decision open when restoring fails', async () => {
 })
 it('keeps the decision open when acceptance fails', async () => {
   const onClose = vi.fn()
-  vi.mocked(api.acceptRunTestReview).mockRejectedValue(new Error('Git rejected the commit'))
+  vi.mocked(runsApi.acceptRunTestReview).mockRejectedValue(new Error('Git rejected the commit'))
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
   await click('Accept & commit')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Git rejected the commit')
@@ -354,17 +380,37 @@ it.each([
   { ...run, status: 'queued' as const },
   { ...run, status: 'passed' as const },
 ])('does not offer run actions for a non-active run: %o', async (pending) => {
-  await render({ pendingRuns: [pending] })
+  await render({ features: [{ ...feature(), dirty: undefined }], pendingRuns: [pending] })
   expect(button('Accept & commit')).toBeUndefined()
   expect(button('Restore recorded files')).toBeUndefined()
-  expect(api.acceptRunTestReview).not.toHaveBeenCalled()
+  expect(runsApi.acceptRunTestReview).not.toHaveBeenCalled()
+})
+it('opens the flagged file and offers the suite commit when a selected historical run matches current tests', async () => {
+  const dirtyFile = 'e2e/20-tenancy-invariants.spec.ts'
+  const terminal = { ...run, status: 'aborted' as const, pendingSpecEdits: 0 }
+  const historical = { ...detail, manifest: { ...detail.manifest, status: 'aborted' as const,
+    specEdits: { checkedAt: 'now', adopted: [], pending: [] } } }
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue(settledRunReview())
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/00-inventory.spec.ts', dirtyFile],
+    differences: [], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getFeatureTestReview).mockResolvedValue({ feature: 'alpha', baseline: 'head', review_revision: reviewRevision,
+    files: [{ file: dirtyFile, change: 'added' }] })
+  vi.mocked(featuresApi.getTestFileReview).mockImplementation(async (_feature, file) => ({ ...testFileReview(), file }))
+  await render({ features: [feature('alpha', [dirtyFile])], pendingRuns: [terminal], focusFeature: 'alpha',
+    focusRunId: 'run-1', focusRunDetail: historical })
+  expect(document.querySelector('.cl-review-file[aria-pressed="true"]')?.getAttribute('title')).toBe(dirtyFile)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledWith('alpha', dirtyFile, undefined)
+  expect(button('Accept & commit')).not.toBeUndefined()
+  await click('Accept & commit')
+  expect(featuresApi.acceptFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
+  expect(runsApi.acceptRunTestReview).not.toHaveBeenCalled()
 })
 it('uses the same exact-revision acceptance label for a terminal run', async () => {
   const onAccepted = vi.fn()
-  const receipt = { decision: 'accepted' as const, review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed' as const }, execution: { status: 'new-run-required' as const, runId: 'run-1' } }
-  vi.mocked(api.acceptRunTestReview).mockResolvedValue(receipt)
+  const receipt = reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed' }, execution: { status: 'new-run-required', runId: 'run-1' } })
+  vi.mocked(runsApi.acceptRunTestReview).mockResolvedValue(receipt)
   const terminal = { ...run, status: 'passed' as const }
-  vi.mocked(api.getRunTestReview).mockResolvedValue({
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue({
     runId: terminal.runId, feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
     files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: false,
     reviewState: 'pending-terminal', allowedActions: ['approve-new-run', 'restore', 'leave-pending'], nextAction: 'restore-or-leave',
@@ -374,31 +420,30 @@ it('uses the same exact-revision acceptance label for a terminal run', async () 
   expect(onAccepted).not.toHaveBeenCalled()
   expect([...document.querySelectorAll('.cl-review-commit-buttons button')].map((item) => item.textContent)).toEqual(['Restore recorded files', 'Accept & commit'])
   await click('Accept & commit')
-  expect(api.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
+  expect(runsApi.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
   expect(onAccepted).toHaveBeenCalledExactlyOnceWith('alpha', receipt, detail)
 })
 it('offers acceptance for an active supporting-only review even when no test declarations changed', async () => {
   const fixture = 'e2e/fixture.ts'
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [{ file: fixture, change: 'modified' }], canAdopt: true })
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(runsApi.getRunTestReview).mockResolvedValue(activeRunReview({ files: [{ file: fixture, change: 'modified' }] }))
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
   const supportingOnly = { ...run, pendingSpecEdits: 0 }
   const onClose = vi.fn()
   await render({ features: [{ ...feature(), dirty: undefined }], pendingRuns: [supportingOnly], focusFeature: 'alpha', focusRunId: 'run-1',
-    focusRunDetail: { manifest: { ...detail.manifest, specEdits: { pending: [] } } } as RunDetail, focus: { file: fixture, baseline: 'run' }, onClose })
+    focusRunDetail: { ...detail, manifest: { ...detail.manifest, specEdits: { checkedAt: 'now', adopted: [], pending: [] } } }, focus: { file: fixture, baseline: 'run' }, onClose })
   expect(button('Accept & commit')).not.toBeUndefined()
   expect(button('Restore recorded files')).not.toBeUndefined()
   expect(document.body.textContent).toContain('1 changed file')
   expect(document.body.textContent).toContain('no test declaration changes')
   await click('Accept & commit')
-  expect(api.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
+  expect(runsApi.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it('locks a pending decision to the recorded-run scope it will settle', async () => {
-  vi.mocked(api.getTestFileReview).mockResolvedValue({ ...testFileReview(), baseline: 'run-start' })
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue({ ...testFileReview(), baseline: 'run-start' })
   await render({ pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1' })
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
   expect([...document.querySelectorAll('thead th')].map((item) => item.textContent)).toEqual(['Recorded tests', 'Current source'])
   expect(document.querySelector<HTMLOptionElement>('option[value="head"]')?.disabled).toBe(true)
 })
@@ -409,7 +454,7 @@ it('supports a committed file that differs from a completed run without showing 
   const props = { features: [], pendingRuns: [{ ...run, status: 'passed' as const, pendingSpecEdits: 0 }], focusRunId: 'run-1',
     focusRunDetail: { ...detail, manifest: { ...detail.manifest, specEdits: { checkedAt: 'now', adopted: [], pending: [] } } }, onFocus }
   await render({ ...props, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
-  expect(api.getTestFileReview).toHaveBeenCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
   expect(button('Pending test edits')).toBeUndefined()
   expect(document.body.textContent).not.toContain('0 edits not executed')
   expect(document.querySelector('.cl-review-file')?.textContent).toBe('a.spec.ts')
@@ -426,10 +471,10 @@ it('shows a recoverable empty state when a completed run has no selected file', 
   expect(button('Pending test edits')).toBeUndefined()
   expect(document.body.textContent).not.toContain('Loading test files')
   expect(document.querySelector('.cl-review-content [role="status"]')?.textContent).toContain('open a comparison from the Tests panel')
-  expect(api.getTestFileReview).not.toHaveBeenCalled()
+  expect(featuresApi.getTestFileReview).not.toHaveBeenCalled()
 })
 it('discloses missing source and retries instead of presenting it as removed code', async () => {
-  vi.mocked(api.getTestFileReview).mockRejectedValueOnce(new Error('Snapshot unavailable'))
+  vi.mocked(featuresApi.getTestFileReview).mockRejectedValueOnce(new Error('Snapshot unavailable'))
   await render()
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Snapshot unavailable')
   expect(document.querySelector('del')).toBeNull()
@@ -440,16 +485,16 @@ it('discloses missing source and retries instead of presenting it as removed cod
   expect(document.querySelector('table')).not.toBeNull()
 })
 it('does not claim the baseline matches while source is still loading', async () => {
-  vi.mocked(api.getTestFileReview).mockReturnValue(new Promise(() => {}))
+  vi.mocked(featuresApi.getTestFileReview).mockReturnValue(new Promise(() => {}))
   await render()
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Loading complete test source')
   expect(document.body.textContent).not.toContain('This file matches')
   expect(document.body.textContent).not.toContain('No edits')
 })
 it('opens the existing editor at the test source without creating a new screen', async () => {
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'cursor' })
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: true, editor: 'cursor' })
   await render({ focus: { file: 'e2e/a.spec.ts', line: 5 } }); await click('Edit e2e/a.spec.ts in editor')
-  expect(api.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/a.spec.ts', line: 5 })
+  expect(workspaceApi.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/a.spec.ts', line: 5 })
 })
 it('shows an honest empty cold load', async () => {
   await render({ features: [] })
@@ -466,7 +511,7 @@ it('starts a linked file at its requested change and persists navigation through
 })
 it('shows one accurate whole-file empty state when the selected baseline matches', async () => {
   const review = testFileReview(); review.before = review.after; review.patch = ''; review.assessment.tests = []
-  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   await render()
   expect(document.body.textContent).toContain('No differences from Git HEAD.')
   expect(button('Previous change').disabled).toBe(true)
@@ -490,15 +535,15 @@ it('places the language switch and baseline in the toolbar and changes in the fo
 })
 it('opens an unselected spec from its own row without changing the comparison', async () => {
   const review = testFileReview()
-  vi.mocked(api.getTestFileReview).mockImplementation(async (_feature, file) => ({ ...review, file, currentPath: `/tmp/features/alpha/${file}` }))
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'cursor' })
+  vi.mocked(featuresApi.getTestFileReview).mockImplementation(async (_feature, file) => ({ ...review, file, currentPath: `/tmp/features/alpha/${file}` }))
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: true, editor: 'cursor' })
   await render({ features: [feature('alpha', ['e2e/a.spec.ts', 'e2e/b.spec.ts'])] })
   await click('Edit e2e/b.spec.ts in editor')
-  expect(api.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/b.spec.ts', line: 1 })
+  expect(workspaceApi.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/b.spec.ts', line: 1 })
   expect(document.querySelector('.cl-review-file[aria-pressed="true"]')?.getAttribute('title')).toBe('e2e/a.spec.ts')
 })
 it('shows editor launch failures in the footer', async () => {
-  vi.mocked(api.openEditor).mockResolvedValue({ opened: false, editor: 'cursor' })
+  vi.mocked(workspaceApi.openEditor).mockResolvedValue({ opened: false, editor: 'cursor' })
   await render()
   await click('Edit e2e/a.spec.ts in editor')
   expect(document.querySelector('.cl-review-footer [role="alert"]')?.textContent).toContain('Could not open the editor')
@@ -507,13 +552,13 @@ it('shows editor launch failures in the footer', async () => {
 it('uses the notification run suite when no feature is supplied', async () => {
   await render({ features: [feature('alpha'), feature('beta')], pendingRuns: [{ ...run, feature: 'beta' }], focusRunId: 'run-1' })
   expect([...document.querySelectorAll('[data-testid^="dirty-review-suite-"]')].map((item) => item.getAttribute('data-testid'))).toEqual(['dirty-review-suite-beta'])
-  expect(api.getTestFileReview).toHaveBeenCalledWith('beta', 'e2e/a.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledWith('beta', 'e2e/a.spec.ts', undefined)
 })
 it('keeps a clean entry suite instead of substituting an unrelated dirty suite', async () => {
   await render({ features: [feature('alpha'), { ...feature('beta'), dirty: undefined }], focusFeature: 'beta', focus: { file: 'e2e/b.spec.ts' } })
   expect(document.querySelector('[data-testid="dirty-review-suite-alpha"]')).toBeNull()
   expect(document.querySelector('[data-testid="dirty-review-suite-beta"]')).not.toBeNull()
-  expect(api.getTestFileReview).toHaveBeenCalledWith('beta', 'e2e/b.spec.ts', undefined)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledWith('beta', 'e2e/b.spec.ts', undefined)
   expect(button('Accept & commit')).toBeUndefined()
 })
 
@@ -535,11 +580,11 @@ function setupTestChangeNavigation() {
     { ...deleted, before: deleted.after, after: deleted.before,
       patch: `@@ -1,${deleted.after.source.split('\n').length} +0,0 @@\n${deleted.after.source.split('\n').map((line) => '-' + line).join('\n')}` }]
   const targets = (review: typeof original, side: 'before' | 'after') => review[side].tests.map(({ name, line, endLine }) => ({ file: review.file, name, line, endLine }))
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: reviews.map((review) => review.file),
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: reviews.map((review) => review.file),
     differences: reviews.map((review) => ({ file: review.file, affectedTests: review.after.tests.map((test) => test.name) })),
     changes: { added: [...targets(reviews[1], 'after'), ...targets(reviews[2], 'after')], changed: targets(original, 'after'), removed: targets(reviews[3], 'before') },
   })
-  vi.mocked(api.getTestFileReview).mockImplementation(async (_feature, file) => reviews.find((review) => review.file === file)!)
+  vi.mocked(featuresApi.getTestFileReview).mockImplementation(async (_feature, file) => reviews.find((review) => review.file === file)!)
   return { features: [{ ...feature(), dirty: undefined }], focusFeature: 'alpha', focusRunId: 'old-run',
     focusRunDetail: { manifest: { ...detail.manifest, runId: 'old-run', featureDir: '/source',
       suiteSnapshot: { kind: 'taken', dir: '/recorded', takenAt: 'now', digest: 'd' } } } as RunDetail }
@@ -555,8 +600,8 @@ it('leaves a tag-only comparison neutral in both languages and recovers a stale 
   review.after.source = review.before.source.replace('@old', '@new')
   review.patch = '@@ -1,8 +1,8 @@\n' + review.before.source.split('\n').flatMap((line, index) => index === 2 ? ['-' + line, '+' + line.replace('@old', '@new')] : [' ' + line]).join('\n')
   review.assessment.tests = []
-  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [review.file], differences: [], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [review.file], differences: [], changes: { added: [], changed: [], removed: [] } })
   await render({ ...props, focus: { file: review.file, line: 3, test: 'a', change: 'changed', baseline: 'run', mode: 'code' } })
   for (const mode of ['Code', 'English']) {
     await click(mode)
@@ -583,22 +628,22 @@ it('navigates the suite test counts across files and displays only the selected 
   expect(document.querySelector('tbody')?.textContent).toContain('Not present in recorded tests')
   expect(button('Previous test change').disabled).toBe(true)
   const table = document.querySelector('table')
-  const reads = vi.mocked(api.getTestFileReview).mock.calls.length
+  const reads = vi.mocked(featuresApi.getTestFileReview).mock.calls.length
   await click('Next test change')
   expect(document.querySelector('table')).toBe(table)
-  expect(api.getTestFileReview).toHaveBeenCalledTimes(reads)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledTimes(reads)
   expect(testNavigation().textContent).toContain('2 / 3')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('new second')
   expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
   expect(document.querySelector('tbody')?.textContent).not.toContain('new first')
   await click('Next test change')
   expect(testNavigation().textContent).toContain('3 / 3')
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/z.spec.ts', 'old-run')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/z.spec.ts', 'old-run')
   expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/z.spec.ts', line: 3, change: 'added', test: 'new third', baseline: 'run', mode: 'code' })
   expect(button('Next test change').disabled).toBe(true)
   await click('Previous test change')
   expect(testNavigation().textContent).toContain('2 / 3')
-  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/b.spec.ts', 'old-run')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/b.spec.ts', 'old-run')
 })
 
 it('counts a test with two separate code edits once and navigates removed tests on the recorded side', async () => {
@@ -613,7 +658,7 @@ it('counts a test with two separate code edits once and navigates removed tests 
     expect(button('Next test change').disabled).toBe(true)
     await click('Show 1 removed test')
     expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('gone')
-    expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/deleted.spec.ts', 'old-run')
+    expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/deleted.spec.ts', 'old-run')
     expect(scrolled.at(-1)?.getAttribute('data-side')).toBe('before')
     expect(scrolled.at(-1)?.getAttribute('data-source-line')).toBe('3')
     expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
@@ -640,7 +685,7 @@ it('preserves the selected test and category while switching language or inspect
 
 it('shows unavailable counts rather than a fabricated zero when a comparison fails', async () => {
   const props = setupTestChangeNavigation()
-  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new Error('Snapshot unavailable'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new Error('Snapshot unavailable'))
   await render({ ...props, focus: { file: 'e2e/b.spec.ts', line: 3, change: 'added', baseline: 'run' } })
   expect(testNavigation().textContent).toContain('Unavailable')
   expect(changeMarks()).toEqual([])
@@ -648,9 +693,38 @@ it('shows unavailable counts rather than a fabricated zero when a comparison fai
   expect(document.querySelector('[aria-label="Edit blocks in this file"]')).toBeNull()
 })
 
+it('explains a historical run without a saved snapshot and compares against Git HEAD', async () => {
+  const historical = { ...detail, manifest: { ...detail.manifest, status: 'passed' as const, suiteSnapshot: undefined } }
+  const onFocus = vi.fn()
+  await render({ pendingRuns: [{ ...run, status: 'passed' }], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: historical,
+    focus: { file: 'e2e/a.spec.ts', baseline: 'run' }, onFocus })
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('This run has no saved test snapshot')
+  expect(document.body.textContent).toContain('start a new run to verify them')
+  expect(featuresApi.getTestSourceComparison).not.toHaveBeenCalled()
+  expect(runsApi.getRunTestReview).not.toHaveBeenCalled()
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')?.value).toBe('head')
+  expect(document.querySelector<HTMLOptionElement>('option[value="run"]')?.disabled).toBe(true)
+  expect(button('Accept & commit')).toBeUndefined()
+  expect(button('Restore recorded files')).toBeUndefined()
+  await act(async () => document.querySelector<HTMLButtonElement>('.cl-review-file[title="e2e/a.spec.ts"]')!.click())
+  expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/a.spec.ts', mode: undefined })
+})
+
+it('recovers to Git HEAD when a recorded snapshot directory has disappeared', async () => {
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new ApiError(409, { error: 'This run’s test snapshot is unavailable.' }, 'This run’s test snapshot is unavailable.'))
+  vi.mocked(runsApi.getRunTestReview).mockRejectedValue(new ApiError(409, { error: 'Run snapshot unavailable' }, 'Run snapshot unavailable'))
+  await render({ pendingRuns: [{ ...run, status: 'passed' }], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail,
+    focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
+  expect(document.body.textContent).toContain('This run has no saved test snapshot')
+  expect(document.body.textContent).not.toContain('Could not confirm this run’s review state')
+  expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')?.value).toBe('head')
+})
+
 it('explains a removed live suite and returns to the saved run', async () => {
   const onClose = vi.fn()
-  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
   await render({ features: [feature()], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, onClose })
   expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')?.textContent).toContain('Live suite unavailable')
   expect(document.body.textContent).not.toContain('No test files available')
@@ -660,7 +734,7 @@ it('explains a removed live suite and returns to the saved run', async () => {
 })
 
 it('explains a stale review link after the suite disappears from feature listing', async () => {
-  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+  vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
   await render({ features: [], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, focus: { baseline: 'run' } })
   expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')).not.toBeNull()
   expect(button('View saved run')).not.toBeUndefined()
@@ -672,7 +746,7 @@ it('notices a suite removed while its comparison stays open', async () => {
     await render({ features: [feature()], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail })
     const reconcile = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0] as (() => void) | undefined
     expect(reconcile).toBeDefined()
-    vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+    vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
     await act(async () => { reconcile?.(); await Promise.resolve() })
     expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')).not.toBeNull()
     expect(button('Accept & commit')).toBeUndefined()
@@ -681,12 +755,12 @@ it('notices a suite removed while its comparison stays open', async () => {
 
 it('hides a kind with nothing in it and opens on a kind that has tests', async () => {
   const props = setupTestChangeNavigation()
-  const ready = await api.getTestSourceComparison('alpha', 'old-run')
+  const ready = await featuresApi.getTestSourceComparison('alpha', 'old-run')
   if (ready.state !== 'ready') throw new Error('the navigation fixture must be a ready comparison')
   // Only removed tests, and the file the dialog opens on holds none of them. The
   // strip hides a kind at zero, so a fallback to `added` would light no mark at
   // all and report "No test changes" beside a mark that says one was removed.
-  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ ...ready, changes: { added: [], changed: [], removed: ready.changes.removed } })
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ ...ready, changes: { added: [], changed: [], removed: ready.changes.removed } })
   // No `change` in the focus: the category has to be derived, which is the point.
   await render({ ...props, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
   expect(changeMarks()).toEqual(['Show 1 removed test (showing)'])
@@ -698,17 +772,17 @@ it('hides a kind with nothing in it and opens on a kind that has tests', async (
 
 it('uses declaration targets even when a runtime roster expands them into more cases', async () => {
   const props = setupTestChangeNavigation()
-  vi.mocked(api.getFeatureTests).mockResolvedValue([{ file: '/source/e2e/b.spec.ts', tests: Array.from({ length: 10 }, (_, index) => ({
+  vi.mocked(configApi.getFeatureTests).mockResolvedValue([{ file: '/source/e2e/b.spec.ts', tests: Array.from({ length: 10 }, (_, index) => ({
     ...testFileReview().after.tests[0], name: `generated case ${index}`, line: 3, bodySource: '', steps: [],
   })) }])
   const onFocus = vi.fn()
   await render({ ...props, onFocus, focus: { file: 'e2e/b.spec.ts', line: 3, change: 'added', test: 'new first', baseline: 'run' } })
-  expect(api.getFeatureTests).not.toHaveBeenCalled()
+  expect(configApi.getFeatureTests).not.toHaveBeenCalled()
   const table = document.querySelector('table')
-  const reads = vi.mocked(api.getTestFileReview).mock.calls.length
+  const reads = vi.mocked(featuresApi.getTestFileReview).mock.calls.length
   await click('Next test change')
   expect(document.querySelector('table')).toBe(table)
-  expect(api.getTestFileReview).toHaveBeenCalledTimes(reads)
+  expect(featuresApi.getTestFileReview).toHaveBeenCalledTimes(reads)
   expect(testNavigation().textContent).toContain('2 / 3')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('new second')
   const saved = onFocus.mock.calls.at(-1)![0]
@@ -720,8 +794,8 @@ it('uses declaration targets even when a runtime roster expands them into more c
 
 it('never highlights a different test if the source changes after the declaration list was loaded', async () => {
   const props = setupTestChangeNavigation()
-  const readReview = vi.mocked(api.getTestFileReview).getMockImplementation()!
-  vi.mocked(api.getTestFileReview).mockImplementation(async (...args) => {
+  const readReview = vi.mocked(featuresApi.getTestFileReview).getMockImplementation()!
+  vi.mocked(featuresApi.getTestFileReview).mockImplementation(async (...args) => {
     const review = await readReview(...args)
     return review.file === 'e2e/deleted.spec.ts' ? { ...review, before: { ...review.before, tests: review.before.tests.map((test) => ({ ...test, name: 'different test' })) } } : review
   })
@@ -730,4 +804,20 @@ it('never highlights a different test if the source changes after the declaratio
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('gone')
   expect(document.body.textContent).toContain('matching declaration is unavailable in this source snapshot')
   expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
+})
+
+it('reconciles comparison files without events and withdraws actions on transient failure', async () => {
+  vi.useFakeTimers()
+  try {
+    await render({ pendingRuns: [run], focusFeature: 'alpha', focusRunId: run.runId, focusRunDetail: detail, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
+    expect(button('Accept & commit')).toBeDefined()
+    vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(button('Accept & commit')).toBeUndefined()
+    expect(document.body.textContent).toContain('Could not list all comparison files')
+    vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts'], differences: [], changes: { added: [], changed: [], removed: [] } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(button('Accept & commit')).toBeDefined()
+    expect(document.body.textContent).not.toContain('Could not list all comparison files')
+  } finally { vi.useRealTimers() }
 })

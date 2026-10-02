@@ -89,6 +89,45 @@ entry. The three places that must agree for the web aliases are
 | `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a suite so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
+**Test contracts** use production-owned types and small domain-owned fixtures.
+Run-manifest defaults live in the Runs domain's `logic/__fixtures__/run-manifest.ts`;
+shared review scenarios and receipts live in `shared/__fixtures__/test-review.ts`.
+MCP tests narrow text results through `mcp/__fixtures__/tool-result.ts`, also used
+by the tool-group harness, so an input request cannot masquerade as a text result.
+Fixtures supply structural defaults; each test keeps its decisive evidence and
+expected outcome explicit. Run-start mocks use the actual dependency signature,
+and the reserved request ID must match both the persisted run and request.
+The existing `npm run typecheck:all` checks build, frontend, and server contracts,
+including test fixtures in their applicable projects.
+
+**Workspace selection** lives in `apps/web/src/shared/state/`.
+`workspace-selection.ts` defines eligible runs, index-order fallbacks, and suite/run
+reconciliation. `useWorkspaceSelection` applies those rules and obtains displayed
+evidence through the existing `useRun` detail hook. `useWorkspaceData` loads lists
+and reports successful loads to the controller; `useWorkspaceNavigation` retains
+URL persistence, cross-tab state, selection refs, and explicit navigation actions.
+`App.tsx` composes these hooks. A pending run keeps its selection until its index
+row arrives, while evidence falls back to the latest eligible indexed run; an
+indexed historical selection survives new runs and suite refreshes.
+
+`useWorkspaceFeatures` backs the suite list with the existing live-resource reader.
+Workspace events and reconnects still refresh immediately; a ten-second read while
+mounted also repairs missed events on a connected socket, with focus/online recovery.
+Failed reads retain the last successful list and retry, and superseded responses
+cannot restore deleted suites or reconcile selection. Initial hydration and explicit
+refresh preferences reach the selection controller only after an accepted read;
+preferences survive failed reads and are consumed after success. Unmount releases
+the recovery timer and listeners. The fallback adds six list reads per minute per
+mounted workspace in steady state; it does not poll run details or reconnect sockets.
+
+**Workspace Flight presentation** belongs to `useWorkspaceFlights` in the web
+Flights feature. It composes the existing activity and evidence readers for suite
+shortcuts, picker rails, pending suite rows, and the coverage ledger's generating
+state. Changes to the ordered coverage job IDs/statuses refresh suite metadata and
+invalidate coverage, including completion discovered by the existing 2.5-second
+active-job fallback. The controller adds no fetch loop or store; navigation,
+dialogs, and component composition remain in `App.tsx`.
+
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
 the data being deleted — `/api/cleanup/runs` and `/api/cleanup/worktrees` in
@@ -98,6 +137,339 @@ feature, and do not create one: it would pull run and portify deletion away from
 stores that back them, for nothing but symmetry. The web side is named after the API
 surface it consumes so the two are greppable together. (In the UI this is the
 **Cleanup** pill, with three tabs — Runs, Worktrees, Portify.)
+
+Cleanup readers share selection, bulk actions and toolbar components. The visible tab
+uses `useLiveResource`: scoped `cleanup-changed` events from the owning run,
+benchmark and Portify stores trigger reads, coalesced over 2.5 seconds. Successful
+worktree deletion publishes directly. A 15-second reconciliation while visible
+recovers missed events and filesystem changes; reconnect/focus also refreshes.
+Background reads retain rows and valid selections, and expose read failures as
+unconfirmed inventory rather than hiding the table. Workspace bus events and the
+`connected` stream frame are declared once in `shared/workspace-events.ts`.
+
+**Suite deletion** is owned by
+`apps/web-server/src/features/config/logic/feature-deletion.ts`. REST and MCP
+delegate to `deleteSuite`, which resolves the suite, validates confirmation and
+directory containment, then invokes the existing Flight guard/cleanup before
+removing the directory. Invalid targets cannot remove Flight history. The command
+publishes `feature-deleted` after directory removal; Flight events remain owned by
+the Flight store. The legacy `deleteFeature` helper preserves directory-only
+scaffold reset, which must retain the owning Flight. This sequence is not a
+filesystem transaction: an I/O failure after Flight cleanup does not roll it back.
+
+**Envset configuration** is owned by
+`apps/web-server/src/features/config/logic/envset-config.ts`. REST and feature
+authoring share metadata reads/writes, directory discovery, and synchronization
+of the suite's environment list. The folders on disk are authoritative: capture
+now drops stale declarations and includes previously undeclared folders. Suite
+configs are written only when the AST writer produces changed content; config
+file discovery lives in `apps/web-server/src/shared/config-file.ts`, with thin
+no forwarding modules: callers import it directly. It selects the first existing
+file in cjs/js/ts order; callers retain loading, cache invalidation, and error
+handling, so an invalid higher-priority file prevents fallback. Callers also retain
+their discovery-versus-linked-suite directory choice. Coverage records every
+candidate, including absent and lower-priority files, to invalidate discovery when
+any candidate changes. Playwright keeps its separate filename order.
+
+Missing metadata means an empty configuration. Malformed JSON and non-object
+metadata produce a 409 error without echoing file contents. Capture and slot
+metadata mutations validate before touching files; read and write I/O failures
+propagate. Valid object metadata retains unknown fields, with no nested schema
+validation. Raw slot-content and environment-directory operations remain
+independent of metadata.
+
+Envset runtime resolution lives in
+`apps/web-server/src/features/config/logic/envset-runtime.ts`. Configuration
+presentation, CLI switching, run preparation, and worktree hydration share
+workspace-root aliases and variable expansion. Both `CANARY_LAB_PROJECT_ROOT`
+and `CANARY_LAB` default to the workspace root; explicit `appRoots` entries
+replace each default independently. Unknown variables retain their literal form.
+Runtime loading keeps its existing missing-file and parsing errors, separate
+from authoring's optional metadata and 409 validation policy.
+
+Selected sources retain declaration order and duplicates and skip absent files.
+Target iteration is lazy so worktree hydration retains its per-slot failure
+boundary; normal run application collects targets before backups. Discovery
+uses source-only selection without requiring target definitions. Each caller
+still owns content transforms, destination mapping, backups, and restoration.
+The former runtime and route-support exports remain compatibility forwards.
+
+REST envset writes and capture share
+`apps/web-server/src/features/config/logic/envset-events.ts`.
+Writers announce only after successful persistence:
+slot operations publish one `envsets-changed`; environment creation/deletion and
+capture publish that event followed by `features-changed`. Capture uses this
+same pair for overwrite-only calls, feature creation, and Flights, including
+when a subsequent boot fails. MCP adapters do not add another announcement.
+Repeated successful writes remain separate events. Later filesystem failures
+can leave partial files without a success event; this is not a transaction.
+Environment removal belongs to
+`apps/web-server/src/features/config/logic/envset-removal.ts`. REST deletion and
+Flight env-capture reset both validate containment, remove the environment,
+synchronize the suite's declared environments from surviving folders, then
+publish the structural pair. Callers retain suite lookup (including renamed
+suites) and translate a missing environment: REST returns 404; Flight reset is
+an idempotent no-op. The envsets root itself cannot be removed as an environment.
+A config-write failure after removal propagates without rollback or a success
+announcement. Flight's existing restart coordinator catches reset failures and
+continues. Portify snapshot restoration in
+`apps/web-server/src/features/portify/logic/runtime/unportify.ts` synchronizes
+`envs` from current folders before deleting the overlay. This shared operation
+covers REST, MCP, and Flight reset, so restoring an old snapshot cannot
+reintroduce removed environments or omit newly added ones. Other snapshot
+settings are restored as before; the legacy path without a snapshot still
+strips port slots on a best-effort basis. Synchronization failures retain the
+overlay backup for retry and propagate to the caller without a success event;
+the already-restored config is not rolled back.
+
+Suite repository status, checkout, and upstream updates share
+`apps/web-server/src/features/config/logic/feature-repos.ts`. REST and MCP use the
+same suite/repository lookup and active-run/discovery-repair guard, composed by
+the configuration registrar. Transport adapters retain their response shapes and
+validation wording; feature-authoring exports remain compatibility wrappers.
+The existing Git checkout writer announces one `features-changed` only for an
+actual branch move; an upstream update announces only after a fast-forward.
+No-op and refused operations announce nothing. This corrects REST's duplicate
+checkout publication and MCP's missing active-work guard. The activity policy
+remains suite-scoped; it does not introduce cross-suite path locking.
+
+`readWorkingTree` in `apps/web-server/src/shared/git-repo.ts` owns the single
+`git --no-optional-locks status --porcelain` inspection and porcelain parsing.
+Callers explicitly choose repository scope or directory scope (`-- .`); the
+reader preserves their working directory and returns status lines plus raw stdout, or the
+failed command's exit code and diagnostics. Portify preparation and benchmark
+startup retain their refusal policies; Flight recovery skips unreadable paths
+and counts scoped lines. Their directory scope excludes unrelated monorepo
+changes. Portify edit fingerprinting also uses repository-scoped inspection; its
+digest keeps the raw stdout plus best-effort file modification times. The pure
+`apps/web-server/src/shared/git-status-path.ts` decoder owns porcelain-v1 quoted
+paths, UTF-8 octal escapes, and rename/copy destinations for Portify and run fix
+preflight. Literal arrows and filename whitespace survive decoding; malformed
+payloads stay opaque. Fingerprint policy and recovery stash/commit remain with
+their domains. Repair capture reads `git diff --name-only -z` as literal paths
+and marks new filename lists with `fileNamesFormat: 'literal'`. Runs-domain
+`fix-capture-names.ts` decodes unmarked legacy names at manifest read and apply
+preflight boundaries, without rewriting files on read or decoding literal names
+a second time. Unreadable Portify worktrees produce no live file count; the
+Flight tile uses current counts during editing and patch statistics after it.
+`getGitStatus` uses repository scope without adding a second status subprocess.
+Background inspection does not refresh the index. Once a working repository is
+identified, failed branch, status, or reference reads reject with a diagnostic
+rather than reporting clean or empty evidence. Detached HEAD and an unborn
+branch remain valid states. Checkout-status assembly passes its existing status
+to the upstream reader, avoiding a second inspection without claiming an atomic
+snapshot. A completed checkout still announces its change if the subsequent
+status read fails; the response reports that read failure. Read failures before
+checkout prevent the mutation and produce no change event.
+
+Run detail recovery uses the existing one-second active-detail reads in
+`apps/web/src/features/runs/state/RunsContext.tsx`. HTTP recovery and stream
+updates share the reducer's index derivation, so a recovered terminal result
+also settles the sidebar's Services badge and active-run consumers. Recovery
+stops once the detail settles; no additional index poll is introduced. Later
+stream observations and provider cleanup invalidate outstanding detail reads,
+preventing late responses from reverting newer state or restoring removed runs.
+Runs, Portify, and Benchmark share that per-record request guard in
+`apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
+separate. Portify and Benchmark compose these guards with the reconnecting socket
+through `apps/web/src/shared/state/record-stream.ts`, which owns connection labels,
+backoff, frame observation, and teardown. Their reducers and HTTP actions remain
+feature-owned. The server writer and browser reducer derive compact run rows through
+`shared/run-index.ts`, including repair ownership, cycles, and review counts.
+Portify and Benchmark detail demand belongs to the provider-owned
+`apps/web/src/shared/state/detail-hydration.ts` controller, through thin domain
+adapters. Ports and Flight use `usePortifyDetail`; Benchmark uses
+`useBenchmarkDetail`. Mounted consumers share manifests, read tokens and a
+2.5-second failed/hung-read recovery timer per demanded record. Stream updates
+settle demand; removals stop recovery; reconnect snapshots rehydrate demanded
+terminal records whose details were omitted. An authoritative 404 stops retries
+until explicit retry or a new stream observation; releasing the last consumer
+releases the timer.
+
+Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
+browser updates retain the server's branch, producer, and terminal timestamp.
+Benchmark uses `shared/benchmark-index.ts` for its compact rows and terminal
+timestamps. The wire-contract gate requires both converter calls for all three domains and
+rejects any app file that declares its own copy of a root wire type. Portify and Benchmark lifecycle
+predicates live beside their canonical statuses; operation-specific eligibility
+(such as Benchmark cleanup excluding `invalid`) remains with the operation.
+
+Pre-flight planning lists use `useLiveResource` with a dedicated cache and the
+`pre-flights` invalidation topic. Workspace changes and connected handshakes
+refresh the list; superseded reads cannot restore an older status or deletion.
+Unknown and running lists reconcile every 2.5 seconds; accepted empty or settled
+lists stop periodic reads. Refreshes and failures retain accepted records.
+The planning dialog uses the same reader and topic with a separate task-detail
+cache and a 1.5-second cadence. Creation responses seed only unread task keys;
+an authoritative 404 stops polling and disables task actions, while transient
+failures retain the accepted task. Proposal edits and navigation guards belong
+to the task identity, so reconnects cannot overwrite edits or navigate twice.
+
+Test-source comparisons in the Tests column and review dialog share
+`apps/web/src/shared/state/use-test-source-comparison.ts`. Both reconcile every
+10 seconds while mounted, retain evidence through transient failures, and clear
+it on authoritative missing-suite or missing-snapshot responses. Comparison
+freshness does not grant review permission; review actions still require a
+confirmed review revision.
+
+Test rosters share `apps/web/src/shared/state/use-feature-test-roster.ts`, with
+retention local to each mounted consumer and isolated by suite/run identity.
+The Tests column makes at most three attempts per refresh, one second apart,
+and checks missing/configuration failures in the workspace every ten seconds.
+Counterpart rosters remain event-driven; Coverage source remains lazy and has
+no periodic reads. The live reader owns retry cancellation along with response
+ordering, so refreshes and teardown also cancel scheduled retries.
+
+PR confirmation uses a no-topic live reader only while open, with explicit
+Refresh/Retry and no background probes. Each open session requires its own
+successful preflight. Closing expires callbacks but retains an outstanding
+submission lock until the server request settles; server eligibility checks
+remain authoritative.
+
+Token pickers use scoped configuration readers for the environment index, port
+names, and selected slot keys, reconciling every five seconds while mounted.
+Failed reads retain choices but disable insertion; authoritative deletion clears
+choices. Environment/slot replacement rejects older reads without changing
+already-entered tokens. Configuration is not kept in a module-global cache.
+
+Repository path probes and filesystem pickers use no-topic live readers with
+identity changes and explicit Retry, without polling. Repository editor rows
+carry private identities outside configuration; asynchronous patches target the
+latest row, and removal, replacement, or Discard expires old callbacks. Directory
+navigation retains a disabled previous listing until the requested directory
+succeeds, while typed path text has its own lifetime. Copy previews also expire
+when their source or picker session changes.
+
+Discovery-repair starts keep one outstanding lock per suite within the mounted
+hook. Switching suites changes which lock is displayed without releasing another
+suite's request. Completion publication belongs to the originating mounted
+identity; the dedicated reconnecting task stream remains authoritative.
+
+Notification lists use the same live reader with ten-second reconciliation.
+Its synchronous `accept` operation applies mutation observations to the current
+value and invalidates older reads. Acceptance callbacks survive refreshes but
+expire on resource replacement or unmount; domain actions and navigation remain
+owned by the notification hook.
+
+Getting Started also uses `useLiveResource`, with the `onboarding` topic and
+continuous five-second reconciliation while mounted, including after an empty
+catalog. Journal readers subscribe directly to their run-scoped `journal` topic;
+unknown or pending journals poll every two seconds, stopping on accepted empty or
+settled entries. External audit uses an explicit null topic because its writer
+does not emit invalidations. It polls unknown/active runs every two seconds and
+refreshes on terminal transitions and Runs connection changes. Journal and audit
+use separate identity-bound caches, retain accepted data through failures, and
+ignore superseded reads. Settled audit logs do not continuously reconcile.
+
+Agent-session viewers and socket adapters share the eight source identities in
+`apps/web/src/shared/api/agent-session-source.ts`. Identity includes the flight
+stage; cache keys append the live/history flag. REST and WebSocket routing stay
+transport-specific and exhaustive over that union.
+
+Drafts and evaluation exports share collection recovery in
+`apps/web/src/shared/state/use-workspace-records.ts`. It subscribes before the
+first list read, reconciles on workspace handshakes, and ignores superseded
+reads. Per-record revisions preserve events and deletion tombstones observed
+during a list request; unaffected rows still reconcile. Failures retain records.
+Failures and overlapping changes schedule a follow-up after 2.5 seconds, while
+visible pages reconcile every 30 seconds and immediately after becoming visible.
+The global status bar identifies stale activity. Export log attachment remains
+feature-owned and does not replay historical completed tasks during reconciliation.
+
+Flight detail reads are coordinated by
+`apps/web/src/features/flights/state/use-flight-record.ts`. Recent pushed records
+avoid duplicate REST work; a quiet channel is reconciled after 30 seconds. A
+stream removal or confirmed REST 404 retires the mounted detail, including its
+controls. A recovered 404 also removes the row from the shared Flight stream
+state, so the active badge and picker do not retain the deleted record. Transient read failures retain evidence. Request identity and push
+identity prevent old responses from replacing another selection or a newer push.
+Repair apply controls require confirmed preflight evidence, retain read errors
+separately from action errors, and keep an open confirmation current. Provisional
+repairs only open their isolated worktree and do not request final apply preflight.
+
+
+REST and MCP removal orchestration belongs to
+`apps/web-server/src/features/portify/logic/remove-portification.ts`: suite lookup,
+restoration, one `features-changed` event, and the existing result fields. Each
+successful call publishes once, including a repeat after the overlay is absent;
+missing suites and propagated failures publish nothing. MCP adds no event.
+Flight reset retains its missing-overlay guard and its own publication around
+the lower-level restoration core. Legacy best-effort failures retain that core's
+existing success behavior; no transaction or event deduplication is added.
+
+Repository display reads, repair apply-preflight display reads, and Flight recovery use the server-owned
+`apps/web-server/src/shared/repository-observer.ts`. Reads lease scoped filesystem observation for
+90 seconds; overlapping consumers share native watches and simultaneous local
+reads. The observer watches working directories, their parent (replacement),
+and Git metadata including linked-worktree references. Git-derived ignore rules
+filter hints while preserving tracked exceptions. Native recursive watches still
+observe the directory tree; filtering avoids status work for ignored activity.
+Bursts debounce for 250 ms, with a one-second maximum delay. Watch failures and
+the 256-handle budget leave authoritative reads available for recovery. Shutdown
+and the last expired lease release watches and timers.
+
+The observer publishes scoped `repos-changed` hints through the existing workspace
+socket, without running status in callbacks. Repository and directory scopes stay
+separate, newer generations never join older reads, and completed status is never
+cached. A hung read can be replaced after 30 seconds. Mutation preflights keep
+using fresh Git primitives directly; observation does not change their policies.
+
+Repository branch controls in the Service tab and Flight setup share
+`apps/web/src/features/config/state/use-repo-git-status.ts`; failed Flight stages
+use `apps/web/src/features/flights/state/use-flight-remedy.ts`; repaired-repo cards
+use `apps/web/src/features/runs/state/use-apply-preflight.ts`. These compose `useLiveResource`
+with scoped repository hints, global/reconnect invalidation, 30-second local
+reconciliation, and a 45-second freshness lease. Hidden readers pause requests;
+focus, online and visibility restoration read immediately. Disabled/unmounted
+readers release recovery work. Failed reads retain the last snapshot with a stale
+indication, and recovery continues at zero dirty files. Concurrent browser reads
+share the existing snapshot request wrapper. Suite, repository name and optional
+local path identify repository reads; Flight and error detail identify remedies.
+
+Service checkout and Flight stash/commit require confirmed display evidence;
+server-side guards remain authoritative. Flight branch pinning stays editable
+while stale. Mutation completion refreshes the reader even after partial failure,
+retains action errors separately, and cannot update a replaced or closed control.
+Background reads perform no remote fetch. Connected agents obtain current status
+through `get_feature_repo_status` and `get_flight`; passive clients receive no
+unsolicited wakeup guarantee. Flight remedy retains its existing skip-on-Git-read-
+failure policy; a successful empty remedy is not a new repository-health claim.
+
+The configuration dialog shares document reads through a dialog-local
+`config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped
+`configuration` invalidations, global reconnect/bulk invalidations, and a
+five-second recovery interval. Equal reads retain document identity; failed
+reads retain the last snapshot and retry. Closing the reader releases recovery
+work, and closing the dialog releases its cache, including slot values.
+`useEditableSlice` updates clean forms while retaining dirty drafts and warning
+when their edited slice changed externally. Discard takes the latest snapshot;
+Save merges the draft into that snapshot, preserving unrelated fields. Envset
+pickers retain valid selections and fall back when a selected row disappears.
+Flight's `useImmediateConfig` uses the same document store and editable-state
+mechanisms, with a local cache per mounted editor. Field changes queue as
+transforms against the latest accepted document; writes serialize per document.
+A failed write retains its draft and pauses further writes until Retry. Server
+responses supersede older reads. Advanced setup retains explicit Save/Discard.
+The internal `useEditableDraft` helper owns draft/baseline comparison for both
+configuration editors and project Settings. Settings opts into field-level
+rebasing: untouched fields follow remote changes, edited fields retain their
+values and report conflicts, and Save sends only changed fields. Edits entered
+during a save remain unsaved; the dialog closes only when no newer edits remain.
+Settings, Getting Started, and the Flight launcher use `useProjectConfig` on
+`project-config`, with five-second mounted reconciliation and no global cache.
+Save and model-matrix responses supersede pending reads. Getting Started
+serializes optimistic visibility writes and reveals the latest accepted value
+on failure. Flight refreshes saved models and follows the default agent until
+an explicit selection. GitHub status uses the shared reader without a topic or
+polling: mount and manual Refresh are its only probes. Failed probes retain
+accepted status and show Retry rather than diagnosing a missing CLI.
+Verification settings use separate five-second list and envset-target readers,
+without module-global configuration caching. Initial values seed the form once;
+refreshes preserve edits, and a removed saved selection becomes an unsaved draft.
+
+Connected agents can obtain current redacted metadata through
+`get_feature_envset_summary`; this read path does not provide unsolicited wakeups
+to passive clients.
 
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
@@ -132,22 +504,24 @@ returns a handle other features consume — `runs` returns
 `coverage` and the MCP mount all take. Don't turn one into a re-export barrel;
 `server.ts` depends on the register/handle contract.
 
-**Web features are re-export barrels.** Each
-`apps/web/src/features/<name>/index.ts` names that feature's public surface. A
-feature may import another only through its barrel, never a path inside it:
+**Web features have no barrels; they declare public files.** A symbol lives in
+one file and every caller imports that file directly — there is no
+`features/<name>/index.ts` and no module that only forwards another's exports.
+A feature may import another feature's file only when that file is listed in
+the `PUBLIC` map in `tools/check-feature-boundaries.mjs`:
 
 ```
-✔  import { RunRow } from '@/features/runs'
-✘  import { RunRow } from '@/features/runs/components/RunRow'
+✔  import { RunRow } from '@/features/runs/components/RunRow'   (listed in PUBLIC.runs)
+✘  import { x } from '@/features/runs/state/runs-reducer'       (not listed)
 ```
 
-`npm run check:boundaries` enforces this and fails on three things: a deep
-cross-feature import, a feature that is consumed but has no barrel, and a stale
-entry in its `ALLOWED_DEEP` allowlist. The allowlist exists because routing
-**both** directions of a mutually-dependent pair through barrels is an ESM
-module-init cycle; `coverage ⇄ flights` is the one surviving pair (the flight
-page embeds coverage's docs rail, the coverage page renders flight stage chips).
-Shrink that list, don't grow it.
+`npm run check:boundaries` fails on an undeclared cross-feature import (either
+spelling, `@/features/…` or relative), any feature `index.ts`, and a `PUBLIC`
+entry nothing imports any more. Tests may additionally `vi.mock` another
+feature's module and import its fixtures, since neither is a production
+dependency. Repo-wide, `npm run check:conventions` rejects re-exports
+(`export … from` and import-then-`export { … }`); the only exception is the
+published `canary-lab/feature-support/log-marker-fixture` entry file.
 
 **Two shared aliases, easily confused.** `@shared/` is the repo-root `shared/`
 package (published types, shared with the CLI). `@/shared/` is the web app's own
@@ -212,6 +586,14 @@ within their existing task authority and respect active jobs/Flight ownership.
 
 ## Notifications
 
+The Notifications feature registrar composes the notification runtime and HTTP
+routes. `apps/web-server/src/features/notifications/logic/notification-runtime.ts`
+owns source reconciliation, availability tracking, action refresh, the recovery
+scan, and subscription disposal through explicit store, workspace-event, and
+logging dependencies. The routes own inbox operations and the bounded feature
+summary consumed by agents. The registrar starts recovery during registration
+and awaits runtime disposal on Fastify shutdown.
+
 The Notifications inbox stores messages and source-transition history together in
 `logs/notifications/state.json` inside each workspace. The notification store uses
 the shared atomic writer so a crash cannot persist a message without its deduplication
@@ -223,10 +605,23 @@ Flight attention transitions and test changes that block an active run or a fres
 start after an ended run create messages even when the browser is closed. Terminal
 blockers use the same byte-level review gate as run start, including exact-revision
 approval and restoration, rather than relying on a pending-file count in the run
-index. Each inbox read also reconciles these sources. A server recovery scan starts
+index. Run and dirty-store events reconcile only the affected suite; Flight events
+reconcile only Flight sources. Scoped reconciliation leaves every other source and
+its availability unchanged. Cheap source projections remain synchronous to retain
+attention transitions. Inbox reads repair missed source events; feature reads scope
+the test projection to that suite. Neither path performs historical Git checks.
+A server recovery scan starts
 every ten seconds when no scan is running, reloads configured suite paths, and
 recomputes test integrity from disk. It yields between suites and does not queue
-overlapping scans. This repairs missed filesystem events even with no browser open.
+overlapping scans. Suite edits request their own asynchronous integrity refresh;
+requests for the same suite share one check. A newer file/config event invalidates
+the check and forces another pass before its result becomes current. Retained
+alerts remain visibly unavailable during checking; known attention can still be
+recorded, but a quiet result cannot settle an unverified source. This repairs
+missed filesystem events even with no browser open. Historical Git retirement
+checks run asynchronously, one suite at a time, during the full audit. A newer
+suite revision or restored config prevents a delayed retirement result from
+being applied. Negative Git results are retried on later audits, not cached.
 The open client's ten-second reconciliation repairs missed notification pushes.
 Recovery latency includes scan duration; these intervals are not instantaneous
 delivery guarantees. An unreadable suite or historical snapshot preserves its
@@ -283,7 +678,18 @@ Flights adds search and an attention filter. Test review keeps suite/file select
 in a rail and presents complete source in two fixed before/after columns. The
 read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
 then derives English, source alignment, and advisory checks from those same
-versions. English and Code share source-based change navigation across the whole
+versions. Run-domain `apps/web-server/src/features/runs/logic/test-review-comparison.ts`
+owns byte-level review fingerprints and sorted file-change classification for
+both Git-backed acceptance and snapshot review. Each reader keeps its own baseline,
+path selection, exclusions, and I/O errors. The fresh-run gate reads the snapshot
+and live suite once per evaluation, deriving execution changes, the full review
+revision, and changed-file count from that inventory. Approval revisions retain
+their existing encoding, including unchanged files. Inventories are not cached:
+patch generation, acceptance, and snapshot copying keep their fresh revalidation
+reads after asynchronous work or mutations. These reads do not provide an atomic
+filesystem snapshot.
+
+English and Code share source-based change navigation across the whole
 file, including imports and shared setup; the selected change's assessment appears
 below the source. File review uses `translateReadableSource` to include imports,
 declarations, lifecycle hooks, test registrations, and loops around generated tests.
@@ -438,6 +844,15 @@ service exit as a confirmed service failure. Before readiness this stops boot
 without running tests; after readiness it stops Playwright, retains partial test
 evidence, and enters the configured heal path. Readiness resets on each service
 restart. Generic log lines containing "error" are diagnostic output, not verdicts.
+
+HTTP and TCP readiness checks probe immediately, then wait 100ms and back off
+to the configured health-poll ceiling (1s by default); shorter configured
+intervals and the readiness deadline remain bounds. Heal signal files are
+checked every 100ms by default, independently of that health-check ceiling.
+An explicitly configured health interval remains the signal interval fallback
+for existing callers. Once the signal gate accepts a file, it wakes the heal
+loop immediately. Timed wakeups still check cancellation and agent liveness,
+including the grace period for agents that write a signal just before exiting.
 
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
@@ -670,6 +1085,15 @@ portified/collision-only behaviour — they don't heal, so there is nothing to c
 
 ### Same-repo collision
 
+`apps/web-server/src/shared/repo-identity.ts` owns configured-directory identity:
+expand `~`/`~/`, resolve an absolute path, and follow filesystem symlinks. Run
+admission, upstream ownership guards, and Flight matching use this identity, so
+an alias cannot hide an occupied directory. Flight start/planning require the
+path to resolve; historical comparisons retain an absolute-path fallback on
+resolution failure. Comparisons do not rewrite persisted records or execution
+paths. Sibling directories in one Git root and separate worktrees stay distinct.
+This is a current filesystem observation, not a lock against symlink retargeting.
+
 Worktrees isolate files, not fixed network listeners. Starting a non-portified
 run while another active run uses the same repo returns
 `repo_collision_requires_choice` (REST 409 / MCP result). The user may choose
@@ -707,24 +1131,28 @@ this process still holds.
 
 ### Getting Started ownership
 
-The two core Getting Started workflows add a narrower workspace-level guard above
-normal run/Flight admission. `GettingStartedSessionStore` persists the current
-owner in `<logs>/getting-started/session.json`; both REST starts and MCP starts
-claim it before creating work, then attach the real run or Flight ID. A competing
-internal or external start receives the same typed `getting_started_busy` 409.
-Run/Flight store events reconcile the guard from persisted evidence, so closing
-the dialog never stops work and terminal evidence releases the owner. A failed
-Run gets a short settle grace because auto-heal records `failed` immediately
-before changing the same run to `healing`; releasing in that transition would
-allow two demos to overlap. Completed run and Flight targets remain in the file
-as navigation references.
+Getting Started adds a workspace-level guard above normal subsystem admission.
+`GettingStartedSessionStore` persists the current owner in
+`<logs>/getting-started/session.json`; REST and MCP starts claim it before
+creating work, then attach the real target. Competing internal and external
+starts receive the same typed `getting_started_busy` conflict. All seven demo
+workflows share this guard; ordinary user runs retain their existing admission.
+Historical `verify` session records remain readable.
 
-This guard does not serialize ordinary user runs. The smaller workflow demos use
-their existing subsystem locks. The Verify demo composes two existing run records:
-a held boot session supplies the allocated local URL to an observational verify
-run, and that verify run owns server-side cleanup of the boot session when it
-settles. The verification route permits that one named boot record beside the
-verify run while continuing to reject unrelated active executions.
+The frontend owner is `apps/web/src/features/getting-started/`: its controller
+combines the catalog/session reader with launch actions and destination routing.
+`App.tsx` supplies navigation callbacks and retains the routed dialog state and
+shell composition. The reader uses workspace invalidation and a five-second
+fallback to recover missed updates while live run evidence can settle run cards.
+
+The backend runtime in
+`apps/web-server/src/features/config/logic/getting-started-runtime.ts` resolves
+linked targets and subscribes to run, Flight, Portify, and workspace events.
+`server.ts` constructs it once, starts reconciliation after orphaned-run recovery,
+and detaches its subscriptions on close. Queued runs, spec-ready drafts, and
+Portify workflows awaiting save remain active; paused Flights release the claim.
+A failed run retains its short grace period so the transition into healing does
+not release the owner. Completed targets remain available for navigation.
 
 ### Multi-service limits (what concurrency can't auto-fix)
 
@@ -867,6 +1295,12 @@ link, or the per-repo reason there is none.
 
 ## MCP Layer
 
+- `apps/web-server/src/mcp/rest-adapters.ts` owns request construction and response
+  translation for the eight REST-backed MCP callbacks. The server composition root
+  injects Fastify's request function and the existing Getting Started classifiers;
+  routes retain validation and execution. Adapter-specific JSON parsing, origin
+  headers, and error contracts are preserved. Direct store/runner callbacks stay
+  in the composition root.
 - The MCP HTTP server mounts at `localhost:<port>/mcp` (streamable HTTP) inside
   `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`. The port is configured in
   `canary-lab.config.json` (`port` field) in the workspace directory — read it
@@ -918,7 +1352,8 @@ link, or the per-repo reason there is none.
   section (`reads`, `authoring`, `run-lifecycle`, `heal-flow`), each a thin wrapper
   over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers
   via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call
-  `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
+  configuration-domain helpers directly, including `feature-authoring.ts` and
+  the shared `deleteSuite` operation described above.
   `tool-registry.ts` captures each group registration once as a schema + handler
   definition. `tools.ts` exposes selected definitions directly or registers
   `exec-tool.ts`, which validates with the original Zod schema and calls the same
@@ -928,8 +1363,7 @@ link, or the per-repo reason there is none.
   The grouping is **by domain, not by profile**. Tools may belong to several profiles, so `tool-profiles.ts` owns membership; file layout does not.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`COVERAGE_TOOLS`/
   `EXPORT_TOOLS`/`FLIGHT_TOOLS`/`PORTIFY_TOOLS` arrays, which live in
-  **`mcp/tool-profiles.ts`** and reach the rest of the layer re-exported through
-  `tool-support.ts`. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
+  **`mcp/tool-profiles.ts`**, which the rest of the layer imports directly. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
   arrays + `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`);
   `FULL_TOOLS` is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`, while `COMPACT_TOOLS`
   contains only the public `exec` dispatcher. Because both composed direct-tool profiles are computed
@@ -1107,10 +1541,16 @@ reusing the internal prompts), and canary writes the result through the canonica
 (`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
 via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
 `sessionRef`, and render as external-session rows in Flight Activity. GUI Generate
-opens the recorded or evidence-derived Flight in follow-mode. The shared coverage-job
+opens the recorded or evidence-derived Flight in follow-mode. Recalculate Coverage
+starts the required summary/mapping job with configured defaults and opens Requirements
+(`stage=docs`) directly, without the flight launcher. Active coverage jobs or a flight
+already doing that work are opened instead of launching duplicate work. The shared coverage-job
 index drives Requirements and Tests & coverage; each Activity segment tails its own
 `kind: 'coverage'` job source, including completed sessions. Active jobs also reconcile
-through REST so a missed broadcast cannot strand the stage transition. The ledger
+through REST so a missed broadcast cannot strand the stage transition. Activity merges
+individual agent, system, and external lifecycle entries by full timestamp across sessions;
+undated legacy entries are labelled separately, and reconnect replay retains source order
+for deduplication. The ledger
 remains the input and results surface. Both
 models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
 only reads on-disk tags). The single
@@ -1228,7 +1668,7 @@ procedure.
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Readable Test compiler ↔ source links ↔ consumers | TypeScript 5.9.3 in `package.json` ↔ `controlled-english/compiler-context.ts` and syntax inventories ↔ `readable-tests/translator.ts` ↔ `ast-extractor.ts` ↔ `shared/readable-tests/types.ts` ↔ `TestPresentation` / `ReadableTestView` and the evaluation flowchart adapter. The story stays deterministic and source-linked; runner verdicts stay at test level. | controlled-English, readable-tests, extractor, presentation, and `npm run check:wire` tests | `cl_run-evidence-invariants` |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
-| **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
+| **Web↔server wire contract** | Server response types are declared once in root `shared/` (`run-manifest.ts`, `run-detail.ts`, `cleanup-listing.ts`, `draft-types.ts`, `evaluation-export-types.ts`, `extracted-test.ts`, …) and imported by both apps, so drift is a compile error. Workspace events/stream frames and Getting Started contracts also have one declaration in root `shared/`. The gate rejects a copy of a shared wire type in either app and a side that bypasses a shared converter. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

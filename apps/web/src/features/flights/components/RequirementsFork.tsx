@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
-import type { FeatureDocsListing } from '@/shared/api/types'
-import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
+import * as flightsApi from '@/shared/api/flights'
+import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@shared/flights/types'
+import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
+import { AddDocsTile, DocsDropOverlay, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
+import { DocPill, EmptyDropzone } from '@/features/coverage/components/DocPill'
 import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -105,7 +106,7 @@ export function RequirementsFork({
   const respond = (choice: string): void => {
     setBusy(true)
     setFailure(null)
-    api.respondFlightCheckpoint(flightId, { choice })
+    flightsApi.respondFlightCheckpoint(flightId, { choice })
       .then(() => onResponded())
       .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false))

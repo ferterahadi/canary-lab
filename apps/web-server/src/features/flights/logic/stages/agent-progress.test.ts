@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { AgentActivity } from '../types'
+import type { AgentActivity } from '../../../../../../../shared/flights/types'
 import type { StageContext } from '../flight-stages'
 import { agentProgressSink } from './agent-progress'
 

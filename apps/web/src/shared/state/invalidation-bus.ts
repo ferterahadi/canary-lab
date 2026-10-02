@@ -16,12 +16,16 @@
 // `invalidation.tsx`.
 
 export type InvalidationTopic =
+  | 'cleanup'
+  | 'features'
+  | 'configuration'
   | 'coverage'
   | 'ports'
   | 'repos'
   | 'verification'
   | 'tests'
   | 'flights'
+  | 'pre-flights'
   | 'notifications'
   | 'journal'
   | 'project-config'

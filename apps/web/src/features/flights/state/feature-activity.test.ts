@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
-import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
+import type { RunManifest } from '@shared/run-manifest'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { DraftRecord } from '@shared/draft-types'
+import type { RunIndexEntry } from '@shared/run-index'
+import type { PortifyIndexEntry } from '@shared/portify-index'
 import fixture from '../../runs/utils/__fixtures__/run-snapshot-review.json'
-import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
+import { deriveFeatureActivity, deriveFeatureExternalHistory, displayedActiveRuns, presentActivityRunStatus } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
   runId: 'r1',
@@ -33,6 +37,30 @@ const draft = (over: Partial<DraftRecord>): DraftRecord => ({
 })
 
 describe('deriveFeatureActivity', () => {
+  it('selects one active run per suite by review, agent, healing, running, then queued', () => {
+    const runs = [
+      run({ runId: 'queued-new', status: 'queued', startedAt: '2026-01-01T00:05:00Z' }),
+      run({ runId: 'running-new', startedAt: '2026-01-01T00:04:00Z' }),
+      run({ runId: 'healing-old', status: 'healing', startedAt: '2026-01-01T00:01:00Z' }),
+      run({ runId: 'healing-new', status: 'healing', startedAt: '2026-01-01T00:02:00Z' }),
+    ]
+    expect(displayedActiveRuns(runs).get('checkout')?.runId).toBe('healing-new')
+    const review = run({ runId: 'review', status: 'healing', pendingSpecEdits: 1, startedAt: '2026-01-01T00:00:00Z' })
+    expect(displayedActiveRuns([...runs, review]).get('checkout')?.runId).toBe('review')
+    const agent = run({ runId: 'agent', status: 'healing', startedAt: '2026-01-01T00:06:00Z' })
+    const details = { agent: { manifest: { status: 'healing', externalHealSession: { status: 'waiting' } } } } as never
+    expect(displayedActiveRuns([...runs, review, agent], details).get('checkout')?.runId).toBe('agent')
+    expect(displayedActiveRuns([run({ runId: 'a' }), run({ runId: 'b' })]).get('checkout')?.runId).toBe('b')
+  })
+
+  it('publishes the selected run to every aggregate activity consumer', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [run({ runId: 'new-running', startedAt: '2026-01-01T00:02:00Z' }), run({ runId: 'old-healing', status: 'healing' })],
+      portifyWorkflows: [], drafts: [],
+    })
+    expect(map.get('checkout')).toMatchObject({ kind: 'healing', runId: 'old-healing' })
+  })
+
   it('an EXTERNAL draft silent for over an hour stops counting as live authoring; fresh + server-spawned stay', () => {
     const nowMs = Date.parse('2026-01-02T00:00:00Z')
     const map = deriveFeatureActivity({
@@ -175,6 +203,14 @@ describe('deriveFeatureActivity', () => {
     expect(map.get('ext')).toEqual({ kind: 'verifying', runId: 'r-ext', external: true })
   })
 
+  it('shows Healing when a verify-mode run is actively healing', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [run({ runId: 'verify-heal', executionType: 'verify', status: 'healing' })],
+      portifyWorkflows: [], drafts: [],
+    })
+    expect(map.get('checkout')).toMatchObject({ kind: 'healing', runId: 'verify-heal' })
+  })
+
   it('skips an authoring draft that has no feature name yet (nothing to pin it to)', () => {
     const map = deriveFeatureActivity({
       activeRuns: [],
@@ -261,7 +297,7 @@ describe('deriveFeatureExternalHistory', () => {
       exportTasks: [{
         taskId: 't1', runId: 'r1', feature: 'report', mode: 'raw', producer: 'external',
         status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
-      }] as EvaluationExportTask[],
+      }] as EvaluationExportTaskView[],
       portifyDetails: {
         wf1: {
           workflowId: 'wf1', feature: 'ports', producer: 'external', status: 'saved',
@@ -316,7 +352,7 @@ describe('deriveFeatureExternalHistory', () => {
         taskId: 't1', runId: 'r-export', feature: 'export', mode: 'raw', producer: 'external', status: 'completed',
         createdAt: timestamp, updatedAt: timestamp, downloadReady: true, clientKind: 'claude', sessionId: 'export-session',
         conversationName: 'Publish report', externalSessionUrl: 'claude://session/export',
-      }] as EvaluationExportTask[],
+      }] as EvaluationExportTaskView[],
     })
 
     expect(history.get('coverage')?.['specs-coverage']?.traces.map((trace) => trace.resourceId))
@@ -349,7 +385,7 @@ describe('deriveFeatureExternalHistory', () => {
       exportTasks: [{
         taskId: 't-linkless', runId: 'r-linkless', feature: 'export-linkless', mode: 'raw', producer: 'external',
         status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
-      }] as EvaluationExportTask[],
+      }] as EvaluationExportTaskView[],
     })
     for (const trace of [
       history.get('coverage-linkless')?.['specs-coverage']?.current,
@@ -399,7 +435,7 @@ describe('deriveFeatureExternalHistory', () => {
         taskId: 't-linked', runId: 'r-linked', feature: 'export-linked', mode: 'raw', producer: 'external',
         status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
         clientKind: 'claude', sessionId: 'export-session', conversationName: 'Export', externalSessionUrl: 'claude://export',
-      }] as EvaluationExportTask[],
+      }] as EvaluationExportTaskView[],
     })
     expect(history.get('coverage-linked')?.['specs-coverage']?.traces.map((trace) => trace.resourceId))
       .toEqual(['j-linked-first', 'j-linked-second'])
@@ -537,4 +573,14 @@ it('carries the recorded review wait from run detail into the feature activity',
     portifyWorkflows: [], drafts: [],
   })
   expect(result.get('sample-suite')?.waiting?.label).toBe('Awaiting test review')
+})
+
+
+it('leaves unrelated work without a run presentation and orders queued siblings deterministically', () => {
+  expect(presentActivityRunStatus(undefined)).toBeNull()
+  expect(presentActivityRunStatus({ kind: 'authoring' })).toBeNull()
+  expect(presentActivityRunStatus({ kind: 'running' })).toBeNull()
+  const later = run({ runId: 'later', status: 'queued', startedAt: '2026-01-02T00:00:00Z' })
+  const older = run({ runId: 'older', status: 'queued' })
+  expect(displayedActiveRuns([later, older]).get('checkout')).toBe(later)
 })

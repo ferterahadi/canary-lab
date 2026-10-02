@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightEntryOptions } from '@/shared/api/client'
+import type { FlightEntryOptions } from '@shared/flights/types'
 
 const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
@@ -16,18 +16,23 @@ const mocks = vi.hoisted(() => ({
   abortFlight: vi.fn(),
 }))
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  // Keep ApiError (the dialog branches on it for the server's error body).
-  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+vi.mock('@/shared/api/flights', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/flights')>()),
   getFlightEntryOptions: mocks.getFlightEntryOptions,
   startFlight: mocks.startFlight,
   planFeatures: mocks.planFeatures,
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
-  getProjectConfig: mocks.getProjectConfig,
   abortFlight: mocks.abortFlight,
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: mocks.getProjectConfig,
+}))
+vi.mock('@/shared/api/workspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
   // The repo picker reuses FolderPickerModal, which lists dirs via this.
-  listWorkspaceDirs: mocks.listWorkspaceDirs,
+    listWorkspaceDirs: mocks.listWorkspaceDirs,
 }))
 
 // The planning view embeds the live agent timeline — its transports are its
@@ -38,7 +43,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
   ),
 }))
 
-import { ApiError } from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
 import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

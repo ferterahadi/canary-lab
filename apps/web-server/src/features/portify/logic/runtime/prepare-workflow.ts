@@ -8,9 +8,10 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { runGit, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
-import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { readWorkingTree, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
+import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
+import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { hydrateEnvsetIntoWorktrees } from '../../../runs/logic/runtime/env-switcher/worktree-hydrate'
 import { PortifyOrchestrator } from './orchestrator'
@@ -30,21 +31,22 @@ import type { PortifyManifest, PortifyRepoState, PortifyProducer, PortifyExterna
 // repos that live in ONE monorepo (different subpaths); git forbids the same
 // branch checked out in two worktrees of one repo, so each git root gets ONE
 // worktree and every member repo is edited inside it. Distinct roots get
+import { type ActiveWorkflow, type PortifyRunnerDeps } from './runner'
 import {
   buildSeededNote,
   buildSiblingOverlayIndex,
+  pickBorrowable,
+  safeKey,
+  type GroupMember,
+  type RepoGroup,
+} from './portify-worktree-borrow'
+import {
   canonicalConfigDiff,
   captureOverlayRepos,
-  pickBorrowable,
   readFileOrNull,
   realpathOrSelf,
   restoreConfig,
-  safeKey,
-  type ActiveWorkflow,
-  type GroupMember,
-  type RepoGroup,
-  type PortifyRunnerDeps,
-} from './runner'
+} from './portify-overlay-capture'
 
 export interface PrepareWorkflowContext {
   deps: PortifyRunnerDeps
@@ -78,11 +80,11 @@ export async function prepareWorkflow(
   const dirty: string[] = []
   for (const repo of repos) {
     const repoPath = resolveRepoPath(repo.localPath)
-    const status = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-    if (status.code !== 0) {
+    const status = await readWorkingTree(repoPath, 'directory')
+    if (!status.ok) {
       throw Object.assign(new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository`), { statusCode: 409 })
     }
-    if (status.stdout.trim()) {
+    if (status.lines.length > 0) {
       dirty.push(repo.name)
       continue
     }

@@ -1,10 +1,11 @@
+import type { WorkspaceEvent } from '../../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AgentJobRunStore, agentJobStore, bridgeAgentJobEvents } from './store'
 import type { AgentJobManifest } from './types'
-import type { WorkspaceEvent } from '../../../../shared/workspace-events'
+
 
 // The record half of "an agent is a first-class thing". The interesting behaviour
 // is not save/get — the shared store owns that — but what a record says after the

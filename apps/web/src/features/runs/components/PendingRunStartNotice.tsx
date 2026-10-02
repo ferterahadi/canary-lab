@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import * as api from '@/shared/api/client'
+import * as runsApi from '@/shared/api/runs'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import type { RunStartRequest } from '@shared/test-review'
 import type { PendingRunStart } from '../state/pending-run-starts'
@@ -25,7 +25,7 @@ function requestMessage(request: RunStartRequest): string {
 }
 
 export function PendingRunStartNotice({ pending, onRunStarted, onReview, onDismiss }: Props) {
-  const live = useLiveResource('tests', pending.requestId, api.getRunStartRequest, { scope: pending.feature, reconcileMs: 5000, leaseMs: 15000 })
+  const live = useLiveResource('tests', pending.requestId, runsApi.getRunStartRequest, { scope: pending.feature, reconcileMs: 5000, leaseMs: 15000 })
   const newest = useRef<RunStartRequest | null>(null)
   if (live.value && (!newest.current || live.value.version >= newest.current.version)) newest.current = live.value
   const request = newest.current
@@ -42,7 +42,7 @@ export function PendingRunStartNotice({ pending, onRunStarted, onReview, onDismi
     setBusy(true)
     setActionError(null)
     try {
-      await api.cancelRunStartRequest(pending.requestId)
+      await runsApi.cancelRunStartRequest(pending.requestId)
       live.refresh()
     } catch (error) { setActionError(error instanceof Error ? error.message : 'Could not cancel the run request') }
     finally { setBusy(false) }

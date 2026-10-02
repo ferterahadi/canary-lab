@@ -1,5 +1,8 @@
-import { Suspense, lazy, memo, useState } from 'react'
-import type { AgentSessionEvent, SubagentThread } from '@/shared/api/client'
+import { Suspense, lazy, memo, type ReactNode } from 'react'
+import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+import { LOG_KIND_LABEL, type ExternalSessionActivity, type LogLine } from './activity-log'
+import { clientKindToDesktopAgent, clientLabel } from './external-client-branding'
+import { useOpenAgentApp } from './ExternalAgentCard'
 
 // The markdown stack (react-markdown + remark-gfm → micromark) is the heaviest
 // dependency in the bundle and only agent prose needs it — loaded lazily so a
@@ -32,149 +35,64 @@ function MarkdownBody({ text }: { text: string }) {
 }
 
 // ─── Timeline rows ───────────────────────────────────────────────────────────
-// Each event is a node on a single vertical rail: a typed marker (role/tool
-// glyph) + its content. Tool calls/results collapse to one mono line and
-// disclose their full payload; prose reads as a clean transcript.
+// Every Activity entry — conductor line, agent event, task prompt, external
+// session lifecycle — renders as ONE row shape: glyph · kind · verb · one-line
+// summary · time. A row never expands in place. When its summary is cut it
+// opens the entry in the log modal, so a long payload can't push the rest of
+// the rail off screen; when the summary is already the whole entry
+// (`line.whole`) the row is plain text that wraps, with nothing to open.
 
-// memo: events are append-only — a new WS frame appends one event object and
-// never mutates the earlier ones, so every existing row bails out on identity
-// and an append re-renders one row instead of the whole transcript.
-export const EventRow = memo(function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
+export interface LogGlyph {
+  icon: ReactNode
+  /** A token colour; the glyph is the row's only hue. */
+  color: string
+}
+
+// memo: events are append-only — a new WS frame appends one entry and never
+// mutates the earlier ones, so every existing row bails out on identity and an
+// append re-renders one row instead of the whole transcript.
+export const LogRow = memo(function LogRow({ activityId, line, glyph, timestamp, selected = false, onOpen, testId }: {
+  activityId?: string
+  line: LogLine
+  glyph: LogGlyph
+  timestamp?: string
+  selected?: boolean
+  onOpen: () => void
+  testId?: string
+}) {
+  const kind = LOG_KIND_LABEL[line.kind]
+  const cells = <>
+    <span className="agentts-logicon" style={{ color: line.danger ? 'var(--danger)' : glyph.color }} aria-hidden="true">{glyph.icon}</span>
+    <span className="agentts-logkind">{kind}</span>
+    <span className="agentts-logverb">{line.verb}</span>
+    <span className="agentts-logsum">{line.summary}</span>
+    {timestamp !== undefined && <Timestamp value={timestamp} />}
+  </>
   return (
-    <li className="agentts-row" data-kind={event.kind}>
-      <NodeMarker event={event} />
-      <EventBody event={event} subagents={subagents} />
+    <li className="agentts-row" data-kind={line.kind} data-activity-id={activityId} data-testid={testId}>
+      {line.whole ? (
+        <div className="agentts-log" data-whole="true" data-danger={line.danger ? 'true' : 'false'}>{cells}</div>
+      ) : (
+        <button
+          type="button"
+          className="agentts-log"
+          data-selected={selected ? 'true' : 'false'}
+          data-danger={line.danger ? 'true' : 'false'}
+          aria-haspopup="dialog"
+          aria-current={selected ? 'true' : undefined}
+          aria-label={`${kind} · ${line.verb}${line.summary ? ` — ${line.summary}` : ''}`}
+          title={line.summary || undefined}
+          onClick={onOpen}
+        >
+          {cells}
+          <Chevron open={false} className="agentts-chev" />
+        </button>
+      )}
     </li>
   )
 })
 
-/** A run of consecutive conductor lines sharing one `[TAG]` (untagged lines
- *  group under `tag: undefined`). Exact repeats inside the run collapse to one
- *  entry with a count — the conductor re-announces the same state often. */
-export type SystemGroup = {
-  tag?: string
-  /** The earliest STAMPED line in the run — the group heads on it, the way an
-   *  agent row heads on its event time. A run can mix undated lines (written
-   *  before the conductor stamped them) with dated ones when a flight spans the
-   *  change: the head takes the first timestamp it finds, so the group is dated
-   *  as long as ANY line in it is. Absent only when every line is unstamped. */
-  timestamp?: string
-  entries: Array<{ text: string; count: number }>
-}
-
-/** Same-tag lines this far apart are separate visits to the stage (a resume /
- *  retry days later), not one burst of output — the run splits so each visit
- *  heads on its own time. Without the split, a stage log that accumulated
- *  re-entries (portify's `workflow … started` per attempt) renders every start
- *  under the FIRST stamp, dating today's workflow with yesterday's clock. */
-export const SYSTEM_GROUP_SPLIT_MS = 60_000
-
-/** Fold `[TAG] text` lines into tag-runs so the tag prints once per run and
- *  identical consecutive lines show as `×N` instead of stacking. A run breaks
- *  on a tag change OR a stamp gap over `SYSTEM_GROUP_SPLIT_MS` — see above. */
-export function groupSystemLines(lines: string[]): SystemGroup[] {
-  const groups: SystemGroup[] = []
-  // Last stamped instant in the current group — the gap baseline. Undefined
-  // while a group has only unstamped lines (no gap is computable there, so
-  // undated runs never split; they group exactly as before).
-  let lastStampMs: number | undefined
-  for (const line of lines) {
-    // `[tag@<iso>] text` — the stamp is optional: lines written before the
-    // conductor stamped them (older flights) still parse, just undated.
-    const m = /^\[([\w-]+)(?:@([^\]]+))?\]\s?(.*)$/.exec(line)
-    const tag = m?.[1]
-    const timestamp = m?.[2]
-    const text = m ? m[3] : line
-    const stampMs = timestamp !== undefined ? Date.parse(timestamp) : NaN
-    const last = groups[groups.length - 1]
-    const reentry =
-      lastStampMs !== undefined && !Number.isNaN(stampMs) && stampMs - lastStampMs > SYSTEM_GROUP_SPLIT_MS
-    if (!last || last.tag !== tag || reentry) {
-      groups.push({ tag, timestamp, entries: [{ text, count: 1 }] })
-      lastStampMs = Number.isNaN(stampMs) ? undefined : stampMs
-      continue
-    }
-    // Backfill the head time from a later line when the run opened undated —
-    // a flight that spanned the stamping change has undated lines first, then
-    // stamped ones; without this the whole run reads as timeless.
-    if (last.timestamp === undefined && timestamp !== undefined) last.timestamp = timestamp
-    if (!Number.isNaN(stampMs)) lastStampMs = stampMs
-    const lastEntry = last.entries[last.entries.length - 1]
-    if (lastEntry.text === text) lastEntry.count += 1
-    else last.entries.push({ text, count: 1 })
-  }
-  return groups
-}
-
-// A run of conductor system lines on the same rail as the agent events, in the
-// same left gutter (boxy terminal node + shared thread line) so it reads as one
-// timeline. No band, no chip: mono type at the agent's own size, in muted
-// colour, is the whole distinction — the agent's prose stays the loudest thing.
-export function SystemRow({ group }: { group: SystemGroup }) {
-  return (
-    <li className="agentts-sysrow">
-      <span className="agentts-sysnode" aria-hidden="true">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3.5 4.5l3 3-3 3" />
-          <path d="M8.5 11h4.5" />
-        </svg>
-      </span>
-      <div className="agentts-sysbody">
-        {/* The tag heads the run on its own line — same shape as an agent row's
-            head (label above, body below) so system and agent rows read as one
-            rail instead of two layouts. */}
-        {group.tag !== undefined && (
-          <div className="agentts-rowhead">
-            <span className="agentts-label agentts-systag">{group.tag}</span>
-            {group.timestamp && <Timestamp value={group.timestamp} />}
-          </div>
-        )}
-        {group.entries.map((entry, idx) => (
-          <div className="agentts-sysline" key={idx}>
-            <span className="agentts-systext">
-              {entry.text}
-              {entry.count > 1 && <span className="agentts-sysrepeat">×{entry.count}</span>}
-            </span>
-          </div>
-        ))}
-      </div>
-    </li>
-  )
-}
-
-export const NODE_ACCENT: Record<AgentSessionEvent['kind'], string> = {
-  'user-message': 'var(--boot)',
-  'assistant-message': 'var(--assistant)',
-  'assistant-thinking': 'var(--text-muted)',
-  'tool-call': 'var(--warning)',
-  'tool-result': 'var(--text-muted)',
-}
-
-export function NodeMarker({ event }: { event: AgentSessionEvent }) {
-  const isError = event.kind === 'tool-result' && event.isError === true
-  const accent = isError ? 'var(--danger)' : NODE_ACCENT[event.kind]
-  const filled = event.kind === 'user-message' || event.kind === 'assistant-message'
-  return (
-    <span
-      className="agentts-node"
-      aria-hidden="true"
-      style={{ borderColor: accent, color: filled ? 'var(--bg-base)' : accent, background: filled ? accent : 'var(--bg-base)' }}
-    >
-      <NodeGlyph event={event} />
-    </span>
-  )
-}
-
-export function NodeGlyph({ event }: { event: AgentSessionEvent }) {
-  if (event.kind === 'tool-call') return <NodeSvg>{toolGlyph(event.name)}</NodeSvg>
-  if (event.kind === 'tool-result') {
-    return <NodeSvg>{event.isError ? <path d="M5 5l6 6M11 5l-6 6" /> : <path d="M3.5 8.5l3 3 6-6.5" />}</NodeSvg>
-  }
-  if (event.kind === 'user-message') return <NodeSvg><path d="M6 4l4 4-4 4" /></NodeSvg>
-  return null // assistant + thinking → the filled/hollow dot is enough
-}
-
-export function NodeSvg({ children }: { children: React.ReactNode }) {
+export function GlyphSvg({ children }: { children: ReactNode }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       {children}
@@ -182,68 +100,47 @@ export function NodeSvg({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function EventBody({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
+export const SYSTEM_GLYPH: LogGlyph = {
+  icon: <GlyphSvg><path d="M3.5 4.5l3 3-3 3" /><path d="M8.5 11h4.5" /></GlyphSvg>,
+  color: 'var(--text-muted)',
+}
+
+const SUBAGENT_ICON = <GlyphSvg><circle cx="4" cy="4" r="1.6" /><circle cx="12" cy="12" r="1.6" /><path d="M4 5.6V9a3 3 0 003 3h3.4" /></GlyphSvg>
+
+/** The glyph types an agent event the way the old rail's node markers did, in
+ *  the same hues: prompt in the boot hue, prose in the assistant hue, tool
+ *  calls in the tool hue, results muted. */
+export function eventGlyph(event: AgentSessionEvent, hasThreads = false): LogGlyph {
   switch (event.kind) {
     case 'user-message':
-      return <PromptBody text={event.text} timestamp={event.timestamp} />
+      return { icon: <GlyphSvg><path d="M6 4l4 4-4 4" /></GlyphSvg>, color: 'var(--boot)' }
     case 'assistant-message':
       return event.apiError
-        ? <ApiErrorBody text={event.text} timestamp={event.timestamp} />
-        : <ProseBody label="Assistant" text={event.text} timestamp={event.timestamp} />
+        ? { icon: <GlyphSvg><path d="M8 3.5v5" /><path d="M8 11.5v.5" /></GlyphSvg>, color: 'var(--danger)' }
+        : { icon: <GlyphSvg><circle cx="8" cy="8" r="3.2" fill="currentColor" stroke="none" /></GlyphSvg>, color: 'var(--assistant)' }
     case 'assistant-thinking':
-      return <ThinkingBody text={event.text} timestamp={event.timestamp} />
+      return { icon: <GlyphSvg><circle cx="8" cy="8" r="3.6" strokeDasharray="2 1.6" /></GlyphSvg>, color: 'var(--text-muted)' }
     case 'tool-call':
-      return (
-        <ToolCallBody
-          name={event.name}
-          input={event.input}
-          timestamp={event.timestamp}
-          toolId={event.toolId}
-          threads={subagents?.get(event.toolId)}
-        />
-      )
+      return hasThreads
+        ? { icon: SUBAGENT_ICON, color: 'var(--accent)' }
+        : { icon: <GlyphSvg>{toolGlyph(event.name)}</GlyphSvg>, color: 'var(--warning)' }
     case 'tool-result':
-      return <ToolResultBody output={event.output} isError={event.isError} timestamp={event.timestamp} toolId={event.toolId} />
+      return event.isError
+        ? { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color: 'var(--danger)' }
+        : { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color: 'var(--text-muted)' }
   }
 }
 
-/** A turn the CLI synthesized after the model's stream dropped. Rendered as a
- *  termination rather than prose: the text that came with it is recovered
- *  partial output, and reading it as the agent's conclusion is exactly the
- *  mistake this row exists to prevent. */
-export function ApiErrorBody({ text, timestamp }: { text: string; timestamp: string }) {
-  return (
-    <>
-      <div className="agentts-rowhead">
-        <span className="agentts-label" style={{ color: 'var(--danger)' }}>Terminated · API error</span>
-        <Timestamp value={timestamp} />
-      </div>
-      <div className="agentts-prose" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{firstLineOf(text)}</div>
-    </>
-  )
-}
-
-export function firstLineOf(text: string): string {
-  const line = text.split('\n').find((l) => l.trim().length > 0)?.trim() ?? ''
-  return line.length > 160 ? `${line.slice(0, 157)}…` : line
-}
-
-export function RowHead({ label, timestamp }: { label: string; timestamp: string }) {
-  return (
-    <div className="agentts-rowhead">
-      <span className="agentts-label">{label}</span>
-      <Timestamp value={timestamp} />
-    </div>
-  )
-}
-
-export function ProseBody({ label, text, timestamp }: { label: string; text: string; timestamp: string }) {
-  return (
-    <>
-      <RowHead label={label} timestamp={timestamp} />
-      <Markdown text={text} />
-    </>
-  )
+/** External lifecycle glyphs: a ring at start, the outcome at the end. */
+export function externalGlyph(phase: 'start' | 'end', status: ExternalSessionActivity['status']): LogGlyph {
+  const color = status === 'done' || status === 'ready' ? 'var(--success)'
+    : status === 'failed' ? 'var(--danger)'
+    : status === 'aborted' ? 'var(--text-muted)'
+    : 'var(--running)'
+  if (phase === 'start') return { icon: <GlyphSvg><circle cx="8" cy="8" r="3" /></GlyphSvg>, color: status === 'running' ? color : 'var(--text-muted)' }
+  if (status === 'done' || status === 'ready') return { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color }
+  if (status === 'failed') return { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color }
+  return { icon: <GlyphSvg><path d="M4.5 8h7" /></GlyphSvg>, color }
 }
 
 // Assistant/prompt prose is genuine markdown (headers, GFM tables, status
@@ -259,161 +156,6 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
     </div>
   )
 })
-
-export const CLAMP_3: React.CSSProperties = {
-  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-}
-
-export function PromptBody({ text, timestamp }: { text: string; timestamp: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const long = text.length > 260
-  // Collapsed preview stays plain text — `-webkit-line-clamp` only clamps
-  // inline content, so it can't truncate markdown's block children. The
-  // expanded view renders the full markdown.
-  return (
-    <>
-      <RowHead label="Prompt" timestamp={timestamp} />
-      {!expanded && long
-        ? <div className="agentts-prose" style={CLAMP_3}>{text}</div>
-        : <Markdown text={text} />}
-      {long && (
-        <button type="button" className="agentts-morebtn" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </>
-  )
-}
-
-export function ThinkingBody({ text, timestamp }: { text: string; timestamp: string }) {
-  const [expanded, setExpanded] = useState(false)
-  return (
-    <div className="agentts-think">
-      <button type="button" className="agentts-thinkbtn" onClick={() => setExpanded((v) => !v)}>
-        <Chevron open={expanded} />
-        <span>Thinking</span>
-        <Timestamp value={timestamp} />
-      </button>
-      {expanded && <div className="agentts-thinkbody agentts-md">{text && <MarkdownBody text={text} />}</div>}
-    </div>
-  )
-}
-
-export function ToolCallBody({ name, input, timestamp, toolId, threads }: {
-  name: string
-  input: unknown
-  timestamp: string
-  toolId: string
-  threads?: SubagentThread[]
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const target = summarizeInput(input)
-  // No `RowHead`: a "TOOL CALL" caption on its own line doubled the row's height
-  // to restate what the gutter's tool glyph and the bold tool name already say.
-  // The clock rides the box instead, so the whole event is one line.
-  return (
-    <div className="agentts-tool">
-      <button
-        type="button"
-        className="agentts-toolbtn"
-        onClick={() => setExpanded((v) => !v)}
-        title={toolId}
-        aria-label={`Tool call: ${name || 'tool'}${target ? ` — ${target}` : ''}`}
-      >
-        <span className="agentts-toolname">{name || 'tool'}</span>
-        {target && <span className="agentts-tooltarget">{target}</span>}
-        <Timestamp value={timestamp} />
-        <Chevron open={expanded} className="agentts-chev" />
-      </button>
-      {expanded && <pre className="agentts-pre">{formatJson(input)}</pre>}
-      {/* Spawned children hang below the input disclosure as siblings, not
-          inside it: "what did it do" and "what were its args" are separate
-          questions, and gating the timeline behind the JSON would bury the
-          one that matters. */}
-      {(threads ?? []).map((thread) => (
-        <SubagentThreadRow key={thread.agentId} thread={thread} />
-      ))}
-    </div>
-  )
-}
-
-/** How long a thread ran, from its first to its last event. */
-export function threadDuration(events: AgentSessionEvent[]): string {
-  const stamps = events.map((e) => Date.parse(e.timestamp)).filter((n) => Number.isFinite(n))
-  if (stamps.length < 2) return ''
-  const secs = Math.round((Math.max(...stamps) - Math.min(...stamps)) / 1000)
-  if (secs < 60) return `${secs}s`
-  return `${Math.floor(secs / 60)}m ${secs % 60}s`
-}
-
-/** One spawned subagent, disclosed inside its parent's tool-call box. Collapsed
- *  by default — a finished child's conclusion already reached the parent rail —
- *  except when it's still running or died, which are the two cases where the
- *  parent rail alone leaves the user guessing. */
-export function SubagentThreadRow({ thread }: { thread: SubagentThread }) {
-  const events = thread.events.filter(Boolean)
-  const failed = events.some((e) => e.kind === 'assistant-message' && e.apiError)
-  // A thread whose last event is a tool call is mid-flight: the result that
-  // would close it hasn't been written yet.
-  const running = !failed && events.length > 0 && events[events.length - 1].kind === 'tool-call'
-  const [expanded, setExpanded] = useState(running || failed)
-  const duration = threadDuration(events)
-  return (
-    <div className="agentts-sub">
-      <button type="button" className="agentts-subbtn" onClick={() => setExpanded((v) => !v)}>
-        {running && <span className="agentts-sublive" aria-hidden="true" />}
-        <span className="agentts-subtype">{thread.agentType}</span>
-        <span className="agentts-submeta">
-          {events.length} event{events.length === 1 ? '' : 's'}
-          {duration && ` · ${duration}`}
-          {failed ? ' · terminated' : running ? '' : ' · done'}
-        </span>
-        <Chevron open={expanded} className="agentts-chev" />
-      </button>
-      {expanded && (
-        <ol className="agentts-nest">
-          {events.map((event, idx) => (
-            // Depth stops here: a subagent's own children would nest a third
-            // rail inside an already-indented one, which stops being readable
-            // long before it stops being possible.
-            <li key={idx} className="agentts-row agentts-nestrow" data-kind={event.kind}>
-              <NodeMarker event={event} />
-              <EventBody event={event} />
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  )
-}
-
-export function ToolResultBody({ output, isError, timestamp, toolId }: { output: string; isError?: boolean; timestamp: string; toolId: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const firstLine = output.split('\n').find((l) => l.trim().length > 0)?.trim() ?? ''
-  const preview = firstLine.length > 140 ? firstLine.slice(0, 137) + '…' : firstLine
-  // One line, like its tool call above: the gutter's ✓/✗ node types the row, so
-  // a "RESULT" caption bought nothing but height. A failure still says so in
-  // words — an inline `error` tag, not a whole line of its own.
-  return (
-    <div className="agentts-tool" style={isError ? { borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' } : undefined}>
-      <button
-        type="button"
-        className="agentts-toolbtn"
-        onClick={() => setExpanded((v) => !v)}
-        title={toolId}
-        aria-label={`${isError ? 'Tool error' : 'Result'}: ${preview || '(empty)'}`}
-      >
-        {isError && <span className="agentts-errtag">error</span>}
-        <span className="agentts-tooltarget" style={{ color: isError ? 'var(--danger)' : 'var(--text-secondary)' }}>
-          {preview || '(empty)'}
-        </span>
-        <Timestamp value={timestamp} />
-        <Chevron open={expanded} className="agentts-chev" />
-      </button>
-      {expanded && <pre className="agentts-pre">{output || '(empty)'}</pre>}
-    </div>
-  )
-}
 
 export function Chevron({ open, className }: { open: boolean; className?: string }) {
   return (
@@ -445,49 +187,45 @@ export function toolGlyph(name: string): React.ReactNode {
   return <circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none" />
 }
 
-export function shortSession(id: string): string {
-  return id.length > 12 ? id.slice(0, 8) : id
-}
-
 export function Timestamp({ value }: { value: string }) {
-  if (!value) return null
-  let display = value
-  try {
-    const d = new Date(value)
-    if (!Number.isNaN(d.getTime())) {
-      const hh = d.getHours().toString().padStart(2, '0')
-      const mm = d.getMinutes().toString().padStart(2, '0')
-      const ss = d.getSeconds().toString().padStart(2, '0')
-      display = `${hh}:${mm}:${ss}`
-    }
-  } catch { /* fall back to raw */ }
+  if (!value || Number.isNaN(Date.parse(value))) return <span className="agentts-time">Time unavailable</span>
+  const d = new Date(value)
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const ss = d.getSeconds().toString().padStart(2, '0')
+  const display = `${hh}:${mm}:${ss}`
   return (
     <span className="agentts-time" title={value}>{display}</span>
   )
 }
 
-export function summarizeInput(input: unknown): string {
-  if (input === null || input === undefined) return ''
-  if (typeof input === 'string') {
-    const oneLine = input.replace(/\s+/g, ' ').trim()
-    return oneLine.length > 80 ? oneLine.slice(0, 77) + '…' : oneLine
+/** "Open in Claude/Codex": the exact session when the client sent a link, else
+ *  the client app. One home for the session divider and the log modal, which
+ *  both have to send the reader to where the conversation actually lives. */
+export function ExternalOpenAction({ session }: { session: ExternalSessionActivity }) {
+  const { opening, error, open } = useOpenAgentApp()
+  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
+  const agent = clientLabel(session.clientKind, 'External agent')
+  if (session.sessionUrl) {
+    return (
+      <a href={session.sessionUrl} target="_blank" rel="noreferrer" className="agentts-extaction" aria-label={`Open ${agent} session`}>
+        Open in {agent} <span aria-hidden>→</span>
+      </a>
+    )
   }
-  if (typeof input !== 'object') return String(input)
-  const obj = input as Record<string, unknown>
-  const interesting = ['file_path', 'path', 'cmd', 'command', 'pattern', 'query', 'url']
-  for (const key of interesting) {
-    if (typeof obj[key] === 'string' && obj[key]) {
-      const v = obj[key] as string
-      return v.length > 80 ? v.slice(0, 77) + '…' : v
-    }
-  }
-  try {
-    const json = JSON.stringify(obj)
-    return json.length > 80 ? json.slice(0, 77) + '…' : json
-  } catch { return '' }
-}
-
-export function formatJson(value: unknown): string {
-  if (typeof value === 'string') return value
-  try { return JSON.stringify(value, null, 2) } catch { return String(value) }
+  if (!desktopAgent) return null
+  return (
+    <>
+      <button
+        type="button"
+        className="agentts-extaction"
+        title={`No exact session link was provided; opens the ${agent} app.`}
+        disabled={opening !== null}
+        onClick={() => open(desktopAgent)}
+      >
+        {opening ? 'Opening…' : `Open ${agent} app`} {!opening && <span aria-hidden>→</span>}
+      </button>
+      {error && <span className="agentts-exterror" role="alert">{error}</span>}
+    </>
+  )
 }
