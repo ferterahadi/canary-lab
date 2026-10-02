@@ -1,3 +1,4 @@
+import { listFiles } from '../../../shared/list-files'
 import { stripTerminalEscapes } from '../../../shared/terminal-text'
 import fs from 'fs'
 import path from 'path'
@@ -402,16 +403,6 @@ function parseDotenvLine(line: string): { key: string; value: string } | null {
     value = value.slice(1, -1)
   }
   return { key, value }
-}
-
-function listFiles(root: string): string[] {
-  const out: string[] = []
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const full = path.join(root, entry.name)
-    if (entry.isDirectory()) out.push(...listFiles(full))
-    else if (entry.isFile()) out.push(full)
-  }
-  return out
 }
 
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {

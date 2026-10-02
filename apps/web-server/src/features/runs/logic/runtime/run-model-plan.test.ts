@@ -38,6 +38,11 @@ describe('resolveRunModelPlan', () => {
     expect(plan.commit).toEqual({ model: 'haiku', effort: 'low' })
   })
 
+  it('an explicit agent-default override beats the saved pin', () => {
+    expect(resolveRunModelPlan('claude', config, { heal: { model: null, effort: null } }).heal)
+      .toEqual({ model: null, effort: null })
+  })
+
   it('degrades a junk override to config instead of failing the launch', () => {
     expect(resolveRunModelPlan('claude', config, 'not-a-plan')).toEqual(
       resolveRunModelPlan('claude', config),

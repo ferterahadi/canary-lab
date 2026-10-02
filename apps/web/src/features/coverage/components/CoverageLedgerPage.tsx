@@ -16,7 +16,6 @@ import type { FlightStageKey, FlightStageStatus } from '@shared/flights/types'
 import {
   EMPTY_AGENT_MODELS,
   type AgentModelsConfig,
-  type AgentStagePlans,
   type ModelAgentKind,
   type ModelStageKey,
 } from '@shared/agent-models'
@@ -32,6 +31,7 @@ import { COVERAGE_CSS } from './coverage-ledger-css'
 import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import type { CoverageRecoveryStage } from '@shared/coverage/freshness'
+import type { CoverageLaunchModels } from '@/shared/state/use-coverage-recalculation'
 
 // The two stages a coverage generation spawns (the summary job chains the
 // mapping engine) — the models gate scopes its rows to them.
@@ -47,7 +47,8 @@ interface Props {
   // `job` takeover below can't know about them.
   generatingFlight?: { flightId: string; stage: FlightStageKey; stageStatus: FlightStageStatus } | null
   onOpenFlight?: (flightId: string) => void
-  onOpenRecovery?: (stage: CoverageRecoveryStage) => void
+  /** `models` is the gate's confirmed override; absent means the saved plan. */
+  onOpenRecovery?: (stage: CoverageRecoveryStage, models?: CoverageLaunchModels) => void
   onOpenGeneration: (job: CoverageJobIndexEntry) => void
   coverageJobs?: CoverageJobIndexEntry[]
 }
@@ -89,12 +90,20 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     if (focusClearRef.current) clearTimeout(focusClearRef.current)
   }, [])
 
-  // The models gate (2.2.0): Generate parks on "use defaults or customize?"
-  // when the workspace armed askModelsOnLaunch. Holds the parked kind plus the
-  // config snapshot the gate previews (fetched at click time, not page load).
-  const [modelsGate, setModelsGate] = useState<{ kind: CoverageJobKind; agent: ModelAgentKind; agentModels: AgentModelsConfig } | null>(null)
+  // The models gate (2.2.0): Generate and Recalculate Coverage both park on
+  // "use defaults or customize?" when the workspace armed askModelsOnLaunch.
+  // Holds the parked launch plus the config snapshot the gate previews (fetched
+  // at click time, not page load). The gate renders inside this z-[60] page —
+  // an App-level modal would sit beneath it.
+  const [modelsGate, setModelsGate] = useState<{
+    launch: (models?: CoverageLaunchModels) => void
+    noun: string
+    confirmLabel: string
+    agent: ModelAgentKind
+    agentModels: AgentModelsConfig
+  } | null>(null)
 
-  const beginJob = useCallback((kind: CoverageJobKind, launch?: { agent: ModelAgentKind; models: AgentStagePlans }) => {
+  const beginJob = useCallback((kind: CoverageJobKind, launch?: CoverageLaunchModels) => {
     setActionError(null)
     setLaunching(true)
     // A customized launch pins `adapter` to the agent the gate showed, so the
@@ -114,27 +123,35 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       .finally(() => setLaunching(false))
   }, [feature, onOpenGeneration])
 
-  const startJob = useCallback((kind: CoverageJobKind) => {
+  const gateLaunch = useCallback((
+    launch: (models?: CoverageLaunchModels) => void,
+    copy: { noun: string; confirmLabel: string },
+  ) => {
     if (launching) return
     setLaunching(true)
     setActionError(null)
-    // Config unreachable → generate with defaults rather than dead-ending the
+    // Config unreachable → launch with defaults rather than dead-ending the
     // button on a settings probe (the gate is best-effort, launching is not).
     configApi.getProjectConfig()
       .then((config) => {
+        setLaunching(false)
         if (config.askModelsOnLaunch === true) {
-          setLaunching(false)
           setModelsGate({
-            kind,
+            launch,
+            ...copy,
             agent: config.healAgent === 'codex' ? 'codex' : 'claude',
             agentModels: config.agentModels ?? EMPTY_AGENT_MODELS,
           })
           return
         }
-        beginJob(kind)
+        launch()
       })
-      .catch(() => beginJob(kind))
-  }, [beginJob, launching])
+      .catch(() => { setLaunching(false); launch() })
+  }, [launching])
+
+  const startJob = useCallback((kind: CoverageJobKind) => {
+    gateLaunch((models) => beginJob(kind, models), { noun: 'coverage generation', confirmLabel: 'Generate' })
+  }, [beginJob, gateLaunch])
 
   // Refresh results on workspace events and on authoritative job transitions.
   // The shared jobs read reconciles missed completion events without leaving a
@@ -297,7 +314,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       <style>{COVERAGE_CSS}</style>
       {modelsGate && (
         <ModelLaunchGate
-          launchNoun="coverage generation"
+          launchNoun={modelsGate.noun}
           agent={modelsGate.agent}
           stages={COVERAGE_MODEL_STAGES}
           config={modelsGate.agentModels}
@@ -305,9 +322,9 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           onConfirm={(models) => {
             const gate = modelsGate
             setModelsGate(null)
-            beginJob(gate.kind, models ? { agent: gate.agent, models } : undefined)
+            gate.launch(models ? { agent: gate.agent, models } : undefined)
           }}
-          confirmLabel="Generate"
+          confirmLabel={modelsGate.confirmLabel}
         />
       )}
       <header className="clcov-head" data-generating={generating ? 'true' : 'false'}>
@@ -375,9 +392,12 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
             onDocsChanged={refresh}
             reloadKey={docsReloadKey}
             recovery={onOpenRecovery && ledger.freshness?.nextAction && ledger.freshness.nextAction.stage !== 'run' ? {
-              onClick: () => onOpenRecovery(ledger.freshness!.nextAction!.stage),
+              onClick: () => {
+                const stage = ledger.freshness!.nextAction!.stage
+                gateLaunch((models) => onOpenRecovery(stage, models), { noun: 'coverage recalculation', confirmLabel: 'Recalculate' })
+              },
               disabledReason: !confirmed ? 'Checking coverage freshness before starting work.'
-                : generating ? 'Coverage work is already active. Open its Flight to follow progress.' : undefined,
+                : undefined,
             } : undefined}
           />
           <div className="flex min-h-0 flex-1 flex-col">

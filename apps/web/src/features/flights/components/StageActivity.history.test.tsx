@@ -40,7 +40,8 @@ describe('StageActivityRail multi-session chronology', () => {
         sessionId: stage,
         events: [{
           kind: 'assistant-message',
-          timestamp: '2026-08-26T01:00:00.000Z',
+          // Each event really occurs in its session; chronology must use event time.
+          timestamp: `2026-08-26T01:0${(Number(stage.slice(-3)) - 1) * 4}:00.000Z`,
           text: eventText[stage],
         }],
       }
@@ -99,7 +100,7 @@ describe('StageActivityRail multi-session chronology', () => {
     expect(text.indexOf('Pass 2 authoring event')).toBeLessThan(text.indexOf('validated 1 file(s)'))
   })
 
-  it('keeps old raw-chunk separators readable without rendering them', async () => {
+  it('labels undated historical rows separately without rendering copied transcripts', async () => {
     await act(async () => {
       root.render(
         <StageActivityRail
@@ -124,9 +125,10 @@ describe('StageActivityRail multi-session chronology', () => {
     })
 
     const text = container.textContent ?? ''
-    expect(text.indexOf('Pass 1 authoring event')).toBeLessThan(text.indexOf('validated 2 file(s)'))
-    expect(text.indexOf('validated 2 file(s)')).toBeLessThan(text.indexOf('Pass 1 mapping event'))
-    expect(text.indexOf('Pass 1 mapping event')).toBeLessThan(text.indexOf('mapped 4 requirement(s)'))
+    expect(text).toContain('Time unavailable')
+    expect(text.indexOf('validated 2 file(s)')).toBeLessThan(text.indexOf('mapped 4 requirement(s)'))
+    expect(text.indexOf('mapped 4 requirement(s)')).toBeLessThan(text.indexOf('Pass 1 authoring event'))
+    expect(text.indexOf('Pass 1 authoring event')).toBeLessThan(text.indexOf('Pass 1 mapping event'))
     expect(text).not.toContain('legacy author chunk')
     expect(text).not.toContain('legacy mapping chunk')
   })

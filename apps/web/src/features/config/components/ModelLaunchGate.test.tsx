@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
+import { recommendedChoice } from '@shared/agent-models'
 import { defaultsByChoice, ModelLaunchGate, savedModelsSummary } from './ModelLaunchGate'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
@@ -162,6 +163,39 @@ describe('ModelLaunchGate', () => {
       heal: { model: 'opus', effort: 'max' },
       commit: { model: 'haiku', effort: null },
     })
+  })
+
+  it('Change → Reset all to recommended overrides exactly this launch\'s stages', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    await act(async () => {})
+    await act(async () => { byTestId<HTMLButtonElement>('model-plan-reset-all').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith({
+      heal: recommendedChoice('claude', 'heal'),
+      commit: recommendedChoice('claude', 'commit'),
+    })
+    // Settings is untouched — the reset belongs to this launch only.
+    expect(configApi.putProjectConfig).not.toHaveBeenCalled()
+  })
+
+  it('setting a pinned stage back to Agent default sends it explicitly, so it beats the saved pin', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!, '')
+    setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!, '')
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith({
+      heal: { model: null, effort: null },
+      commit: { model: 'haiku', effort: null },
+    })
+  })
+
+  it('opening Change without editing still confirms on the saved plan', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith(null)
   })
 
   it('Use saved models discards the edits and confirms on the saved plan', async () => {

@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as coverageApi from '@/shared/api/coverage'
+import * as configApi from '@/shared/api/config'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { COVERAGE_FRESHNESS_LEASE_MS, COVERAGE_RECONCILE_MS } from '@shared/coverage/freshness'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
@@ -12,6 +13,10 @@ vi.mock('@/shared/api/coverage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
   getFeatureCoverage: vi.fn(),
   listFeatureDocs: vi.fn(),
+}))
+vi.mock('@/shared/api/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/config')>()),
+  getProjectConfig: vi.fn(),
 }))
 let host: HTMLDivElement
 let root: Root
@@ -23,6 +28,7 @@ beforeEach(() => {
   root = createRoot(host)
   vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(fresh())
   vi.mocked(coverageApi.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
+  vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
 })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.resetAllMocks() })
 const text = (id: string) => host.querySelector(`[data-testid="${id}"]`)?.textContent
@@ -52,7 +58,29 @@ describe('an already-open coverage page', () => {
     const button = host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!
     expect(button.parentElement?.textContent).toContain('Redo from the start')
     await act(async () => button.click())
-    expect(recover).toHaveBeenCalledWith('prd-summary')
+    expect(recover).toHaveBeenCalledWith('prd-summary', undefined)
+  })
+
+  it('parks Recalculate Coverage on the models gate and launches only on confirm', async () => {
+    vi.mocked(configApi.getProjectConfig).mockResolvedValue({ healAgent: 'codex', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true })
+    const stale = structuredClone(LEDGER)
+    vi.mocked(coverageApi.getFeatureCoverage).mockResolvedValue(stale)
+    const recover = vi.fn()
+    await mount(recover)
+    const recalculate = () => host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!.click()
+    await act(async () => recalculate())
+    expect(host.querySelector('[data-testid="model-launch-gate"]')?.textContent).toContain('Models for this coverage recalculation')
+    expect(recover).not.toHaveBeenCalled()
+    const cancel = [...host.querySelectorAll<HTMLButtonElement>('[data-testid="model-launch-gate"] button')].find((b) => b.textContent === 'Cancel')!
+    await act(async () => cancel.click())
+    expect(host.querySelector('[data-testid="model-launch-gate"]')).toBeNull()
+    expect(recover).not.toHaveBeenCalled()
+    await act(async () => recalculate())
+    const confirm = host.querySelector<HTMLButtonElement>('[data-testid="gate-confirm"]')!
+    expect(confirm.textContent).toBe('Recalculate')
+    await act(async () => confirm.click())
+    // Unchanged saved models send no override, so the server resolves config.
+    expect(recover).toHaveBeenCalledExactlyOnceWith('prd-summary', undefined)
   })
 
   it('recovers dropped events through reconciliation and exposes a newer failed result', async () => {

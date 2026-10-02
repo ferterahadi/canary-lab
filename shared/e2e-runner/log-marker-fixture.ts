@@ -1,3 +1,4 @@
+import { serviceLogsFromManifest } from '../lib/service-log-paths'
 import { slugify as testNameSlug, summaryEntryName } from '../test-names'
 import { test as base, type Page, type TestInfo } from '@playwright/test'
 import fs from 'fs'
@@ -32,14 +33,7 @@ export async function withLogMarkers(
   const manifest: { serviceLogs?: string[]; services?: Array<{ logPath?: string }> } = JSON.parse(
     fs.readFileSync(manifestPath, 'utf-8'),
   )
-  const serviceLogs = [
-    ...(Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []),
-    ...(Array.isArray(manifest.services)
-      ? manifest.services
-          .map((s) => s.logPath)
-          .filter((p): p is string => typeof p === 'string' && p.length > 0)
-      : []),
-  ]
+  const serviceLogs = serviceLogsFromManifest(manifest)
   const name = summaryEntryName(title)
   const openTag = `<${name}>\n`
   const closeTag = `</${name}>\n`

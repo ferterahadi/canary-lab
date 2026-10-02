@@ -69,7 +69,7 @@ export const EMPTY_AGENT_MODELS: AgentModelsConfig = Object.freeze({ claude: {},
 // ── Effort + model vocab per CLI ─────────────────────────────────────────────
 export const EFFORT_LEVELS = {
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
-  codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+  codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
 } as const satisfies Record<ModelAgentKind, readonly string[]>
 
 export interface KnownModelOption {
@@ -104,9 +104,10 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // ── Recommendation policy ────────────────────────────────────────────────────
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
-// Claude's stable aliases resolve to the latest family member. Codex prefers
-// GPT-6 Terra for balanced work once available, GPT-6.1 Sol until then, and
-// GPT-6 Sol or an older Sol when the current CLI lacks the newer choices.
+// Claude's stable aliases resolve to the latest family member. Codex mirrors
+// Claude stage for stage: Opus high → GPT-6.1 Sol high, Sonnet high → GPT-6
+// Luna max, Sonnet medium → GPT-6 Luna high. A CLI without those ids falls back
+// to GPT-6 Sol, then any installed Sol, at the same effort.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
@@ -135,7 +136,7 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-type CodexModelRole = 'sol' | 'terra'
+type CodexModelRole = 'sol' | 'luna'
 
 interface StageModelRecommendation<TModel extends string = string> {
   model: TModel
@@ -163,15 +164,15 @@ export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
     commit: { model: 'sonnet', effort: 'medium' },
   },
   codex: {
-    scout: { model: 'terra', effort: 'high' },
-    docs: { model: 'terra', effort: 'high' },
+    scout: { model: 'luna', effort: 'max' },
+    docs: { model: 'luna', effort: 'max' },
     prd: { model: 'sol', effort: 'high' },
     gen: { model: 'sol', effort: 'high' },
     mapping: { model: 'sol', effort: 'high' },
     heal: { model: 'sol', effort: 'high' },
-    portify: { model: 'terra', effort: 'high' },
-    report: { model: 'terra', effort: 'high' },
-    commit: { model: 'terra', effort: 'medium' },
+    portify: { model: 'luna', effort: 'max' },
+    report: { model: 'luna', effort: 'max' },
+    commit: { model: 'luna', effort: 'high' },
   },
 }
 
@@ -182,12 +183,12 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // Prefer GPT-6.1 Sol regardless of catalog order. The balanced stages use Sol
-  // until Terra joins that lineup; older CLIs can still use an installed Sol.
-  // Without a matching model, keep the safe effort-only recommendation.
+  // Prefer the exact id regardless of catalog order. A Luna stage without
+  // GPT-6 Luna climbs to Sol rather than an older Luna; older CLIs can still use
+  // an installed Sol. Without a matching model, keep the effort-only choice.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const preferredIds = recommendation.model === 'terra'
-    ? ['gpt-6-terra', 'gpt-6.1-sol', 'gpt-6-sol']
+  const preferredIds = recommendation.model === 'luna'
+    ? ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-sol']
     : ['gpt-6.1-sol', 'gpt-6-sol']
   for (const id of preferredIds) {
     const preferred = availableModels.find(({ value }) => value.toLowerCase() === id)
@@ -218,17 +219,39 @@ export function normalizeStageChoice(agent: ModelAgentKind, v: unknown): StageMo
   return { model, effort }
 }
 
-/** One agent's stage plan out of untrusted JSON — the launch-gate override
- *  payloads carry a single agent's plan, where config carries both. */
-export function normalizeStagePlans(agent: ModelAgentKind, v: unknown): AgentStagePlans {
+/** `{ model: null, effort: null }` spelled out — the launch gate's way of
+ *  saying "agent default for this stage", as opposed to a malformed entry
+ *  (a bad effort string), which is dropped like anywhere else. */
+function isExplicitAgentDefault(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null) return false
+  const raw = v as { model?: unknown; effort?: unknown }
+  return raw.model === null && raw.effort === null
+}
+
+function normalizePlans(agent: ModelAgentKind, v: unknown, keepExplicitDefaults: boolean): AgentStagePlans {
   if (typeof v !== 'object' || v === null) return {}
   const plans: AgentStagePlans = {}
   for (const [key, value] of Object.entries(v)) {
     if (!isModelStageKey(key)) continue
     const choice = normalizeStageChoice(agent, value)
     if (choice) plans[key] = choice
+    else if (keepExplicitDefaults && isExplicitAgentDefault(value)) plans[key] = AGENT_DEFAULT_CHOICE
   }
   return plans
+}
+
+/** One agent's saved stage plan out of untrusted JSON — agent-default entries
+ *  are pruned, so stored config only lists real deviations. */
+export function normalizeStagePlans(agent: ModelAgentKind, v: unknown): AgentStagePlans {
+  return normalizePlans(agent, v, false)
+}
+
+/** One agent's launch override out of untrusted JSON (the launch gate's
+ *  `models` payload). Unlike saved config, an absent stage means "use the saved
+ *  pin", so an explicit agent default is KEPT as `AGENT_DEFAULT_CHOICE` — it is
+ *  how a launch turns a saved pin off. */
+export function normalizeLaunchPlans(agent: ModelAgentKind, v: unknown): AgentStagePlans {
+  return normalizePlans(agent, v, true)
 }
 
 export function normalizeAgentModels(v: unknown): AgentModelsConfig {

@@ -21,9 +21,11 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import {
-  normalizeStagePlans,
+  normalizeLaunchPlans,
+  stageChoiceValue,
   type AgentStagePlans,
   type ModelAgentKind,
+  type ModelStageKey,
 } from '../../../../../../shared/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
@@ -162,14 +164,22 @@ export function buildStageEntryLinkResolver(logsDir?: string) {
  *  launch-gate override entries laid over the workspace `agentModels` config
  *  for the conducting agent. Callers persist the result on the record, so a
  *  later config edit never changes a flight mid-pipeline. `{}` is a real
- *  answer — every stage on the agent default. */
+ *  answer — every stage on the agent default. An explicit agent-default
+ *  override removes the saved pin, so the stored plan keeps the "absent =
+ *  agent default" shape `stageModels` reads. */
 export function resolveFlightModels(
   projectRoot: string,
   agent: ModelAgentKind,
   override: unknown,
 ): AgentStagePlans {
-  const configured = loadProjectConfig(projectRoot).agentModels[agent]
-  return { ...configured, ...normalizeStagePlans(agent, override) }
+  const merged: AgentStagePlans = {
+    ...loadProjectConfig(projectRoot).agentModels[agent],
+    ...normalizeLaunchPlans(agent, override),
+  }
+  for (const stage of Object.keys(merged) as ModelStageKey[]) {
+    if (stageChoiceValue(merged[stage]) === null) delete merged[stage]
+  }
+  return merged
 }
 
 /** Validate the untrusted REST form of an MCP-owned Flight session. The ID is

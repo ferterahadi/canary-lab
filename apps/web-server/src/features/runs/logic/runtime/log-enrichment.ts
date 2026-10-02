@@ -1,3 +1,4 @@
+import { serviceLogsFromManifest } from '../../../../../../../shared/lib/service-log-paths'
 import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 import fs from 'fs'
 import path from 'path'
@@ -314,16 +315,6 @@ export function healIndexPathForSummary(summaryPath: string): string {
 
 export function journalPathForSummary(summaryPath: string): string {
   return path.join(summaryPathToRunDir(summaryPath), 'diagnosis-journal.md')
-}
-
-function serviceLogsFromManifest(manifest: Manifest): string[] {
-  const legacy = Array.isArray(manifest.serviceLogs) ? manifest.serviceLogs : []
-  const current = Array.isArray(manifest.services)
-    ? manifest.services
-        .map((s) => s.logPath)
-        .filter((p): p is string => typeof p === 'string' && p.length > 0)
-    : []
-  return [...legacy, ...current]
 }
 
 // Rewrite e2e-summary.json so each failed[] entry carries logFiles (paths)

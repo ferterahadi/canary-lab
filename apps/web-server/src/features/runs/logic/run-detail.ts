@@ -1,3 +1,4 @@
+import { testLogicalKey } from './test-identity'
 import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
 import path from 'path'
@@ -83,7 +84,7 @@ export function normalizeRunSummary(summary: RunSummary): RunSummary {
 }
 
 export function knownTestLogicalKey(entry: NonNullable<RunSummary['knownTests']>[number]): string | undefined {
-  return entry.titlePath?.length ? [...entry.titlePath, entry.title ?? ''].join('\u001f') : undefined
+  return testLogicalKey({ title: entry.title ?? '', titlePath: entry.titlePath })
 }
 
 export function remapIds(ids: string[], idRemap: Map<string, string>): string[] {

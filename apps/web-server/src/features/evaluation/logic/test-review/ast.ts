@@ -1,3 +1,4 @@
+import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
 import fs from 'fs'
 import path from 'path'
 import ts from 'typescript'
@@ -17,15 +18,14 @@ export function listSpecFiles(featureDir: string): string[] {
 }
 
 export function sourceKey(location: string): string {
-  const match = location.match(/^(.*):(\d+)(?::\d+)?$/)
-  return match ? `${match[1]}:${match[2]}` : location
+  const { file, line } = parseSourceLocation(location)
+  return line === undefined ? location : `${file}:${line}`
 }
 
 /** The spec file of a `file:line[:col]` location — the part of a test's
  *  position that survives a heal edit moving it to another line. */
 export function specFileOf(location: string): string {
-  const match = location.match(/^(.*):\d+(?::\d+)?$/)
-  return match ? match[1] : location
+  return parseSourceLocation(location).file
 }
 
 export function isPlaywrightTestCall(node: ts.CallExpression): boolean {

@@ -1,3 +1,4 @@
+import { testLogicalKey } from '../test-identity'
 import { normalizeKnownTestRecord } from './known-test-record'
 import fs from 'fs'
 import type { TestCase } from '@playwright/test/reporter'
@@ -116,7 +117,7 @@ export function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEnt
 }
 
 export function knownTestLogicalKey(entry: Pick<KnownTestEntry, 'title' | 'titlePath'>): string | undefined {
-  return entry.titlePath?.length ? [...entry.titlePath, entry.title].join('\u001f') : undefined
+  return testLogicalKey(entry)
 }
 
 export function legacyTestIdForName(name: string): string {

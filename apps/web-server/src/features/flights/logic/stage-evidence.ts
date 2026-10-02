@@ -1,3 +1,4 @@
+import { capturedEnvsetCount } from './envset-evidence'
 import fs from 'fs'
 import path from 'path'
 import { docsDirFor } from '../../coverage/logic/coverage/docs-collection'
@@ -22,22 +23,7 @@ const SPEC_FILE_RE = /\.spec\.[cm]?[jt]sx?$/
  *  given, ANY non-empty envset directory counts (the derived rail asks "was
  *  the environment ever captured", not "for this specific env"). */
 export function hasCapturedEnvset(featureDir: string, env?: string): boolean {
-  const envsetsDir = path.join(featureDir, 'envsets')
-  const nonEmpty = (dir: string): boolean => {
-    try {
-      return fs.readdirSync(dir).length > 0
-    } catch {
-      return false
-    }
-  }
-  if (env !== undefined) return nonEmpty(path.join(envsetsDir, env))
-  try {
-    return fs
-      .readdirSync(envsetsDir, { withFileTypes: true })
-      .some((d) => d.isDirectory() && nonEmpty(path.join(envsetsDir, d.name)))
-  } catch {
-    return false
-  }
+  return capturedEnvsetCount(featureDir, env) !== undefined
 }
 
 /** How far back to look for a boot. A feature that has never booted pays one

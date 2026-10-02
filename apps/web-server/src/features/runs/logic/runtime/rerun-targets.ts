@@ -1,3 +1,4 @@
+import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
 import { normalizeKnownTestRecord } from './known-test-record'
 // Turning a Playwright run's summary + manifest into a verdict: pass counts,
 // rerun/verification plans, failure extraction, and the final run status.
@@ -252,7 +253,7 @@ export function serialSpecFiles(featureDir: string): Set<string> {
  *  before the reporter captured locations. */
 export function specFileOfKnownTest(test: KnownSummaryTest): string | undefined {
   if (!test.location) return undefined
-  const file = test.location.replace(/:\d+(?::\d+)?$/, '')
+  const { file } = parseSourceLocation(test.location)
   return file.length > 0 ? path.resolve(file) : undefined
 }
 

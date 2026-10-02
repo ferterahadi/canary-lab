@@ -410,7 +410,7 @@ describe('AgentSessionView external-session Activity row', () => {
       />,
     ))
 
-    const rows = [...container.querySelectorAll('.agentts-rail > li')]
+    const rows = [...container.querySelectorAll('.agentts-rail > li[data-activity-id]')]
     expect(rows.at(-1)?.getAttribute('data-testid')).toBe('external-session-activity')
     expect(rows.at(-2)?.textContent).toContain('handed the collect repo docs step to the external agent session')
   })

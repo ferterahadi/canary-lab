@@ -1,3 +1,4 @@
+import { ACTIVITY_CHIP } from './FlightChipState'
 import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import type {
@@ -106,6 +107,8 @@ export function externalSessionActivity(
     message = `Stopped in ${owner}.`
   }
   return {
+    taskId: trace.resourceId ? `${trace.kind}:${trace.resourceId}` : undefined,
+    actionLabel: ACTIVITY_CHIP[trace.kind].title,
     clientKind,
     ...(sessionId ? { sessionId } : {}),
     status: trace.status,
@@ -436,6 +439,7 @@ export function StageDetail({
     (activityOnThisRow || flightHandOff)
       && !historicalExternalSessions.some((session) => session.status === 'running')
       ? {
+          actionLabel: activityOnThisRow ? ACTIVITY_CHIP[activity.kind].title : flightStageLabel(stage.key),
           clientKind: externalClientKind(flight.externalAgentSession?.clientKind),
           ...(flight.externalAgentSession?.sessionId
             ? { sessionId: flight.externalAgentSession.sessionId }

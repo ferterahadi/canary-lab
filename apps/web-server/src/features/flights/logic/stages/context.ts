@@ -1,10 +1,10 @@
+import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import crypto from 'crypto'
 import path from 'path'
 import {
   runAgentProcess,
   buildClaudeAgenticArgs,
 } from '../../../agent-sessions/logic/agent-process'
-import { agentModelArgs } from '../../../agent-sessions/logic/agent-models'
 import type {
   AgentStagePlans,
   ModelStageKey,
@@ -160,14 +160,7 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
             model: opts.models?.model ?? null,
             effort: opts.models?.effort ?? null,
           })
-        : [
-            'exec',
-            '--full-auto',
-            '--skip-git-repo-check',
-            // Model/effort ride as exec options, before the stdin marker.
-            ...agentModelArgs('codex', opts.models ?? { model: null, effort: null }),
-            '-',
-          ],
+        : buildCodexAgenticArgs('-', { ...opts.models, skipGitRepoCheck: true }),
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
     captureStdout: true,

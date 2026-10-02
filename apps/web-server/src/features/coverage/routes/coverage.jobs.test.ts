@@ -503,6 +503,12 @@ describe('resolveCoverageJobModels', () => {
     }
   })
 
+  it('an explicit agent-default override turns the saved pin off for the preferred agent', () => {
+    const models = resolveCoverageJobModels(projectRoot, 'claude', { mapping: { model: null, effort: null } })
+    expect(models.mapping?.claude).toEqual({ model: null, effort: null })
+    expect(models.prd?.claude).toEqual({ model: 'sonnet', effort: 'medium' })
+  })
+
   it('lays the gate override over the PREFERRED agent only; the other keeps its config row', () => {
     const models = resolveCoverageJobModels(projectRoot, 'claude', { prd: { model: 'opus', effort: 'max' } })
     expect(models).toEqual({

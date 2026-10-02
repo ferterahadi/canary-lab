@@ -99,6 +99,37 @@ async function expandActivity() {
 }
 
 describe('Flight generation Activity', () => {
+  it('opens recalculation Activity on Requirements and preserves the selection through discovery and mapping', async () => {
+    const selectStage = vi.fn()
+    const renderRecovery = async (id: string) => {
+      await act(async () => root.render(<InvalidationProvider>
+        <FlightPage flightId={id} liveFlight={{ ...flight, flightId: id }} coverageJobs={jobs}
+          stage="docs" onSelectStage={selectStage} onClose={vi.fn()} onSelectFlight={vi.fn()}
+          recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'started' }} />
+      </InvalidationProvider>))
+    }
+    await renderRecovery('fl_loading')
+    expect(text()).toContain('Extracting requirements from spec.md')
+    jobs = [{ ...summary, status: 'done' }, mapping]
+    await renderRecovery('fl_resolved')
+    expect(selectStage).not.toHaveBeenCalledWith(null)
+    expect(text()).toContain('Extracting requirements from spec.md')
+    expect(text()).not.toContain('Linking R1 to checkout.spec.ts')
+  })
+
+  it('shows a launch failure with a retry on the destination', async () => {
+    const retry = vi.fn()
+    await act(async () => root.render(<InvalidationProvider>
+      <FlightPage flightId={flight.flightId} coverageJobs={[]} stage="docs" onSelectStage={vi.fn()}
+        onClose={vi.fn()} onSelectFlight={vi.fn()} onRetryRecalculation={retry}
+        recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'failed', error: 'Launch unavailable' }} />
+    </InvalidationProvider>))
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Launch unavailable')
+    const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Retry recalculation')!
+    act(() => button.click())
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
   it('follows the summary and mapping stages using their actual coverage sessions', async () => {
     await render()
     expect(text()).toContain('Extracting requirements from spec.md')

@@ -39,11 +39,14 @@ function MarkdownBody({ text }: { text: string }) {
 // memo: events are append-only — a new WS frame appends one event object and
 // never mutates the earlier ones, so every existing row bails out on identity
 // and an append re-renders one row instead of the whole transcript.
-export const EventRow = memo(function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
+export const EventRow = memo(function EventRow({ event, subagents, activityId, provenance }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]>; activityId?: string; provenance?: string }) {
   return (
-    <li className="agentts-row" data-kind={event.kind}>
+    <li className="agentts-row" data-kind={event.kind} data-activity-id={activityId}>
       <NodeMarker event={event} />
-      <EventBody event={event} subagents={subagents} />
+      <div>
+        {provenance && <div className="agentts-time">{provenance}</div>}
+        <EventBody event={event} subagents={subagents} />
+      </div>
     </li>
   )
 })
@@ -110,9 +113,9 @@ export function groupSystemLines(lines: string[]): SystemGroup[] {
 // same left gutter (boxy terminal node + shared thread line) so it reads as one
 // timeline. No band, no chip: mono type at the agent's own size, in muted
 // colour, is the whole distinction — the agent's prose stays the loudest thing.
-export function SystemRow({ group }: { group: SystemGroup }) {
+export function SystemRow({ group, activityId }: { group: SystemGroup; activityId?: string }) {
   return (
-    <li className="agentts-sysrow">
+    <li className="agentts-sysrow" data-activity-id={activityId}>
       <span className="agentts-sysnode" aria-hidden="true">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3.5 4.5l3 3-3 3" />
@@ -123,10 +126,10 @@ export function SystemRow({ group }: { group: SystemGroup }) {
         {/* The tag heads the run on its own line — same shape as an agent row's
             head (label above, body below) so system and agent rows read as one
             rail instead of two layouts. */}
-        {group.tag !== undefined && (
+        {(group.tag !== undefined || activityId !== undefined) && (
           <div className="agentts-rowhead">
-            <span className="agentts-label agentts-systag">{group.tag}</span>
-            {group.timestamp && <Timestamp value={group.timestamp} />}
+            <span className="agentts-label agentts-systag">{group.tag ?? 'System'}</span>
+            {(group.timestamp || activityId) && <Timestamp value={group.timestamp ?? ''} />}
           </div>
         )}
         {group.entries.map((entry, idx) => (
@@ -212,13 +215,19 @@ export function EventBody({ event, subagents }: { event: AgentSessionEvent; suba
  *  partial output, and reading it as the agent's conclusion is exactly the
  *  mistake this row exists to prevent. */
 export function ApiErrorBody({ text, timestamp }: { text: string; timestamp: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const summary = firstLineOf(text)
   return (
     <>
       <div className="agentts-rowhead">
         <span className="agentts-label" style={{ color: 'var(--danger)' }}>Terminated · API error</span>
         <Timestamp value={timestamp} />
       </div>
-      <div className="agentts-prose" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{firstLineOf(text)}</div>
+      <div className="agentts-prose" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{summary}</div>
+      {text !== summary && <button type="button" className="agentts-morebtn" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        {expanded ? 'Hide error details' : 'Show error details'}
+      </button>}
+      {expanded && <pre className="agentts-pre">{text}</pre>}
     </>
   )
 }
@@ -238,10 +247,17 @@ export function RowHead({ label, timestamp }: { label: string; timestamp: string
 }
 
 export function ProseBody({ label, text, timestamp }: { label: string; text: string; timestamp: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const long = text.length > 260
   return (
     <>
       <RowHead label={label} timestamp={timestamp} />
-      <Markdown text={text} />
+      {long && !expanded
+        ? <div className="agentts-prose" style={CLAMP_3}>{text}</div>
+        : <Markdown text={text} />}
+      {long && <button type="button" className="agentts-morebtn" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        {expanded ? 'Show less' : 'Show more'}
+      </button>}
     </>
   )
 }
@@ -266,22 +282,15 @@ export const CLAMP_3: React.CSSProperties = {
 
 export function PromptBody({ text, timestamp }: { text: string; timestamp: string }) {
   const [expanded, setExpanded] = useState(false)
-  const long = text.length > 260
-  // Collapsed preview stays plain text — `-webkit-line-clamp` only clamps
-  // inline content, so it can't truncate markdown's block children. The
-  // expanded view renders the full markdown.
   return (
-    <>
-      <RowHead label="Prompt" timestamp={timestamp} />
-      {!expanded && long
-        ? <div className="agentts-prose" style={CLAMP_3}>{text}</div>
-        : <Markdown text={text} />}
-      {long && (
-        <button type="button" className="agentts-morebtn" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </>
+    <div>
+      <button type="button" className="agentts-thinkbtn" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        <Chevron open={expanded} />
+        <span>Task instructions</span>
+        <Timestamp value={timestamp} />
+      </button>
+      {expanded && <Markdown text={text} />}
+    </div>
   )
 }
 
@@ -289,7 +298,7 @@ export function ThinkingBody({ text, timestamp }: { text: string; timestamp: str
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="agentts-think">
-      <button type="button" className="agentts-thinkbtn" onClick={() => setExpanded((v) => !v)}>
+      <button type="button" className="agentts-thinkbtn" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
         <Chevron open={expanded} />
         <span>Thinking</span>
         <Timestamp value={timestamp} />
@@ -316,6 +325,7 @@ export function ToolCallBody({ name, input, timestamp, toolId, threads }: {
       <button
         type="button"
         className="agentts-toolbtn"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         title={toolId}
         aria-label={`Tool call: ${name || 'tool'}${target ? ` — ${target}` : ''}`}
@@ -360,7 +370,7 @@ export function SubagentThreadRow({ thread }: { thread: SubagentThread }) {
   const duration = threadDuration(events)
   return (
     <div className="agentts-sub">
-      <button type="button" className="agentts-subbtn" onClick={() => setExpanded((v) => !v)}>
+      <button type="button" className="agentts-subbtn" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
         {running && <span className="agentts-sublive" aria-hidden="true" />}
         <span className="agentts-subtype">{thread.agentType}</span>
         <span className="agentts-submeta">
@@ -399,6 +409,7 @@ export function ToolResultBody({ output, isError, timestamp, toolId }: { output:
       <button
         type="button"
         className="agentts-toolbtn"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         title={toolId}
         aria-label={`${isError ? 'Tool error' : 'Result'}: ${preview || '(empty)'}`}
@@ -450,17 +461,12 @@ export function shortSession(id: string): string {
 }
 
 export function Timestamp({ value }: { value: string }) {
-  if (!value) return null
-  let display = value
-  try {
-    const d = new Date(value)
-    if (!Number.isNaN(d.getTime())) {
-      const hh = d.getHours().toString().padStart(2, '0')
-      const mm = d.getMinutes().toString().padStart(2, '0')
-      const ss = d.getSeconds().toString().padStart(2, '0')
-      display = `${hh}:${mm}:${ss}`
-    }
-  } catch { /* fall back to raw */ }
+  if (!value || Number.isNaN(Date.parse(value))) return <span className="agentts-time">Time unavailable</span>
+  const d = new Date(value)
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const ss = d.getSeconds().toString().padStart(2, '0')
+  const display = `${hh}:${mm}:${ss}`
   return (
     <span className="agentts-time" title={value}>{display}</span>
   )

@@ -13,7 +13,7 @@ export function DiscoveryRepairActivity({ repair }: { repair: DiscoveryRepairVie
     <AgentSessionView
       source={owner.kind === 'internal' && repair.sessionRef ? { kind: 'discovery-repair', taskId: repair.id, live: active && repair.status !== 'verifying' } : undefined}
       systemRows={{ pre: repair.log.slice(0, 1), post: repair.log.slice(1) }}
-      externalSessions={owner.kind === 'external' ? [{ ...owner, status: active ? 'running' : repair.status === 'succeeded' ? 'done' : 'failed', message: repair.message, startedAt: repair.createdAt, endedAt: repair.endedAt }] : []}
+      externalSessions={owner.kind === 'external' ? [{ ...owner, taskId: `discovery-repair:${repair.id}`, actionLabel: 'Repairing test discovery', status: active ? 'running' : repair.status === 'succeeded' ? 'done' : 'failed', message: repair.message, startedAt: repair.createdAt, endedAt: repair.endedAt }] : []}
       empty={{ ...EMPTY_COPY.discoveryNoActivity, detail: <span title={repair.message}>{repair.message}</span> }}
     />
   </div>

@@ -12,6 +12,7 @@ import {
 } from './test-review-export'
 import { buildEvaluationLlmPrompt } from './test-review/rewrite'
 import { buildTestReviewPacket, statusBucket, testStatusCounts } from './test-review/packet'
+import { sourceKey, specFileOf } from './test-review/ast'
 import { NOT_RUN_STATUS } from './test-review/types'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../shared/run-detail'
 
@@ -437,7 +438,7 @@ describe('a test that moved lines between heal cycles', () => {
     )
   })
 
-  it('keeps two declared tests that share a title in one file apart by line', () => {
+  it.each(['', ':3'])('keeps same-title tests apart by line with column suffix %s', (column) => {
     const dup = path.join(tmpDir, 'e2e', 'dup.spec.ts')
     fs.writeFileSync(dup, [
       "import { test, expect } from '@playwright/test'",
@@ -462,28 +463,28 @@ describe('a test that moved lines between heal cycles', () => {
       passed: 1,
       passedNames: ['test-case-renders'],
       passedIds: ['id-guest'],
-      failed: [{ id: 'id-host', name: 'test-case-renders', location: `${dup}:10` }],
+      failed: [{ id: 'id-host', name: 'test-case-renders', location: `${dup}:10${column}` }],
       knownTests: [
-        { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `${dup}:4` },
-        { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `${dup}:10` },
+        { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `${dup}:4${column}` },
+        { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `${dup}:10${column}` },
       ],
     }
     detail.playbackEvents = [
-      { type: 'test-end', time: '2026-01-01T00:00:01.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:4` }, status: 'passed', passed: true, durationMs: 5, retry: 0 },
-      { type: 'test-end', time: '2026-01-01T00:00:02.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:10` }, status: 'failed', passed: false, durationMs: 6, retry: 0 },
+      { type: 'test-end', time: '2026-01-01T00:00:01.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:4${column}` }, status: 'passed', passed: true, durationMs: 5, retry: 0 },
+      { type: 'test-end', time: '2026-01-01T00:00:02.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:10${column}` }, status: 'failed', passed: false, durationMs: 6, retry: 0 },
       // A third 'renders' at a line neither declared test owns: with two
       // candidates the line has to decide, and it matches neither, so this is
       // reported evidence the roster lacks — appended, never folded into one
       // of the two.
-      { type: 'test-end', time: '2026-01-01T00:00:03.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:16` }, status: 'passed', passed: true, durationMs: 7, retry: 0 },
+      { type: 'test-end', time: '2026-01-01T00:00:03.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:16${column}` }, status: 'passed', passed: true, durationMs: 7, retry: 0 },
     ]
 
     const packet = buildTestReviewPacket(detail)
 
     expect(packet.tests.map((test) => [test.location, test.status, test.testBody.includes('expect(1)'), test.testBody.includes('expect(2)')])).toEqual([
-      [`${dup}:4`, 'passed', true, false],
-      [`${dup}:10`, 'failed', false, true],
-      [`${dup}:16`, 'passed', false, false],
+      [`${dup}:4${column}`, 'passed', true, false],
+      [`${dup}:10${column}`, 'failed', false, true],
+      [`${dup}:16${column}`, 'passed', false, false],
     ])
   })
 
@@ -535,4 +536,37 @@ describe('a test that moved lines between heal cycles', () => {
 
     expect(packet.tests.map((test) => [test.status, test.location?.slice(-4)])).toEqual([['passed', ':202']])
   })
+})
+
+
+describe('column-qualified source association', () => {
+  it.each([[':2', ':2:1'], [':2:1', ':2'], [':2:1', ':2:5']])(
+    'associates roster %s and playback %s with one source test', (knownSuffix, eventSuffix) => {
+      const spec = path.join(tmpDir, 'cart.spec.ts')
+      fs.writeFileSync(spec, "import { test, expect } from '@playwright/test'\ntest('cart', async () => { expect(1).toBe(1) })\n")
+      const test = { name: 'test-case-cart', title: 'cart' }
+      const packet = buildTestReviewPacket({
+        runId: 'source-association',
+        manifest: { runId: 'source-association', feature: 'cart', featureDir: tmpDir,
+          startedAt: '2026-01-01T00:00:00Z', status: 'passed', healCycles: 0, services: [] },
+        summary: { complete: true, total: 1, passed: 1, failed: [], passedNames: [test.name],
+          knownTests: [{ ...test, location: spec + knownSuffix }] },
+        playbackEvents: [{ type: 'test-end', time: '2026-01-01T00:00:01Z',
+          test: { ...test, location: spec + eventSuffix }, status: 'passed', passed: true,
+          durationMs: 1, retry: 0 }],
+      })
+      expect(packet.tests).toHaveLength(1)
+      expect(packet.tests[0].testBody).toContain('expect(1).toBe(1)')
+      expect(packet.tests[0].status).toBe('passed')
+      expect(packet.tests[0].location).toBe(spec + eventSuffix)
+    },
+  )
+})
+
+
+it('keeps export source keys literal while removing only the column suffix', () => {
+  expect(sourceKey('C:\\repo\\cart.spec.ts:002:5')).toBe('C:\\repo\\cart.spec.ts:002')
+  expect(specFileOf('C:\\repo\\cart.spec.ts:002:5')).toBe('C:\\repo\\cart.spec.ts')
+  expect(sourceKey('cart.spec.ts')).toBe('cart.spec.ts')
+  expect(specFileOf('cart.spec.ts')).toBe('cart.spec.ts')
 })

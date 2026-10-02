@@ -486,3 +486,13 @@ describe('base.extend wiring', () => {
     ))).rejects.toThrow()
   })
 })
+
+
+it('retains repeated marker writes when a path appears in both manifest formats', async () => {
+  const dir = mkTmp()
+  const log = path.join(dir, 'service.log')
+  const manifest = path.join(dir, 'manifest.json')
+  fs.writeFileSync(manifest, JSON.stringify({ serviceLogs: [log], services: [{ logPath: log }, {}] }))
+  await withLogMarkers('cart', manifest, async () => { fs.appendFileSync(log, 'during\n') })
+  expect(fs.readFileSync(log, 'utf-8')).toBe('<test-case-cart>\n<test-case-cart>\nduring\n</test-case-cart>\n</test-case-cart>\n')
+})

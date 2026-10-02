@@ -1,10 +1,10 @@
+import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
 import path from 'path'
 import { type ChildProcess } from 'child_process'
 import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
-import { agentModelArgs } from '../../../agent-sessions/logic/agent-models'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
@@ -56,7 +56,7 @@ export function runPortifyAgent(opts: {
   // liveness; the double-boot verifier judges the result, so we don't parse output.
   const args = agent === 'claude'
     ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId, resume })
-    : ['exec', '--full-auto', ...agentModelArgs('codex', models), prompt]
+    : buildCodexAgenticArgs(prompt, models)
   let out: number | null = null
   if (logPath) {
     try { out = fs.openSync(logPath, 'a') } catch { out = null }

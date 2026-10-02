@@ -7,17 +7,18 @@ import {
   type AgentStagePlans,
   type ModelAgentKind,
   type ModelStageKey,
-  type StageModelChoice,
 } from '@shared/agent-models'
 import { Modal } from '@/shared/ui/Overlays'
-import { StageChoiceGrid } from './ModelMatrixDialog'
 import { agentTitle } from './settings-options'
-import { useAgentModelOptions } from './use-agent-model-options'
+import { ModelPlanEditor } from './ModelPlanEditor'
+import { choiceText, toLaunchOverride, useModelPlanDraft } from './model-plan-draft'
 
 // The launch gate (2.2.0 model cockpit): the last look at the model plan before
 // an expensive spawn, at the three GUI spawn points — flight start, suite run,
 // coverage generate — when `askModelsOnLaunch` is armed. It CONFIRMS by default
-// (the saved plan as one passive line) and becomes the editor only on Change. One component, mounted transiently by each
+// (the saved plan as one passive line) and becomes the editor only on Change —
+// the same `ModelPlanEditor` and draft the Settings matrix uses, scoped to this
+// launch's stages. One component, mounted transiently by each
 // launcher (deliberately unrouted: like the collision prompt it holds
 // click-time parameters — env, mode — a cold load cannot reconstruct; the
 // flight mount rides the already-routed launcher dialog).
@@ -33,16 +34,11 @@ export interface ModelLaunchGateProps {
   config: agentModelsApi.AgentModelsConfig
   onCancel: () => void
   /** Fired with the per-launch override to ride the payload — null = use
-   *  defaults (send nothing; the server resolves config itself). */
+   *  defaults (send nothing; the server resolves config itself). An override
+   *  names every scoped stage, so an explicit agent default beats a saved pin. */
   onConfirm: (models: AgentStagePlans | null) => void
   /** Label for the confirm action (e.g. "Start flight", "Run suite"). */
   confirmLabel: string
-}
-
-/** One resolved default, compactly: "opus · high", "high", or "agent default". */
-function choiceLabel(choice: StageModelChoice): string {
-  const knobs = [choice.model, choice.effort].filter((v): v is string => v !== null)
-  return knobs.length ? knobs.join(' · ') : 'agent default'
 }
 
 /** Above this many steps the resolved defaults summarize by model instead of
@@ -60,7 +56,7 @@ export function defaultsByChoice(
 ): Array<{ choice: string; steps: string }> {
   const groups: Array<{ choice: string; labels: string[] }> = []
   for (const stage of stages) {
-    const choice = choiceLabel(resolveStageChoice(agent, config, stage, null))
+    const choice = choiceText(resolveStageChoice(agent, config, stage, null))
     const group = groups.find((g) => g.choice === choice)
     if (group) group.labels.push(MODEL_STAGE_LABEL[stage])
     else groups.push({ choice, labels: [MODEL_STAGE_LABEL[stage]] })
@@ -88,20 +84,9 @@ export function savedModelsSummary(
 
 export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, onConfirm, confirmLabel }: ModelLaunchGateProps) {
   const [customize, setCustomize] = useState(false)
-  const { modelOptions } = useAgentModelOptions(agent, customize)
-  // Editing works on a per-launch copy seeded from the resolved defaults —
-  // Project Settings stays untouched either way. Seeding is a function so
-  // "Use saved models" can genuinely restore it, not just collapse the view
-  // over edits that would come back on the next Change.
-  const seedPlans = (): AgentStagePlans => {
-    const seeded: AgentStagePlans = {}
-    for (const stage of stages) {
-      const resolved = resolveStageChoice(agent, config, stage, null)
-      if (resolved.model !== null || resolved.effort !== null) seeded[stage] = resolved
-    }
-    return seeded
-  }
-  const [plans, setPlans] = useState<AgentStagePlans>(seedPlans)
+  // Editing works on a per-launch draft seeded from the resolved defaults —
+  // Project Settings stays untouched either way.
+  const plan = useModelPlanDraft(agent, stages, config)
   const [dontAskAgain, setDontAskAgain] = useState(false)
 
   // "Don't ask again" writes the Settings master switch back the moment it is
@@ -128,8 +113,7 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
           {/* The full rule lives in the tooltip: a sentence-long label beside
               two buttons made the footer read as a third paragraph. */}
           <label
-            className="mr-auto flex items-center gap-2 text-[11px]"
-            style={{ color: 'var(--text-muted)' }}
+            className="cl-type-meta mr-auto flex items-center gap-2 text-muted"
             title="Launches use your saved defaults without asking. Turn it back on any time in Project Settings."
           >
             <input
@@ -142,19 +126,14 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
             />
             Don&apos;t ask again
           </label>
-          <button type="button" onClick={onCancel} className="cl-button px-3 py-1 text-xs">
+          <button type="button" onClick={onCancel} className="cl-button px-3 py-1">
             Cancel
           </button>
           <button
             type="button"
             data-testid="gate-confirm"
-            onClick={() => onConfirm(customize ? plans : null)}
-            className="cl-button px-3 py-1 text-xs"
-            style={{
-              color: 'var(--accent)',
-              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-            }}
+            onClick={() => onConfirm(customize ? toLaunchOverride(plan.draft, plan.seed, stages) : null)}
+            className="cl-button-primary px-3.5 py-1"
           >
             {confirmLabel}
           </button>
@@ -162,75 +141,67 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
       }
     >
       <div className="flex flex-col gap-3 p-3">
-        {/* Collapsed, this dialog CONFIRMS a launch; expanded, it IS the editor.
-            The two option cards it replaced made a radio pair out of a fact and
-            a button — nobody picks "customize", they click it. */}
+        {/* Collapsed, this dialog CONFIRMS a launch; expanded, it IS the editor
+            — the same one Settings shows, so changing models reads the same
+            wherever it happens. */}
         {customize ? (
-          <>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>
-                This launch only
-              </span>
-              {/* Restores the saved plan AND returns to the confirmation, which
-                  is the same statement said once: nothing here is changing. */}
+          <ModelPlanEditor
+            agent={agent}
+            stages={stages}
+            plan={plan}
+            label="This launch only"
+            toolbarExtra={
+              // Restores the saved plan AND returns to the confirmation, which
+              // is the same statement said once: nothing here is changing.
               <button
                 type="button"
                 data-testid="gate-use-saved"
-                onClick={() => { setPlans(seedPlans()); setCustomize(false) }}
-                className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+                onClick={() => { plan.restoreSaved(); setCustomize(false) }}
+                className="cl-button shrink-0 px-2 py-0.5"
               >
                 Use saved models
               </button>
-            </div>
-            <StageChoiceGrid
-              agent={agent}
-              stages={stages}
-              plans={plans}
-              modelOptions={modelOptions}
-              onChange={(stage, choice) => setPlans((prev) => ({ ...prev, [stage]: choice }))}
-            />
-          </>
+            }
+          />
         ) : (
-          <div className="flex items-start justify-between gap-3">
-            <span className="flex min-w-0 flex-col gap-1">
-              <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>
-                Your saved models
+          <div className="cl-ledger">
+            <div className="flex items-start justify-between gap-3 py-2">
+              <span className="flex min-w-0 flex-col gap-1.5">
+                <span className="cl-rubric-strong">Saved models</span>
+                {stages.length > SUMMARY_STEP_THRESHOLD ? (
+                  <span data-testid="gate-saved-summary" className="cl-type-data text-secondary">
+                    {savedModelsSummary(agent, config, stages)}
+                  </span>
+                ) : (
+                  <span
+                    data-testid="gate-saved-summary"
+                    className="cl-type-data grid gap-x-3 gap-y-1"
+                    style={{ gridTemplateColumns: 'minmax(0,1fr) max-content' }}
+                  >
+                    {defaultsByChoice(agent, config, stages).map((group) => (
+                      <Fragment key={group.choice}>
+                        <span className="min-w-0 truncate text-secondary">{group.steps}</span>
+                        <span className="font-mono text-muted">{group.choice}</span>
+                      </Fragment>
+                    ))}
+                  </span>
+                )}
               </span>
-              {stages.length > SUMMARY_STEP_THRESHOLD ? (
-                <span data-testid="gate-saved-summary" className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-                  {savedModelsSummary(agent, config, stages)}
-                </span>
-              ) : (
-                <span
-                  data-testid="gate-saved-summary"
-                  className="grid gap-x-3 gap-y-1 text-[11px]"
-                  style={{ gridTemplateColumns: 'minmax(0,1fr) max-content' }}
-                >
-                  {defaultsByChoice(agent, config, stages).map((group) => (
-                    <Fragment key={group.choice}>
-                      <span className="min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{group.steps}</span>
-                      <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{group.choice}</span>
-                    </Fragment>
-                  ))}
-                </span>
-              )}
-            </span>
-            <button
-              type="button"
-              data-testid="gate-change"
-              onClick={() => setCustomize(true)}
-              className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            >
-              Change
-            </button>
+              <button
+                type="button"
+                data-testid="gate-change"
+                onClick={() => setCustomize(true)}
+                className="cl-button shrink-0 px-2 py-0.5"
+              >
+                Change
+              </button>
+            </div>
           </div>
         )}
         {/* One scope sentence for the whole dialog. "Locked once started" holds
             for a flight, a run and a coverage job alike — the launch noun is
             already in the title. */}
-        <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          Locked once started.
-        </div>
+        <p className="cl-type-meta text-muted">Locked once started.</p>
       </div>
     </Modal>
   )

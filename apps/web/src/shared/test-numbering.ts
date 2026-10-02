@@ -1,3 +1,5 @@
+import { parseSourceLocation } from '../../../../shared/lib/source-location'
+
 // Canary Lab numbers every test in a feature with a stable id so a person can
 // find the same case across the Tests column, Playback, and Coverage Ledger.
 //
@@ -25,9 +27,8 @@ export function testNumberKey(file: string | undefined, line: number | undefined
  */
 export function parseLocation(location: string | undefined): { file: string; line: number } | null {
   if (!location) return null
-  const match = /^(.*?):(\d+)(?::\d+)?$/.exec(location)
-  if (!match) return { file: location, line: 0 }
-  return { file: match[1], line: Number(match[2]) }
+  const { file, line } = parseSourceLocation(location)
+  return { file, line: line === undefined ? 0 : Number(line) }
 }
 
 /**

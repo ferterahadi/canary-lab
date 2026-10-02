@@ -4,7 +4,7 @@
 // config edit mid-run cannot change a running agent, and a restart reuses what
 // the run started with instead of silently re-resolving.
 import {
-  normalizeStagePlans,
+  normalizeLaunchPlans,
   perAgentStageChoices,
   resolveStageChoice,
   type AgentModelsConfig,
@@ -22,7 +22,7 @@ export function resolveRunModelPlan(
   config: AgentModelsConfig,
   override?: unknown,
 ): RunModelPlan {
-  const requested = normalizeStagePlans(agent, override)
+  const requested = normalizeLaunchPlans(agent, override)
   return {
     heal: resolveStageChoice(agent, config, 'heal', requested.heal ?? null),
     commit: resolveStageChoice(agent, config, 'commit', requested.commit ?? null),

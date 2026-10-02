@@ -69,6 +69,7 @@ export const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
 
 export function FlightDetail({
   flightId,
+  activityRequest,
   refreshKey,
   liveFlight,
   onBackToList,
@@ -91,6 +92,7 @@ export function FlightDetail({
   onFlightMissing,
 }: {
   flightId: string
+  activityRequest?: number
   refreshKey: number
   /** The manifest `/ws/flights` pushed for this flight. When present it IS the
    *  record — the fetch below is only how a settled flight (which the server
@@ -158,6 +160,9 @@ export function FlightDetail({
       return { ...current, [flightId]: { ...flightState, [stageKey]: open } }
     })
   }, [flightId])
+  useEffect(() => {
+    if (activityRequest !== undefined) setStageActivityOpen('docs', true)
+  }, [activityRequest, setStageActivityOpen])
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
@@ -264,17 +269,16 @@ export function FlightDetail({
     })
   }, [setSelectedStage])
 
-  // R71/W2: switching flights returns selection to follow-mode — a stage pick
-  // made on flight A must not survive onto flight B. Guarded on an actual
-  // CHANGE rather than firing on mount: the pick is routed now, and a mount is
-  // exactly what a refresh or a drill-through's way back produces — clearing
-  // there would wipe the stage the URL just restored.
+  // Keep an explicit recalculation destination and the derived-to-recorded
+  // redirect pinned. Ordinary flight switches still return to follow-mode.
   const seenFlightRef = useRef(flightId)
   useEffect(() => {
-    if (seenFlightRef.current === flightId) return
+    const previous = seenFlightRef.current
+    if (previous === flightId) return
     seenFlightRef.current = flightId
+    if (onSelectStage && (activityRequest !== undefined || derivedFlightFeature(previous) !== null)) return
     setSelectedStage(null)
-  }, [flightId, setSelectedStage])
+  }, [activityRequest, flightId, onSelectStage, setSelectedStage])
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.

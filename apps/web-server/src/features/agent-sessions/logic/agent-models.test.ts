@@ -164,15 +164,15 @@ describe('recommendation policy', () => {
         commit: { model: 'sonnet', effort: 'medium' },
       },
       codex: {
-        scout: { model: 'terra', effort: 'high' },
-        docs: { model: 'terra', effort: 'high' },
+        scout: { model: 'luna', effort: 'max' },
+        docs: { model: 'luna', effort: 'max' },
         prd: { model: 'sol', effort: 'high' },
         gen: { model: 'sol', effort: 'high' },
         mapping: { model: 'sol', effort: 'high' },
         heal: { model: 'sol', effort: 'high' },
-        portify: { model: 'terra', effort: 'high' },
-        report: { model: 'terra', effort: 'high' },
-        commit: { model: 'terra', effort: 'medium' },
+        portify: { model: 'luna', effort: 'max' },
+        report: { model: 'luna', effort: 'max' },
+        commit: { model: 'luna', effort: 'high' },
       },
     })
   })
@@ -186,15 +186,15 @@ describe('recommendation policy', () => {
 
     expect(Object.fromEntries(MODEL_STAGE_KEYS.map((stage) => [stage, recommendedChoice('codex', stage, catalog)])))
       .toEqual({
-        scout: { model: 'gpt-5.7-sol', effort: 'high' },
-        docs: { model: 'gpt-5.7-sol', effort: 'high' },
+        scout: { model: 'gpt-5.7-sol', effort: 'max' },
+        docs: { model: 'gpt-5.7-sol', effort: 'max' },
         prd: { model: 'gpt-5.7-sol', effort: 'high' },
         gen: { model: 'gpt-5.7-sol', effort: 'high' },
         mapping: { model: 'gpt-5.7-sol', effort: 'high' },
         heal: { model: 'gpt-5.7-sol', effort: 'high' },
-        portify: { model: 'gpt-5.7-sol', effort: 'high' },
-        report: { model: 'gpt-5.7-sol', effort: 'high' },
-        commit: { model: 'gpt-5.7-sol', effort: 'medium' },
+        portify: { model: 'gpt-5.7-sol', effort: 'max' },
+        report: { model: 'gpt-5.7-sol', effort: 'max' },
+        commit: { model: 'gpt-5.7-sol', effort: 'high' },
       })
   })
 
@@ -262,8 +262,10 @@ describe('normalizePerAgentChoices', () => {
       claude: { model: 'opus', effort: 'max' },
       codex: { model: null, effort: 'minimal' },
     })
-    // `max` is claude-only: the codex entry degrades to nothing and is dropped.
-    expect(normalizePerAgentChoices({ codex: { model: null, effort: 'max' } })).toEqual({})
+    // `max` is in both vocabularies now (codex-cli lists it for GPT-6 Luna);
+    // an effort outside codex's vocabulary still degrades to nothing.
+    expect(normalizePerAgentChoices({ codex: { model: null, effort: 'max' } })).toEqual({ codex: { model: null, effort: 'max' } })
+    expect(normalizePerAgentChoices({ codex: { model: null, effort: 'ultra' } })).toEqual({})
   })
 
   it('drops empty entries, unknown agents, and junk input wholesale', () => {

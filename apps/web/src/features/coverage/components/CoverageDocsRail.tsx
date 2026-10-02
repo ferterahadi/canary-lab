@@ -418,8 +418,8 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         {props.recovery && !confirmingRedo && (
           <DisabledControlTooltip wrapperClassName="flex">
             <button type="button" data-testid="recalculate-coverage" onClick={props.recovery.onClick}
-              disabled={locked || Boolean(props.recovery.disabledReason)}
-              title={props.recovery.disabledReason ?? 'Open Flight to recalculate coverage from the affected step'}
+              disabled={Boolean(props.recovery.disabledReason)}
+              title={props.recovery.disabledReason ?? 'Recalculate coverage and open Requirements'}
               className="cl-button w-full px-3 py-1.5">
               Recalculate Coverage
             </button>

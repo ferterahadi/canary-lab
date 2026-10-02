@@ -105,3 +105,9 @@ describe('stripLeadingTestOrdinal', () => {
     expect(stripLeadingTestOrdinal('3.14 is pi')).toBe('3.14 is pi')
   })
 })
+
+
+it('numbers Windows and column-qualified locations at their original source line', () => {
+  expect(parseLocation('C:\\repo\\cart.spec.ts:002:1')).toEqual({ file: 'C:\\repo\\cart.spec.ts', line: 2 })
+  expect(parseLocation('')).toBeNull()
+})

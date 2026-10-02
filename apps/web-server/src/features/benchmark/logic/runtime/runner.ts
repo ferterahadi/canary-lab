@@ -1,3 +1,4 @@
+import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
@@ -440,7 +441,7 @@ function runAgentHeadless(
   // for liveness; the diff is the arbiter, so we don't capture/parse the output.
   const args = session.agent === 'claude'
     ? buildClaudeAgenticArgs(prompt, { sessionId: session.sessionId })
-    : ['exec', '--full-auto', prompt]
+    : buildCodexAgenticArgs(prompt)
   let out: number | null = null
   try { out = fs.openSync(logPath, 'a') } catch { out = null }
   const handle = runAgentProcess({

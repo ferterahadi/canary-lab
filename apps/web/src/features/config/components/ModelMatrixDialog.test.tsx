@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
 import type { AgentProbe } from '@/shared/api/config'
 import { MODEL_STAGE_KEYS, recommendedChoice, type KnownModelOption } from '@shared/agent-models'
-import { ModelMatrixDialog, StageChoiceGrid } from './ModelMatrixDialog'
+import { ModelMatrixDialog } from './ModelMatrixDialog'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -152,21 +152,28 @@ describe('ModelMatrixDialog', () => {
     expect(props.onClose).not.toHaveBeenCalled()
   })
 
-  it('✦ rec marks a row matching the shipped recommendation; custom gets the amber chip + reset', async () => {
+  it('✦ marks a row matching the shipped recommendation; a deviating row offers only a reset', async () => {
     await mount()
     const rec = recommendedChoice('claude', 'heal')
     setSelect(select('Auto-repair model'), rec.model!)
     setSelect(select('Auto-repair reasoning effort'), rec.effort!)
-    const recommendedRow = document.querySelector('[data-testid="model-row-heal"]')!
-    expect(recommendedRow.textContent).toContain('✦ rec')
-    expect(recommendedRow.querySelector<HTMLElement>('span[title]')?.title)
-      .toContain('Auto-repair edits application code')
+    const recommendedMark = document.querySelector('[data-testid="model-row-heal"] [data-mark="recommended"]')
+    expect(recommendedMark?.textContent).toBe('✦')
+    // The reason rides the mark's accessible name (and its hover tooltip).
+    expect(recommendedMark?.getAttribute('aria-label')).toContain('Auto-repair edits application code')
 
     setSelect(select('Auto-repair reasoning effort'), 'low')
     const row = document.querySelector('[data-testid="model-row-heal"]')!
-    expect(row.textContent).toContain('custom')
+    expect(row.querySelector('[data-mark="recommended"]')).toBeNull()
+    // No worded chip at rest — the reset button is the whole "custom" mark.
+    expect(row.textContent).not.toContain('custom')
     await act(async () => { row.querySelector<HTMLButtonElement>('button[aria-label="Reset Auto-repair to recommended"]')!.click() })
-    expect(document.querySelector('[data-testid="model-row-heal"]')?.textContent).toContain('✦ rec')
+    expect(document.querySelector('[data-testid="model-row-heal"] [data-mark="recommended"]')).toBeTruthy()
+  })
+
+  it('an agent-default row carries no mark at all', async () => {
+    await mount()
+    expect(document.querySelector('[data-testid="model-row-report"] [data-mark]')).toBeNull()
   })
 
   it('Custom id… reveals the free-text input; a typed id round-trips, a blanked one falls back to agent default', async () => {
@@ -195,24 +202,25 @@ describe('ModelMatrixDialog', () => {
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
 
+    // Sonnet-high stages keep Luna's `max` effort when they climb to Sol.
     expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
-    expect(select('Repo scan reasoning effort').value).toBe('high')
+    expect(select('Repo scan reasoning effort').value).toBe('max')
     expect(select('Doc collection model').value).toBe('gpt-5.6-sol')
-    expect(select('Doc collection reasoning effort').value).toBe('high')
+    expect(select('Doc collection reasoning effort').value).toBe('max')
     expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
     expect(select('Report model').value).toBe('gpt-5.6-sol')
-    expect(select('Report reasoning effort').value).toBe('high')
+    expect(select('Report reasoning effort').value).toBe('max')
   })
 
-  it('Reset all selects GPT-6 Terra for balanced stages and Sol for authoring and repair', async () => {
+  it('Reset all selects GPT-6 Luna for Sonnet stages and Sol for Opus stages', async () => {
     vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
         ...CODEX_MODELS,
         { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
         { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
-        { value: 'gpt-6-terra', label: 'GPT-6-Terra' },
+        { value: 'gpt-6-luna', label: 'GPT-6-Luna' },
       ] }),
     })
     await mount({ agent: 'codex' })
@@ -222,13 +230,18 @@ describe('ModelMatrixDialog', () => {
     expect(select('Test authoring model').value).toBe('gpt-6-sol')
     expect(select('Auto-repair model').value).toBe('gpt-6-sol')
     expect(select('Coverage mapping model').value).toBe('gpt-6-sol')
-    expect(select('Repo scan model').value).toBe('gpt-6-terra')
+    expect(select('Repo scan model').value).toBe('gpt-6-luna')
+    expect(select('Repo scan reasoning effort').value).toBe('max')
+    expect(select('Commit message model').value).toBe('gpt-6-luna')
+    expect(select('Commit message reasoning effort').value).toBe('high')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
     expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
         gen: { model: 'gpt-6-sol', effort: 'high' },
         heal: { model: 'gpt-6-sol', effort: 'high' },
+        scout: { model: 'gpt-6-luna', effort: 'max' },
+        commit: { model: 'gpt-6-luna', effort: 'high' },
       }),
     } })
   })
@@ -247,7 +260,7 @@ describe('ModelMatrixDialog', () => {
       agentModels: { claude: {}, codex: { heal: { model: 'gpt-6-sol', effort: 'high' } } },
     })
     expect(select('Auto-repair model').value).toBe('gpt-6-sol')
-    expect(document.querySelector('[data-testid="model-row-heal"]')?.textContent).toContain('custom')
+    expect(document.querySelector('[data-testid="model-row-heal"] [data-mark="custom"]')).toBeTruthy()
     expect(configApi.putProjectConfig).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -256,13 +269,13 @@ describe('ModelMatrixDialog', () => {
     expect(select('Repo scan model').value).toBe('gpt-6.1-sol')
     expect(select('Auto-repair model').value).toBe('gpt-6.1-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
-    expect(select('Commit message reasoning effort').value).toBe('medium')
+    expect(select('Commit message reasoning effort').value).toBe('high')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
     expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
         heal: { model: 'gpt-6.1-sol', effort: 'high' },
-        commit: { model: 'gpt-6.1-sol', effort: 'medium' },
+        commit: { model: 'gpt-6.1-sol', effort: 'high' },
       }),
     } })
   })
@@ -299,21 +312,5 @@ describe('ModelMatrixDialog', () => {
     await mount()
     expect(document.body.textContent).toContain('CLI check unavailable — settings still apply.')
     expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')).toBeNull()
-  })
-})
-
-describe('StageChoiceGrid (standalone, as the launch gate embeds it)', () => {
-  it('renders only the scoped stages and reports changes through onChange', async () => {
-    const onChange = vi.fn()
-    await act(async () => {
-      root.render(<StageChoiceGrid agent="codex" stages={['heal', 'commit']} plans={{}} onChange={onChange} />)
-    })
-    expect(document.querySelector('[data-testid="model-row-heal"]')).toBeTruthy()
-    expect(document.querySelector('[data-testid="model-row-scout"]')).toBeNull()
-    // Without a discovered catalog, Codex falls back to default + custom.
-    const modelSelect = select('Auto-repair model')
-    expect([...modelSelect.options].map((o) => o.value)).toEqual(['', '__custom'])
-    setSelect(select('Auto-repair reasoning effort'), 'xhigh')
-    expect(onChange).toHaveBeenCalledWith('heal', { model: null, effort: 'xhigh' })
   })
 })

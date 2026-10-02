@@ -1541,10 +1541,16 @@ reusing the internal prompts), and canary writes the result through the canonica
 (`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
 via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
 `sessionRef`, and render as external-session rows in Flight Activity. GUI Generate
-opens the recorded or evidence-derived Flight in follow-mode. The shared coverage-job
+opens the recorded or evidence-derived Flight in follow-mode. Recalculate Coverage
+starts the required summary/mapping job with configured defaults and opens Requirements
+(`stage=docs`) directly, without the flight launcher. Active coverage jobs or a flight
+already doing that work are opened instead of launching duplicate work. The shared coverage-job
 index drives Requirements and Tests & coverage; each Activity segment tails its own
 `kind: 'coverage'` job source, including completed sessions. Active jobs also reconcile
-through REST so a missed broadcast cannot strand the stage transition. The ledger
+through REST so a missed broadcast cannot strand the stage transition. Activity merges
+individual agent, system, and external lifecycle entries by full timestamp across sessions;
+undated legacy entries are labelled separately, and reconnect replay retains source order
+for deduplication. The ledger
 remains the input and results surface. Both
 models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
 only reads on-disk tags). The single

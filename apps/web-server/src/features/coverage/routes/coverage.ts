@@ -10,7 +10,7 @@ import type { CoverageJobKind, CoverageJobModels } from '../../../../../../share
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { pickAvailableHealAgent } from '../../runs/logic/runtime/heal-agent-spawn'
 import {
-  normalizeStagePlans,
+  normalizeLaunchPlans,
   perAgentStageChoices,
   resolveStageChoice,
 } from '../../../../../../shared/agent-models'
@@ -445,7 +445,7 @@ export function resolveCoverageJobModels(
   const config = loadProjectConfig(projectRoot).agentModels
   const preferred: 'claude' | 'codex' =
     adapter === 'codex' ? 'codex' : adapter === 'claude' ? 'claude' : pickAvailableHealAgent() ?? 'claude'
-  const requested = normalizeStagePlans(preferred, override)
+  const requested = normalizeLaunchPlans(preferred, override)
   return {
     prd: { ...perAgentStageChoices(config, 'prd'), [preferred]: resolveStageChoice(preferred, config, 'prd', requested.prd ?? null) },
     mapping: { ...perAgentStageChoices(config, 'mapping'), [preferred]: resolveStageChoice(preferred, config, 'mapping', requested.mapping ?? null) },

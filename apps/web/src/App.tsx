@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from 'react'
+import { coverageGeneratingFlight as generatingFlightFor } from './features/flights/lib/workspace-flights'
+import { useCoverageRecalculation } from './shared/state/use-coverage-recalculation'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
@@ -142,6 +144,22 @@ export function App() {
     setSelectedFeature(feature)
     openFlightStage(resolveFeatureFlightTarget(feature, flightsRef.current).flightId, stage)
   }, [flightsRef, openFlightStage, setSelectedFeature])
+
+  const openRecalculation = useCallback((feature: string) => {
+    setFlightStartFor(null)
+    setFlightStartNew(false)
+    const active = generatingFlightFor(flightsRef.current, feature)
+    if (active) { setSelectedFeature(feature); openFlightStage(active.flightId, 'docs') }
+    else openFeatureStage(feature, 'docs')
+  }, [flightsRef, openFeatureStage, openFlightStage, setSelectedFeature, setFlightStartFor, setFlightStartNew])
+  const recalculation = useCoverageRecalculation({
+    jobs: coverageJobs, openRequirements: openRecalculation, invalidate: invalidateCoverage,
+    hasActiveFlight: (feature) => generatingFlightFor(flightsRef.current, feature) !== null,
+  })
+  const flightRecalculation = recalculation.launch
+    && (flights.find((entry) => entry.flightId === selectedFlightId)?.feature
+      ?? (selectedFlightId ? derivedFlightFeature(selectedFlightId) : null)) === recalculation.launch.feature
+    ? recalculation.launch : null
 
   // Portify is a Flight stage, regardless of whether a conductor record exists.
   const openPortifyStage = useCallback((feature: string): void => {
@@ -400,9 +418,8 @@ export function App() {
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={openFlight}
               coverageJobs={coverageJobs}
-              onOpenRecovery={(stage) => {
-                openFeatureStage(selectedFeature, stage)
-                setFlightStartFor(selectedFeature, 'refly', stage)
+              onOpenRecovery={(stage, models) => {
+                recalculation.start(selectedFeature, stage, models)
               }}
               onOpenGeneration={(job) => {
                 invalidate('coverage')
@@ -414,6 +431,10 @@ export function App() {
           : view === 'flights' && selectedFlightId
           ? <FlightPage
               flightId={selectedFlightId}
+              recalculation={flightRecalculation}
+              onRetryRecalculation={() => {
+                if (flightRecalculation) recalculation.start(flightRecalculation.feature, flightRecalculation.stage, flightRecalculation.launchModels)
+              }}
               // The manifest `/ws/flights` pushed for this flight, when it has
               // one — an active flight then advances from the push instead of
               // the detail view polling for it.
