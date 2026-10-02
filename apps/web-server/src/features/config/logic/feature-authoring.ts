@@ -1,3 +1,4 @@
+import { normalizeEnvironmentName, normalizeEnvironmentNames } from '../../../../../../shared/lib/environment-names'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -100,10 +101,11 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
 } | { ok: false; error: string; featureDir?: string } {
   const validation = validateFeatureTarget(input.projectRoot, input.feature)
   if (!validation.ok) return { ok: false, error: validation.error, featureDir: validation.featureDir }
+  const envs = normalizeEnvironmentNames(input.envs)
   const files = buildFeatureSkeletonScaffold({
     featureName: input.feature,
     description: input.description,
-    envs: input.envs,
+    envs,
     repos: input.repos,
   })
   const featureDir = validation.featureDir
@@ -116,7 +118,7 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
     fs.writeFileSync(target, file.content, 'utf8')
     written.push(target)
   }
-  for (const env of sanitizeEnvNames(input.envs)) {
+  for (const env of envs) {
     fs.mkdirSync(path.join(featureDir, 'envsets', env), { recursive: true })
   }
   publishWorkspaceEvent(input.workspaceEvents, { type: 'feature-created', feature: input.feature })
@@ -180,7 +182,7 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
     if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
       return { ok: false, error: `source file not found: ${source.sourcePath}` }
     }
-    const env = sanitizeEnvName(source.env == null ? 'local' : source.env)
+    const env = normalizeEnvironmentName(source.env == null ? 'local' : source.env)
     const slot = sanitizeSlotName(source.slot ?? path.basename(sourcePath))
     const envDir = path.join(envsetsDir, env)
     const dest = path.join(envDir, slot)
@@ -352,17 +354,6 @@ function readExistingSpecFiles(featureDir: string): GeneratedFeatureFile[] {
       path: `e2e/${entry.name}`,
       content: fs.readFileSync(path.join(e2eDir, entry.name), 'utf8'),
     }))
-}
-
-function sanitizeEnvNames(envs: string[] | undefined): string[] {
-  const clean = (envs ?? ['local']).map((env) => sanitizeEnvName(env)).filter(Boolean)
-  return Array.from(new Set(clean.length > 0 ? clean : ['local']))
-}
-
-function sanitizeEnvName(env: string): string {
-  const clean = env.trim()
-  if (!/^[a-zA-Z0-9_-]+$/.test(clean)) throw new Error(`invalid env name: ${env}`)
-  return clean
 }
 
 function sanitizeSlotName(slot: string): string {

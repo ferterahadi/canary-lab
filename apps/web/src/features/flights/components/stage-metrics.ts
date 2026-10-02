@@ -1,3 +1,4 @@
+import { unifiedDiffLines } from '@shared/lib/unified-diff'
 import type { CoverageLedger, TestStrength } from '@shared/coverage/types'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { ServiceManifestEntry } from '@shared/run-manifest'
@@ -193,7 +194,7 @@ export function overlayDiffStat(diff: string | undefined): OverlayDiffStat | nul
   const byFile: OverlayDiffStat['byFile'] = []
   let current: OverlayDiffStat['byFile'][number] | null = null
   let group: string | undefined
-  for (const line of diff.split('\n')) {
+  for (const { kind, text: line } of unifiedDiffLines(diff)) {
     const header = OVERLAY_GROUP.exec(line)
     if (header) {
       // The repo block names its member repos; the config block's value is the
@@ -201,16 +202,15 @@ export function overlayDiffStat(diff: string | undefined): OverlayDiffStat | nul
       group = header[1] === 'repo' ? header[2].trim() : CONFIG_GROUP
       continue
     }
-    if (line.startsWith('+++ ')) {
+    if (kind === 'new-file') {
       const path = line.slice(4).replace(/^b\//, '').trim()
       current = { path, ...(group ? { group } : {}), added: 0, removed: 0 }
       byFile.push(current)
       continue
     }
-    if (line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('@@')) continue
     if (!current) continue
-    if (line.startsWith('+')) current.added += 1
-    else if (line.startsWith('-')) current.removed += 1
+    if (kind === 'addition') current.added += 1
+    else if (kind === 'deletion') current.removed += 1
   }
   if (byFile.length === 0) return null
   return {

@@ -1,3 +1,4 @@
+import { createRepositoryObserver } from '../../../shared/repository-observer'
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
@@ -103,6 +104,7 @@ async function build(opts: {
 	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
 	  restartRun?: (runId: string) => Promise<RestartRunResult>
   projectRoot?: string
+  repositoryObserver?: Parameters<typeof runsRoutes>[1]['repositoryObserver']
   events?: WorkspaceEvent[]
   isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
 } = {}) {
@@ -119,6 +121,7 @@ async function build(opts: {
 	    restartHeal: opts.restartHeal,
     restartRun: opts.restartRun,
     isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
+    repositoryObserver: opts.repositoryObserver,
 	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
 	  })
   return { app, registry, store }
@@ -548,4 +551,20 @@ describe('readable-log route', () => {
     }
     expect(fs.existsSync(path.join(runDir, 'readable-logs'))).toBe(false)
   })
+})
+
+
+it('reads apply-preflight through the workspace repository observer when provided', async () => {
+  const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'non-repo-'))
+  writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
+  const observer = createRepositoryObserver({ events: { publish: vi.fn() }, log: vi.fn() })
+  const { app } = await build({ repositoryObserver: observer })
+  try {
+    const response = await app.inject({ method: 'GET', url: '/api/runs/r1/apply-preflight' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().targets).toEqual([{ repoName: 'prod', repoRoot, ready: false, reason: 'not a git working tree', foreignDirty: [], branch: null }])
+  } finally {
+    observer.dispose()
+    await app.close()
+  }
 })

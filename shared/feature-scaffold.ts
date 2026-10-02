@@ -1,3 +1,4 @@
+import { normalizeEnvironmentNames } from './lib/environment-names'
 import fs from 'fs'
 import path from 'path'
 
@@ -237,7 +238,7 @@ function buildFeatureConfig(
   envsInput: string[] | undefined,
   reposInput: FeatureScaffoldRepo[] | undefined,
 ): string {
-  const envs = sanitizeEnvNames(envsInput)
+  const envs = normalizeEnvironmentNames(envsInput)
   const repos = reposInput ?? []
   return `const config = {
   name: '${name}',
@@ -306,13 +307,6 @@ test.describe('${name}', () => {
 `
 }
 
-function sanitizeEnvNames(envs: string[] | undefined): string[] {
-  const clean = (envs ?? ['local'])
-    .map((env) => env.trim())
-    .filter(Boolean)
-  return Array.from(new Set(clean.length > 0 ? clean : ['local']))
-}
-
 function formatStringArray(values: string[]): string {
   return `[${values.map((value) => `'${escapeSingleQuoted(value)}'`).join(', ')}]`
 }
@@ -326,7 +320,7 @@ function formatRepos(repos: FeatureScaffoldRepo[]): string {
     ]
     if (repo.cloneUrl) fields.push(`cloneUrl: '${escapeSingleQuoted(repo.cloneUrl)}'`)
     if (repo.branch) fields.push(`branch: '${escapeSingleQuoted(repo.branch)}'`)
-    if (repo.envs?.length) fields.push(`envs: ${formatStringArray(sanitizeEnvNames(repo.envs))}`)
+    if (repo.envs?.length) fields.push(`envs: ${formatStringArray(normalizeEnvironmentNames(repo.envs))}`)
     if (repo.startCommands?.length) fields.push(`startCommands: ${JSON.stringify(repo.startCommands, null, 2)}`)
     return `{\n      ${fields.join(',\n      ')}\n    }`
   })

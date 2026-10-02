@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEscapeToClose } from '@/shared/ui/Overlays'
-import * as cleanupApi from '@/shared/api/cleanup'
+import { useOpenPortifyProject } from '../state/use-open-portify-project'
 import type { PortifyManifest } from '@/shared/api/portify'
 import { DiffView } from '@/shared/ui/DiffView'
 import { NoChangesNeeded, VerificationBadge } from './SavedOverlayPanel'
@@ -14,19 +14,7 @@ export function ReviewScreen({ m, busy, canRequestChanges = true, onSave, onRequ
   // At ready-to-save verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be saved.
   const proven = m.verification?.ok === true
-  const [openError, setOpenError] = useState<string | null>(null)
-  // Open the scratch worktree in the user's editor while live. Best-effort:
-  // surface a launch failure. (The saved view's open control lives inside
-  // SavedOverlayPanel — it opens the overlay folder, not a worktree.)
-  const openProject = async () => {
-    setOpenError(null)
-    try {
-      const res = await cleanupApi.openPortifyProject(m.workflowId)
-      if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
-    } catch (e) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
-    }
-  }
+  const { openError, openProject } = useOpenPortifyProject(m.workflowId)
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>

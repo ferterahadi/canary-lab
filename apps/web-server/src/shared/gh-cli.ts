@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { commandResult } from './command-result'
 
 // Detect-and-instruct wrapper around the GitHub CLI (`gh`). Canary NEVER runs
 // `gh auth login`, never performs the OAuth device flow, and never handles the
@@ -16,15 +16,7 @@ export interface GhResult {
 /** Run a `gh` subcommand. Never pass a subcommand that mutates auth state or
  *  prints the raw token (`gh auth token`) — status/read commands only. */
 export function runGh(args: string[]): Promise<GhResult> {
-  return new Promise((resolve) => {
-    const child = execFile('gh', args, { timeout: 15_000 }, (error, stdout, stderr) => {
-      const code = typeof (error as { code?: unknown } | null)?.code === 'number'
-        ? (error as { code: number }).code
-        : error ? 1 : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
-    child.on('error', (err) => resolve({ code: 127, stdout: '', stderr: err.message }))
-  })
+  return commandResult('gh', args, { timeout: 15_000 }, 127)
 }
 
 export interface GhStatus {

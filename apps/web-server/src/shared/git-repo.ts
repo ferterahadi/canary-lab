@@ -1,4 +1,5 @@
-import { execFile, execFileSync } from 'child_process'
+import { commandResult } from './command-result'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../shared/launcher/types'
@@ -25,17 +26,7 @@ export interface GitResult {
 }
 
 export function runGit(cwd: string, args: string[]): Promise<GitResult> {
-  return new Promise((resolve) => {
-    const child = execFile('git', args, { cwd }, (error, stdout, stderr) => {
-      const code = typeof (error as { code?: unknown } | null)?.code === 'number'
-        ? (error as { code: number }).code
-        : error
-          ? 1
-          : 0
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-    })
-    child.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }))
-  })
+  return commandResult('git', args, { cwd }, 1)
 }
 
 export function parsePorcelainStatus(stdout: string): string[] {

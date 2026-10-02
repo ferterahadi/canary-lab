@@ -1,3 +1,4 @@
+import { unifiedDiffLines } from '../../../../shared/lib/unified-diff'
 import { compareActiveRuns } from '../features/runs/logic/active-run-order'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
@@ -246,10 +247,10 @@ export function summarizeUnifiedDiff(diff: string): { files: number; additions: 
   let files = 0
   let additions = 0
   let deletions = 0
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('diff --git ')) files += 1
-    else if (line.startsWith('+') && !line.startsWith('+++')) additions += 1
-    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1
+  for (const { kind } of unifiedDiffLines(diff)) {
+    if (kind === 'file') files += 1
+    else if (kind === 'addition') additions += 1
+    else if (kind === 'deletion') deletions += 1
   }
   return { files, additions, deletions }
 }

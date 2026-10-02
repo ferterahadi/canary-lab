@@ -616,3 +616,31 @@ it.each(['missing source', 'filesystem failure'])('does not announce partial cap
   expect(fs.readFileSync(path.join(envDir, 'first.env'), 'utf8')).toBe('TOKEN=synthetic\n')
   expect(publish).not.toHaveBeenCalled()
 })
+
+it.each([
+  { envs: ['local', 'staging/eu'] },
+  { envs: ['local'], repos: [{ name: 'api', localPath: '/repo', envs: ['staging/eu'] }] },
+])('rejects invalid environment lists before any writes or event (%j)', (input) => {
+  const publish = vi.fn()
+  expect(() => createFeatureSkeleton({ ...ctx(), feature: 'invalid_env', workspaceEvents: { publish }, ...input })).toThrow('invalid env name: staging/eu')
+  expect(fs.existsSync(path.join(featuresDir, 'invalid_env'))).toBe(false)
+  expect(fs.readdirSync(featuresDir)).toEqual([])
+  expect(publish).not.toHaveBeenCalled()
+})
+
+it('uses normalized names consistently in generated configuration and directories', () => {
+  const publish = vi.fn()
+  const result = createFeatureSkeleton({ ...ctx(), feature: 'normalized', envs: [' staging ', '', 'staging', 'dev_2'], workspaceEvents: { publish } })
+  expect(result.ok).toBe(true)
+  const dir = path.join(featuresDir, 'normalized')
+  expect(require(path.join(dir, 'feature.config.cjs')).config.envs).toEqual(['staging', 'dev_2'])
+  expect(fs.readdirSync(path.join(dir, 'envsets'))).toEqual(['dev_2', 'envsets.config.json', 'local', 'staging'])
+  expect(publish).toHaveBeenCalledWith({ type: 'feature-created', feature: 'normalized' })
+})
+
+it('defaults blank list entries to local but still rejects blank capture environments', () => {
+  expect(createFeatureSkeleton({ ...ctx(), feature: 'blank_envs', envs: [' ', ''] }).ok).toBe(true)
+  const source = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(source, 'KEY=value\n')
+  expect(() => captureFeatureEnvFiles(ctx(), { feature: 'blank_envs', sources: [{ sourcePath: source, env: ' ', slot: 'api.env' }] })).toThrow('invalid env name:  ')
+})

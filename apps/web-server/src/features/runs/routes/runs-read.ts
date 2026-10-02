@@ -1,3 +1,4 @@
+import { proposalRecord } from '../logic/pr/proposal-record'
 // Runs REST — reads: index, detail, verification report, agent session, and the
 // Playwright artifact stream. Split out of runs.ts; handler bodies are unchanged.
 import type { FastifyInstance } from 'fastify'
@@ -257,17 +258,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     // Merge the freshly-opened PRs into the manifest by repo name (idempotent),
     // and record the attempt either way — the Changes tab reads the same
     // per-repo reasons whether the run proposed on its own or the user did.
-    const opened = results.filter((r): r is typeof r & { pr: RunProposedPr } => r.ok && !!r.pr).map((r) => r.pr)
-    const prAttempt = {
-      at: new Date().toISOString(),
-      auto: false,
-      results: results.map((r) => ({
-        repoName: r.repoName,
-        ok: r.ok,
-        ...(r.pr ? { url: r.pr.url } : {}),
-        ...(r.reason ? { reason: r.reason } : {}),
-      })),
-    }
+    const { opened, attempt: prAttempt } = proposalRecord(results, { at: new Date().toISOString(), auto: false })
     // Written through the store, not straight to the file: the store's emitter
     // is what pushes the change over the runs WebSocket, so an open Changes tab
     // shows the new PR link without a refetch.

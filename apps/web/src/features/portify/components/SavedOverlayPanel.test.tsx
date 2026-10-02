@@ -138,3 +138,12 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
     ...over,
   }
 }
+
+it('counts header-looking source in the collapsed badge and updates it while open', async () => {
+  const m = manifest()
+  m.diff = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n--- old\n+++ new\n'
+  await act(async () => root.render(<SavedOverlayPanel manifest={m} collapsibleDiff />))
+  expect(container.textContent).toContain('Show diff · 2 lines')
+  await act(async () => root.render(<SavedOverlayPanel manifest={{ ...m, diff: m.diff + '+extra\n' }} collapsibleDiff />))
+  expect(container.textContent).toContain('Show diff · 3 lines')
+})

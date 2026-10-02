@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import * as cleanupApi from '@/shared/api/cleanup'
+import { useOpenPortifyProject } from '../state/use-open-portify-project'
+import { unifiedDiffLines } from '@shared/lib/unified-diff'
 import type { PortifyManifest } from '@/shared/api/portify'
 import { DiffView } from '@/shared/ui/DiffView'
 import { patchFileName } from '@shared/portify-overlay'
@@ -26,25 +27,13 @@ export function SavedOverlayPanel({
    *  isn't enumerated twice on that screen. */
   showServiceTable?: boolean
 }) {
-  const [openError, setOpenError] = useState<string | null>(null)
+  const { openError, openProject: openOverlay } = useOpenPortifyProject(m.workflowId)
   const [showDiff, setShowDiff] = useState(!collapsibleDiff)
-  // For a saved workflow the server opens the overlay folder
-  // (features/<feature>/portify/) — the scratch worktrees are long gone.
-  // Best-effort: the route never rejects on a launch failure, it reports it.
-  const openOverlay = async (): Promise<void> => {
-    setOpenError(null)
-    try {
-      const res = await cleanupApi.openPortifyProject(m.workflowId)
-      if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
-    } catch (e) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
-    }
-  }
   const hasDiff = (m.diff ?? '').trim().length > 0
   // Changed-line count for the collapsed toggle label — the +/- lines, minus the
   // `+++`/`---` file headers, so "N lines" reads as churn, not raw line count.
   const changedLines = hasDiff
-    ? m.diff!.split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)).length
+    ? unifiedDiffLines(m.diff!).filter((line) => line.kind === 'addition' || line.kind === 'deletion').length
     : 0
   return (
     <div>
