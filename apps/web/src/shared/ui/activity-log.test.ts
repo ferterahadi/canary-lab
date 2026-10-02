@@ -14,6 +14,7 @@ import {
   shortSession,
   summarizeInput,
   systemVerb,
+  textKey,
   toolFilePath,
   toolVerb,
 } from './activity-log'
@@ -188,6 +189,15 @@ describe('parseSystemLine / systemVerb', () => {
   it('turns a tag into a word, and no tag into System', () => {
     expect(systemVerb('coverage')).toBe('Coverage')
     expect(systemVerb(undefined)).toBe('System')
+  })
+})
+
+describe('textKey', () => {
+  it('keys a line of any length short and stable, and tells lines apart', () => {
+    const key = textKey('x'.repeat(5000))
+    expect(key).toMatch(/^[0-9a-z]{1,7}$/)
+    expect(textKey('x'.repeat(5000))).toBe(key)
+    expect(textKey('a')).not.toBe(textKey('b'))
   })
 })
 

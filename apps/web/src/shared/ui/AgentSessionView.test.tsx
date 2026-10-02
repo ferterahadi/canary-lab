@@ -118,6 +118,27 @@ describe('System rows (flight conductor lines on the agent rail)', () => {
     expect(row.querySelector('.agentts-log')?.getAttribute('data-whole')).toBe('true')
     expect(row.querySelector('.agentts-chev')).toBeNull()
   })
+
+  it('cuts a line too long for its row to one line, and opens it pretty-printed', () => {
+    const raw = JSON.stringify({ type: 'system', subtype: 'hook_response', output: 'x'.repeat(300) })
+    render(`[evaluation] ${raw}`)
+    const row = rows()[0]
+    expect(part(row, 'sum')).toHaveLength(160)
+    act(() => row.querySelector('button')!.click())
+    const modal = document.querySelector('[data-testid="activity-log-modal"]')!
+    expect(modal.textContent).toContain('Evaluation')
+    expect(modal.querySelector('[data-lang="json"]')?.textContent).toContain('"subtype": "hook_response"')
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+  })
+
+  it('opens a long line that is not JSON as plain text', () => {
+    render(`plain ${'y'.repeat(200)}`)
+    act(() => rows()[0].querySelector('button')!.click())
+    const modal = document.querySelector('[data-testid="activity-log-modal"]')!
+    expect(modal.querySelector('[data-lang="json"]')).toBeNull()
+    expect(modal.textContent).toContain('y'.repeat(200))
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+  })
 })
 
 // ─── Subagent threads ───────────────────────────────────────────────────────

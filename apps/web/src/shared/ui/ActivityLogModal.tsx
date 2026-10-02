@@ -9,9 +9,11 @@ import {
   languageFor,
   numberedLines,
   shortSession,
+  systemVerb,
   toolFilePath,
   type ExternalSessionActivity,
   type LogLine,
+  type SystemLine,
 } from './activity-log'
 import { ExternalOpenAction, LogRow, Markdown, eventGlyph } from './AgentSessionRows'
 import type { CodeLanguage } from './code-highlighter'
@@ -43,6 +45,7 @@ export type LogEntry =
     pair?: { id: string; event: AgentSessionEvent }
   }
   | { kind: 'external'; id: string; session: ExternalSessionActivity; phase: 'start' | 'end' }
+  | { kind: 'system'; id: string; line: SystemLine }
 
 export function ActivityLogModal({ entry, onClose, onOpenEntry }: {
   entry: LogEntry
@@ -137,6 +140,20 @@ function entryView(entry: LogEntry, onOpenEntry: (id: string) => void, onPickNes
         </div>
       ),
       copyText: message,
+    }
+  }
+  if (entry.kind === 'system') {
+    // Only a line too long for its row opens — usually raw output a producer
+    // forwarded. Pretty-print it when it is JSON, so it reads as a record.
+    const { tag, timestamp, text } = entry.line
+    const lang = languageFor(undefined, text)
+    const source = lang === 'json' ? formatJson(JSON.parse(text)) : text
+    return {
+      line: { kind: 'system', verb: systemVerb(tag), summary: text },
+      context: `Canary Lab · ${timeOf(timestamp)}`,
+      meta: tag ? [{ label: 'source', value: tag }] : [],
+      body: <CodeView source={source} lang={lang} />,
+      copyText: text,
     }
   }
   const { event, session, pair, threads } = entry

@@ -81,7 +81,6 @@ interface RunAgentOpts {
   signal?: AbortSignal
   spawnScope?: string
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
-  onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
   /** Resolved model+effort for this launch; absent → agent default. */
   models?: StageModelChoice
@@ -326,7 +325,6 @@ export async function proposeCoverageMappings(
           signal: args.signal,
           spawnScope: args.spawnScope,
           agentJob: args.agentJob,
-          onOutput: args.onOutput,
           onSession: args.onSession,
           models: args.models?.[agent],
         })

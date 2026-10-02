@@ -91,7 +91,6 @@ export function runEvaluationAgent(
     outputSchemaPath: EVALUATION_REWRITE_SCHEMA_PATH,
     errorLabel: 'evaluation rewrite agent',
     cancellationMessage: 'evaluation rewrite cancelled',
-    onOutput,
     onSession,
     onTick: (idleMs) => {
       if (idleMs >= 10_000) onOutput?.(`[agent:${agent}] still running; waiting for CLI output (${Math.floor(idleMs / 1000)}s idle)\n`)

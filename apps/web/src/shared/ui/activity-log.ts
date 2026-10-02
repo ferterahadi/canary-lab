@@ -169,6 +169,16 @@ export function parseSystemLine(line: string): SystemLine {
   return { tag: match[1], ...(match[2] ? { timestamp: match[2] } : {}), text: match[3] }
 }
 
+/** A short, stable key for a line of any length (FNV-1a, base 36). */
+export function textKey(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 /** A conductor tag reads as a word in the verb column (`coverage` → Coverage). */
 export function systemVerb(tag: string | undefined): string {
   if (!tag) return 'System'

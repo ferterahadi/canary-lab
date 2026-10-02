@@ -77,8 +77,9 @@ describe('defaultRunAgent — claude success path', () => {
     expect(capturedSession?.agent).toBe('claude')
     expect(typeof capturedSession?.sessionId).toBe('string')
     expect(capturedSession?.sessionId.length).toBeGreaterThan(0)
-    // onOutput received something
-    expect(outputChunks.length).toBeGreaterThan(0)
+    // The progress log carries canary's own lines, never the CLI's raw
+    // stream-json — the transcript is the session log onSession pinned.
+    expect(outputChunks).toEqual(['[agent:claude] summarizing PRD\n'])
   })
 })
 

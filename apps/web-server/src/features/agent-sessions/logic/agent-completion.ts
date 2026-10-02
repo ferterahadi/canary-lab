@@ -100,7 +100,6 @@ interface ReadOnlyAnswerAgentOptions extends Omit<AgentCompletionOptions, 'start
   /** Resolved model+effort for this launch; absent → agent default. */
   models?: StageModelChoice
   cwd?: string
-  onOutput?: (chunk: string) => void
   /** Fired once at spawn. Claude's id is pinned here so its JSONL session log is
    *  locatable for AgentSessionView; codex has no `--session-id` and is found
    *  later by cwd + start time, so its id is empty. */
@@ -114,7 +113,9 @@ interface ReadOnlyAnswerAgentOptions extends Omit<AgentCompletionOptions, 'start
  *  claude streams stream-json for liveness and answer recovery; codex `exec`
  *  reads the prompt from stdin (`-`) and writes its final message to
  *  `--output-last-message`. Every caller here only reads and returns data for
- *  canary to apply, so neither arm is given a write tool. */
+ *  canary to apply, so neither arm is given a write tool. The CLI's raw output
+ *  is never forwarded to a caller's progress log: the transcript is the
+ *  session log `onSession` pins, and raw stream-json in a log reads as noise. */
 export function runReadOnlyAnswerAgent(options: ReadOnlyAnswerAgentOptions): Promise<string> {
   const { agent, prompt, cwd, models = AGENT_DEFAULT_CHOICE } = options
   return runAgentCompletion({
@@ -130,7 +131,6 @@ export function runReadOnlyAnswerAgent(options: ReadOnlyAnswerAgentOptions): Pro
         args,
         cwd,
         stdin: agent === 'codex' ? prompt : undefined,
-        onChunk: (text) => options.onOutput?.(text),
         idleMs: options.idleMs,
         activityPath: agentActivityPath(agent, cwd, claudeSessionId),
         onIdle,

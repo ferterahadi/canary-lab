@@ -1003,7 +1003,7 @@ describe('TestCasesColumn', () => {
   // rerun only re-lists the tests it re-runs — so the roster's recorded line is
   // allowed to be stale for a test that already passed. Matching by exact line
   // turned two real passes into "pending" (run 2026-09-04T0638-7rcl).
-  it('keeps a passed verdict when a heal edit moved the test to another line', async () => {
+  it.each(['', ':5'])('keeps a passed verdict when a heal edit moved the test to another line (column suffix %s)', async (column) => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/current.spec.ts',
@@ -1021,7 +1021,7 @@ describe('TestCasesColumn', () => {
             passedNames: ['test-case-validates-checkout'],
             passedIds: ['test-id-checkout'],
             knownTests: [
-              { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
+              { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: `/tmp/features/alpha/e2e/current.spec.ts:14${column}` },
             ],
             failed: [],
           }, status: 'passed' }}
@@ -1033,7 +1033,7 @@ describe('TestCasesColumn', () => {
     expect(statusBadges()).toEqual(['passed'])
   })
 
-  it('lets the line decide only when one file declares the same title twice', async () => {
+  it.each(['', ':5'])('lets the line decide only when one file declares the same title twice (column suffix %s)', async (column) => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/current.spec.ts',
@@ -1054,8 +1054,8 @@ describe('TestCasesColumn', () => {
             passedNames: ['test-case-renders'],
             passedIds: ['id-guest'],
             knownTests: [
-              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
-              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:30' },
+              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `/tmp/features/alpha/e2e/current.spec.ts:14${column}` },
+              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `/tmp/features/alpha/e2e/current.spec.ts:30${column}` },
             ],
             failed: [{ id: 'id-host', name: 'test-case-renders' }],
           }, status: 'failed' }}
@@ -1065,5 +1065,28 @@ describe('TestCasesColumn', () => {
 
     await waitFor(() => statusBadges().length === 2)
     expect(statusBadges()).toEqual(['passed', 'failed'])
+  })
+
+  it('updates a column-qualified recorded verdict while the Tests column stays mounted', async () => {
+    const file = '/tmp/features/alpha/e2e/current.spec.ts'
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      { file, tests: [{ name: 'renders', line: 14, bodySource: '{}', steps: [], readable: readableTest('renders') }] },
+    ])
+    const renderEvidence = async (passed: boolean) => {
+      await act(async () => root.render(<TestCasesColumn feature="alpha" runEvidence={{
+        summary: {
+          complete: true, total: 1, passed: passed ? 1 : 0,
+          passedIds: passed ? ['id-render'] : [],
+          knownTests: [{ id: 'id-render', name: 'test-case-renders', title: 'renders', location: `${file}:14:5` }],
+          failed: passed ? [] : [{ id: 'id-render', name: 'test-case-renders' }],
+        },
+        status: passed ? 'passed' : 'failed',
+      }} />))
+    }
+    await renderEvidence(false)
+    await waitFor(() => statusBadges().length === 1)
+    expect(statusBadges()).toEqual(['failed'])
+    await renderEvidence(true)
+    expect(statusBadges()).toEqual(['passed'])
   })
 })

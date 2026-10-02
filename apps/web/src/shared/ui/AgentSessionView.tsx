@@ -19,7 +19,7 @@ import { clientLabel } from './external-client-branding'
 import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
 import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
 import {
-  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, type ExternalSessionActivity, type LogLine,
+  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, textKey, type ExternalSessionActivity, type LogLine,
 } from './activity-log'
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
@@ -359,7 +359,8 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
   for (const line of [...sys.pre, ...(sys.between ?? []).flat(), ...sys.post]) {
     const occurrence = occurrences.get(line) ?? 0
     occurrences.set(line, occurrence + 1)
-    items.push({ kind: 'system', id: `system:${line}:${occurrence}`, source: 'system', sequence: items.length,
+    // Hashed: the id rides the `?log=` deep link, and a line can be any length.
+    items.push({ kind: 'system', id: `system:${textKey(line)}:${occurrence}`, source: 'system', sequence: items.length,
       timestamp: parseSystemLine(line).timestamp, line })
   }
   externalSessions.forEach((session, index) => {
@@ -533,9 +534,11 @@ function rowLine(row: TimelineRow): LogLine | null {
     case 'event':
       return describeEvent(row.event, row.event.kind === 'tool-call' ? row.state.subagents.get(row.event.toolId) : undefined)
     case 'system': {
-      // A conductor line is one line, shown in full: it never opens.
+      // A conductor line usually fits the row and opens nothing; a long one —
+      // raw output a producer forwarded — is cut to one line and opens.
       const line = parseSystemLine(row.line)
-      return { kind: 'system', verb: systemVerb(line.tag), summary: line.text, whole: true }
+      const summary = firstLineOf(line.text)
+      return { kind: 'system', verb: systemVerb(line.tag), summary, ...(line.text.trim() === summary ? { whole: true } : {}) }
     }
     case 'external': {
       const { session, phase } = row
@@ -555,6 +558,7 @@ function rowLine(row: TimelineRow): LogLine | null {
  *  the other half of a tool use, the subagents a call spawned. */
 function logEntryFor(row: TimelineRow, rows: readonly TimelineRow[]): LogEntry | null {
   if (row.kind === 'external') return { kind: 'external', id: row.id, session: row.session, phase: row.phase }
+  if (row.kind === 'system') return { kind: 'system', id: row.id, line: parseSystemLine(row.line) }
   if (row.kind !== 'event') return null
   const { event, state } = row
   const toolId = event.kind === 'tool-call' || event.kind === 'tool-result' ? event.toolId : undefined
