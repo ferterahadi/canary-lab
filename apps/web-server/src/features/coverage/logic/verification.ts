@@ -15,6 +15,7 @@ import type { PlaywrightArtifactGroup } from '../../../../../../shared/run-detai
 import type { RunDetail, RunSummaryFailedEntry } from '../../../../../../shared/run-detail'
 import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
 import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
+import { bootsServicesForEnv } from '../../runs/logic/runtime/service-specs'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
@@ -193,8 +194,7 @@ export function resolveVerificationRun(
     if (target.url) {
       try {
         const url = new URL(target.url)
-        const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-        if (loopback && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
+        if (isLoopbackHost(url.hostname) && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
       } catch {
         /* An unparsable URL already fails the run visibly at request time. */
       }
@@ -369,6 +369,30 @@ function inferEnvVar(
 function singleUrlEnvVar(urls: Record<string, string>): string | undefined {
   const keys = Object.keys(urls)
   return keys.length === 1 ? keys[0] : undefined
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
+
+/** The deployed origins a suite reaches when it boots nothing in `env`, keyed
+ *  by envset variable. A run's repair cycle edits a worktree those hosts never
+ *  read, so such a run is a Verify in Run clothing. Origins only: an envset URL
+ *  may carry credentials or tokens in its userinfo or query. Null when a
+ *  service boots, or when no envset URL leaves this machine. */
+export function remoteOnlyTargets(feature: FeatureConfig, env: string): Record<string, string> | null {
+  if (bootsServicesForEnv(feature, env)) return null
+  const remote: Record<string, string> = {}
+  for (const [key, value] of Object.entries(readEnvsetUrlEntries(feature, env))) {
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch {
+      continue /* An unparsable URL names no host to verify. */
+    }
+    if (!isLoopbackHost(url.hostname)) remote[key] = url.origin
+  }
+  return Object.keys(remote).length > 0 ? remote : null
 }
 
 function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefined): Record<string, string> {

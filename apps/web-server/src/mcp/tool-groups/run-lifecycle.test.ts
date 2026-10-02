@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { toolResultText } from '../__fixtures__/tool-result'
 import type { CanaryLabMcpDeps } from '../tool-schemas'
@@ -802,6 +805,141 @@ describe('start_run: starting fresh', () => {
     })
 
     expect(await text('start_run', START)).toBe('no envset named local')
+  })
+})
+
+// A suite that boots nothing and whose envset names a deployed host is a
+// Verify: its repair cycle would edit a worktree no target reads. The fixture
+// is a real feature.config + envset on disk because the predicate is the same
+// loader and envset reader Verify uses, not a mocked flag.
+describe('start_run: a suite that boots nothing and targets a deployed host', () => {
+  let featuresDir: string
+  const writeSuite = (envset: string, repo: Record<string, unknown> = {}): void => {
+    const dir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(path.join(dir, 'envsets', 'staging'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'feature.config.cjs'), `module.exports = { config: { featureDir: __dirname, ...${JSON.stringify({
+      name: 'checkout', description: 'checkout', envs: ['staging'],
+      repos: [{ name: 'shop', localPath: '/repo/shop', ...repo }],
+    })} } }`)
+    fs.writeFileSync(path.join(dir, 'envsets', 'staging', 'checkout.env'), envset)
+  }
+  const remote = (over: Record<string, unknown> = {}, facts?: McpClientFacts) => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    return { startRun, ...harness({ startRun, featuresDir, ...over }, facts) }
+  }
+
+  beforeEach(() => {
+    featuresDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-remote-target-'))
+    writeSuite('API_BASE_URL=https://user:secret@api.staging.example.com/v1\nGATEWAY_URL=http://localhost:3000\n')
+  })
+  afterEach(() => fs.rmSync(featuresDir, { recursive: true, force: true }))
+
+  it('starts nothing and tells a form-less client to ask, naming only the deployed origin', async () => {
+    const { call, startRun } = remote()
+
+    const out = await call('start_run', START)
+
+    expect(out).toMatchObject({
+      type: 'remote_target_requires_choice',
+      runStarted: false,
+      env: 'staging',
+      targetOrigins: { API_BASE_URL: 'https://api.staging.example.com' },
+      options: ['Verify the deployed target', 'Run with repair anyway'],
+      nextSteps: ['ask_user_verify_or_run'],
+    })
+    expect(JSON.stringify(out)).not.toContain('secret')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('starts the run when the caller relays the user\'s run-anyway choice', async () => {
+    const { call, startRun } = remote()
+
+    expect(await call('start_run', { ...START, remote_target: 'run' })).toMatchObject({ runId: 'run-new', reused: false })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('never asks when a service boots in that env', async () => {
+    writeSuite('API_BASE_URL=https://api.staging.example.com\n', { startCommands: ['npm run dev'] })
+    const { call, startRun } = remote()
+
+    expect(await call('start_run', START)).toMatchObject({ runId: 'run-new' })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a run_ref restart ungated: that run already chose its mode', async () => {
+    const restartExternalRun = vi.fn(async () => ({ runId: 'run-1', mode: 'remaining' as const }))
+    const { call } = remote({ store: storeOf([runDetail({ status: 'failed' })]), restartExternalRun })
+
+    expect(await call('start_run', { ...START, run_ref: 'run-1' })).toMatchObject({ restarted: true })
+    expect(restartExternalRun).toHaveBeenCalledOnce()
+  })
+
+  it('elicits the choice and points Verify at the verification tools without starting a run', async () => {
+    const { raw, startRun } = remote({}, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    expect(opened.inputRequests).toMatchObject({ answer: { params: {
+      message: expect.stringContaining('targets deployed hosts (https://api.staging.example.com)'),
+      requestedSchema: { properties: { choice: { enum: ['Verify the deployed target', 'Run with repair anyway'] } } },
+    } } })
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Verify the deployed target' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
+      type: 'verify_instead', runStarted: false, env: 'staging',
+      targetOrigins: { API_BASE_URL: 'https://api.staging.example.com' },
+      nextSteps: ['list_verification_configs', expect.stringContaining('never invent them')],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('asks the remote target before coverage, and never re-asks it once answered', async () => {
+    const { raw, startRun } = remote({ coverageRequest: coverageRequest() }, eliciting)
+    const remoteOpened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const coverageOpened = await raw('start_run', START, context(remoteOpened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    })) as InputRequiredResult
+    expect(coverageOpened.inputRequests).toMatchObject({ answer: { params: {
+      requestedSchema: { properties: { choice: { enum: ['Update coverage first', 'Run now with stale coverage'] } } },
+    } } })
+
+    const answered = await raw('start_run', START, context(coverageOpened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    }))
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId: 'run-new', coverageStale: true })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('carries the answered remote choice through the isolation question too', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const { raw } = harness({ startRun, featuresDir }, eliciting)
+    const remoteOpened = await raw('start_run', START, context()) as InputRequiredResult
+    const isolationOpened = await raw('start_run', START, context(remoteOpened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    })) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(isolationOpened.requestState, {
+      action: 'accept', content: { isolation: 'worktree' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId: 'run-new' })
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('applies nothing when the target changes while the question is open', async () => {
+    const { raw, startRun } = remote({}, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    writeSuite('API_BASE_URL=https://api.other.example.com\n')
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Run with repair anyway' },
+    }))
+
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ status: 'needs-input' })
+    expect(startRun).not.toHaveBeenCalled()
   })
 })
 

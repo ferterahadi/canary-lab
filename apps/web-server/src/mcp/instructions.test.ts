@@ -67,6 +67,22 @@ describe('envset ownership guidance', () => {
   })
 })
 
+// An agent asked for "the staging run" read the verify guide twice and still
+// called start_run: the guide said how to verify, never when. The rule has to
+// reach a skill-less client before the cut, on every surface that starts work.
+describe('Verify-versus-run guidance', () => {
+  it('tells a client when to choose Verify before the initialize cut', () => {
+    expect(INSTRUCTIONS_BY_PROFILE.verify).toContain('Choose Verify, not start_run, whenever the target is a deployed, staging or live host')
+    expect(INSTRUCTIONS_BY_PROFILE.lifecycle).toContain('deployed/staging target the suite does not boot (never start_run)')
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('remote_target_requires_choice: ASK Verify vs run')
+  })
+
+  it('spells out both answers to the remote-target choice in the repair guide', () => {
+    expect(WORKFLOW_GUIDES.repair).toContain('type:"verify_instead"')
+    expect(WORKFLOW_GUIDES.repair).toContain('re-call start_run with remote_target:"run"')
+  })
+})
+
 describe('splitAtInitializeCut', () => {
   it('delivers a marker-less file whole on both surfaces', () => {
     expect(splitAtInitializeCut('short guidance', 'x.md')).toEqual({ lead: 'short guidance', guide: 'short guidance' })

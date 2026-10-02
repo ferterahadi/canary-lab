@@ -40,6 +40,14 @@ export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot
   return [...slots.values()]
 }
 
+/** Whether any start command boots in `env` — the same filters buildServiceSpecs
+ *  applies, without resolving tokens or paths. */
+export function bootsServicesForEnv(feature: FeatureConfig, env?: string): boolean {
+  return (feature.repos ?? []).some((repo) => enabledForEnv(repo.envs, env)
+    && (repo.startCommands ?? []).some((command, i) =>
+      enabledForEnv(normalizeStartCommand(command, `${repo.name}-cmd-${i + 1}`).envs, env)))
+}
+
 export function buildServiceSpecs(
   feature: FeatureConfig,
   runDir: string,

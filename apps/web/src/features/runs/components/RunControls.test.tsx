@@ -628,6 +628,48 @@ describe('run overview', () => {
     expect(container.textContent).toContain('terminal')
     expect(container.textContent).not.toContain('agent session')
   })
+
+  it('answers a settled run with no heal cycle at once, without reading a session log', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ healMode: 'auto', healCycles: 0 }),
+      transient: null,
+      status: 'passed',
+      displayStatus: 'passed',
+      error: null,
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+    await act(async () => {
+      clickButton('Heal agent')
+    })
+
+    expect(container.querySelector('[data-testid="heal-empty"]')?.textContent).toContain('No repairs needed')
+    expect(container.textContent).not.toContain('agent session')
+  })
+
+  it('reads the session log once a settled run has a heal cycle to show', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({ healMode: 'auto', healCycles: 1 }),
+      transient: null,
+      status: 'passed',
+      displayStatus: 'passed',
+      error: null,
+    })
+
+    await act(async () => {
+      root.render(<RunDetailColumn runId="run-1" />)
+    })
+    await act(async () => {
+      clickButton('Heal agent')
+    })
+
+    expect(container.querySelector('[data-testid="heal-empty"]')).toBeNull()
+    expect(container.textContent).toContain('agent session')
+  })
 })
 
 function runDetail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {

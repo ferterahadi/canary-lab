@@ -150,6 +150,8 @@ export function RunDetailColumn({
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
+  // External heal keeps its own panel: the parked/claimed state is the answer there.
+  const settledWithoutRepair = isTerminalRunStatus(m.status) && m.healCycles === 0 && m.healMode !== 'external'
   // The dialog is the full compiler-error list, so only a card that shows such a
   // list can open it. A dependency blocker has its own panel and no dialog.
   const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
@@ -278,6 +280,15 @@ export function RunDetailColumn({
               wrapper clips at its own height, so a `h-full` agent view under a
               banner overflowed by exactly the banner's height and cut that much
               off the bottom of the transcript. */}
+          {settledWithoutRepair ? (
+            // A run that finished without one repair cycle has no transcript to
+            // read: answer at once, in the same padded pane — surface, inset
+            // and vertical position — as the Changes and Journal empty states,
+            // instead of a session read that can only come back empty.
+            <RunPane padded>
+              <EmptyState testId="heal-empty" {...healEmptyCopy(m.status, m.healCycles)} />
+            </RunPane>
+          ) : (
           <RunPane scroll={false}>
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
               {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
@@ -315,6 +326,7 @@ export function RunDetailColumn({
                 RetestIconButton). The footer-bar variant that used to sit here
                 duplicated that affordance. */}
           </RunPane>
+          )}
         </div>}
         {!isVerify && !isBootRun && tab === 'changes' && (
           // No wrapper scroller: the tab renders its own `RunPane`, the same

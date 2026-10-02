@@ -14,6 +14,7 @@ import {
   deriveVerificationTargets,
   getVerificationConfig,
   listVerificationConfigs,
+  remoteOnlyTargets,
   resolveVerificationRun,
   updateVerificationConfig,
 } from './verification'
@@ -418,5 +419,34 @@ describe('verification configs', () => {
 
     expect(resolved.metadata.targets).toEqual([{ id: 'api', name: 'api', url: '' }])
     expect(resolved.playwrightEnv).toEqual({})
+  })
+})
+
+describe('remoteOnlyTargets', () => {
+  const remoteSuite = (): FeatureConfig => ({
+    name: 'ledger', description: 'ledger', envs: ['staging'], featureDir,
+    repos: [{ name: 'api', localPath: featureDir }],
+  })
+
+  it('returns the deployed origins of a suite that boots nothing, without credentials, paths or loopback hosts', () => {
+    writeEnvset('staging', [
+      'API_BASE_URL=https://user:secret@api.staging.example.com/v1?token=abc',
+      'GATEWAY_URL=http://localhost:3000',
+      'LOCAL_URL=http://127.0.0.1:4000',
+      'BROKEN_URL=http://',
+      'NOT_A_URL_KEY=https://ignored.example.com',
+    ].join('\n'))
+
+    expect(remoteOnlyTargets(remoteSuite(), 'staging')).toEqual({ API_BASE_URL: 'https://api.staging.example.com' })
+  })
+
+  it('is null when a service boots in that env, or when every URL stays on this machine', () => {
+    writeEnvset('local', 'API_BASE_URL=https://api.staging.example.com\n')
+    // feature() boots api-server in "local": a run there repairs code it booted.
+    expect(remoteOnlyTargets(feature(), 'local')).toBeNull()
+
+    writeEnvset('staging', 'GATEWAY_URL=http://localhost:3000\n')
+    expect(remoteOnlyTargets(remoteSuite(), 'staging')).toBeNull()
+    expect(remoteOnlyTargets(remoteSuite(), 'missing')).toBeNull()
   })
 })

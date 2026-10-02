@@ -120,17 +120,11 @@ export function RunOverviewTab({
             </div>
           )}
         </div>
-        {/* Six slots, always: the grid only ever folds 6 → 3 → 2 columns, so no
-            row is left half-full. The 1px gap over the border colour draws the
-            hairlines between cells at every column count. */}
-        <div className="@container">
-          <div
-            className="grid grid-cols-2 gap-px @[420px]:grid-cols-3 @[760px]:grid-cols-6"
-            style={{ background: 'var(--border-default)' }}
-          >
-            {runFacts(manifest, duration).map((fact) => <RunFactTile key={fact.label} fact={fact} />)}
-          </div>
-        </div>
+        {/* A label column beside a value column, one fact per row — the same
+            reading order as a service card's cmd/cwd/url fields below. */}
+        <dl className="cl-card-body grid grid-cols-[92px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-xs">
+          {runFacts(manifest, duration).map((fact) => <RunFactRow key={fact.label} fact={fact} />)}
+        </dl>
       </section>
       {/* For a boot-only session the held-state message is the point of the
           screen, so surface it on the overview (normal runs keep it in the
@@ -174,57 +168,56 @@ export function RunOverviewTab({
   )
 }
 
-/** One cell in the Overview's "At a glance" card. */
+/** One row in the Overview's "At a glance" card. */
 export interface RunFact {
   label: string
   value: string
   /** A second, quieter part — the date after a time, the cycle count after the agent. */
   sub?: string
-  /** Hover text when the cell shows a shortened form (the full ISO timestamp). */
+  /** Hover text when the row shows a shortened form (the full ISO timestamp). */
   title?: string
   mono?: boolean
-  /** No value recorded for this run: the slot shows a muted dash. */
+  /** No value recorded for this run: the row shows a muted dash. */
   empty?: boolean
 }
 
 const NO_VALUE = '—'
 
-/** The run's six facts, in a fixed order. Every slot is always present — an
- *  unknown value reads as a dash, as on a service card — so the grid keeps a
- *  whole number of rows. A timestamp splits into the time (what you compare
- *  between runs) and the date, with the exact ISO value on hover. The heal
- *  agent and its cycle count are one fact — who healed, and how many times. */
+/** The run's facts, in a fixed order. Envset, duration and start always show —
+ *  a run without an envset reads as a dash; the end time, heal and models rows
+ *  appear once the run has recorded them. A timestamp splits into the time
+ *  (what you compare between runs) and the date, with the exact ISO value on
+ *  hover. The heal agent and its cycle count are one fact — who healed, and
+ *  how many times. */
 export function runFacts(manifest: RunManifest, duration: number | null): RunFact[] {
   const agent = healAgentOverviewLabel(manifest)
   const cycles = manifest.healCycles > 0 ? plural(manifest.healCycles, 'cycle') : null
   const heal = agent ?? cycles
   const models = pinnedPlanSummary(manifest.models)
   return [
-    { label: 'Envset', value: manifest.env ?? NO_VALUE, mono: true, empty: !manifest.env },
+    { label: 'Envset', value: manifest.env ?? NO_VALUE, mono: true, ...(manifest.env ? {} : { empty: true }) },
     { label: 'Duration', value: manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration) },
-    heal
-      ? { label: 'Heal', value: heal, ...(agent && cycles ? { sub: cycles } : {}) }
-      : { label: 'Heal', value: NO_VALUE, empty: true },
     timestampFact(manifest.status === 'queued' ? 'Queued at' : 'Started', manifest.startedAt),
-    timestampFact('Ended', manifest.endedAt),
-    models ? { label: 'Models', value: models, title: models } : { label: 'Models', value: NO_VALUE, empty: true },
+    ...(manifest.endedAt ? [timestampFact('Ended', manifest.endedAt)] : []),
+    ...(heal ? [{ label: 'Heal', value: heal, ...(agent && cycles ? { sub: cycles } : {}) }] : []),
+    ...(models ? [{ label: 'Models', value: models, title: models }] : []),
   ]
 }
 
-function timestampFact(label: string, iso: string | undefined): RunFact {
-  if (!iso) return { label, value: NO_VALUE, empty: true }
+function timestampFact(label: string, iso: string): RunFact {
   return { label, value: formatLifecycleTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
 }
 
-/** A cell of the facts grid: a rubric label over the value, on the card's own
- *  surface — the hairlines come from the grid behind it. */
-export function RunFactTile({ fact }: { fact: RunFact }) {
+/** A row of the facts list: the rubric label in the left column, the value
+ *  and its quieter sub in the right. `contents` lets the dt/dd pair sit in the
+ *  parent grid's two columns while the row stays one addressable element. */
+export function RunFactRow({ fact }: { fact: RunFact }) {
   const mono = fact.mono ? { fontFamily: 'var(--font-mono)' } : {}
   return (
-    <div className="min-w-0 bg-surface px-3 py-2.5" data-testid="run-fact">
-      <div className="cl-rubric truncate">{fact.label}</div>
-      <div
-        className="mt-1 flex min-w-0 items-baseline gap-1.5 text-xs"
+    <div className="contents" data-testid="run-fact">
+      <dt className="cl-rubric truncate">{fact.label}</dt>
+      <dd
+        className="flex min-w-0 items-baseline gap-1.5"
         title={fact.title ?? fact.value}
       >
         <span className="truncate" style={{ color: fact.empty ? 'var(--text-muted)' : 'var(--text-primary)', ...mono }}>
@@ -235,7 +228,7 @@ export function RunFactTile({ fact }: { fact: RunFact }) {
             {fact.sub}
           </span>
         )}
-      </div>
+      </dd>
     </div>
   )
 }

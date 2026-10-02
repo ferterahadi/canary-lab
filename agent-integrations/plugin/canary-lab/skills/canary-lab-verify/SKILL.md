@@ -53,6 +53,17 @@ An invocation argument (`/canary-lab-verify <suite>`) is a suite (feature) name
 in the connected workspace. Use it directly, then choose the **Local app** or
 **Deployed environment** flow below from the target the user named.
 
+## When to choose Verify
+
+Choose Verify, not `start_run`, whenever the target is a deployed, staging or
+live host the suite does not boot. A run boots the suite's services from its
+repos and its repair cycle edits that local code; a remote deployment never
+reads it, so a run there can only "pass" by changing the test. If `start_run`
+returned `type: "verify_instead"` or `remote_target_requires_choice`, this is
+that case: its `targetOrigins` name the deployed hosts. Use a saved config, or
+create one and take the target URLs from the user — never copy them in from the
+envset on your own.
+
 ## Workspace Bootstrap
 
 1. Find the LIVE server first: read `~/.canary-lab/active-servers.json`, which records `projectRoot`, `port` and `pid` for every UI that registered. A stopped server's entry LINGERS — the file is only rewritten when the next server registers — so an entry is a candidate, not proof: the health check below is what confirms it. One entry → that is your server and its `port`. Several → take the one whose `projectRoot` is the workspace the user means. None → fall back to `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`): one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`. Do NOT start from a guessed port.

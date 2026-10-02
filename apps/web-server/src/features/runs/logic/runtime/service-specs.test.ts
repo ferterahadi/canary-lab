@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolvePortEnv, collectPortSlots } from './service-specs'
+import { resolvePortEnv, collectPortSlots, bootsServicesForEnv } from './service-specs'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 
 // The port-slot half of buildServiceSpecs, which the orchestrator's own tests
@@ -90,5 +90,26 @@ describe('collectPortSlots', () => {
       repos: [{ name: 'api', localPath: '/repos/api', startCommands: [{ command: 'a', name: 'a' }] }],
     }))
     expect(slots).toEqual([])
+  })
+})
+
+describe('bootsServicesForEnv', () => {
+  const feature = (repos: FeatureConfig['repos']): FeatureConfig =>
+    ({ name: 'checkout', description: '', envs: ['local', 'staging'], featureDir: '/tmp/checkout', repos }) as FeatureConfig
+
+  it('is false for a feature with no repos, or repos without start commands', () => {
+    expect(bootsServicesForEnv(feature(undefined), 'local')).toBe(false)
+    expect(bootsServicesForEnv(feature([{ name: 'api', localPath: '/repo/api' }]), 'local')).toBe(false)
+  })
+
+  it('honours both the repo and the start-command env whitelists', () => {
+    const repos: FeatureConfig['repos'] = [
+      { name: 'api', localPath: '/repo/api', envs: ['local'], startCommands: ['npm run dev'] },
+      { name: 'web', localPath: '/repo/web', startCommands: [{ command: 'npm run web', envs: ['local'] }] },
+    ]
+    expect(bootsServicesForEnv(feature(repos), 'local')).toBe(true)
+    expect(bootsServicesForEnv(feature(repos), 'staging')).toBe(false)
+    // No selected env means no filtering, exactly as buildServiceSpecs treats it.
+    expect(bootsServicesForEnv(feature(repos), undefined)).toBe(true)
   })
 })
