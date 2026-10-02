@@ -88,6 +88,6 @@ it('deduplicates replay and closes the live stream when the same identity switch
   await act(async () => { root.render(<AgentSessionView source={{ ...source, live: false }} />) })
   expect(socket.connect.mock.results[0].value.close).toHaveBeenCalledOnce()
   expect(socket.connect).toHaveBeenCalledOnce()
-  expect(container.querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('History')
+  expect(container.querySelector('[data-testid="agent-session-mode"]')?.textContent).toMatch(/^Ended/)
   expect(container.querySelectorAll('.agentts-row')).toHaveLength(2)
 })

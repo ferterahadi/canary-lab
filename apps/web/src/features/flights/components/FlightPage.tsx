@@ -40,6 +40,8 @@ export function FlightPage({
   onOpenCoverage,
   stage,
   onSelectStage,
+  log,
+  onOpenLog,
 }: {
   /** A real flight id, or a `feature:<name>` derived token (R81). */
   flightId: string
@@ -81,6 +83,9 @@ export function FlightPage({
    *  the pick survives a drill-through and a refresh. Pass both or neither. */
   stage?: FlightStageKey | null
   onSelectStage?: (stage: FlightStageKey | null) => void
+  /** The routed Activity log entry (`?log=…`) and its setter. Pass both or neither. */
+  log?: string | null
+  onOpenLog?: (id: string | null) => void
 } & FlightDrillThroughs) {
   // The flight detail refetches on `flights-changed`; the setup digest on
   // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
@@ -95,7 +100,7 @@ export function FlightPage({
           {recalculation.status === 'failed' && <button type="button" className="cl-button" onClick={onRetryRecalculation}>Retry recalculation</button>}
         </div>
       )}
-      <FlightDetail activityRequest={recalculation?.request} flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
+      <FlightDetail activityRequest={recalculation?.request} flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} log={log} onOpenLog={onOpenLog} />
     </div>
   )
 }

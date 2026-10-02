@@ -77,7 +77,7 @@ export function App() {
     resumePlanTaskId, setResumePlanTaskId,
     focusTest, runTab, bootFailureFor, setBootFailureFor,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
-    flightStage, setFlightStage,
+    flightStage, setFlightStage, flightLog, setFlightLog,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
   } = nav
 
@@ -470,6 +470,10 @@ export function App() {
                  auto-pick — landing on the last done stage, not the one left. */
               stage={flightStage}
               onSelectStage={setFlightStage}
+              /* The stage Activity's open log entry is routed too (?log=…), so
+                 a refresh or a shared link reopens the same entry. */
+              log={flightLog}
+              onOpenLog={setFlightLog}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
               /* The run hero's "verdict from run-start snapshot · N pending
                  edits" link lands on the same review the status-bar pill

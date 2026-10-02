@@ -271,6 +271,31 @@ describe('useWorkspaceNavigation — openFlight', () => {
     expect(nav.selectedFlightId).toBeNull()
   })
 
+  it('closes the Activity log entry when the stage changes, and keeps it on the same stage', async () => {
+    await mount(persisted({ view: 'flights', flight: 'fl-1', flightStage: 'docs', flightLog: 'agent:docs:4' }))
+    expect(nav.flightLog).toBe('agent:docs:4')
+
+    await act(async () => { nav.setFlightStage('docs') })
+    expect(nav.flightLog).toBe('agent:docs:4')
+
+    await act(async () => { nav.setFlightStage('run') })
+    expect(nav.flightLog).toBeNull()
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ flightStage: 'run', flightLog: null }))
+  })
+
+  it('opens and closes a log entry, and drops it when a different flight opens', async () => {
+    await mount(persisted({ view: 'flights', flight: 'fl-1', flightStage: 'docs' }))
+
+    await act(async () => { nav.setFlightLog('agent:docs:2') })
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ flightLog: 'agent:docs:2' }))
+
+    await act(async () => { nav.openFlight('fl-1') })
+    expect(nav.flightLog).toBe('agent:docs:2')
+
+    await act(async () => { nav.openFlight('fl-2') })
+    expect(nav.flightLog).toBeNull()
+  })
+
   it('sets the stage directly', async () => {
     await mount()
 

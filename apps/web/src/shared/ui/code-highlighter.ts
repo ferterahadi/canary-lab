@@ -3,7 +3,9 @@
 // singleton means every code view (test playback, coverage source, spec preview)
 // shares the same payload instead of each component initialising its own copy.
 // The TypeScript grammar also covers JavaScript for our purposes, so callers pass
-// `lang: 'typescript'` for both .ts and .js.
+// `lang: 'typescript'` for both .ts and .js. The agent log viewer also shows
+// Markdown, JSON, TSX and YAML payloads; those grammars load on first use so a
+// test-playback screen never pays for them.
 
 type Highlighter = {
   codeToHtml: (code: string, opts: { lang: string; theme: string }) => string
@@ -11,6 +13,19 @@ type Highlighter = {
    *  and default/comment token colours — so non-code surfaces can share the
    *  exact Code mode palette. */
   themeColors: (theme: string) => { bg?: string; fg?: string; comment?: string }
+  /** Load an on-demand grammar before the first `codeToHtml` that names it. */
+  loadLanguage: (lang: ExtraCodeLanguage) => Promise<void>
+}
+
+/** Grammars beyond the always-loaded TypeScript one, each its own lazy chunk. */
+export type ExtraCodeLanguage = 'markdown' | 'json' | 'tsx' | 'yaml'
+export type CodeLanguage = 'typescript' | ExtraCodeLanguage
+
+const EXTRA_GRAMMARS: Record<ExtraCodeLanguage, () => Promise<{ default: unknown }>> = {
+  markdown: () => import('shiki/langs/markdown.mjs'),
+  json: () => import('shiki/langs/json.mjs'),
+  tsx: () => import('shiki/langs/tsx.mjs'),
+  yaml: () => import('shiki/langs/yaml.mjs'),
 }
 
 let highlighterPromise: Promise<Highlighter> | null = null
@@ -37,6 +52,11 @@ export function getCodeHighlighter(): Promise<Highlighter> {
           const registration = hl.getTheme(theme)
           const comment = hl.codeToTokens('// comment', { lang: 'typescript', theme }).tokens[0]?.[0]?.color
           return { bg: registration.bg, fg: registration.fg, comment }
+        },
+        loadLanguage: async (lang) => {
+          if (hl.getLoadedLanguages().includes(lang)) return
+          const grammar = await EXTRA_GRAMMARS[lang]()
+          await hl.loadLanguage(grammar.default as Parameters<typeof hl.loadLanguage>[0])
         },
       }
     })()

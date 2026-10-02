@@ -15,6 +15,7 @@ const base: NavState = {
   run: null,
   flight: null,
   flightStage: null,
+  flightLog: null,
   configFor: null,
   configTab: null,
   verifyOpen: false,
@@ -74,6 +75,14 @@ describe('initialNavState', () => {
     expect(initialNavState(persisted({ view: 'flights', flightStage: 'specs-coverage' })).flightStage).toBeNull()
     // A stale or hand-typed stage name reads as follow-mode, never a blank pane.
     expect(initialNavState(persisted({ view: 'flights', flight: 'fl_1', flightStage: 'not-a-stage' })).flightStage).toBeNull()
+  })
+
+  it('hydrates the open Activity log entry, and only alongside a flight', () => {
+    const s = initialNavState(persisted({ view: 'flights', flight: 'fl_1', flightStage: 'docs', flightLog: 'agent:docs:4' }))
+    expect(s.flightLog).toBe('agent:docs:4')
+    expect(navToPersistedView(s).flightLog).toBe('agent:docs:4')
+    expect(initialNavState(persisted({ view: 'flights', flight: 'fl_1' })).flightLog).toBeNull()
+    expect(initialNavState(persisted({ view: 'flights', flightLog: 'agent:docs:4' })).flightLog).toBeNull()
   })
 
   it('opens the config dialog on the persisted feature + tab', () => {
@@ -246,7 +255,7 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, configTab: 'ports', modelsAgent: null, focusTest: null, runTab: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, flightLog: null, configTab: 'ports', modelsAgent: null, focusTest: null, runTab: null, returnFlight: null })
   })
 })
 

@@ -445,6 +445,30 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('specs-coverage')
   })
 
+  // The Activity log modal names one row of an open flight's stage, so it is
+  // gated exactly like the stage it lives on.
+  it('round-trips the open Activity log entry alongside its flight', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'docs', flightLog: 'agent:docs:4' }))
+    expect(window.location.search).toContain('log=agent%3Adocs%3A4')
+    expect(readPersistedView()).toEqual(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'docs', flightLog: 'agent:docs:4' }))
+  })
+
+  it('drops the log entry without an open flight to hang it on', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightLog: 'agent:docs:4' }))
+    persistView(view({ view: 'flights', flight: null, flightLog: 'agent:docs:4' }))
+    expect(window.location.search).not.toContain('log=')
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightLog: 'agent:docs:4' }))
+    persistView(view({ view: 'coverage', feature: 'checkout', flight: 'fl_abc123', flightLog: 'agent:docs:4' }))
+    expect(window.location.search).not.toContain('log=')
+    window.history.replaceState(null, '', '/?view=flights&log=agent%3Adocs%3A4')
+    expect(readPersistedView()).toEqual(view({ view: 'flights' }))
+  })
+
+  it('keeps the log entry OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightLog: 'agent:docs:4' }))
+    expect(localStorage.getItem(KEY)).not.toContain('agent:docs:4')
+  })
+
   // External authoring now surfaces on the flight's specs-coverage stage, so the
   // `draft` dialog and its id qualifier are tombstones like `wf` and `task`.
   it('ignores the retired draft dialog in a stale deep link', () => {

@@ -19,11 +19,15 @@ it('retains discovery task identity and updates its external outcome in the open
   }
   try {
     await act(async () => root.render(<DiscoveryRepairActivity repair={repair} />))
+    const header = () => host.querySelector('[data-activity-id="external:discovery-repair:repair-one:header"]')
     const start = host.querySelector('[data-activity-id="external:discovery-repair:repair-one:start"]')
-    expect(start?.textContent).toContain('Repairing test discovery · Running')
+    expect(header()?.textContent).toContain('Repairing test discovery')
+    expect(header()?.querySelector('[data-testid="external-session-status"]')?.getAttribute('data-tone')).toBe('live')
+    expect(start?.textContent).toContain('Running')
     await act(async () => root.render(<DiscoveryRepairActivity repair={{ ...repair, status: 'succeeded', endedAt: '2026-10-02T03:02:00Z', message: 'Discovered 4 tests.' }} />))
     expect(host.querySelector('[data-activity-id="external:discovery-repair:repair-one:start"]')).toBe(start)
-    expect(host.textContent).toContain('Repairing test discovery · Completed')
+    expect(header()?.querySelector('[data-testid="external-session-status"]')?.textContent).toBe('Completed · 2m 00s')
+    expect(host.querySelector('[data-activity-id="external:discovery-repair:repair-one:end"]')?.textContent).toContain('Completed')
     expect(host.textContent).toContain('Discovered 4 tests.')
     expect(host.querySelector('[data-empty-reason]')).toBeNull()
   } finally { act(() => root.unmount()) }

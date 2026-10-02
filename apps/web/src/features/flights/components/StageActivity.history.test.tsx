@@ -132,4 +132,51 @@ describe('StageActivityRail multi-session chronology', () => {
     expect(text).not.toContain('legacy author chunk')
     expect(text).not.toContain('legacy mapping chunk')
   })
+
+  it('opens a collapsed band for a routed log entry, and records it open', async () => {
+    mocks.getFlightAgentSession.mockResolvedValue({ agent: 'claude', sessionId: 'docs', events: [
+      { kind: 'assistant-message', timestamp: '2026-08-26T01:00:00.000Z', text: 'Collected the docs.\nThree files.' },
+    ] })
+    const onOpenChange = vi.fn()
+    await act(async () => {
+      root.render(
+        <StageActivityRail
+          stageKey="docs"
+          sessionSources={[{ label: 'Summarizing docs', source: { kind: 'flight', flightId: 'fl_1', stage: 'docs', live: false } }]}
+          live={false}
+          settled
+          log=""
+          open={false}
+          onOpenChange={onOpenChange}
+          openLogId="flight:fl_1:docs:event:0"
+          onOpenLogChange={vi.fn()}
+        />,
+      )
+    })
+
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    // The routed row is the one shown open and marked selected.
+    expect(container.querySelector('li[data-kind="agent"] .agentts-log')?.getAttribute('data-selected')).toBe('true')
+    expect(container.querySelector('[data-testid="activity-log-modal"]')?.textContent).toContain('Three files.')
+  })
+
+  it('caps the band at the whole column it shares with the stage panes', async () => {
+    const column = document.createElement('div')
+    container.appendChild(column)
+    const columnRoot = createRoot(column)
+    Object.defineProperty(column, 'clientHeight', { configurable: true, value: 600 })
+    await act(async () => {
+      columnRoot.render(
+        <>
+          <div />
+          <StageActivityRail stageKey="docs" sessionSources={[]} live={false} settled log="" open onOpenChange={vi.fn()} />
+        </>,
+      )
+    })
+
+    const handle = column.querySelector<HTMLElement>('[data-testid="stage-activity-resize"]')!
+    await act(async () => { handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })) })
+    expect(handle.getAttribute('aria-valuenow')).toBe('600')
+    act(() => columnRoot.unmount())
+  })
 })

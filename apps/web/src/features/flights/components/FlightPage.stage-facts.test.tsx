@@ -600,7 +600,7 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => { toggleActivity(container) })
     expect(band()?.style.height).toBe('208px')
     expect(band()?.className).not.toContain('flex-1')
-    expect(band()?.className).toContain('max-h-[70%]')
+    expect(band()?.className).toContain('max-h-full')
     expect(isActivityOpen(container)).toBe(true)
 
     // The bar IS the band's top edge, so a rising pointer grows it.

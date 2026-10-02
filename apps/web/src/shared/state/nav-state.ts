@@ -29,6 +29,9 @@ export interface NavState {
    *  flight view: coming back remounted the detail, which re-ran the auto-pick
    *  and dropped the user on a different stage than they left. */
   flightStage: FlightStageKey | null
+  /** Which Activity entry's full log is open in the selected stage (routed as
+   *  ?log=…), or null. Belongs to that stage: a stage switch closes it. */
+  flightLog: string | null
   /** The Feature-config dialog (routed as ?dialog=config), by feature. */
   configFor: string | null
   /** Which tab that dialog is on (routed as ?tab=…). Null = the entry point's
@@ -98,6 +101,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     run: persisted.run,
     flight: persisted.flight,
     flightStage: persisted.flight ? parseFlightStage(persisted.flightStage) : null,
+    flightLog: persisted.flight ? persisted.flightLog ?? null : null,
     configFor: persisted.dialog === 'config' ? persisted.feature : null,
     configTab: persisted.dialog === 'config' ? persisted.configTab : null,
     verifyOpen: persisted.dialog === 'verification',
@@ -164,6 +168,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     dialog: routedDialog(state),
     flight: state.flight,
     flightStage: state.flightStage,
+    flightLog: state.flightLog,
     configTab: state.configTab,
     // Same drop-unless-active gate as configTab: the matrix belongs to an OPEN
     // settings dialog, so closing settings drops it from the URL too.

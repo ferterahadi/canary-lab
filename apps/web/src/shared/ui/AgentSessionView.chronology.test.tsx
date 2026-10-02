@@ -45,25 +45,29 @@ describe('interleaved Activity', () => {
     expect(text.indexOf('Aborted')).toBeLessThan(text.indexOf('Restarting'))
     expect(text.indexOf('Restarting')).toBeLessThan(text.indexOf('Second prompt'))
     expect(text.indexOf('Second prompt')).toBeLessThan(text.indexOf('Late first answer'))
-    expect(host.querySelectorAll('.agentts-sysrow .agentts-time')).toHaveLength(4)
+    // Two conductor lines and the external session's start and end, each one
+    // System row carrying its own time.
+    expect(host.querySelectorAll('.agentts-row[data-kind="system"] .agentts-time')).toHaveLength(4)
+    expect(host.querySelectorAll('[data-testid="external-session-header"]')).toHaveLength(1)
     expect(host.querySelectorAll('[data-testid="activity-date"]')).toHaveLength(2)
     expect(host.querySelectorAll('[data-testid="external-session-start"]')).toHaveLength(1)
   })
 
-  it('inserts late live events without remounting expanded rows, and deduplicates reconnect replay', async () => {
+  it('inserts late live events without remounting a selected row or closing its log, and deduplicates reconnect replay', async () => {
     const prompt = event('Long prompt '.repeat(100), '2026-10-02T12:05:09+08:00')
     mocks.get.mockResolvedValue({ agent: 'codex', sessionId: 'live', events: [prompt] })
     await act(async () => root.render(<AgentSessionView source={{ kind: 'flight', flightId: 'flight', stage: 'live', live: true }} />))
     const stream = mocks.connect.mock.calls[0][0] as unknown as ConnectAgentSessionOptions
-    const oldRow = host.querySelector('[data-kind="assistant-message"]')!
-    const more = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Show more'))!
-    act(() => more.click())
+    const agentRows = () => host.querySelectorAll('li[data-kind="agent"]')
+    const oldRow = agentRows()[0]
+    act(() => oldRow.querySelector('button')!.click())
+    expect(document.querySelector('[data-testid="activity-log-modal"]')).not.toBeNull()
     const scroller = host.querySelector<HTMLElement>('.overflow-y-auto')!
     Object.defineProperty(scroller, 'scrollHeight', { value: 1000, configurable: true })
     Object.defineProperty(scroller, 'clientHeight', { value: 200, configurable: true })
     scroller.scrollTop = 400
     vi.spyOn(oldRow, 'getBoundingClientRect').mockImplementation(() => {
-      const index = [...host.querySelectorAll('[data-kind="assistant-message"]')].indexOf(oldRow)
+      const index = [...agentRows()].indexOf(oldRow)
       return new DOMRect(0, 500 + index * 80 - scroller.scrollTop, 300, 100)
     })
     act(() => scroller.dispatchEvent(new Event('scroll', { bubbles: true })))
@@ -74,8 +78,9 @@ describe('interleaved Activity', () => {
       stream.onEvent(late)
     })
     expect(texts().indexOf('Earlier arriving late')).toBeLessThan(texts().indexOf('Long prompt'))
-    expect(host.querySelectorAll('[data-kind="assistant-message"]')[1]).toBe(oldRow)
-    expect(oldRow.textContent).toContain('Show less')
+    expect(agentRows()[1]).toBe(oldRow)
+    expect(oldRow.querySelector('button')?.getAttribute('data-selected')).toBe('true')
+    expect(document.querySelector('[data-testid="activity-log-modal"]')?.textContent).toContain('Long prompt')
     expect(scroller.scrollTop).toBe(480)
     expect(host.querySelector('[aria-label="Jump to latest"]')).not.toBeNull()
     act(() => {
@@ -84,7 +89,7 @@ describe('interleaved Activity', () => {
       stream.onEvent(late)
       stream.onEvent(event('Newest', '2026-10-02T12:06:00+08:00'))
     })
-    expect(host.querySelectorAll('[data-kind="assistant-message"]')).toHaveLength(3)
+    expect(agentRows()).toHaveLength(3)
     expect(texts().indexOf('Newest')).toBeGreaterThan(texts().indexOf('Long prompt'))
   })
 })

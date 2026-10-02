@@ -11,7 +11,8 @@ import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { coverageSessionSources, stageCoverageJobs } from '../lib/coverage-activity'
 import * as coverageApi from '@/shared/api/coverage'
-import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import type { AgentSessionSegmentSource, AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import type { ExternalSessionActivity } from '@/shared/ui/activity-log'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel } from './FeatureSetupPanel'
@@ -240,6 +241,8 @@ export function StageDetail({
   coverageJobs = [],
   activityOpen,
   onActivityOpenChange,
+  openLogId,
+  onOpenLogChange,
   externalMutationOwner,
   onResponded,
   onActionError,
@@ -274,6 +277,9 @@ export function StageDetail({
    *  the normal default: open while live, collapsed otherwise. */
   activityOpen?: boolean
   onActivityOpenChange: (open: boolean) => void
+  /** The routed Activity log entry open in the modal, and its setter. */
+  openLogId?: string | null
+  onOpenLogChange?: (id: string | null) => void
   /** Present while mutations belong to the Claude/Codex session. */
   externalMutationOwner?: ExternalMutationOwner
   onResponded: () => void
@@ -536,7 +542,11 @@ export function StageDetail({
       {/* R66: header, facts and stage panels scroll here; the activity band
           below fills the rest of the pane so a long transcript scrolls in
           place instead of the whole stage view running off the bottom. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* The padding lives on an inner block, not on the scroller: a flex item
+          can't shrink below its own padding, so a padded scroller kept 24px of
+          the panes showing above an Activity band dragged all the way up. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      <div className="flex flex-1 flex-col p-3">
       {/* R85: the chip + actions share a top edge with the first card instead of
           sitting on a row of their own above it. The cards are capped at
           STAGE_COLUMN (92ch) while the pane is wider, so the leftover width to
@@ -900,6 +910,7 @@ export function StageDetail({
       </div>
       </div>
       </div>
+      </div>
       {/* R66: one activity rail per stage — the conductor's tagged system lines
           and the stage's agent timeline (if any) on a single block. The run
           stage is agentless at the flight level (its repair agent's timeline is
@@ -917,6 +928,8 @@ export function StageDetail({
           externalSessions={externalSessions}
           open={activityOpen}
           onOpenChange={onActivityOpenChange}
+          openLogId={openLogId}
+          onOpenLogChange={onOpenLogChange}
           {...(stage.key === 'portify' ? { empty: EMPTY_COPY.portifyNoTranscript } : {})}
         />
       )}

@@ -87,6 +87,8 @@ export function FlightDetail({
   drill,
   stage: routedStage,
   onSelectStage,
+  log,
+  onOpenLog,
   indexEntry,
   missing = false,
   onFlightMissing,
@@ -121,6 +123,10 @@ export function FlightDetail({
    *  it standalone. */
   stage?: FlightStageKey | null
   onSelectStage?: (stage: FlightStageKey | null) => void
+  /** The open Activity log entry, when App routes it (`?log=…`). Same hybrid
+   *  contract as `stage`; without them the stage's Activity keeps it locally. */
+  log?: string | null
+  onOpenLog?: (id: string | null) => void
   /** The flight's row from the `/ws/flights` index, when the caller holds it.
    *  A settled flight is not snapshotted on the push channel, so a cold open
    *  used to blank the WHOLE page behind "Loading flight…" until REST resolved
@@ -793,6 +799,16 @@ export function FlightDetail({
               coverageJobs={featureCoverageJobs}
               activityOpen={activityOpenByFlight[flightId]?.[stage.key]}
               onActivityOpenChange={(open) => setStageActivityOpen(stage.key, open)}
+              {...(onOpenLog ? {
+                openLogId: log ?? null,
+                // A log entry names a row of THIS stage, so opening one in
+                // follow-mode pins the stage too — otherwise a refresh could
+                // auto-pick a different stage and lose the entry.
+                onOpenLogChange: (id: string | null) => {
+                  if (id && selectedStage === null) setSelectedStage(stage.key)
+                  onOpenLog(id)
+                },
+              } : {})}
               externalMutationOwner={externalMutationOwner}
               onResponded={refetch}
               onActionError={setActionError}
