@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import ts from 'typescript'
+import { isTestCall } from '../../../../shared/test-declaration'
 
 export function listSpecFiles(featureDir: string): string[] {
   const out: string[] = []
@@ -28,10 +29,7 @@ export function specFileOf(location: string): string {
 }
 
 export function isPlaywrightTestCall(node: ts.CallExpression): boolean {
-  const chain = calleeChain(node.expression)
-  if (chain[0] !== 'test') return false
-  if (chain[1] === 'describe' || chain[1] === 'step') return false
-  return chain.length >= 1
+  return isTestCall(node)
 }
 
 export function isAssertionCall(node: ts.CallExpression): boolean {

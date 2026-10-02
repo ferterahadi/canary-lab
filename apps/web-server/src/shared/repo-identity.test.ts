@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { resolveRepoIdentity, resolveRepoPath } from './repo-identity'
+import { resolveRepoIdentity, resolveRepoPath, sameRepoSet } from './repo-identity'
 
 let root: string
 beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-'))) })
@@ -34,6 +34,8 @@ it('keeps different subdirectories and real Git worktrees distinct', () => {
   const dirs = [path.join(root, 'service-a'), path.join(root, 'service-b')]
   dirs.forEach((dir) => fs.mkdirSync(dir))
   expect(new Set([root, worktree, ...dirs].map((dir) => resolveRepoIdentity(dir, 'required'))).size).toBe(4)
+  expect(sameRepoSet([root], [worktree])).toBe(false)
+  expect(sameRepoSet([dirs[0]], [dirs[1]])).toBe(false)
 })
 
 it('preserves missing paths and dangling symlinks only in best-effort mode', () => {
@@ -67,4 +69,20 @@ it('observes changes on each call and does not introduce a directory-type guard'
   expect(resolveRepoIdentity(alias, 'required')).toBe(root)
   fs.unlinkSync(alias); fs.symlinkSync(file, alias)
   expect(resolveRepoIdentity(alias, 'required')).toBe(file)
+})
+
+it('compares identities without changing order or duplicate multiplicity', () => {
+  const repo = path.join(root, 'repo')
+  const alias = path.join(root, 'alias')
+  fs.mkdirSync(repo)
+  fs.symlinkSync(repo, alias, 'dir')
+  const missing = path.join(root, 'missing')
+  const original = [missing, repo, repo]
+  expect(sameRepoSet(original, [alias, missing, repo])).toBe(true)
+  expect(original).toEqual([missing, repo, repo])
+  expect(sameRepoSet([repo, repo], [alias])).toBe(false)
+  expect(sameRepoSet([repo], [missing])).toBe(false)
+  expect(sameRepoSet(['~'], [os.homedir()])).toBe(true)
+  expect(sameRepoSet(['~/missing-repo'], [path.join(os.homedir(), 'missing-repo')])).toBe(true)
+  expect(sameRepoSet([], [])).toBe(true)
 })

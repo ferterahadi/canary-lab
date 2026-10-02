@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../../shared/path-containment'
 import * as fs from 'fs';
 import * as path from 'path';
 import { getEnvSetsDir, loadConfig, selectedEnvsetTargets } from '../../../../config/logic/envset-runtime';
@@ -64,10 +65,6 @@ function realpathDeep(p: string): string {
   return tail.length > 0 ? path.join(dir, ...tail) : dir
 }
 
-function isUnder(child: string, root: string): boolean {
-  const rel = path.relative(root, child)
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
-}
 
 export function hydrateEnvsetIntoWorktrees(opts: {
   /** Absolute featureDir (getEnvSetsDir/loadConfig accept it directly). */
@@ -90,7 +87,7 @@ export function hydrateEnvsetIntoWorktrees(opts: {
 
   for (const { slot, sourcePath, targetPath } of selectedEnvsetTargets(envSetsDir, opts.setName, config)) {
     const targetReal = realpathDeep(targetPath)
-    const root = rootsReal.find((r) => isUnder(targetReal, r.sourceRootReal))
+    const root = rootsReal.find((r) => isPathUnder(targetReal, r.sourceRootReal, false))
     // Targets outside every mapped root (e.g. the feature's own .env under
     // featureDir) are the real-path apply's business, not the worktree's.
     if (!root) continue

@@ -182,3 +182,18 @@ describe('hydrateEnvsetIntoWorktrees', () => {
     expect(res.written).toEqual([path.join(worktreeRoot, 'cfg/app.env')])
   })
 })
+
+it('hydrates a two-dot-prefixed child and restores its prior contents', () => {
+  const repoRoot = mkTmp()
+  const worktreeRoot = mkTmp()
+  const relative = '..cache/app.env'
+  const dest = path.join(worktreeRoot, relative)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, 'OLD=1')
+  const featureDir = scaffold({ repoRoot, slots: { env: { target: path.join(repoRoot, relative), content: 'NEW=1' } } })
+  const result = hydrateEnvsetIntoWorktrees({ featureDir, setName: 'local', roots: [{ sourceRoot: repoRoot, worktreeRoot }] })
+  expect(result.written).toEqual([dest])
+  expect(fs.readFileSync(dest, 'utf8')).toBe('NEW=1')
+  result.restore()
+  expect(fs.readFileSync(dest, 'utf8')).toBe('OLD=1')
+})

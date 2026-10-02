@@ -1,7 +1,7 @@
+import { sameRepoSet as compareRepoSets } from '../../../shared/repo-identity'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import {
   FLIGHT_EXECUTION_ORDER,
   FLIGHT_STAGE_KEYS,
@@ -366,8 +366,7 @@ export async function resetStagesForRestart(
 }
 
 export function sameRepoSet(a: string[], b: string[]): boolean {
-  const norm = (paths: string[]) => paths.map((p) => resolveRepoIdentity(p, 'best-effort')).sort().join('\n')
-  return norm(a) === norm(b)
+  return compareRepoSets(a, b)
 }
 
 /** Fresh stage array; with `fromStage`, earlier execution-priority stages are

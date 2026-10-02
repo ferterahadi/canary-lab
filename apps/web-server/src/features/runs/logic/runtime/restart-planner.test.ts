@@ -85,3 +85,9 @@ describe('planRestart', () => {
     expect(plan.noMatch).toBe(true)
   })
 })
+
+it('matches two-dot-prefixed children without matching escaped siblings', () => {
+  const service = svc('api', '/repo')
+  expect(planRestart(['/repo/..cache/app.ts'], [service]).toRestart).toEqual(['api'])
+  expect(planRestart(['/repo/../repo-other/app.ts'], [service]).toRestart).toEqual([])
+})

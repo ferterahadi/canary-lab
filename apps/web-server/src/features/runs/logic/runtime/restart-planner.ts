@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import path from 'path'
 import type { ServiceSpec } from './run-orchestrator-types'
 
@@ -38,7 +39,7 @@ export function planRestart(
 
   for (const svc of services) {
     const svcCwd = path.resolve(svc.cwd)
-    const matches = resolvedFiles.some((f) => isUnder(f, svcCwd))
+    const matches = resolvedFiles.some((f) => isPathUnder(f, svcCwd, true))
     if (matches) toRestart.push(svc.safeName)
     else toKeep.push(svc.safeName)
   }
@@ -48,10 +49,4 @@ export function planRestart(
     toKeep,
     noMatch: toRestart.length === 0,
   }
-}
-
-function isUnder(file: string, dir: string): boolean {
-  if (file === dir) return true
-  const withSep = dir.endsWith(path.sep) ? dir : dir + path.sep
-  return file.startsWith(withSep)
 }

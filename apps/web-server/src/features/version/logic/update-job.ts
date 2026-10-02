@@ -1,5 +1,5 @@
+import { readPackageBin } from '../../../../../../shared/lib/package-bin'
 import { spawn } from 'child_process'
-import fs from 'fs'
 import path from 'path'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, abortOnRestart } from '../../../../../../shared/lib/file-backed-task-store'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -102,16 +102,9 @@ function runLoggedCommand(
 }
 
 function installedCliPath(cwd: string, packageName: string): string | null {
-  try {
-    const packageRoot = path.join(cwd, 'node_modules', packageName)
-    const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'))
-    const bin = typeof pkg.bin === 'string'
-      ? pkg.bin
-      : pkg.bin?.['canary-lab'] ?? Object.values(pkg.bin ?? {}).find((value) => typeof value === 'string')
-    return typeof bin === 'string' ? path.resolve(packageRoot, bin) : null
-  } catch {
-    return null
-  }
+  const packageRoot = path.join(cwd, 'node_modules', packageName)
+  const bin = readPackageBin(packageRoot, 'canary-lab', true)
+  return bin === null ? null : path.resolve(packageRoot, bin)
 }
 
 const defaultInstall: InstallRunner = async ({ cwd, packageName, onOutput }) => {

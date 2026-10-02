@@ -441,3 +441,23 @@ describe('main (init-project orchestration)', () => {
     expect(messages.join('\n')).toContain('npx canary-lab setup')
   })
 })
+
+it.each(['', { alternate: 'cli.js' }])('keeps initialization fallback for bin %j', async (bin) => {
+  const workspace = mkTmp()
+  process.chdir(workspace)
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  const target = path.join(workspace, 'lookup-policy')
+  execFileSync.mockImplementation((cmd: string) => {
+    if (cmd === 'npm') {
+      const pkgRoot = path.join(target, 'node_modules', 'canary-lab')
+      fs.mkdirSync(pkgRoot, { recursive: true })
+      fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin }))
+      fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '')
+    }
+    return Buffer.from('')
+  })
+  await main(['lookup-policy', '--package-spec', '^9.9.9'])
+  expect(setupProject).toHaveBeenCalledWith(
+    { workspace: target, agent: 'auto', dryRun: false, force: false, implicit: true }, {},
+  )
+})

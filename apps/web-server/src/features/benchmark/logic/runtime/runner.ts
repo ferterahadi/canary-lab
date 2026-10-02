@@ -8,7 +8,7 @@ import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
-import { addWorktree, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
+import { addWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { RunOrchestrator } from '../../../runs/logic/runtime/orchestrator'
 import { defaultPlaywrightSpawner } from '../../../runs/logic/runtime/run-spawn'
 import { buildOrchestratorHealPrompt } from '../../../runs/logic/runtime/auto-heal'
@@ -460,17 +460,4 @@ function runAgentHeadless(
   // Sabotage swallows a failed/non-zero agent (it may still have edited code;
   // the diff is the arbiter), so resolve void on close OR spawn error.
   return handle.done.then(cleanup, cleanup)
-}
-
-// Git worktrees don't include gitignored deps, so the arm/staging worktrees have
-// no node_modules — services (`npx tsx ...`) and Playwright can't run. Symlink
-// the source repo's node_modules into the worktree root so resolution works.
-function linkNodeModules(handle: WorktreeHandle): void {
-  const src = path.join(handle.sourceRoot, 'node_modules')
-  const dst = path.join(handle.worktreeRoot, 'node_modules')
-  try {
-    if (fs.existsSync(src) && !fs.existsSync(dst)) fs.symlinkSync(src, dst, 'dir')
-  } catch {
-    /* best-effort — boot will surface a clearer error if deps are truly missing */
-  }
 }

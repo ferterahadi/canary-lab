@@ -354,3 +354,25 @@ describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
     expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf-8')).toBe('const x = 2\n')
   })
 })
+
+it('lists and removes a two-dot-prefixed worktree without admitting outside paths', async () => {
+  const { sourceRepo } = setupWorktreeFixtures()
+  const target = path.join(logsDir, '..cache', 'app')
+  addGitWorktree(sourceRepo, target)
+  const { app } = await build()
+  try {
+    const listing = await app.inject({ method: 'GET', url: '/api/cleanup/worktrees' })
+    expect(listing.json().worktrees).toContainEqual(expect.objectContaining({ path: target }))
+    for (const outside of [`${logsDir}-sibling/app`, path.join(logsDir, '..', 'outside')]) {
+      const rejected = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: outside } })
+      expect(rejected.statusCode).toBe(400)
+      expect(fs.existsSync(target)).toBe(true)
+    }
+    const deleted = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: target } })
+    expect(deleted.statusCode).toBe(200)
+    expect(fs.existsSync(target)).toBe(false)
+    expect(fs.existsSync(sourceRepo)).toBe(true)
+  } finally {
+    await app.close()
+  }
+})

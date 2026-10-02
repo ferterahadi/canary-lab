@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import { runGit, type GitResult } from '../../../../shared/git-repo'
@@ -69,8 +70,7 @@ export function parsePorcelainWorktrees(stdout: string): PorcelainWorktree[] {
 
 /** True when `child` is `parent` or lives inside it (no `..` escape). */
 export function isUnder(child: string, parent: string): boolean {
-  const rel = path.relative(parent, child)
-  return rel === '' ? true : (!rel.startsWith('..') && !path.isAbsolute(rel))
+  return isPathUnder(child, parent, true)
 }
 
 /**

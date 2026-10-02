@@ -1,3 +1,4 @@
+import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
 import path from 'path'
 import { readManifest } from './runtime/manifest'
@@ -7,25 +8,10 @@ import { indexPlaywrightArtifacts } from './run-artifacts'
 import type { RunSummary, PlaywrightPlaybackEvent, RunDetail } from '../../../../../../shared/run-detail'
 
 export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
-  const p = buildRunPaths(runDir).lifecycleEventsPath
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  const out: RunLifecycleEvent[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const parsed = JSON.parse(trimmed) as RunLifecycleEvent
-      if (parsed && typeof parsed === 'object' && typeof parsed.phase === 'string') out.push(parsed)
-    } catch {
-      // Ignore corrupt partial lines; the manifest snapshot remains usable.
-    }
-  }
-  return out.length > 0 ? out : undefined
+  const out = readJsonLines(buildRunPaths(runDir).lifecycleEventsPath, (value): value is RunLifecycleEvent =>
+    value !== null && typeof value === 'object' && 'phase' in value && typeof value.phase === 'string',
+  )
+  return out?.length ? out : undefined
 }
 
 // Read e2e-summary.json if present. Returns undefined when absent or
@@ -111,24 +97,9 @@ export function remapSummaryEntryId<T extends { id?: string }>(entry: T, idRemap
 }
 
 export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlaybackEvent[] | undefined {
-  const p = buildRunPaths(runDir).playwrightEventsPath
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  const out: PlaywrightPlaybackEvent[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const parsed = JSON.parse(trimmed) as PlaywrightPlaybackEvent
-      if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') out.push(parsed)
-    } catch {
-      // Ignore corrupt partial lines; the terminal log remains authoritative.
-    }
-  }
+  const out = readJsonLines(buildRunPaths(runDir).playwrightEventsPath, (value): value is PlaywrightPlaybackEvent =>
+    value !== null && typeof value === 'object' && 'type' in value && typeof value.type === 'string',
+  )
   return out
 }
 

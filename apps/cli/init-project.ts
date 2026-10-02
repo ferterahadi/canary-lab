@@ -1,3 +1,4 @@
+import { readPackageBin } from '../../shared/lib/package-bin'
 import { resolvePackageAsset } from './package-assets'
 import fs from 'fs'
 import path from 'path'
@@ -286,16 +287,8 @@ export interface InitProjectExtras {
 // caller treats that the same as "not installed" and leaves registration to its
 // own fallback.
 function installedCliPath(pkgRoot: string): string | null {
-  let bin: unknown
-  try {
-    bin = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8')).bin
-  } catch {
-    // Best-effort: a missing or unreadable package.json means the install did not
-    // land, which the caller already handles.
-    return null
-  }
-  const rel = typeof bin === 'string' ? bin : (bin as Record<string, unknown> | null)?.['canary-lab']
-  if (typeof rel !== 'string' || rel === '') return null
+  const rel = readPackageBin(pkgRoot, 'canary-lab', false)
+  if (rel === null || rel === '') return null
   const abs = path.join(pkgRoot, rel)
   return fs.existsSync(abs) ? abs : null
 }

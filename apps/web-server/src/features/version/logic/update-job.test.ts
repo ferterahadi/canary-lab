@@ -376,3 +376,20 @@ describe('reconcileInterrupted', () => {
     expect(after?.endedAt).toBe('t1')
   })
 })
+
+it.each(['', 'missing.js'])('leaves executable validation to the spawned updater for bin %j', async (bin) => {
+  const store = new UpdateJobStore(logsDir)
+  const packageRoot = path.join(logsDir, 'node_modules', 'canary-lab')
+  fs.mkdirSync(packageRoot, { recursive: true })
+  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ bin }))
+  const install = new FakeChild()
+  const upgrade = new FakeChild()
+  spawnMock.mockReturnValueOnce(install).mockReturnValueOnce(upgrade)
+  const { completion } = startUpdateJob({ projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' }, { store })
+  install.emit('close', 0)
+  await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2))
+  expect(spawnMock).toHaveBeenLastCalledWith(process.execPath, [path.resolve(packageRoot, bin), 'upgrade', '--silent'], { cwd: logsDir, env: process.env })
+  upgrade.emit('close', 1)
+  await completion
+  expect(store.current()?.status).toBe('failed')
+})

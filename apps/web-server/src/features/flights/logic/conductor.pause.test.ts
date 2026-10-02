@@ -537,3 +537,16 @@ describe('redoFlight', () => {
     expect(() => redoFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
   })
 })
+
+it('accepts a frozen-flight re-entry through an equivalent repository symlink', async () => {
+  const repo = path.join(tmpDir, 'repo')
+  const alias = path.join(tmpDir, 'alias')
+  fs.mkdirSync(repo)
+  fs.symlinkSync(repo, alias, 'dir')
+  const first = startFlight(args(repo), deps(allDone()))
+  await first.completion
+  const resumed = startFlight({ ...args(alias), mode: 'jump', fromStage: 'similarity' }, deps(allDone()))
+  expect(resumed.manifest.flightId).toBe(first.manifest.flightId)
+  expect(resumed.manifest.repoPaths).toEqual([repo])
+  await resumed.completion
+})

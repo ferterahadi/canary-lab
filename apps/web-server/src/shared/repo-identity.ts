@@ -19,3 +19,9 @@ export function resolveRepoIdentity(localPath: string, mode: 'required' | 'best-
     return absolute
   }
 }
+
+/** Repository order is incidental; repeated entries retain their multiplicity. */
+export function sameRepoSet(a: readonly string[], b: readonly string[]): boolean {
+  const norm = (paths: readonly string[]) => paths.map((p) => resolveRepoIdentity(p, 'best-effort')).sort().join('\n')
+  return norm(a) === norm(b)
+}
