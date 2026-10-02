@@ -33,6 +33,26 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.2 — 2026-10-03
+
+> After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to pick up the refreshed run and verify instructions.
+
+- **[Test Runner]** **Deployed targets go to Verify, not a repair run.** When an agent starts a suite that boots nothing and points at a staging or live host, Canary Lab now asks whether to verify that deployment or run with repair anyway. A repair cycle can't change a remote deployment, so the only "fix" left would have been editing the test.
+- **[Test Runner]** **The repair agent diagnoses failures itself by default.** It works out what went wrong directly instead of handing the diagnosis to helper agents, and runs spend less time idle between steps.
+- **[Test Runner]** **Clearer agent activity view.** A new timeline and activity log show what the repair agent did, step by step.
+- **[Test Runner]** **Easier-to-read test failures.** Failed checks show what the test expected next to what it actually got.
+- **[Test Runner]** **Consistent run status everywhere.** Every screen shows a run's status the same way, and "Waiting for agent" now reads "Awaiting Agent" throughout.
+- **[Test Runner]** **Clearer service status.** Service health shows up more plainly, and startup errors are easier to understand.
+- **[Test Runner]** **Better pull request proposals.** The changes a repair would submit are shown as a clear before-and-after view.
+- **[Test Runner]** **Smarter test change review.** Reviews catch even tiny edits to test files and tell you when a change affects how a test runs.
+- **[Test Runner]** **Steadier change review dialog.** The dialog explains the problem instead of breaking when a saved copy of a file is missing.
+- **[General]** **Screens stay up to date on their own.** Suites, runs, settings, branches, environments, and cleanup lists update live without a page refresh, and catch up after a dropped connection.
+- **[General]** **Cleaner suite and setup removal.** Deleting a suite or undoing a project's test setup tidies up everything linked to it, including old notifications.
+- **[General]** **Improved settings screens.** Folder browsing, branch pickers, and the agent model chooser are easier to use and show git problems clearly.
+- **[General]** **Smoother project setup.** Creating a new project and running the command-line tool handle more situations without errors.
+- **[General]** **More predictable settings file lookup.** When there's more than one candidate config file, Canary Lab picks one in a clear, fixed order.
+- **[Benchmark]** **New repair speed results.** Benchmarks now include campaigns on unfamiliar codebases, with published results comparing how long repairs take.
+
 ## 2.3.1 — 2026-09-26
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh repair instructions.
