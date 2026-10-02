@@ -165,7 +165,7 @@ describe('ModelLaunchGate', () => {
     })
   })
 
-  it('Change → Reset all to recommended overrides exactly this launch\'s stages', async () => {
+  it('Change → Reset all overrides exactly this launch\'s stages', async () => {
     const props = await mount()
     await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
     await act(async () => {})
@@ -198,7 +198,7 @@ describe('ModelLaunchGate', () => {
     expect(props.onConfirm).toHaveBeenCalledWith(null)
   })
 
-  it('Use saved models discards the edits and confirms on the saved plan', async () => {
+  it('Use saved discards the edits and confirms on the saved plan', async () => {
     const props = await mount()
     await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
     setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!, 'max')
@@ -251,11 +251,10 @@ describe('ModelLaunchGate', () => {
     expect(props.onConfirm).not.toHaveBeenCalled()
   })
 
-  it('names the launch and locks the plan in copy', async () => {
+  it('names the launch in the title and the action in the confirm', async () => {
     await mount({ launchNoun: 'flight', confirmLabel: 'Start flight' })
     const dialog = byTestId('model-launch-gate')
     expect(dialog.textContent).toContain('Models for this flight')
-    expect(dialog.textContent).toContain('Locked once started')
     expect(byTestId('gate-confirm').textContent).toBe('Start flight')
   })
 })

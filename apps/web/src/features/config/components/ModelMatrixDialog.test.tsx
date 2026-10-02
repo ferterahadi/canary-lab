@@ -80,7 +80,11 @@ describe('ModelMatrixDialog', () => {
     for (const stage of MODEL_STAGE_KEYS) {
       expect(document.querySelector(`[data-testid="model-row-${stage}"]`), stage).toBeTruthy()
     }
-    expect(document.querySelector('[data-testid="model-matrix-dialog"]')?.textContent).toContain('claude CLI found — 9.9.9')
+    // The found state is a dot + the version; the sentence moves to the
+    // accessible name and tooltip so the toolbar stays one quiet line.
+    const status = document.querySelector('[data-testid="model-matrix-dialog"] [role="status"]')!
+    expect(status.getAttribute('aria-label')).toMatch(/^claude CLI found/)
+    expect(status.textContent).toBe('9.9.9')
   })
 
   it('labels Claude aliases as latest while keeping the raw CLI values', async () => {
@@ -188,10 +192,10 @@ describe('ModelMatrixDialog', () => {
     expect(document.querySelector('input[aria-label="Report custom model id"]')).toBeNull()
   })
 
-  it('Reset all to recommended pins every stage to its explicit choice', async () => {
+  it('Reset all pins every stage to its explicit choice', async () => {
     await mount()
     const buttons = [...document.querySelectorAll('button')]
-    await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
+    await act(async () => { buttons.find((b) => b.textContent === 'Reset all')!.click() })
     expect(select('Auto-repair model').value).toBe(recommendedChoice('claude', 'heal').model)
     expect(select('Commit message model').value).toBe(recommendedChoice('claude', 'commit').model)
     expect(document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.disabled).toBe(false)
@@ -200,7 +204,7 @@ describe('ModelMatrixDialog', () => {
   it('Reset all falls back to the installed Sol when GPT-6 Sol is not visible', async () => {
     await mount({ agent: 'codex' })
     const buttons = [...document.querySelectorAll('button')]
-    await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
+    await act(async () => { buttons.find((b) => b.textContent === 'Reset all')!.click() })
 
     // Sonnet-high stages keep Luna's `max` effort when they climb to Sol.
     expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
@@ -225,7 +229,7 @@ describe('ModelMatrixDialog', () => {
     })
     await mount({ agent: 'codex' })
     await act(async () => {
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all')!.click()
     })
     expect(select('Test authoring model').value).toBe('gpt-6-sol')
     expect(select('Auto-repair model').value).toBe('gpt-6-sol')
@@ -264,7 +268,7 @@ describe('ModelMatrixDialog', () => {
     expect(configApi.putProjectConfig).not.toHaveBeenCalled()
 
     await act(async () => {
-      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all')!.click()
     })
     expect(select('Repo scan model').value).toBe('gpt-6.1-sol')
     expect(select('Auto-repair model').value).toBe('gpt-6.1-sol')
@@ -303,14 +307,14 @@ describe('ModelMatrixDialog', () => {
       claude: OK_PROBE('claude', { state: 'missing', binaryPath: null, version: null, remedy: 'Install the claude CLI.' }),
     })
     await mount()
-    expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')?.textContent).toContain("isn't on PATH")
+    expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')?.textContent).toContain('not on PATH')
     expect(select('Auto-repair model').disabled).toBe(false)
   })
 
   it('a failed probe stays quiet ("unavailable") instead of warning', async () => {
     vi.mocked(configApi.getAgentProbe).mockRejectedValue(new Error('down'))
     await mount()
-    expect(document.body.textContent).toContain('CLI check unavailable — settings still apply.')
+    expect(document.body.textContent).toContain('CLI check unavailable')
     expect(document.querySelector('[data-testid="model-matrix-probe-warning"]')).toBeNull()
   })
 })

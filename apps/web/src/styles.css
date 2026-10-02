@@ -1799,6 +1799,37 @@ body {
   outline: none;
 }
 
+/* A select that reads as its value until touched, worn with `.themed-select`
+   for the chevron. Dense editors (the model plan: two per stage, nine stages)
+   turned into a wall of bordered fields; the frame now appears only on hover
+   and focus, while the chevron stays so a value still reads as a choice. An
+   empty value (agent default) drops to muted ink. */
+.cl-ghost-select {
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.cl-ghost-select[data-empty='true'] {
+  color: var(--text-muted);
+}
+.cl-ghost-select:hover {
+  background-color: var(--bg-hover);
+}
+.cl-ghost-select:focus,
+.cl-ghost-select:focus-visible {
+  background-color: var(--bg-input);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+.cl-ghost-select option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
 .cl-popover {
   background: var(--bg-overlay);
   border: 1px solid var(--border-default);

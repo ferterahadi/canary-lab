@@ -27,10 +27,15 @@ import { useAgentModelOptions } from './use-agent-model-options'
  *  it reveals the free-text id input (the escape hatch for new releases). */
 const CUSTOM = '__custom'
 
-/** One grid template for the column rubrics and every row, so they align. */
+/** One grid template for every row, so the columns align without a header —
+ *  the values ("GPT-6-Sol", "high") name their own column. */
 const ROW_COLUMNS = 'minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) 24px'
 
-const SELECT_CLASS = 'themed-select cl-input cl-type-data w-full py-1 pl-2 pr-7'
+const SELECT_CLASS = 'themed-select cl-ghost-select cl-type-data w-full py-1 pl-2 pr-7'
+
+/** A quiet text action: the toolbar's actions are secondary to the dialog's
+ *  primary button, so they carry no slab. */
+const TEXT_ACTION_CLASS = 'cl-icon-button cl-type-meta h-6 shrink-0 px-2'
 
 function ProbeLine({ agent, probe, busy, onRetry }: {
   agent: ModelAgentKind
@@ -40,42 +45,42 @@ function ProbeLine({ agent, probe, busy, onRetry }: {
 }) {
   const entry = probe?.[agent] ?? null
   const retry = (
-    <button type="button" onClick={onRetry} disabled={busy} className="cl-button shrink-0 px-2 py-0.5">
-      {busy ? 'Probing…' : 'Retry probe'}
+    <button type="button" onClick={onRetry} disabled={busy} className={TEXT_ACTION_CLASS}>
+      {busy ? 'Checking…' : 'Retry'}
     </button>
   )
   // Still probing (or the request itself failed): stay quiet — the probe is
   // informational and must never block configuring.
   if (!entry) {
     return (
-      <div className="cl-type-meta flex items-center gap-2 text-muted">
-        <span className="min-w-0 flex-1 truncate">{busy ? 'Checking the installed CLI…' : 'CLI check unavailable — settings still apply.'}</span>
+      <span className="cl-type-meta flex min-w-0 items-center gap-1 text-muted">
+        <span className="truncate">{busy ? 'Checking CLI…' : 'CLI check unavailable'}</span>
         {!busy && retry}
-      </div>
+      </span>
     )
   }
   if (entry.state === 'ok') {
+    const found = `${agent} CLI found${entry.binaryPath ? ` at ${entry.binaryPath}` : ''}`
     return (
-      <div className="cl-type-meta flex items-center gap-2 text-muted">
-        <StatusDot state="success" />
-        <span className="min-w-0 flex-1 truncate" title={entry.binaryPath ?? undefined}>
-          {agent} CLI found{entry.version ? ` — ${entry.version}` : ''}
+      <Tooltip label={found}>
+        <span role="status" aria-label={found} className="cl-type-meta flex min-w-0 items-center gap-1.5 text-muted">
+          <StatusDot state="success" />
+          <span className="truncate font-mono">{entry.version ?? agent}</span>
         </span>
-      </div>
+      </Tooltip>
     )
   }
   // auth / missing: a warning dot and the exact remedy, never a tinted slab —
   // and nothing disabled, since agent default keeps every launch possible.
   return (
-    <div data-testid="model-matrix-probe-warning" className="cl-type-meta flex items-start gap-2 text-secondary">
+    <span data-testid="model-matrix-probe-warning" className="cl-type-meta flex min-w-0 items-start gap-1.5 text-secondary">
       <StatusDot state="warning" className="mt-[3px] shrink-0" />
-      <span className="min-w-0 flex-1">
-        {entry.state === 'missing' ? `The ${agent} CLI isn't on PATH.` : `The ${agent} CLI needs a sign-in.`}
+      <span className="min-w-0">
+        {entry.state === 'missing' ? `${agent} CLI not on PATH.` : `${agent} CLI needs a sign-in.`}
         {entry.remedy ? ` ${entry.remedy}` : ''}
-        {' '}Choices here still save and apply once the CLI works.
       </span>
       {retry}
-    </div>
+    </span>
   )
 }
 
@@ -129,13 +134,9 @@ export function StageChoiceGrid({ agent, stages, draft, modelOptions, onChange }
   const knownModelOptions = modelOptions ?? KNOWN_MODEL_OPTIONS[agent]
   const knownModels = new Set(knownModelOptions.map(({ value }) => value))
   return (
-    <div className="cl-ledger">
-      <div className="grid items-center gap-2 py-1.5" style={{ gridTemplateColumns: ROW_COLUMNS }}>
-        <span className="cl-rubric">Stage</span>
-        <span className="cl-rubric">Model</span>
-        <span className="cl-rubric">Reasoning effort</span>
-        <span />
-      </div>
+    // Hairlines only BETWEEN rows: the dialog's header and footer rules already
+    // bound the list, so an edge rule above or below it doubled each of them.
+    <div className="flex flex-col divide-y divide-line">
       {stages.map((stage) => {
         const choice = draftChoice(draft, stage)
         const isCustomModel = choice.model !== null && !knownModels.has(choice.model)
@@ -151,6 +152,7 @@ export function StageChoiceGrid({ agent, stages, draft, modelOptions, onChange }
               <select
                 aria-label={`${MODEL_STAGE_LABEL[stage]} model`}
                 className={SELECT_CLASS}
+                data-empty={choice.model === null}
                 value={isCustomModel ? CUSTOM : choice.model ?? ''}
                 onChange={(e) => {
                   const v = e.target.value
@@ -170,7 +172,7 @@ export function StageChoiceGrid({ agent, stages, draft, modelOptions, onChange }
                 <input
                   aria-label={`${MODEL_STAGE_LABEL[stage]} custom model id`}
                   className="cl-input cl-type-data w-full px-2 py-1"
-                  placeholder="model id (passed to --model verbatim)"
+                  placeholder="model id"
                   value={choice.model ?? ''}
                   onChange={(e) => {
                     const v = e.target.value
@@ -184,6 +186,7 @@ export function StageChoiceGrid({ agent, stages, draft, modelOptions, onChange }
             <select
               aria-label={`${MODEL_STAGE_LABEL[stage]} reasoning effort`}
               className={SELECT_CLASS}
+              data-empty={choice.effort === null}
               value={choice.effort ?? ''}
               onChange={(e) => onChange(stage, { ...choice, effort: e.target.value || null })}
             >
@@ -202,40 +205,37 @@ export function StageChoiceGrid({ agent, stages, draft, modelOptions, onChange }
   )
 }
 
-/** The whole editing body: probe line, the named toolbar with Reset all, the
- *  rows, and the one sentence on what agent default means. */
-export function ModelPlanEditor({ agent, stages, plan, label, toolbarExtra }: {
+/** The whole editing body: one toolbar (the CLI check, the caller's extra
+ *  action, Reset all) over the rows. No label and no footnote — the dialog's
+ *  title says what the rows are, and the ✦ tooltip names the recommendation. */
+export function ModelPlanEditor({ agent, stages, plan, toolbarExtra }: {
   agent: ModelAgentKind
   stages: readonly ModelStageKey[]
   plan: ModelPlanDraftState
-  /** Names what the rows are — "Workspace defaults" or "This launch only". */
-  label: string
   /** Actions only one caller has, set before Reset all (the gate's
-   *  Use saved models). */
+   *  Use saved). */
   toolbarExtra?: ReactNode
 }) {
   const { probe, probeBusy, retryProbe, modelOptions } = useAgentModelOptions(agent)
   return (
-    <div className="flex flex-col gap-3">
-      <ProbeLine agent={agent} probe={probe} busy={probeBusy} onRetry={retryProbe} />
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="cl-rubric-strong mr-auto">{label}</span>
-          {toolbarExtra}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1">
+        <span className="mr-auto min-w-0">
+          <ProbeLine agent={agent} probe={probe} busy={probeBusy} onRetry={retryProbe} />
+        </span>
+        {toolbarExtra}
+        <Tooltip label="Reset every stage to its recommended model and effort">
           <button
             type="button"
             data-testid="model-plan-reset-all"
             onClick={() => plan.resetAllToRecommended(modelOptions)}
-            className="cl-button shrink-0 px-2 py-0.5"
+            className={TEXT_ACTION_CLASS}
           >
-            Reset all to recommended
+            Reset all
           </button>
-        </div>
-        <StageChoiceGrid agent={agent} stages={stages} draft={plan.draft} modelOptions={modelOptions} onChange={plan.setStage} />
+        </Tooltip>
       </div>
-      <p className="cl-type-meta text-muted">
-        Agent default passes no flags — the CLI runs on its own configuration. ✦ marks the shipped recommendation.
-      </p>
+      <StageChoiceGrid agent={agent} stages={stages} draft={plan.draft} modelOptions={modelOptions} onChange={plan.setStage} />
     </div>
   )
 }

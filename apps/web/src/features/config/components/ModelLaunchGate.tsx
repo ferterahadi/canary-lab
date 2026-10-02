@@ -140,16 +140,16 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
         </>
       }
     >
-      <div className="flex flex-col gap-3 p-3">
+      <div className="px-4 py-3">
         {/* Collapsed, this dialog CONFIRMS a launch; expanded, it IS the editor
             — the same one Settings shows, so changing models reads the same
-            wherever it happens. */}
+            wherever it happens. The summary needs no "Saved models" label:
+            the title names the launch, the rows name the models. */}
         {customize ? (
           <ModelPlanEditor
             agent={agent}
             stages={stages}
             plan={plan}
-            label="This launch only"
             toolbarExtra={
               // Restores the saved plan AND returns to the confirmation, which
               // is the same statement said once: nothing here is changing.
@@ -157,51 +157,42 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
                 type="button"
                 data-testid="gate-use-saved"
                 onClick={() => { plan.restoreSaved(); setCustomize(false) }}
-                className="cl-button shrink-0 px-2 py-0.5"
+                className="cl-icon-button cl-type-meta h-6 shrink-0 px-2"
               >
-                Use saved models
+                Use saved
               </button>
             }
           />
         ) : (
-          <div className="cl-ledger">
-            <div className="flex items-start justify-between gap-3 py-2">
-              <span className="flex min-w-0 flex-col gap-1.5">
-                <span className="cl-rubric-strong">Saved models</span>
-                {stages.length > SUMMARY_STEP_THRESHOLD ? (
-                  <span data-testid="gate-saved-summary" className="cl-type-data text-secondary">
-                    {savedModelsSummary(agent, config, stages)}
-                  </span>
-                ) : (
-                  <span
-                    data-testid="gate-saved-summary"
-                    className="cl-type-data grid gap-x-3 gap-y-1"
-                    style={{ gridTemplateColumns: 'minmax(0,1fr) max-content' }}
-                  >
-                    {defaultsByChoice(agent, config, stages).map((group) => (
-                      <Fragment key={group.choice}>
-                        <span className="min-w-0 truncate text-secondary">{group.steps}</span>
-                        <span className="font-mono text-muted">{group.choice}</span>
-                      </Fragment>
-                    ))}
-                  </span>
-                )}
+          <div className="flex items-baseline justify-between gap-3 py-1">
+            {stages.length > SUMMARY_STEP_THRESHOLD ? (
+              <span data-testid="gate-saved-summary" className="cl-type-data min-w-0 text-secondary">
+                {savedModelsSummary(agent, config, stages)}
               </span>
-              <button
-                type="button"
-                data-testid="gate-change"
-                onClick={() => setCustomize(true)}
-                className="cl-button shrink-0 px-2 py-0.5"
+            ) : (
+              <span
+                data-testid="gate-saved-summary"
+                className="cl-type-data grid min-w-0 gap-x-3 gap-y-1"
+                style={{ gridTemplateColumns: 'minmax(0,1fr) max-content' }}
               >
-                Change
-              </button>
-            </div>
+                {defaultsByChoice(agent, config, stages).map((group) => (
+                  <Fragment key={group.choice}>
+                    <span className="min-w-0 truncate text-secondary">{group.steps}</span>
+                    <span className="font-mono text-muted">{group.choice}</span>
+                  </Fragment>
+                ))}
+              </span>
+            )}
+            <button
+              type="button"
+              data-testid="gate-change"
+              onClick={() => setCustomize(true)}
+              className="cl-icon-button cl-type-meta h-6 shrink-0 px-2"
+            >
+              Change
+            </button>
           </div>
         )}
-        {/* One scope sentence for the whole dialog. "Locked once started" holds
-            for a flight, a run and a coverage job alike — the launch noun is
-            already in the title. */}
-        <p className="cl-type-meta text-muted">Locked once started.</p>
       </div>
     </Modal>
   )

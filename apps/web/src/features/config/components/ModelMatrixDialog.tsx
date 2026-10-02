@@ -49,8 +49,8 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
     <Modal
       open
       onClose={onClose}
-      title={`Configure models — ${agentTitle(agent)}`}
-      eyebrow="Project Settings"
+      title="Default models"
+      eyebrow={agentTitle(agent)}
       ariaLabel={`Configure models for ${agentTitle(agent)}`}
       testId="model-matrix-dialog"
       width={620}
@@ -73,8 +73,8 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
         </>
       }
     >
-      <div className="p-3">
-        <ModelPlanEditor agent={agent} stages={MODEL_STAGE_KEYS} plan={plan} label="Workspace defaults" />
+      <div className="px-4 py-3">
+        <ModelPlanEditor agent={agent} stages={MODEL_STAGE_KEYS} plan={plan} />
       </div>
     </Modal>
   )
