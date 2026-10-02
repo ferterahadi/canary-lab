@@ -53,6 +53,7 @@ export function command(executable: string, args: string[], options: {
   cwd: string; env?: NodeJS.ProcessEnv; inheritEnv?: boolean; timeoutMs?: number; log?: string; signal?: AbortSignal;
   killGroupOnClose?: boolean
   parentLease?: boolean
+  onOutput?: (value: string, stream: 'stdout' | 'stderr') => void
 }): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, { cwd: options.cwd,
@@ -65,7 +66,16 @@ export function command(executable: string, args: string[], options: {
       if (stopping) return
       stopping = true
       signalProcessTree(child, 'SIGTERM', { detachedProcessGroup: true })
-      killTimer = setTimeout(() => signalProcessTree(child, 'SIGKILL', { detachedProcessGroup: true }), 2_000)
+      killTimer = setTimeout(() => {
+        signalProcessTree(child, 'SIGKILL', { detachedProcessGroup: true })
+        // A descendant may keep inherited pipes open after the direct child
+        // exits. The deadline must also bound waiting for Node's close event.
+        child.stdout!.destroy(); child.stderr!.destroy()
+        child.stdio[3]?.destroy()
+        child.unref()
+        cleanup()
+        resolve({ code: child.exitCode, signal: child.signalCode, stdout, stderr, timedOut })
+      }, 2_000)
     }
     const timer = setTimeout(() => { timedOut = true; stop() }, options.timeoutMs ?? 120_000)
     options.signal?.addEventListener('abort', stop, { once: true })
@@ -75,6 +85,7 @@ export function command(executable: string, args: string[], options: {
       const value = chunk.toString()
       if (stream === 'stdout') stdout += value
       else stderr += value
+      options.onOutput?.(value, stream)
       if (options.log) { fs.mkdirSync(path.dirname(options.log), { recursive: true }); fs.appendFileSync(options.log, value) }
     }
     child.stdout!.on('data', (chunk: Buffer) => capture(chunk, 'stdout'))

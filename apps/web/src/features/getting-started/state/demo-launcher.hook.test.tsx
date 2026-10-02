@@ -239,3 +239,15 @@ it('failed visibility writes reveal the latest accepted configuration and teardo
   await act(async () => { finish({ showDemo: true } as ProjectConfig); await vi.advanceTimersByTimeAsync(10000) })
   expect(api.putProjectConfig).toHaveBeenCalledTimes(2)
 })
+
+
+it('rejects a retired visibility action and a rejected in-flight write after teardown', async () => {
+  let fail!: (error: Error) => void
+  api.putProjectConfig.mockReturnValueOnce(new Promise((_, no) => { fail = no }))
+  await mount()
+  const retired = launcher.setShowDemo
+  await act(async () => retired(false))
+  await act(async () => root.render(null))
+  await act(async () => { fail(new Error('offline')); retired(true) })
+  expect(api.putProjectConfig).toHaveBeenCalledTimes(1)
+})

@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ConnectWorkspaceEventsOptions } from '@/shared/api/workspace-socket'
 import { useWorkspaceRecords } from './use-workspace-records'
 
-const bus = vi.hoisted(() => ({ options: null as ConnectWorkspaceEventsOptions | null, close: vi.fn() }))
+const bus = vi.hoisted(() => ({ options: null as ConnectWorkspaceEventsOptions | null, close: vi.fn(), throws: false }))
 vi.mock('@/shared/api/workspace-socket', () => ({
   connectWorkspaceEvents: (options: ConnectWorkspaceEventsOptions) => {
+    if (bus.throws) throw new Error('socket unavailable')
     bus.options = options
     return { close: bus.close }
   },
@@ -27,8 +28,11 @@ let root: Root
 let host: HTMLDivElement
 const settle = async () => { await act(async () => {}) }
 const handshake = () => bus.options!.onEvent({ type: 'connected' })
-function Probe() {
-  observed = useWorkspaceRecords<Row>({ list, idOf: row => row.id, decode: () => null })
+const onUpsert = vi.fn()
+const onRemove = vi.fn()
+function Probe({ callbacks = false, earlyRefresh = false }: { callbacks?: boolean; earlyRefresh?: boolean }) {
+  observed = useWorkspaceRecords<Row>({ list, idOf: row => row.id, decode: (event) => event.type === 'features-changed' ? { kind: 'upsert', record: { id: 'event', status: 'done' }, created: true } : event.type === 'feature-deleted' ? { kind: 'remove', id: event.feature } : null, ...(callbacks ? { onUpsert, onRemove } : {}) })
+  useLayoutEffect(() => { if (earlyRefresh) observed.refresh() }, [earlyRefresh])
   return null
 }
 function mount() { act(() => root.render(<Probe />)) }
@@ -37,6 +41,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
   list.mockReset().mockResolvedValue([])
   bus.options = null
+  bus.throws = false
+  onUpsert.mockClear(); onRemove.mockClear()
   bus.close.mockClear()
   host = document.createElement('div')
   root = createRoot(host)
@@ -161,4 +167,84 @@ it('cleans up retry, interval, visibility and late reads on unmount', async () =
   expect(list).toHaveBeenCalledTimes(1)
   expect(observed.records).toBe(last)
   expect(bus.close).toHaveBeenCalledTimes(1)
+})
+
+
+it('delivers decoded events and accepted detail reads while coalescing duplicate detail demands', async () => {
+  act(() => root.render(<Probe callbacks />))
+  await settle()
+  act(() => bus.options!.onEvent({ type: 'features-changed' }))
+  expect(observed.records.event.status).toBe('done')
+  expect(onUpsert).toHaveBeenCalledWith({ id: 'event', status: 'done' }, true)
+  act(() => bus.options!.onEvent({ type: 'feature-deleted', feature: 'event' }))
+  expect(observed.records).toEqual({})
+  expect(onRemove).toHaveBeenCalledWith('event')
+  const pending = deferred<Row>()
+  const fetch = vi.fn(() => pending.promise)
+  let first!: Promise<void>
+  let second!: Promise<void>
+  act(() => { first = observed.readRecord('detail', fetch); second = observed.readRecord('detail', fetch) })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  await act(async () => { pending.resolve({ id: 'detail', status: 'done' }); await Promise.all([first, second]) })
+  expect(observed.records.detail.status).toBe('done')
+  act(handshake); await settle()
+  expect(onRemove).toHaveBeenCalledWith('detail')
+})
+
+it('handles non-Error list failures and holds reconciliation while the page is hidden', async () => {
+  list.mockRejectedValueOnce('offline').mockResolvedValue([])
+  mount(); await settle()
+  expect(observed.sync.error).toBe('offline')
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(list).toHaveBeenCalledTimes(1)
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  act(() => window.dispatchEvent(new Event('online')))
+  await settle()
+  expect(observed.sync.error).toBeNull()
+})
+
+it('keeps accepted records when a conflicted retry fires in a hidden view', async () => {
+  const pending = deferred<Row[]>()
+  list.mockReturnValueOnce(pending.promise)
+  mount(); await settle()
+  act(() => observed.upsert({ id: 'local', status: 'editing' }))
+  await act(async () => pending.resolve([{ id: 'local', status: 'done' }]))
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await act(async () => vi.advanceTimersByTimeAsync(2500))
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(observed.records.local.status).toBe('editing')
+})
+
+it('ignores queued refreshes and retired actions after unmount, including a late failure', async () => {
+  const pending = deferred<Row[]>()
+  list.mockReturnValueOnce(pending.promise)
+  mount(); await settle()
+  const retired = observed
+  act(() => { observed.refresh(); root.render(null) })
+  const fetch = vi.fn()
+  await act(async () => {
+    retired.upsert({ id: 'late', status: 'done' })
+    retired.remove('late')
+    await retired.readRecord('late', fetch)
+    retired.refresh()
+    pending.reject(new Error('late error'))
+  })
+  expect(fetch).not.toHaveBeenCalled()
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(retired.records).toEqual({})
+})
+
+it('reconciles over HTTP when the socket cannot be created', async () => {
+  bus.throws = true
+  list.mockResolvedValue([{ id: 'http', status: 'done' }])
+  mount(); await settle()
+  expect(observed.records.http.status).toBe('done')
+})
+
+it('coalesces a consumer refresh during layout with the initial passive-effect read', async () => {
+  act(() => root.render(<Probe earlyRefresh />))
+  await settle()
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(observed.sync.stale).toBe(false)
 })

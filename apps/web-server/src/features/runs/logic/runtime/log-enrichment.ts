@@ -1,3 +1,4 @@
+import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 import fs from 'fs'
 import path from 'path'
 import { MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
@@ -445,16 +446,13 @@ export function readManifest(file: string = MANIFEST_PATH): Manifest {
 // and keypad-mode toggles (`ESC =`/`ESC >`). Services run under a PTY, so their
 // captured output carries the full set, not just colors.
  
-const TERM_ESCAPE_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[=>])/g
 
 // Strip ANSI/terminal control sequences from a string. Playwright emits color
 // codes in error messages; PTY-captured service logs add cursor moves and
 // erases. Some reporters also emit the bracket form without the escape prefix
 // (`[2m`, `[22m`). All of it is noise in a markdown/log slice read by an agent.
 export function stripAnsi(s: string): string {
-  return s
-    .replace(TERM_ESCAPE_RE, '')
-    .replace(/\[\d+(?:;\d+)*m/g, '')
+  return stripTerminalEscapes(s, 'diagnostic')
 }
 
 // What a person should see when they open a PTY-captured log in an editor:

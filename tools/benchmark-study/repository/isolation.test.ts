@@ -68,9 +68,10 @@ it('serializes both original checkout and held-out fixture denials into native s
   expect(native.codexArgs.join(' ')).toContain(JSON.stringify(fixtureRoot))
 })
 
-it.skipIf(process.env.CANARY_REPOSITORY_ISOLATION_TEST !== '1')('proves OS sandbox denial, including a private symlink alias, and allowed local controls', async () => {
+it('proves OS sandbox denial, including a private symlink alias, and allowed local controls', async () => {
   const { root } = fixture()
-  if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return
+  expect(process.platform, 'Native isolation tests require macOS sandbox-exec').toBe('darwin')
+  expect(fs.existsSync('/usr/bin/sandbox-exec')).toBe(true)
   const manifest = await probeRepositoryIsolation(root)
   for (const scenario of repositoryScenarios) {
     expect(manifest.isolation?.[scenario]).toMatchObject({ osSandbox: 'passed', nativeCodex: 'unverified', nativeClaude: 'unverified' })

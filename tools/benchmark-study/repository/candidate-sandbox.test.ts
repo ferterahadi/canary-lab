@@ -32,9 +32,10 @@ it('builds separate no-network and exact-localhost profiles without inheriting c
   expect(host.policy).not.toBe(build.policy)
 })
 
-it.skipIf(process.env.CANARY_CANDIDATE_SANDBOX_TEST !== '1')('denies private reads, writes, links and network while allowing work-local controls', async () => {
+it('denies private reads, writes, links and network while allowing work-local controls', async () => {
   const { root, work, cache, secret } = fixture()
-  if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return
+  expect(process.platform, 'Native isolation tests require macOS sandbox-exec').toBe('darwin')
+  expect(fs.existsSync('/usr/bin/sandbox-exec')).toBe(true)
   const sandbox = prepareCandidateSandbox(root, work, 'build', cache)
   const script = path.join(work, 'probe.py')
   fs.symlinkSync(secret, path.join(work, 'private-alias'))
@@ -52,9 +53,10 @@ it.skipIf(process.env.CANARY_CANDIDATE_SANDBOX_TEST !== '1')('denies private rea
   expect(fs.existsSync(path.join(root, 'private/new'))).toBe(false)
 }, 30_000)
 
-it.skipIf(process.env.CANARY_CANDIDATE_SANDBOX_TEST !== '1')('limits the host to loopback port 3411', async () => {
+it('limits the host to loopback port 3411', async () => {
   const { root, work, cache } = fixture()
-  if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return
+  expect(process.platform, 'Native isolation tests require macOS sandbox-exec').toBe('darwin')
+  expect(fs.existsSync('/usr/bin/sandbox-exec')).toBe(true)
   const sandbox = prepareCandidateSandbox(root, work, 'host', cache)
   const script = path.join(work, 'network-probe.py')
   fs.writeFileSync(script, `import json, socket\nO={}\ndef bind(port):\n s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n try:\n  s.bind(("127.0.0.1",port)); s.listen(1); O["bind_"+str(port)]=0; return s\n except OSError as e:\n  O["bind_"+str(port)]=e.errno; s.close(); return None\ndef connect(host,port,name):\n s=socket.socket(); s.settimeout(1)\n try:\n  s.connect((host,port)); O[name]=0\n except OSError as e: O[name]=e.errno\n finally: s.close()\nserver=bind(3411)\nif server: connect("127.0.0.1",3411,"connect_3411")\nother=bind(3412)\nif other: other.close()\nconnect("127.0.0.1",3412,"connect_3412")\nconnect("1.1.1.1",80,"connect_outbound")\nif server: server.close()\nprint(json.dumps(O,sort_keys=True))\n`)
@@ -69,9 +71,10 @@ it.skipIf(process.env.CANARY_CANDIDATE_SANDBOX_TEST !== '1')('limits the host to
   for (const name of ['bind_3412', 'connect_3412', 'connect_outbound']) expect(observed[name], name).toBe(1)
 }, 30_000)
 
-it.skipIf(process.env.CANARY_CANDIDATE_SANDBOX_TEST !== '1')('keeps frozen host files read-only and blocks signals to the evaluator', async () => {
+it('keeps frozen host files read-only and blocks signals to the evaluator', async () => {
   const { root, work, cache } = fixture()
-  if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return
+  expect(process.platform, 'Native isolation tests require macOS sandbox-exec').toBe('darwin')
+  expect(fs.existsSync('/usr/bin/sandbox-exec')).toBe(true)
   const source = path.join(work, 'source')
   const host = path.join(work, 'host')
   fs.mkdirSync(source); fs.mkdirSync(host)

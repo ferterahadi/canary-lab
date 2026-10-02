@@ -51,7 +51,7 @@ vi.mock('../api/workspace-socket', () => ({
   },
 }))
 
-const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false }
+const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false, forgetFlight: vi.fn() }
 vi.mock('@/features/flights/state/use-flights-stream', () => ({
   useFlightsStream: () => stream,
 }))
@@ -754,4 +754,13 @@ it('routes cleanup changes to the matching inventory only', async () => {
   harness.invalidated.length = 0
   await fire({ type: 'cleanup-changed', resource: 'worktrees' })
   expect(harness.invalidated).toEqual([['cleanup', 'worktrees']])
+})
+
+
+it('forgets a deleted flight from both the pushed index and its REST fallback', async () => {
+  api.listFlights.mockResolvedValue(['gone', 'kept'].map((flightId): FlightIndexEntry => ({ id: flightId, flightId, feature: 'checkout', repoPaths: [], status: 'done', currentStage: null, createdAt: '', updatedAt: '' })))
+  await mount()
+  await act(async () => harness.data.forgetFlight('gone'))
+  expect(stream.forgetFlight).toHaveBeenCalledWith('gone')
+  expect(harness.data.flights.map(row => row.flightId)).toEqual(['kept'])
 })

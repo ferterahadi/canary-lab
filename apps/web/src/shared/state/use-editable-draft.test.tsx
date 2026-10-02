@@ -36,3 +36,17 @@ it('keeps explicit clearing and rejects a save belonging to a replaced identity'
   expect(accept({ ...original, path: null }, submitted)).toBe(false)
   expect(state.draft).toEqual(original)
 })
+
+it('rejects an edit from the previous identity and discards when no document is available', async () => {
+  await render()
+  const editOld = state.setDraft
+  await render(original, 'replacement')
+  act(() => editOld({ ...original, editor: 'stale' }))
+  expect(state.draft).toEqual(original)
+  await act(async () => { root.render(<Missing />) })
+  act(() => state.discard())
+  expect(state.draft).toBeNull()
+  expect(state.dirty).toBe(false)
+})
+
+function Missing() { state = useEditableDraft({ key: 'missing', doc: null as Doc | null, extract: (v) => v, fields: true }); return null }

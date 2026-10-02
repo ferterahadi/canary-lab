@@ -1,3 +1,4 @@
+import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 // Plain-text "runner log" — captures the runner's own progress narration to a
 // per-run `runner.log` file alongside `svc-*.log` and `playwright.log`. Two
 // upstream sources tee through here:
@@ -18,10 +19,9 @@ import type { OrchestratorEventMap } from './run-orchestrator-types'
 
 export type RunnerLogLevel = 'INFO' | 'WARN' | 'ERROR'
 
-const ANSI_RE = /\x1b\[[0-9;]*m/g
 
 export function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, '')
+  return stripTerminalEscapes(s, 'color')
 }
 
 export function formatLine(level: RunnerLogLevel, message: string, now: Date = new Date()): string {

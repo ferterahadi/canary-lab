@@ -1,3 +1,4 @@
+import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 // Pure classifier: given the tail of a heal agent's own terminal output and
 // which agent produced it, guess WHY the agent went quiet without writing a
 // signal. This is the difference the Test Run surface needs between "the agent
@@ -156,8 +157,7 @@ function squeezeSpace(s: string): string {
 // fingerprint across control bytes ("usage\x1b[0m limit"). Strip them before
 // matching so a colorized "usage limit" banner still classifies.
  
-const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
 
 function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, '')
+  return stripTerminalEscapes(s, 'classifier')
 }

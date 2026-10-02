@@ -505,3 +505,14 @@ it('ships matching source and markers for each expanded Playwright test', async 
   }
   await app.close()
 })
+
+
+it.each([new Error('discovery unavailable'), 'discovery unavailable'])('reports a rejected discovery invocation and preserves source diagnostics', async (error) => {
+  writeFeature('rejecting', { spec: "test('case', async () => {})" })
+  const app = await build({ spawner: () => { throw error } })
+  try {
+    const response = await app.inject({ method: 'GET', url: '/api/features/rejecting/tests' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()[0].discoveryDiagnostics).toContain('discovery unavailable')
+  } finally { await app.close() }
+})

@@ -1,3 +1,4 @@
+import { TEST_DECLARATORS as SHARED_TEST_DECLARATORS } from '../test-declaration'
 import ts from 'typescript'
 import type {
   ExpectedShape,
@@ -44,7 +45,7 @@ function normalize(text: string): string {
  *  vocabulary and Playwright's own `import { test as it }` alias. One set for the
  *  declaration walker (`ast-extractor.ts`) and the guard reader below, so `it.skip(cond)`
  *  and `it('title', fn)` are read from the same root as their `test.` forms. */
-export const TEST_DECLARATORS: ReadonlySet<string> = new Set(['test', 'it'])
+export const TEST_DECLARATORS = SHARED_TEST_DECLARATORS
 
 // Comparison text for a target, an expected value or a guard condition. The
 // expression is re-printed from its syntax tree with every literal in one spelling:

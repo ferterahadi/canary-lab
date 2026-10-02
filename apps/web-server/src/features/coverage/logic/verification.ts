@@ -1,3 +1,4 @@
+import { stripTerminalEscapes } from '../../../shared/terminal-text'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
@@ -458,5 +459,5 @@ function tail(value: string, maxChars: number): string {
 }
 
 function stripAnsi(value: string): string {
-  return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+  return stripTerminalEscapes(value, 'verification')
 }

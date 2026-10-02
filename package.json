@@ -87,7 +87,7 @@
     "fix:test-readability": "node --import tsx apps/cli/test-readability.ts --rules-only --fix apps shared",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "node --import tsx tools/test-coverage.ts",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
     "postinstall": "node tools/fix-node-pty-permissions.mjs",

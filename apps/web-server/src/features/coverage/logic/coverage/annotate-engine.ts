@@ -1,3 +1,5 @@
+import { missingFromRoster as missingRosterNames } from './mapping-roster'
+import { canonicalPathTypes } from '../../../../../../../shared/coverage/path-types'
 import path from 'path'
 import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
@@ -32,8 +34,6 @@ const ANNOTATE_SCHEMA_PATH = promptPath('coverage-annotate.schema.json')
 // Idle (inactivity) window: the annotate agent is killed only after this long
 // with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
 const ANNOTATE_IDLE_TIMEOUT_MS = 5 * 60 * 1000
-
-const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
 
 export type AnnotateAdapter = 'auto' | 'claude' | 'codex'
 
@@ -92,12 +92,7 @@ interface RunAgentOpts {
 // ---------------------------------------------------------------------------
 
 function normalizePathTypes(value: unknown): PathType[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const seen = new Set<PathType>()
-  for (const item of value) {
-    if (typeof item === 'string' && (PATH_TYPES as string[]).includes(item)) seen.add(item as PathType)
-  }
-  const ordered = PATH_TYPES.filter((p) => seen.has(p))
+  const ordered = canonicalPathTypes(value)
   return ordered.length ? ordered : undefined
 }
 
@@ -291,8 +286,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
  * into a detectable failure.
  */
 export function missingFromRoster(tests: AnnotateTestInput[], answer: AnnotateAnswer): string[] {
-  const accounted = new Set<string>([...answer.mappings.map((m) => m.testName), ...answer.unmappable])
-  return tests.map((t) => t.name).filter((name) => !accounted.has(name))
+  return missingRosterNames(tests.map((test) => test.name), answer.mappings, answer.unmappable)
 }
 
 /**

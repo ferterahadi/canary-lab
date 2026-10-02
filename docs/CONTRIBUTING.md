@@ -75,7 +75,7 @@ a prerequisite for every unit-test iteration.
 | `npm run typecheck:all` | CLI, server, and web TypeScript contracts |
 | `npm run build` | Complete distributable build, including generated docs, skills, templates, and web assets |
 | `npm run test:watch` | Local test-driven development |
-| `npm run test:coverage` | Coverage report |
+| `npm run test:coverage` | Full coverage gate with a 180-second wall-clock limit |
 | `npm run check:conventions` | Repository rules that lint and TypeScript do not express |
 | `npm run check:boundaries` | Cross-feature imports go only through declared public files; no barrels |
 | `npm run check:docs` | Backticked paths, relative links, and Markdown anchors |
@@ -85,6 +85,14 @@ a prerequisite for every unit-test iteration.
 | `npm run smoke:demo` | LLM-free storefront repair cascade |
 | `npm run demo -- --agent codex` | Inspectable demo workspace and full Flight routes |
 | `npm run demo:clean` | Remove stopped, unregistered workspaces under `~/Canary Lab Demos/` |
+
+Coverage writes HTML, JSON, and lcov reports under `coverage/`, including when a
+test fails. Set `CANARY_COVERAGE_TIMEOUT_MS` to a positive millisecond budget to
+override the deadline; expiration terminates the test process group and exits
+124. The suite uses at most twelve workers and runs every integration test.
+Full integration verification requires macOS sandbox-exec, the local Colima
+Docker runtime and candidate image, the Yarn v6 cache, Playwright Chromium, and
+the built node-pty binding. Missing prerequisites fail instead of skipping.
 
 Before opening a pull request, always run the structural gates:
 

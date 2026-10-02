@@ -216,11 +216,6 @@ export function deriveFeatureActivity(input: {
     }
   }
   for (const r of displayedActiveRuns(input.activeRuns, input.runDetails).values()) {
-    // Boots are not runs (they have the Services pill) and benchmark runs
-    // drive the benchmark window — neither is feature activity here. A
-    // deployed-env verification IS: it's a run in verify mode, and the suite's
-    // one live indicator must light for it like any other run.
-    if (isAuxiliaryExecution(r.executionType)) continue
     const kind: FeatureActivityKind = r.status === 'healing'
       ? 'healing'
       : r.executionType === 'verify' ? 'verifying' : 'running'

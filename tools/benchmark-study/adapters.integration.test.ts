@@ -1,24 +1,20 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { baseConfig } from '../../shared/configs/playwright.base'
 import { canaryRunDir, command, copy, json, quote, sourceRoot, write } from './files'
 import { buildScenario, plainSuite, schedule } from './scenarios'
 import { dependencies, evaluate } from './evaluator'
 import { runCanary, runPlain } from './agents'
 import { integrity } from './study'
-import { prepareIsolation } from './isolation'
 import type { StudyManifest } from './types'
 
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canary-study-adapters-')))
 afterAll(() => { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }) })
 
-it('runs real Canary and independent plain adapters with scripted repair processes, then checks their application changes', async () => {
-  if (process.platform !== 'darwin') {
-    await expect(prepareIsolation(root, root)).rejects.toThrow('requires macOS sandbox-exec')
-    return
-  }
+beforeAll(() => {
+  expect(process.platform, 'Real adapter integration requires macOS sandbox-exec').toBe('darwin')
   vi.stubEnv('CANARY_LAB_NO_WORKSPACE_TRUST', '1')
   const deps = path.join(root, 'runtime/node_modules')
   fs.mkdirSync(deps, { recursive: true })
@@ -38,45 +34,53 @@ it('runs real Canary and independent plain adapters with scripted repair process
   buildScenario(sourceApp, path.join(root, 'frozen/single-service'), [2])
   copy(sourceSuite, path.join(root, 'frozen/original-suite'))
   plainSuite(sourceSuite, path.join(root, 'frozen/plain-suite'), { ...baseConfig, workers: 4, maxFailures: 4, use: { ...baseConfig.use, video: 'off' } })
+}, 30_000)
+
+const adapterAttempts = schedule().filter((item) => item.scenario === 'single-service' && item.repetition === 1)
+it.concurrent.each(adapterAttempts)('runs $id with a scripted repair and independently checks its application changes', async (scheduled) => {
   const manifest = { root, pins: { codex: { model: 'fixture', effort: 'medium' }, claude: { model: 'fixture', effort: 'high' } }, budgetMs: 60_000 } as StudyManifest
   json(path.join(root, 'study.json'), manifest)
-  for (const scheduled of schedule().filter((item) => item.scenario === 'single-service' && item.repetition === 1)) {
-    const policy = scheduled.agent === 'codex' ? 'parent-only' as const : 'adaptive' as const
-    const attempt = { ...scheduled, ...(scheduled.workflow === 'canary' ? { variant: { id: policy, diagnosisPolicy: policy } } : {}) }
-    const work = path.join(root, 'attempts', attempt.id)
-    const suite = path.join(root, 'frozen', attempt.workflow === 'canary' ? 'original-suite' : 'plain-suite')
-    copy(path.join(root, 'frozen/single-service'), path.join(work, 'app')); copy(suite, path.join(work, 'suite')); dependencies(work, root)
-    const agentFile = path.join(work, 'scripted-agent.cjs')
-    const patch = `const fs=require('fs');const p=${JSON.stringify(path.join(work, 'app/checkout-service/server.ts'))};fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace('const total = (cart: Cart): number => subtotal(cart)','const total = (cart: Cart): number => Math.round(subtotal(cart) * (100 - cart.discountPercent) / 100)'));`
-    write(agentFile, `process.stdout.write('scripted agent started\\n');` + patch + (attempt.workflow === 'canary' ? `fs.writeFileSync(${JSON.stringify(path.join(canaryRunDir(work), 'signals/.restart'))},'');` : ''))
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 55_000)
-    try {
-      const result = attempt.workflow === 'canary'
-        ? await runCanary(manifest, attempt, work, controller.signal, () => `${quote(process.execPath)} ${quote(agentFile)}`)
-        : await runPlain(manifest, attempt, work, controller.signal, { command: process.execPath, args: [agentFile] })
-      expect(result.status).toBe('finished')
-      if (attempt.workflow === 'canary') {
-        expect(fs.readFileSync(path.join(work, 'agent-terminal.log'), 'utf8')).toContain('scripted agent started')
-        const run = JSON.parse(fs.readFileSync(path.join(canaryRunDir(work), 'manifest.json'), 'utf8'))
-        expect(run.services).toHaveLength(3)
-        expect(run.diagnosisPolicy).toBe(policy)
-        expect(fs.readFileSync(path.join(work, 'prompts/cycle-1.md'), 'utf8')).toContain(`Diagnosis policy: ${policy}`)
-        const promptReceipt = JSON.parse(fs.readFileSync(path.join(work, 'prompts/cycle-1.json'), 'utf8'))
-        expect(promptReceipt.diagnosisPolicy).toBe(policy)
-        expect(promptReceipt.digest).toMatch(/^[a-f0-9]{64}$/)
-        expect(JSON.parse(fs.readFileSync(path.join(work, 'stage-intervals.json'), 'utf8')).length).toBeGreaterThan(0)
-        const tail = path.join(canaryRunDir(work), 'heal-agent-tail.txt')
-        const diagnostic = fs.readFileSync(path.join(canaryRunDir(work), 'runner.log'), 'utf8') + (fs.existsSync(tail) ? fs.readFileSync(tail, 'utf8') : '')
-        expect(result.reason, diagnostic).toContain('passed')
-        expect(result.testExecutions).toBeGreaterThanOrEqual(2)
-      } else expect(fs.existsSync(path.join(canaryRunDir(work), 'manifest.json'))).toBe(false)
-      expect(integrity(work, path.join(root, 'frozen/single-service'), suite).contamination).toEqual([])
-      const evidence = await evaluate(root, path.join(work, 'app'), path.join(root, 'frozen/original-suite'), path.join(root, 'evaluation', attempt.id), true)
-      expect(evidence.passed).toHaveLength(7)
-      expect(evidence.extras).toBe(true)
-    } finally { clearTimeout(timeout) }
-  }
+  const policy = scheduled.agent === 'codex' ? 'parent-only' as const : 'adaptive' as const
+  const attempt = { ...scheduled, ...(scheduled.workflow === 'canary' ? { variant: { id: policy, diagnosisPolicy: policy } } : {}) }
+  const work = path.join(root, 'attempts', attempt.id)
+  const suite = path.join(root, 'frozen', attempt.workflow === 'canary' ? 'original-suite' : 'plain-suite')
+  copy(path.join(root, 'frozen/single-service'), path.join(work, 'app')); copy(suite, path.join(work, 'suite')); dependencies(work, root)
+  const agentFile = path.join(work, 'scripted-agent.cjs')
+  const patch = `const fs=require('fs');const p=${JSON.stringify(path.join(work, 'app/checkout-service/server.ts'))};fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace('const total = (cart: Cart): number => subtotal(cart)','const total = (cart: Cart): number => Math.round(subtotal(cart) * (100 - cart.discountPercent) / 100)'));`
+  write(agentFile, `process.stdout.write('scripted agent started\\n');` + patch + (attempt.workflow === 'canary' ? `fs.writeFileSync(${JSON.stringify(path.join(canaryRunDir(work), 'signals/.restart'))},'');` : ''))
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 55_000)
+  try {
+    const result = attempt.workflow === 'canary'
+      ? await runCanary(manifest, attempt, work, controller.signal, () => `${quote(process.execPath)} ${quote(agentFile)}`)
+      : await runPlain(manifest, attempt, work, controller.signal, { command: process.execPath, args: [agentFile] })
+    expect(result.status).toBe('finished')
+    if (attempt.workflow === 'canary') {
+      expect(fs.readFileSync(path.join(work, 'agent-terminal.log'), 'utf8')).toContain('scripted agent started')
+      const run = JSON.parse(fs.readFileSync(path.join(canaryRunDir(work), 'manifest.json'), 'utf8'))
+      expect(run.services).toHaveLength(3)
+      expect(run.diagnosisPolicy).toBe(policy)
+      expect(fs.readFileSync(path.join(work, 'prompts/cycle-1.md'), 'utf8')).toContain(`Diagnosis policy: ${policy}`)
+      const promptReceipt = JSON.parse(fs.readFileSync(path.join(work, 'prompts/cycle-1.json'), 'utf8'))
+      expect(promptReceipt.diagnosisPolicy).toBe(policy)
+      expect(promptReceipt.digest).toMatch(/^[a-f0-9]{64}$/)
+      expect(JSON.parse(fs.readFileSync(path.join(work, 'stage-intervals.json'), 'utf8')).length).toBeGreaterThan(0)
+      const tail = path.join(canaryRunDir(work), 'heal-agent-tail.txt')
+      const diagnostic = fs.readFileSync(path.join(canaryRunDir(work), 'runner.log'), 'utf8') + (fs.existsSync(tail) ? fs.readFileSync(tail, 'utf8') : '')
+      expect(result.reason, diagnostic).toContain('passed')
+      expect(result.testExecutions).toBeGreaterThanOrEqual(2)
+    } else expect(fs.existsSync(path.join(canaryRunDir(work), 'manifest.json'))).toBe(false)
+    expect(integrity(work, path.join(root, 'frozen/single-service'), suite).contamination).toEqual([])
+    const evidence = await evaluate(root, path.join(work, 'app'), path.join(root, 'frozen/original-suite'), path.join(root, 'evaluation', attempt.id), true)
+    expect(evidence.passed).toHaveLength(7)
+    expect(evidence.extras).toBe(true)
+  } finally { clearTimeout(timeout) }
+}, 60_000)
+
+it.concurrent('prepares the study and replays frozen repairs through real workers', async () => {
+  const deps = path.join(root, 'runtime/node_modules')
+  const sourceApp = path.join(sourceRoot, 'templates/project/demo-app')
+  const sourceSuite = path.join(sourceRoot, 'templates/project/features/storefront-journey')
   const workspace = path.join(root, 'demo')
   copy(sourceApp, path.join(workspace, 'demo-app'))
   copy(sourceSuite, path.join(workspace, 'features/storefront-journey'))
@@ -123,4 +127,4 @@ it('runs real Canary and independent plain adapters with scripted repair process
   }
   expect(fs.readFileSync(path.join(replayRoot, 'report.md'), 'utf8')).toContain('Scripted local overhead replay')
 
-}, 240_000)
+}, 90_000)

@@ -209,7 +209,7 @@ export function featureChipState(
   }
   if (activity?.waiting) {
     const run = presentActivityRunStatus(activity)!
-    return { label: run.label, chipWidth: run.chipWidth, tone: run.tone, live: false,
+    return { label: activity.waiting.kind === 'queued' ? run.label.toLowerCase() : run.label, chipWidth: run.chipWidth, tone: run.tone, live: false,
       rank: activity.waiting.kind === 'queued' ? 5.5 : 0, title: `${run.label}. ${run.title}` }
   }
   if (activity?.runId && (activity.kind === 'healing' || activity.kind === 'running' || activity.kind === 'verifying')) {

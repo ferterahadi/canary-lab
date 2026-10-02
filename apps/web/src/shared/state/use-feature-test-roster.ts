@@ -57,7 +57,7 @@ export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKe
     specs,
     // Coverage still interprets partial/parse-error source rows itself.
     source: observation?.specs ?? specs,
-    incomplete: failure?.kind === 'discovery' ? observation?.specs ?? [] : [],
+    incomplete: observation?.specs && failure?.kind === 'discovery' ? observation.specs : [],
     failure,
     error: observation?.requestError ?? null,
     loading: resource.loading,

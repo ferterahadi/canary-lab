@@ -1,22 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { realPtyFactory, type PtyFactory, type PtySpawnOptions } from './pty-spawner'
 
-// Integration tests against the real node-pty native binding. Skipped
-// cleanly (never a hard failure) on environments that lack the built
-// binding — mirrors the itIfFixture pattern in trace-enrichment.test.ts.
-const canLoadPty = (() => {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('node-pty')
-    return true
-  } catch {
-    return false
-  }
-})()
-const itIfPty = canLoadPty ? it : it.skip
-
 describe('realPtyFactory', () => {
-  itIfPty('returns a cached factory instance exposing a full PtyHandle surface', async () => {
+  it('returns a cached factory instance exposing a full PtyHandle surface', async () => {
     const factory1 = realPtyFactory()
     const factory2 = realPtyFactory()
     // Module-level caching: second call must reuse the first factory.
@@ -53,7 +39,7 @@ describe('realPtyFactory', () => {
     }
   }, 15_000)
 
-  itIfPty('applies explicit cols/rows and env overrides', async () => {
+  it('applies explicit cols/rows and env overrides', async () => {
     const factory = realPtyFactory()
     const output = await runCommand(factory, {
       command: 'stty size; echo "VAR_IS=$MY_TEST_VAR"',
@@ -67,13 +53,13 @@ describe('realPtyFactory', () => {
     expect(output).toContain('VAR_IS=canary-pty-test')
   }, 15_000)
 
-  itIfPty('defaults cols/rows to 120x30 when omitted', async () => {
+  it('defaults cols/rows to 120x30 when omitted', async () => {
     const factory = realPtyFactory()
     const output = await runCommand(factory, { command: 'stty size', cwd: process.cwd() })
     expect(output).toContain('30 120')
   }, 15_000)
 
-  itIfPty('resolves shell in priority order: opts.shell > $SHELL > /bin/bash default', async () => {
+  it('resolves shell in priority order: opts.shell > $SHELL > /bin/bash default', async () => {
     const factory = realPtyFactory()
 
     // opts.shell wins even when $SHELL is set to something else.

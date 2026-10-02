@@ -121,3 +121,11 @@ it('leaves source markers untouched when the suite has no committed baseline', a
     fs.rmSync(noGit, { recursive: true, force: true })
   }
 })
+
+it('marks added rows using the declaration span when a legacy extraction has no body boundary', async () => {
+  const edited = original.replace('  expect(1).toBe(1)', '  expect(1).toBe(3)')
+  const { tests } = extractTestsFromSource(file, edited)
+  tests[0].bodyLine = undefined
+  await attachSourceChanges(root, file, edited, tests)
+  expect(tests[0].sourceChanges).toEqual({ changedLines: [3], count: 1 })
+})

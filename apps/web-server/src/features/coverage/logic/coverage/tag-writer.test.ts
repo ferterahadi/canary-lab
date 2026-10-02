@@ -326,3 +326,29 @@ describe('writeCoversTags — no-op mapping branch (line 169)', () => {
     expect(out.match(/@req-R1/g)).toHaveLength(1)
   })
 })
+
+describe('shared declaration recognition', () => {
+  it.each(['test', 'it'].flatMap((root) => ['', '.only', '.skip', '.fixme', '.fail'].map((suffix) => `${root}${suffix}`)))('round-trips tags on %s without changing its body', (callee) => {
+    const source = `${callee}('mapped', async () => { expect(1).toBe(1) })`
+    const tagged = writeCoversTag(source, 'mapped', { requirements: ['R1'] })
+    expect(tagged).toContain("{ tag: ['@req-R1'] }")
+    expect(stripCoverageTags(tagged)).toBe(source)
+    expect(extractTestsFromSource('spec.ts', tagged).tests).toHaveLength(1)
+  })
+
+  it.each(['test.beforeEach', 'test.afterEach', 'test.beforeAll', 'test.afterAll', 'test.use', 'test.setTimeout', 'test.step', 'test.only.skip'])('leaves %s untouched when adding or removing tags', (callee) => {
+    const source = `${callee}('setup', async () => {})`
+    expect(writeCoversTag(source, 'setup', { requirements: ['R1'] })).toBe(source)
+    const tagged = `${callee}('setup', { tag: ['@req-R1', '@smoke'] }, async () => {})`
+    expect(stripCoverageTags(tagged)).toBe(tagged)
+  })
+
+  it('tags a test after a same-title hook inside a suite', () => {
+    const hook = "test.beforeEach('mapped', async () => {})"
+    const source = `test.describe('suite', () => { ${hook}; it('mapped', async () => {}) })`
+    const tagged = writeCoversTag(source, 'mapped', { requirements: ['R1'] })
+    expect(tagged).toContain(hook)
+    expect(tagged).toContain("it('mapped', { tag: ['@req-R1'] }, async () => {})")
+    expect(stripCoverageTags(tagged)).toBe(source)
+  })
+})

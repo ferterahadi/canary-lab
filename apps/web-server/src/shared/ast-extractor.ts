@@ -1,10 +1,12 @@
+import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
+export type TestModifier = DeclarationModifier
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
 import type { ReadableSemanticRuleConfig } from '../../../../shared/readable-tests/types'
 import type { TestPredicate, TestGuard,
   UnparsedExpectation } from '../../../../shared/verification-strength/types'
-import { collectTestPredicates, guardFrom, TEST_DECLARATORS } from './verification-strength/predicates'
+import { collectTestPredicates, guardFrom } from './verification-strength/predicates'
 import {
   translateReadableTest,
   createReadableTestAstTranslator,
@@ -54,48 +56,6 @@ function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | nu
     return raw.slice(1, -1)
   }
   return null
-}
-
-function getCalleeChain(expr: ts.Expression): string[] {
-  // Returns the dotted access chain, e.g. `test.step.skip` → ["test","step","skip"].
-  // Returns [] if the callee isn't an Identifier or a chain of property accesses
-  // rooted at one.
-  if (ts.isIdentifier(expr)) return [expr.text]
-  if (ts.isPropertyAccessExpression(expr)) {
-    const head = getCalleeChain(expr.expression)
-    if (head.length === 0) return []
-    return [...head, expr.name.text]
-  }
-  return []
-}
-
-/** A declaration-level modifier: `test.skip(...)`, `test.fixme(...)`, `test.fail(...)`,
- *  `test.only(...)`. The first three stop the test from proving anything; `only`
- *  stops every other test in the file from running. */
-export type TestModifier = 'only' | 'skip' | 'fixme' | 'fail'
-
-const TEST_DECLARATION_MODIFIERS: ReadonlySet<string> = new Set<TestModifier>(['only', 'skip', 'fixme', 'fail'])
-
-function isTestModifier(name: string): name is TestModifier {
-  return TEST_DECLARATION_MODIFIERS.has(name)
-}
-
-// Only meaningful for a call `isTestCall` accepted: a declaration's modifier is
-// the second segment of its callee chain, and a bare `test(...)` has none.
-function declarationModifier(call: ts.CallExpression): TestModifier | undefined {
-  const tail = getCalleeChain(call.expression)[1] ?? ''
-  return isTestModifier(tail) ? tail : undefined
-}
-
-function isTestCall(call: ts.CallExpression): boolean {
-  // Match the test declaration forms — `test(...)` and its `it` spelling — but not
-  // hooks/configuration methods such as test.beforeEach(), test.use(), or
-  // test.setTimeout(). A titled hook also carries a string + callback, so argument
-  // shape alone cannot distinguish it from a test.
-  const [root, modifier, ...rest] = getCalleeChain(call.expression)
-  if (root === undefined || !TEST_DECLARATORS.has(root)) return false
-  if (modifier === undefined) return true
-  return rest.length === 0 && isTestModifier(modifier)
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {

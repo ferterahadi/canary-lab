@@ -1,3 +1,4 @@
+import { authoredStep, callFromStatement } from './call-syntax'
 import ts from 'typescript'
 import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
@@ -162,53 +163,6 @@ function restoreExactIdentifiers(text: string): string {
   return text.replace(/\uE000([0-9a-f_]+)\uE001/gi, (_match, encoded: string) => (
     encoded.split('_').map((part) => String.fromCodePoint(Number.parseInt(part, 16))).join('')
   ))
-}
-
-function callFromStatement(statement: ts.Statement): ts.CallExpression | undefined {
-  const statementExpression = ts.isExpressionStatement(statement)
-    ? statement.expression
-    : ts.isReturnStatement(statement)
-      ? statement.expression
-      : ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1
-        ? statement.declarationList.declarations[0].initializer
-        : undefined
-  if (!statementExpression) return undefined
-  let expression = statementExpression
-  while (
-    ts.isAwaitExpression(expression)
-    || ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-  ) {
-    expression = expression.expression
-  }
-  return ts.isCallExpression(expression) ? expression : undefined
-}
-
-function authoredStep(statement: ts.Statement): { label: string; body: ts.Block } | undefined {
-  const call = callFromStatement(statement)
-  if (
-    !call
-    || !ts.isPropertyAccessExpression(call.expression)
-    || !ts.isIdentifier(call.expression.expression)
-    || call.expression.expression.text !== 'test'
-    || call.expression.name.text !== 'step'
-  ) {
-    return undefined
-  }
-  const [label, callback] = call.arguments
-  if (
-    !label
-    || !ts.isStringLiteralLike(label)
-    || !callback
-    || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
-    || !ts.isBlock(callback.body)
-  ) {
-    return undefined
-  }
-  return { label: label.text, body: callback.body }
 }
 
 function calledName(call: ts.CallExpression): string | undefined {

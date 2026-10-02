@@ -146,3 +146,18 @@ it('cancels a scheduled retry when an event replaces it', async () => {
   expect(api.getFeatureTests).toHaveBeenCalledTimes(2)
   expect(value.specs?.[0].file).toBe('fresh.ts')
 })
+
+it.each([
+  [new ApiError(500, { error: 'server unavailable' }), 'Server returned HTTP 500. server unavailable'],
+  [new ApiError(500, { message: 'bad module' }), 'Server returned HTTP 500. bad module'],
+  [new ApiError(500, { error: 42 }), 'Server returned HTTP 500.'],
+  [new ApiError(500, null), 'Server returned HTTP 500.'],
+  ['offline', 'Unable to load tests for this suite.'],
+  [new ApiError(422, { code: 'discovery-failed', error: 42 }), 'Server returned HTTP 422.'],
+])('formats malformed or unstructured discovery failures: %s', async (error, message) => {
+  api.getFeatureTests.mockRejectedValue(error)
+  await render()
+  expect(value.failure?.message).toContain(message)
+  expect(value.error).toBe(error instanceof Error ? error.message : 'Failed to load test source')
+  expect(value.confirmed).toBe(false)
+})

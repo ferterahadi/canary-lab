@@ -338,10 +338,7 @@ describe('refreshClaudeDesktopMcpQuietly', () => {
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].args[0]).toBe(CLI)
   })
 
-  // Running as root defeats the read-only bit, so this asserts the guarantee
-  // only where the OS can actually enforce it.
-  const cannotChmod = process.platform === 'win32' || process.getuid?.() === 0
-  it.skipIf(cannotChmod)('swallows a write failure rather than blocking the ui boot', () => {
+  it('swallows a write failure rather than blocking the ui boot', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
     fs.writeFileSync(configPath, JSON.stringify({

@@ -30,7 +30,10 @@ const announcedNoise = new Set<string>()
 
 export default defineConfig({
   test: {
-    bail: 1,
+    bail: 0,
+    // Real integration tests also spawn services and Playwright workers. Leave
+    // CPU headroom so synchronous parser tests do not time out under coverage.
+    maxWorkers: 12,
     onConsoleLog(log) {
       if (process.env.VITEST_VERBOSE) return undefined // full raw logs
       const hit = EXPECTED_LOG_NOISE.find((n) => n.match(log))
@@ -85,6 +88,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
+      reportOnFailure: true,
       reportsDirectory: 'coverage',
       // Coverage threshold scope: every module that decides something. The
       // server's runtime business logic, its route handlers and registrars, the

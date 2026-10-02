@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 import { CandidateContainers } from './container'
 import { command } from '../files'
 
-it.skipIf(process.env.CANARY_CANDIDATE_CONTAINER_TEST !== '1')('kills a reparented detached candidate child at the container boundary', async () => {
+it('kills a reparented detached candidate child at the container boundary', async () => {
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'candidate-container-test-'))
   const containers = new CandidateContainers(output, path.join(os.homedir(), 'Library/Caches/Yarn'))
   try {
@@ -29,7 +29,7 @@ it.skipIf(process.env.CANARY_CANDIDATE_CONTAINER_TEST !== '1')('kills a reparent
   }
 }, 120_000)
 
-it.skipIf(process.env.CANARY_CANDIDATE_CONTAINER_TEST !== '1').each(['volume', 'build', 'host', 'busy'])(
+it.each(['volume', 'build', 'host', 'busy'])(
   'recovers %s resources after evaluator SIGKILL', async (phase) => {
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'candidate-crash-test-'))
     const log = fs.openSync(path.join(output, 'evaluator.log'), 'a')

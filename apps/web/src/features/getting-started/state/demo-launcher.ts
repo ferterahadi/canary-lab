@@ -303,6 +303,7 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
     writes.current.pending = { value: next }
     setOptimistic(next)
     if (writes.current.running) return
+    const reset = () => { writes.current.running = false }
     const drain = async () => {
       writes.current.running = true
       try {
@@ -321,9 +322,9 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
             setOptimistic(null)
           }
         }
-      } finally { writes.current.running = false }
+      } finally { reset() }
     }
-    void drain().catch(() => { /* Mutation failures are handled inside the queue. */ })
+    void drain().catch(reset)
   }, [mounted, acceptConfig])
 
   return {

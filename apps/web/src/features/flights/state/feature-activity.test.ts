@@ -6,7 +6,7 @@ import type { DraftRecord } from '@shared/draft-types'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import fixture from '../../runs/utils/__fixtures__/run-snapshot-review.json'
-import { deriveFeatureActivity, deriveFeatureExternalHistory, displayedActiveRuns } from './feature-activity'
+import { deriveFeatureActivity, deriveFeatureExternalHistory, displayedActiveRuns, presentActivityRunStatus } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
   runId: 'r1',
@@ -573,4 +573,14 @@ it('carries the recorded review wait from run detail into the feature activity',
     portifyWorkflows: [], drafts: [],
   })
   expect(result.get('sample-suite')?.waiting?.label).toBe('Awaiting test review')
+})
+
+
+it('leaves unrelated work without a run presentation and orders queued siblings deterministically', () => {
+  expect(presentActivityRunStatus(undefined)).toBeNull()
+  expect(presentActivityRunStatus({ kind: 'authoring' })).toBeNull()
+  expect(presentActivityRunStatus({ kind: 'running' })).toBeNull()
+  const later = run({ runId: 'later', status: 'queued', startedAt: '2026-01-02T00:00:00Z' })
+  const older = run({ runId: 'older', status: 'queued' })
+  expect(displayedActiveRuns([later, older]).get('checkout')).toBe(later)
 })
