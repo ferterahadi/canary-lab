@@ -444,12 +444,17 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
   const loading = segments.some((segment) => !loaded[sourceIdentityKey(segment.source)] || loaded[sourceIdentityKey(segment.source)].loading)
   let previousDate: string | undefined
   return (
-    <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
+    // The recessed `--bg-base` well belongs to the transcript, not the pane. An
+    // empty view sits on the host's own surface, so its card reads exactly like
+    // the Changes and Journal empty states beside it rather than as a dark hole.
+    <div className="relative flex h-full min-h-0 flex-col" style={rows.length === 0 ? undefined : { background: 'var(--bg-base)' }}>
       <style>{TIMELINE_CSS}</style>
       {segments.map((segment) => <SessionLoader key={sourceIdentityKey(segment.source)} source={segment.source} report={report} />)}
       <div ref={scrollerRef} onScroll={onScroll} className="h-full min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
         {rows.length === 0 && <EmptyState {...(failure ? EMPTY_COPY.agentUnreadable : loading ? EMPTY_COPY.agentLoading : liveSegment ? EMPTY_COPY.agentWaiting : empty ?? EMPTY_COPY.agentNone)} detail={failure ?? empty?.detail} />}
-        <ol className="agentts-rail">
+        {/* No rail under a settled empty state: its bottom padding would overflow
+            the scroller and follow-latest would nudge the card off centre. */}
+        {(rows.length > 0 || liveSegment) && <ol className="agentts-rail">
           {rows.map((row) => {
             const date = activityDate(row.timestamp)
             const dateHeading = date !== previousDate && (dates.size > 1 || date === 'Time unavailable')
@@ -460,7 +465,7 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
             </Fragment>
           })}
           {liveSegment && <LiveTail {...pendingWork(loaded[sourceIdentityKey(liveSegment.source)]?.state?.events ?? [])} />}
-        </ol>
+        </ol>}
       </div>
       {showJumpLatest && <JumpLatestButton onClick={() => {
         const el = scrollerRef.current

@@ -224,7 +224,7 @@ describe('ChangesTab', () => {
     // A healed run with no capture is not the same fact as a first-time pass,
     // and the green "all good" reading would be wrong for it.
     await render(<ChangesTab runId="r1" healCycles={2} />)
-    expect(text('changes-empty')).toContain('Nothing was changed in your code')
+    expect(text('changes-empty')).toContain('No code changes were captured')
     expect(text('changes-empty')).toContain('Heal agent tab')
   })
 
