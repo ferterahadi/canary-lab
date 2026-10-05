@@ -90,13 +90,13 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
             <>
               <span aria-hidden="true" className="mx-1 h-4 w-px bg-line-strong" />
               <button
-                className={`cl-button inline-flex h-7 ${reviewNeeded ? 'gap-1 px-2' : 'w-7'} items-center justify-center rounded-md text-xs`}
+                className="cl-button inline-flex h-7 w-7 items-center justify-center rounded-md text-xs"
                 aria-label={action}
                 title={action}
                 disabled={inbox.busy}
                 onClick={() => { void openItem(item) }}
               >
-                {reviewNeeded && <span>Review</span>}<span aria-hidden="true" className="flex"><ChevronRightIcon /></span>
+                <span aria-hidden="true" className="flex"><ChevronRightIcon /></span>
               </button>
             </>
           )}

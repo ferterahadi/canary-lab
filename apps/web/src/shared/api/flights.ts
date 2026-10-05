@@ -11,8 +11,8 @@ import type {
   PlanFeaturesTask as PlanFeaturesTaskT,
 } from '@shared/flights/types'
 import type { AgentStagePlans as AgentStagePlansT } from '@shared/agent-models'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
  *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
@@ -251,17 +251,10 @@ export async function getFlightAgentSession(
   stage: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+    opts,
+  )
 }
 
 // ─── Plan features (pre-flight intent breakdown, R54) ─────────────────────
@@ -335,15 +328,8 @@ export async function getFlightPlanAgentSession(
   taskId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
+    opts,
+  )
 }

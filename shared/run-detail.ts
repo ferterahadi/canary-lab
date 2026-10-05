@@ -1,3 +1,5 @@
+import type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
+export type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
 // What GET /api/runs/:id returns: the manifest plus the reporter's summary,
 // playback events and artifacts. Shared so the web UI reads the server's own
 // declaration instead of a mirror.
@@ -39,13 +41,6 @@ export interface RunSummaryFailedEntry {
    *  `TestEntry` in `runtime/summary-types.ts`; this interface is the read-side
    *  projection of it and must only ever be a subset. */
   traceSummaryFile?: string
-}
-
-export interface RunSummaryRunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
 }
 
 export interface RunSummary {
@@ -92,30 +87,6 @@ export interface RunSummary {
   runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
   failed: RunSummaryFailedEntry[]
 }
-
-export type PlaywrightPlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { name: string; title: string }
-      step: RunSummaryRunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }
 
 export interface RunDetail {
   runId: string

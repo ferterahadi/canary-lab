@@ -11,8 +11,8 @@ import type {
   CoverageJobManifest,
   PrdSummary,
 } from '@shared/coverage/types'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
   return requestSnapshot(`/api/features/${encodeURIComponent(feature)}/coverage`, opts)
@@ -149,17 +149,10 @@ export async function getCoverageAgentSession(
   jobId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence | null> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse | null>(
-      `${baseUrl}/api/coverage/jobs/${encodeURIComponent(jobId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession<AgentSessionResponse | null>(
+    `/api/coverage/jobs/${encodeURIComponent(jobId)}/agent-session`,
+    opts,
+  )
 }
 
 /** 404 → an `AgentSessionAbsence` with the server's reason (a raw export has
@@ -168,17 +161,10 @@ export async function getEvaluationAgentSession(
   taskId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/evaluation-exports/${encodeURIComponent(taskId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/evaluation-exports/${encodeURIComponent(taskId)}/agent-session`,
+    opts,
+  )
 }
 
 export function clearPrdSummary(feature: string, opts?: ClientOptions): Promise<{ feature: string; removed: string[]; untagged: string[] }> {

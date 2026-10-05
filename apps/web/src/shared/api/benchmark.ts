@@ -3,8 +3,8 @@
 
 import type { BenchmarkIndexEntry, SabotageLevel } from '@shared/benchmark-index'
 import type { BenchmarkManifest, SabotageSkillSummary } from '@/features/benchmark/api/benchmark-types'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function listBenchmarks(opts?: ClientOptions): Promise<BenchmarkIndexEntry[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -115,17 +115,10 @@ export async function getBenchmarkAgentSession(
   id: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence | null> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse | null>(
-      `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession<AgentSessionResponse | null>(
+    `/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
+    opts,
+  )
 }
 
 // ─── Port-ification ──────────────────────────────────────────────────────

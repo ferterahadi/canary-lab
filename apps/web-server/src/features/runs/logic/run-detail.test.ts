@@ -104,6 +104,7 @@ describe('getRunDetail', () => {
 
     const d = getRunDetail(tmpDir, 'r-artifacts')
     expect(d?.playbackEvents).toHaveLength(2)
+    expect(d?.playbackEvents?.map(event => event.test.id)).toEqual([undefined, undefined])
     expect(d?.playwrightArtifacts).toEqual([
       {
         testName: 'test-case-visual-checkout',

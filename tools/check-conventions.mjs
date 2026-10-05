@@ -100,9 +100,17 @@ const BASELINE = {
   ]),
   // A published `package.json` export is the consumer contract, so its entry
   // file may forward a symbol whose real home is elsewhere. Nothing inside the
-  // repo imports through it.
+  // repo imports through it. The type-only compatibility entries below keep
+  // existing import locations during the explicitly scoped contract extraction;
+  // their shared modules remain the sole declarations.
   'no-re-export': new Map([
     ['shared/e2e-runner/log-marker-fixture.ts', 'entry for `canary-lab/feature-support/log-marker-fixture`; installed suites import resolveRunRepoPath and the Playwright expect/Page types from it'],
+    ['apps/web/src/shared/api/runs.ts', 'preserve existing browser PR type imports while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/shared/gh-cli.ts', 'preserve the GhStatus import location while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/pr/pr-preflight.ts', 'preserve existing preflight type imports while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/pr/propose-fixes.ts', 'preserve the ProposeResult type alias while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/runtime/summary-types.ts', 'preserve reporter type imports while shared/playback owns the persisted event contract'],
+    ['shared/run-detail.ts', 'preserve reader type imports while shared/playback owns the persisted event contract'],
   ]),
 }
 

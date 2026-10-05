@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { readPlaywrightPlaybackEvents } from '../run-detail'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 
@@ -184,6 +185,11 @@ describe('SummaryReporter', () => {
         ],
       },
     ])
+    const events = readPlaywrightPlaybackEvents(LOGS_DIR)
+    expect(events).toEqual(readEvents())
+    expect(events?.map(event => event.test.id)).toEqual(Array(4).fill(testIdFor({
+      title: test.title, location: '/specs/checkout.spec.ts:12',
+    })))
   })
 
   it('keeps attachment entries when Playwright only provides a name', () => {

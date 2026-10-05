@@ -3,8 +3,8 @@ import type { PortifyStatus } from '@shared/portify-index'
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { ClientKind, RunProducer } from '@shared/run-mode'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export interface PortifyBootInstance {
   ports: Record<string, number>
@@ -119,15 +119,8 @@ export async function getPortifyAgentSession(
   workflowId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/portify/${encodeURIComponent(workflowId)}/agent-session`,
+    opts,
+  )
 }

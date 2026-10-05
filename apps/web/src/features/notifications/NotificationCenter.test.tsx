@@ -39,6 +39,11 @@ it('keeps a test review and Flight blocker separate in an already-open inbox', a
   rows.push({ id: 'flight', title: 'shop: Test run failed', body: 'Open Flight to recover and continue.', severity: 'warning', target: flight, toast: true, createdAt: '2026-09-08T10:00:00Z' })
   await act(async () => { invalidate('notifications') })
   expect(labelled('Notifications, 2 need attention')).not.toBeNull()
+  for (const action of ['Review test changes', 'Open flight']) {
+    expect(labelled(action).textContent).toBe('')
+    expect(labelled(action).querySelector('svg')).toBeTruthy()
+    expect(labelled(action).className).toContain('w-7')
+  }
   await act(async () => labelled('Review test changes').click())
   expect(navigate).toHaveBeenLastCalledWith(target)
   await act(async () => labelled('Open flight').click())
@@ -118,9 +123,7 @@ it.each(['neutral', 'warning', undefined] as const)('keeps unresolved test revie
   const row = () => document.querySelector('[data-testid="notification-n1"]')!
   expect(row().querySelector('.cl-status-dot')?.className).toContain('bg-warning')
   expect(row().textContent).toContain('Review needed')
-  // The chevron is the shared SVG the rest of the app's "go there" controls
-  // use, so the button's text is the word and the arrow is a mark beside it.
-  expect(labelled('Review test changes').textContent).toBe('Review')
+  expect(labelled('Review test changes').textContent).toBe('')
   expect(labelled('Review test changes').querySelector('svg')).toBeTruthy()
   expect(row().querySelector('.cl-status-dot')?.className).toContain('bg-warning')
   expect(row().textContent).toContain('Review needed')

@@ -1,3 +1,5 @@
+import type { ProposePrResult as ProposeResult } from '../../../../../../../shared/run-pr'
+export type { ProposePrResult as ProposeResult } from '../../../../../../../shared/run-pr'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -24,14 +26,6 @@ import { prProvenanceFooter, type VerdictProvenance } from './pr-provenance'
 // order load-bearing — an existing PR is reused only AFTER the new patch has
 // been pushed onto its branch, so the PR a reviewer opens is never a stale
 // earlier attempt.
-
-export interface ProposeResult {
-  repoName: string
-  ok: boolean
-  pr?: RunProposedPr
-  /** Why it didn't open, when `ok` is false (conflict, push rejected, etc.). */
-  reason?: string
-}
 
 export interface ProposeDeps {
   git?: (cwd: string, args: string[]) => Promise<GitResult>

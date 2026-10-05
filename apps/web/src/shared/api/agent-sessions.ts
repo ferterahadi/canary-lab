@@ -76,16 +76,21 @@ export async function getAgentSession(
   runId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
+  return requestAgentSession(
+    `/api/runs/${encodeURIComponent(runId)}/agent-session`,
+    opts,
+  )
+}
+
+export async function requestAgentSession<T extends AgentSessionResponse | null = AgentSessionResponse>(
+  pathname: string,
+  opts?: ClientOptions,
+): Promise<T | AgentSessionAbsence> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/runs/${encodeURIComponent(runId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
+    return await request<T>(`${baseUrl}${pathname}`, { method: 'GET' }, fetchImpl)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }
-

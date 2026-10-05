@@ -1,3 +1,5 @@
+import type { PrPreflight, PrRepoPreflight } from '../../../../../../../shared/run-pr'
+export type { PrBlockedReason, PrRepoPreflight, PrPreflight } from '../../../../../../../shared/run-pr'
 import { execFileSync } from 'child_process'
 import { detectBaseBranch } from '../../../../shared/git-repo'
 import { resolveRepoPath } from '../../../../shared/repo-identity'
@@ -14,29 +16,6 @@ import type { RunFixCapture } from '../../../../../../../shared/run-state'
 // repo. This is the enforcement point the PR dialog re-runs on open (auth can
 // change outside the app), and it feeds the same taxonomy the Fixes-captured
 // panel uses for its blocked-reason line.
-
-export type PrBlockedReason =
-  | 'no-origin'      // the repo has no `origin` remote
-  | 'not-github'     // origin isn't a GitHub remote we recognize
-  | 'gh-missing'     // the gh CLI isn't installed
-  | 'not-authed'     // gh is installed but no account is signed in
-  | 'wrong-account'  // signed in, but the account can't push to this repo
-
-export interface PrRepoPreflight {
-  repoName: string
-  repoRoot: string
-  origin: { owner: string; name: string; host: string } | null
-  base: string | null
-  pushable: boolean
-  blocked?: { reason: PrBlockedReason; detail?: string }
-}
-
-export interface PrPreflight {
-  gh: GhStatus
-  repos: PrRepoPreflight[]
-  /** At least one repo is pushable — the dialog can offer a PR. */
-  anyPushable: boolean
-}
 
 export interface PrPreflightDeps {
   ghStatus?: () => Promise<GhStatus>

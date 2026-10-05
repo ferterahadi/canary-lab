@@ -7,7 +7,8 @@ import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequi
 import type { AuditList } from './types-wizard'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { RunDetail, JournalSection } from '@shared/run-detail'
-import type { RunProposedPr } from '@shared/run-state'
+import type { GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
+export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
 import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 export function listRuns(
@@ -284,22 +285,11 @@ export function getRunFixPatch(runId: string, repoName: string, opts?: ClientOpt
 }
 
 // gh (GitHub CLI) connection status — detect-and-instruct only.
-export interface GhStatus { installed: boolean; authenticated: boolean; account?: string; host?: string }
 export function getGhStatus(opts?: ClientOptions): Promise<GhStatus> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<GhStatus>(`${baseUrl}/api/gh/status`, { method: 'GET' }, fetchImpl)
 }
 
-export type PrBlockedReason = 'no-origin' | 'not-github' | 'gh-missing' | 'not-authed' | 'wrong-account'
-export interface PrRepoPreflight {
-  repoName: string
-  repoRoot: string
-  origin: { owner: string; name: string; host: string } | null
-  base: string | null
-  pushable: boolean
-  blocked?: { reason: PrBlockedReason; detail?: string }
-}
-export interface PrPreflight { gh: GhStatus; repos: PrRepoPreflight[]; anyPushable: boolean }
 
 // Side-effect-free "can we open a PR from this run's fix?" check, per repo.
 export function getRunPrPreflight(runId: string, opts?: ClientOptions): Promise<PrPreflight> {
@@ -307,7 +297,6 @@ export function getRunPrPreflight(runId: string, opts?: ClientOptions): Promise<
   return request<PrPreflight>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/pr-preflight`, { method: 'GET' }, fetchImpl)
 }
 
-export interface ProposePrResult { repoName: string; ok: boolean; pr?: RunProposedPr; reason?: string }
 // Open a PR from the captured fix, per pushable repo (on demand). Idempotent.
 export function proposeRunPr(runId: string, opts?: ClientOptions): Promise<{ results: ProposePrResult[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

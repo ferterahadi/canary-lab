@@ -55,6 +55,15 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('get_feature_envset_summary', () => {
+  it('reports a corrupt envset configuration instead of returning an empty summary', async () => {
+    const dir = writeFeature('checkout')
+    fs.mkdirSync(path.join(dir, 'envsets'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'envsets', 'envsets.config.json'), '{broken')
+    const { raw, text } = harness()
+    expect(await raw('get_feature_envset_summary', { feature: 'checkout' })).toMatchObject({ isError: true })
+    expect(await text('get_feature_envset_summary', { feature: 'checkout' })).toBe('envsets.config.json must contain a valid JSON object')
+  })
+
   it('reports an unknown feature rather than an empty layout', async () => {
     const { text } = harness()
 
