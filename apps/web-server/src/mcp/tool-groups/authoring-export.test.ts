@@ -155,6 +155,19 @@ describe('start_external_evaluation_export', () => {
     expect(gs.attached).toEqual([
       { sessionId: 'gs-exp', target: { kind: 'export', id: (out.task as { taskId: string }).taskId, feature: 'checkout' } },
     ])
+    expect(gs.abandoned).toEqual([])
+  })
+
+  it('releases the demo claim if the export task cannot be persisted', async () => {
+    fs.rmSync(logsDir, { recursive: true })
+    fs.writeFileSync(logsDir, 'blocked directory')
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-write-failure' })
+    const { call } = harness(runDetail(), { gettingStartedDemo: gs.demo })
+    await expect(call('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's', client_kind: 'claude',
+    })).rejects.toThrow()
+    expect(gs.abandoned).toEqual(['gs-write-failure'])
+    expect(gs.attached).toEqual([])
   })
 
   it('offers an export for a failed run, which is the case that most needs one', async () => {

@@ -133,6 +133,7 @@ describe('ensureClaudeWorkspaceTrusted', () => {
         [workspace]: { hasTrustDialogAccepted: true },
       },
     })
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(JSON.stringify(read(), null, 2))
   })
 
   it('merges into an existing declined entry rather than replacing it', () => {

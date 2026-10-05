@@ -1,10 +1,10 @@
+import { useNow } from '@/shared/state/use-now'
 import { pinnedPlanSummary } from '@shared/agent-models'
-import { useEffect, useState } from 'react'
 import type { CoverageJobManifest } from '@shared/coverage/types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill, useExternalClientAction } from '@/shared/ui/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
@@ -52,14 +52,9 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 
   // Elapsed timer — a constant liveness signal even before the agent pins its
   // session and the timeline starts streaming, so the screen never reads frozen.
-  const [elapsed, setElapsed] = useState(0)
-  useEffect(() => {
-    const started = Date.parse(job.startedAt)
-    const tick = () => setElapsed(Number.isFinite(started) ? Math.max(0, Math.round((Date.now() - started) / 1000)) : 0)
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [job.startedAt])
+  const now = useNow({ resetKey: job.startedAt, refreshOnReset: true })
+  const started = Date.parse(job.startedAt)
+  const elapsed = Number.isFinite(started) ? Math.max(0, Math.round((now - started) / 1000)) : 0
 
   return (
     <div className="min-h-0 h-full overflow-auto" data-testid="coverage-generating" style={{ scrollbarGutter: 'stable' }}>
@@ -128,11 +123,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 // on the shared ExternalAgentCard so it matches external heal / portify / draft.
 export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
   const clientKind = (job.externalClientKind ?? 'other') as ExternalClientKind
-  const { opening, error: openError, open } = useOpenAgentApp()
-  // Jump-to-agent affordance: prefer the client's own conversation deep-link when
-  // it gave us one; otherwise launch the desktop app for a known client (same as
-  // the heal panel). PTY/unknown clients have no app to open → no CTA.
-  const desktopAgent = clientKindToDesktopAgent(clientKind)
+  const { action, error: openError } = useExternalClientAction({ clientKind, sessionUrl: job.externalSessionUrl })
   return (
     <div data-testid="coverage-external-monitor">
       <ExternalAgentCard
@@ -154,14 +145,14 @@ export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
           )
         }
         body="Mapping runs in your connected client — open it to follow the agent's reasoning. Canary tracks the job here and recomputes the ledger when the client submits."
-        action={job.externalSessionUrl ? (
-          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={job.externalSessionUrl} />
+        action={action?.kind === 'link' ? (
+          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={action.href} />
         ) : (
-          desktopAgent && (
+          action && (
             <ExternalClientCta
-              label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-              onClick={() => open(desktopAgent)}
-              busy={opening !== null}
+              label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
+              onClick={action.open}
+              busy={action.busy}
             />
           )
         )}

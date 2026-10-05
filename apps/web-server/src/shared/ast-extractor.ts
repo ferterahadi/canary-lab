@@ -1,3 +1,4 @@
+import { unwrapExpression } from './unwrap-expression'
 import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
 export type TestModifier = DeclarationModifier
 import ts from 'typescript'
@@ -408,15 +409,6 @@ interface LoopLevel {
 /** The literal each bound name takes under one iteration. */
 type IterationBindings = Map<string, ts.Expression>
 
-function unwrapExpression(node: ts.Expression): ts.Expression {
-  let current = node
-  while (
-    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isSatisfiesExpression(current)
-    || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)
-  ) current = current.expression
-  return current
-}
-
 function encloses(scope: ts.Node, node: ts.Node): boolean {
   return scope.pos <= node.pos && node.end <= scope.end
 }
@@ -448,7 +440,7 @@ function literalElements(
   src: ts.SourceFile,
   seen: Set<ts.VariableDeclaration>,
 ): ts.Expression[] | undefined {
-  const unwrapped = unwrapExpression(expr)
+  const unwrapped = unwrapExpression(expr, { unwrapAwait: false })
   if (ts.isArrayLiteralExpression(unwrapped)) {
     return unwrapped.elements.some(ts.isSpreadElement) ? undefined : [...unwrapped.elements]
   }
@@ -503,7 +495,7 @@ function propertyValue(object: ts.ObjectLiteralExpression, name: string): ts.Exp
 // A pattern the element's shape cannot satisfy binds nothing.
 function bindingsFor(binding: ts.BindingName, element: ts.Expression): IterationBindings {
   const bound: IterationBindings = new Map()
-  const value = unwrapExpression(element)
+  const value = unwrapExpression(element, { unwrapAwait: false })
   if (ts.isIdentifier(binding)) {
     bound.set(binding.text, value)
   } else if (ts.isObjectBindingPattern(binding) && ts.isObjectLiteralExpression(value)) {
@@ -534,7 +526,7 @@ function interpolated(expr: ts.Expression, bound: IterationBindings, src: ts.Sou
     value = bound.get(expr.text)
   } else if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
     const object = bound.get(expr.expression.text)
-    const unwrapped = object ? unwrapExpression(object) : undefined
+    const unwrapped = object ? unwrapExpression(object, { unwrapAwait: false }) : undefined
     value = unwrapped && ts.isObjectLiteralExpression(unwrapped) ? propertyValue(unwrapped, expr.name.text) : undefined
   }
   if (!value) return undefined

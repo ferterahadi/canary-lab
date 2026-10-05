@@ -1,3 +1,4 @@
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useState, type ReactNode } from 'react'
 import type { AgentSessionEvent, SubagentThread } from '@/shared/api/agent-sessions'
 import {
@@ -341,19 +342,10 @@ export function SourceModal({ open, onClose, eyebrow, title, description, source
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const onCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // The content stays visible and selectable when clipboard access is denied.
-    }
-  }
+  const { copy, copiedKey } = useClipboardCopy()
   return (
-    <button type="button" className="cl-button min-h-7 shrink-0 px-2 py-0.5" onClick={() => void onCopy()} data-testid="activity-log-copy">
-      {copied ? 'Copied' : 'Copy'}
+    <button type="button" className="cl-button min-h-7 shrink-0 px-2 py-0.5" onClick={() => void copy(text)} data-testid="activity-log-copy">
+      {copiedKey === text ? 'Copied' : 'Copy'}
     </button>
   )
 }

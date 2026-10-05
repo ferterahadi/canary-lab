@@ -1,3 +1,4 @@
+import { unwrapExpression } from '../unwrap-expression'
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
@@ -134,15 +135,7 @@ function renderCallAwareExpression(expression: ts.Expression, sourceFile: ts.Sou
   if (path) return { text: path, fidelity: 'exact' }
   const rendered = renderExpression(expression, sourceFile)
   if (rendered.fidelity !== 'unresolved') return rendered
-  let unwrapped = expression
-  while (
-    ts.isAwaitExpression(unwrapped)
-    || ts.isParenthesizedExpression(unwrapped)
-    || ts.isAsExpression(unwrapped)
-    || ts.isTypeAssertionExpression(unwrapped)
-    || ts.isNonNullExpression(unwrapped)
-    || ts.isSatisfiesExpression(unwrapped)
-  ) unwrapped = unwrapped.expression
+  const unwrapped = unwrapExpression(expression, { unwrapAwait: true })
   return ts.isCallExpression(unwrapped)
     ? renderNamedCallResult(unwrapped, sourceFile, { allowBareZeroArguments: true }) ?? rendered
     : rendered
@@ -232,14 +225,7 @@ function callDescription(call: ts.CallExpression, sourceFile: ts.SourceFile): st
 }
 
 function thrownOperation(actual: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
-  let expression = actual
-  while (
-    ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-  ) expression = expression.expression
+  const expression = unwrapExpression(actual, { unwrapAwait: false })
   if (ts.isIdentifier(expression)) return humanizeIdentifier(expression.text)
   if (!ts.isArrowFunction(expression) && !ts.isFunctionExpression(expression)) return undefined
   let body: ts.Expression | undefined
@@ -338,16 +324,7 @@ export function renderGenericAssertionStatement(
 }
 
 function isCollectionPredicate(expression: ts.Expression): boolean {
-  let current = expression
-  while (
-    ts.isParenthesizedExpression(current)
-    || ts.isAsExpression(current)
-    || ts.isTypeAssertionExpression(current)
-    || ts.isNonNullExpression(current)
-    || ts.isSatisfiesExpression(current)
-  ) {
-    current = current.expression
-  }
+  const current = unwrapExpression(expression, { unwrapAwait: false })
   return ts.isCallExpression(current)
     && ts.isPropertyAccessExpression(current.expression)
     && (

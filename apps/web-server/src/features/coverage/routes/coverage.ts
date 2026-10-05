@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from '../logic/coverage/freshness-monitor'
@@ -402,27 +403,26 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         }
       }
       try {
-        const { manifest } = startCoverageJob(
-          {
-            featuresDir: deps.featuresDir,
-            logsDir: deps.logsDir,
-            feature: req.params.name,
-            kind,
-            adapter: req.body?.adapter as never,
-            // Run the agent in the project root so its session log + cwd-based
-            // codex session location resolve (R17).
-            cwd: deps.projectRoot,
-            models: resolveCoverageJobModels(deps.projectRoot, req.body?.adapter, req.body?.models),
-          },
-          { store: jobStore, workspaceEvents: deps.workspaceEvents },
-        )
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
-        }
-        reply.code(202)
-        return manifest
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), (attach) => {
+          const { manifest } = startCoverageJob(
+            {
+              featuresDir: deps.featuresDir,
+              logsDir: deps.logsDir,
+              feature: req.params.name,
+              kind,
+              adapter: req.body?.adapter as never,
+              // Run the agent in the project root so its session log + cwd-based
+              // codex session location resolve (R17).
+              cwd: deps.projectRoot,
+              models: resolveCoverageJobModels(deps.projectRoot, req.body?.adapter, req.body?.models),
+            },
+            { store: jobStore, workspaceEvents: deps.workspaceEvents },
+          )
+          attach({ kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
+          reply.code(202)
+          return manifest
+        })
       } catch (err) {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         if (err instanceof CoverageJobConflictError) {
           reply.code(409)
           return { error: err.message, existingJobId: err.existingJobId }

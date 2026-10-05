@@ -3,9 +3,9 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-**Turn an app repo into a Playwright evaluation with Claude or Codex.**
+**A local wrapper that coordinates Playwright with Claude or Codex.**
 
-Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. The evaluation report connects requirements to tests, captured evidence, and the recorded pass or fail result.
+Your Claude or Codex agent investigates the app, writes Playwright tests, and repairs application failures. Playwright executes the tests. Canary Lab starts services, manages run state, captures evidence, and records the verdict. The evaluation report connects requirements to tests, captured evidence, and the result.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
@@ -19,7 +19,7 @@ You need Node.js 22.12 or newer and npm 9 or newer.
    npx canary-lab init my-lab
    ```
 
-   `init` installs the workspace dependencies and Chromium, then registers the Canary Lab skills and one Model Context Protocol (MCP) connection, exposed as `exec`, for supported Claude and Codex clients. The workspace holds test suites and run evidence; your app stays in its own repo.
+   `init` installs the workspace dependencies and Chromium, then registers the Canary Lab skills and Model Context Protocol (MCP) connection for supported Claude and Codex clients. The workspace holds test suites and run evidence; your app stays in its own repo.
 
 2. Restart Claude or Codex so it discovers the skill and connection. In its chat, ask it to test a specific flow using your app's absolute path:
 
@@ -44,7 +44,7 @@ If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab s
 
 scan repo → create suite → collect requirements → author and map tests → run and repair → export evaluation → check readiness for parallel runs
 
-The skill keeps the reasoning work in your current Claude or Codex session. Canary Lab runs the checks and calculates each stage result from saved evidence.
+The agent works in your current Claude or Codex session. Canary Lab manages Flight state and validates each stage against saved evidence.
 
 - **Requirements stay reviewable.** Add a product requirements document, link a local file, gather relevant repo documents, or infer requirements from the branch diff.
 - **Coverage is traceable.** The coverage percentage comes from test mappings to requirements and paths.
@@ -52,9 +52,9 @@ The skill keeps the reasoning work in your current Claude or Codex session. Cana
 - **Progress survives interruption.** Run `/canary-lab` again with the same repo to continue the existing Flight.
 - **The evaluation is the deliverable.** The archive preserves the recorded verdict, including failed or aborted runs, test evidence, any captured browser media, and per-test reasoning. It is available before the separate Parallel setup stage finishes.
 
-## Why the Verdict Is Independent
+## How Canary Lab Determines the Verdict
 
-Canary Lab determines pass or fail from its own Playwright run. The agent uses the resulting evidence to diagnose failures, fix application code, and request a rerun. Repairs must preserve the tests; the agent's completion report does not determine the run verdict.
+Canary Lab derives pass or fail from the Playwright results and their saved evidence. The agent uses that evidence to diagnose failures, repair application code, and request a rerun. Repairs preserve the tests, and the verdict reflects the recorded run.
 
 Canary Lab adds:
 

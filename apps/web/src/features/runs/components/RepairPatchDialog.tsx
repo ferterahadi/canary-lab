@@ -1,3 +1,4 @@
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useEffect, useState } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import * as workspaceApi from '@/shared/api/workspace'
@@ -34,16 +35,17 @@ export function RepairPatchDialog({
 }) {
   const [patch, setPatch] = useState<runsApi.RunFixPatch | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const { copy, copiedKey, reset } = useClipboardCopy({ resetAfterMs: null })
 
   useEffect(() => {
-    if (!open) { setPatch(null); setError(null); setCopied(false); return }
+    reset()
+    if (!open) { setPatch(null); setError(null); return }
     let live = true
     runsApi.getRunFixPatch(runId, repoName)
       .then((r) => { if (live) setPatch(r) })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
     return () => { live = false }
-  }, [open, runId, repoName])
+  }, [open, runId, repoName, reset])
 
   const unlisted = Math.max(0, files - fileNames.length)
 
@@ -60,14 +62,14 @@ export function RepairPatchDialog({
       footer={
         <>
           <span className="mr-auto text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {copied ? 'Path copied' : 'Every file in this repo is in this one patch'}
+            {copiedKey !== null ? 'Path copied' : 'Every file in this repo is in this one patch'}
           </span>
           {patch && (
             <>
               <button
                 type="button"
                 data-testid={`changes-patch-copy-${repoName}`}
-                onClick={() => { void navigator.clipboard?.writeText(patch.patchPath); setCopied(true) }}
+                onClick={() => { void copy(patch.patchPath) }}
                 className="cl-button px-2.5 py-1 text-[11px]"
               >
                 Copy path

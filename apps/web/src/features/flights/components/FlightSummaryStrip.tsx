@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useNow } from '@/shared/state/use-now'
 import type { FlightManifest, FlightStageKey } from '@shared/flights/types'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { MODEL_STAGE_KEYS, pinnedPlanChoices, type PinnedStageChoice } from '@shared/agent-models'
@@ -50,12 +50,7 @@ export function FlightSummaryStrip({
   // R71/W5: the one state where you'd watch the clock used to be the one state
   // that hid it — tick locally while the flight runs.
   const live = !flight.endedAt && flight.status === 'running'
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!live) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [live])
+  const now = useNow({ enabled: live })
   // `startedAt` is when work began: a queued flight is created long before it
   // starts, and a redo re-stamps it — `createdAt` alone reported the siblings'
   // whole runtime (or a week-old original start) as this flight's ELAPSED.

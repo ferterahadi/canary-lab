@@ -251,6 +251,7 @@ describe('POST /api/runs', () => {
     // holds a target-less claim, which the next boot reconciles away.
     expect(res.statusCode).toBe(202)
     expect(attach).toHaveBeenCalledWith('gs-q', { kind: 'run', id: 'q-demo' })
+    expect(gettingStarted.abandon).not.toHaveBeenCalled()
   })
 
   it('links a Getting Started claim to the active run it reused', async () => {
@@ -294,6 +295,23 @@ describe('POST /api/runs', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ runId: 'active-demo', reused: true })
     expect(attach).toHaveBeenCalledWith('gs-reuse', { kind: 'run', id: 'active-demo' })
+    expect(gettingStarted.abandon).not.toHaveBeenCalled()
+  })
+
+  it('releases an unattached demo claim when a collision requires a choice', async () => {
+    writeFeature('foo')
+    const gettingStarted = {
+      claim: vi.fn(() => ({ sessionId: 'gs-collision' })), attach: vi.fn(), abandon: vi.fn(),
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => ({ kind: 'collision', conflictingRunId: 'active', conflictingFeature: 'bar', repoPaths: ['/repo/app'] }),
+      gettingStarted,
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', gettingStartedSource: 'internal' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().type).toBe('repo_collision_requires_choice')
+    expect(gettingStarted.abandon).toHaveBeenCalledExactlyOnceWith('gs-collision')
+    expect(gettingStarted.attach).not.toHaveBeenCalled()
   })
 
   it('releases a Getting Started claim when the run fails to start', async () => {

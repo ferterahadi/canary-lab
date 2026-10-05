@@ -1,12 +1,8 @@
+import { runCoverageAgentAttempts, type CoverageAgentSession, type CoverageAgentRunOptions, type CoverageAgentRunner } from './coverage-agent-attempts'
 import path from 'path'
 import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
-import {
-  AGENT_DEFAULT_CHOICE,
-  type PerAgentStageChoices,
-  type StageModelChoice,
-} from '../../../../../../../shared/agent-models'
-import type { CoverageAgentSession } from './annotate-engine'
+import type { PerAgentStageChoices } from '../../../../../../../shared/agent-models'
 import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
 import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
@@ -14,7 +10,7 @@ import type { PrdSummary, Requirement, VariantDimension } from '../../../../../.
 import { type DocsCollection } from './docs-collection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import { readDocumentSelection } from './document-resolution'
-import { ParsedRequirement, assembleSummary, parsePrdSummaryOutput, parseVariantDimension, reconcileRequirementIds } from './prd-summary-parse'
+import { assembleSummary, parsePrdSummaryOutput, parseVariantDimension } from './prd-summary-parse'
 
 // PRD summarization: turn a feature's source docs into structured requirements
 // with STABLE ids. Modeled on the evaluation-export agent pattern
@@ -60,17 +56,7 @@ export interface SummarizePrdArgs {
 
 export interface SummarizePrdDeps {
   resolveAgents?: (adapter: SummarizeAdapter) => HealAgent[]
-  runAgent?: (agent: HealAgent, prompt: string, opts: RunAgentOpts) => Promise<string>
-}
-
-interface RunAgentOpts {
-  cwd?: string
-  signal?: AbortSignal
-  spawnScope?: string
-  agentJob?: { record: AgentJobRecordRef; logsDir: string }
-  onSession?: (session: CoverageAgentSession) => void
-  /** Resolved model+effort for this launch; absent → agent default. */
-  models?: StageModelChoice
+  runAgent?: CoverageAgentRunner
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +105,7 @@ function defaultResolveAgents(adapter: SummarizeAdapter): HealAgent[] {
   return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
 }
 
-function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
+function defaultRunAgent(agent: HealAgent, prompt: string, opts: CoverageAgentRunOptions): Promise<string> {
   // This agent reads docs and answers with JSON, so it has no business holding
   // a write tool on either arm.
   return runReadOnlyAnswerAgent({
@@ -154,51 +140,25 @@ export async function summarizePrd(
   const runAgent = deps.runAgent ?? defaultRunAgent
   const agents = resolveAgents(args.adapter ?? 'auto')
 
-  let parsedReqs: ParsedRequirement[] | null = null
-  let parsedDimension: VariantDimension | undefined
-  let lastFailure: string | undefined
-  if (agents.length) {
-    const prompt = buildPrdSummaryPrompt(args.collection, previous, args.previous?.variantDimension)
-    for (const agent of agents) {
-      try {
-        args.onOutput?.(`[agent:${agent}] summarizing PRD\n`)
-        const output = await runAgent(agent, prompt, {
-          cwd: args.cwd,
-          signal: args.signal,
-          spawnScope: args.spawnScope,
-          agentJob: args.agentJob,
-          onSession: args.onSession,
-          models: args.models?.[agent],
-        })
-        const dimension = parseVariantDimension(output)
-        const parsed = parsePrdSummaryOutput(output, dimension)
-        if (parsed && parsed.length) {
-          parsedReqs = parsed
-          parsedDimension = dimension
-          break
-        }
-        args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
-      } catch (err) {
-        lastFailure = err instanceof Error ? err.message : String(err)
-        args.onOutput?.(`[agent:${agent}] failed: ${lastFailure}\n`)
-      }
-    }
-  }
-
-  if (!parsedReqs) {
-    // LLM-only: no agent on PATH, or every agent failed / returned unparseable
-    // output. We never fabricate requirements from headings — that produced
-    // phantom requirements (goals/context/architecture) and tanked coverage.
-    // If an agent actually ran and threw, surface that real cause (e.g. an
-    // expired OAuth session) rather than the misleading "is on PATH" hint.
-    throw new Error(
-      lastFailure
-        ? `PRD summary failed: ${lastFailure}`
-        : 'PRD summary requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
-    )
-  }
+  const { requirements, dimension } = await runCoverageAgentAttempts({
+    ...args,
+    agents,
+    prompt: agents.length ? buildPrdSummaryPrompt(args.collection, previous, args.previous?.variantDimension) : '',
+    runAgent,
+    activity: 'summarizing PRD',
+    cancellationMessage: 'prd summary cancelled',
+    failurePrefix: 'PRD summary failed',
+    noAnswerMessage: 'PRD summary requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
+    validate(output) {
+      const dimension = parseVariantDimension(output)
+      const requirements = parsePrdSummaryOutput(output, dimension)
+      return requirements?.length
+        ? { accepted: true, value: { requirements, dimension } }
+        : { accepted: false, progress: 'unparseable output; trying next' }
+    },
+  })
 
   // Reconcile ids + stamp fingerprints (R3) through the shared assembler so the
   // offloaded path produces a byte-identical summary shape.
-  return assembleSummary(args.collection, args.previous ?? null, parsedReqs, parsedDimension, args.now)
+  return assembleSummary(args.collection, args.previous ?? null, requirements, dimension, args.now)
 }

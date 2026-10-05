@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -78,6 +78,8 @@ let tmpDir: string
 let projectRoot: string
 let featuresDir: string
 let logsDir: string
+
+afterEach(() => vi.restoreAllMocks())
 
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-restart-heal-')))
@@ -352,6 +354,22 @@ describe('makeRestartLocalHeal — rejections', () => {
     expect(runnerLogText('o1')).toContain('Heal restart failed: pty binding unavailable')
     expect(h.registry.get('o1')).toBeUndefined()
     expect(h.attached).toEqual([])
+  })
+
+  it.each([false, true])('retains prompt-build failure handling and restores any applied envset (%s)', async (applied) => {
+    writeProjectConfig('auto')
+    const featureDir = writeFeature('demo', { envs: ['local'] })
+    const target = applied ? writeEnvset(featureDir, 'local') : null
+    seedRun('prompt-failure', { env: 'local' })
+    const exists = fs.existsSync
+    vi.spyOn(fs, 'existsSync').mockImplementation((file) => String(file).endsWith('/heal-agent.md') ? false : exists(file))
+    const h = harness()
+    expect(await h.restart('prompt-failure', 'go')).toEqual({ ok: false, reason: 'spawn-failed' })
+    expect(runnerLogText('prompt-failure')).toContain('Heal restart failed: Prompt template not found')
+    expect(h.attached).toEqual([])
+    expect(h.registry.get('prompt-failure')).toBeUndefined()
+    expect(fakeOrch.built).toEqual([])
+    if (target) expect(fs.readFileSync(target, 'utf8')).toBe('ORIGINAL=1\n')
   })
 
   it('reverts the applied envset when the orchestrator cannot be constructed', async () => {

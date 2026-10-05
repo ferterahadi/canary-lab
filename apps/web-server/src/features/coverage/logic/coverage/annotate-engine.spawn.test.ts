@@ -150,9 +150,6 @@ describe('defaultRunAgent — pre-aborted signal', () => {
     const controller = new AbortController()
     controller.abort()
 
-    // spawn still returns a fake child but abort path should kick in before events
-    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 50 }))
-
     await expect(proposeCoverageMappings(
       {
         requirements: REQS,
@@ -161,6 +158,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
       },
       { resolveAgents: () => ['claude'] },
     )).rejects.toThrow(/Coverage mapping failed/)
+    expect(mockSpawn).not.toHaveBeenCalled()
   })
 })
 
@@ -561,7 +559,7 @@ describe('cancellation waits for the persisted agent job', () => {
       record: { jobId: 'wait-for-close', feature: 'checkout', stage: 'coverage-map', agent: 'codex' as const },
       logsDir,
     }
-    const pending = proposeCoverageMappings({ requirements: REQS, tests: [{ name: 'creates a todo' }], signal: controller.signal, agentJob }, { resolveAgents: () => ['codex'] })
+    const pending = proposeCoverageMappings({ requirements: REQS, tests: [{ name: 'creates a todo' }], signal: controller.signal, agentJob }, { resolveAgents: () => ['codex', 'claude'] })
     const finished = vi.fn()
     const observed = pending.then(finished, finished)
     try {
@@ -574,6 +572,7 @@ describe('cancellation waits for the persisted agent job', () => {
       await expect(pending).rejects.toThrow('coverage annotate cancelled')
       await observed
       expect(finished).toHaveBeenCalledTimes(1)
+      expect(mockSpawn).toHaveBeenCalledTimes(1)
       expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
         status: 'failed', endedAt: expect.any(String),
       })

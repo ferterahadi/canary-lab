@@ -73,6 +73,18 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('start_external_draft', () => {
+  it('releases the demo claim if the draft cannot be persisted', async () => {
+    writeFeature('checkout')
+    fs.writeFileSync(path.join(logsDir, 'drafts'), 'blocked directory')
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-write-failure' })
+    const { call } = harness({ gettingStartedDemo: gs.demo })
+    await expect(call('start_external_draft', {
+      feature: 'checkout', stage: 'scaffolding', session_id: 's', client_kind: 'claude',
+    })).rejects.toThrow()
+    expect(gs.abandoned).toEqual(['gs-write-failure'])
+    expect(gs.attached).toEqual([])
+  })
+
   it('refuses a feature that does not exist', async () => {
     const { text } = harness()
 

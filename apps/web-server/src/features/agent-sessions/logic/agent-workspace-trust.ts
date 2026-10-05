@@ -26,6 +26,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { atomicReplace } from '../../../../../../shared/lib/atomic-write'
 
 /**
  * Absolute path to the `claude` CLI's global config JSON.
@@ -139,10 +140,8 @@ export function ensureClaudeWorkspaceTrusted(
   // rename across devices is not atomic and would fail outright).
   const tmp = `${file}.canary-lab-${process.pid}.tmp`
   try {
-    fs.writeFileSync(tmp, JSON.stringify(next, null, 2))
-    fs.renameSync(tmp, file)
+    atomicReplace(file, JSON.stringify(next, null, 2), { temporaryPath: tmp, cleanupOnError: true })
   } catch (err) {
-    try { fs.rmSync(tmp, { force: true }) } catch { /* nothing to clean up */ }
     return { outcome: 'unavailable', reason: `could not update ${file}: ${(err as Error).message}` }
   }
   return { outcome: 'granted', trustedPath: root }

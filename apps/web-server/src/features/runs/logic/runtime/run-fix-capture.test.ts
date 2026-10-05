@@ -189,6 +189,30 @@ describe('captureFixes', () => {
     expect(await captureFixes(ctx)).toBeNull()
   })
 
+  it('does not replace an already-captured patch when its bytes are unchanged', async () => {
+    const { ctx } = withBaseline()
+    await captureFixes(ctx)
+    // Occupy the staging name: a redundant replacement would now fail. A
+    // content-equal capture must still retain and report the original patch.
+    const patch = path.join(ctx.paths.fixesDir, 'app.patch')
+    const original = fs.readFileSync(patch, 'utf8')
+    fs.mkdirSync(`${patch}.tmp`)
+    expect((await captureFixes(ctx))?.repos[0].patchPath).toBe(patch)
+    expect(fs.readFileSync(patch, 'utf8')).toBe(original)
+  })
+
+  it('does not publish patch evidence after a staging write fails', async () => {
+    const { ctx } = withBaseline()
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', startedAt: 'now', status: 'healing', healCycles: 1, services: [],
+    })
+    fs.mkdirSync(path.join(ctx.paths.fixesDir, 'app.patch.tmp'), { recursive: true })
+    expect(await captureFixes(ctx)).toBeNull()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture).toBeUndefined()
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'fixes.json'))).toBe(false)
+  })
+
   it('publishes an evolving patch and then finalizes it without waiting to discover edits', async () => {
     const { ctx } = withBaseline()
     Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })

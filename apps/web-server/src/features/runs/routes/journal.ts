@@ -1,7 +1,8 @@
+import { newestFirst } from '../../../../../../shared/journal-order'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
-import { readJournal, filterSections, newestFirst } from '../logic/journal-store'
+import { readJournal, filterSections } from '../logic/journal-store'
 import type { JournalSection } from '../../../../../../shared/run-detail'
 
 export interface JournalRouteDeps {

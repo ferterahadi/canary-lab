@@ -1,3 +1,4 @@
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type { RunBootFailure, ServiceStatus } from '@shared/run-state'
 import { bootFailureSummary, bootNextAction, compilerErrors, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
@@ -312,13 +313,11 @@ export function ServiceField({
  *  button is tab-focused — these paths and commands are read far more often
  *  than they are copied. */
 export function CopyIconButton({ label, value }: { label: string; value: string }) {
-  const onCopy = () => {
-    void navigator.clipboard?.writeText(value)
-  }
+  const { copy } = useClipboardCopy({ resetAfterMs: null })
   return (
     <button
       type="button"
-      onClick={onCopy}
+      onClick={() => { void copy(value) }}
       aria-label={`Copy ${label}`}
       title={`Copy ${label}`}
       className="cl-icon-button h-5 w-5 shrink-0 opacity-0 transition-opacity duration-150 group-hover/card:opacity-100 focus-visible:opacity-100"

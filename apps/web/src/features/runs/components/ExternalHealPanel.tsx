@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useNow } from '@/shared/state/use-now'
+import { useMemo } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useExternalClientAction } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
@@ -17,13 +18,9 @@ interface Props {
 // session rather than Canary Lab. When no claim exists yet, this panel makes
 // that parked state explicit instead of rendering an empty local terminal.
 export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
-  const [now, setNow] = useState(() => Date.now())
-  const { opening, error: openError, open: onOpenAgent } = useOpenAgentApp()
+  const now = useNow()
+  const { action, error: openError } = useExternalClientAction({ clientKind: session?.clientKind ?? 'other' })
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
 
   const heartbeatMs = useMemo(() => {
     if (!session) return null
@@ -45,7 +42,6 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       session?.status === 'running-tests'
     )
   const clientKind = session?.clientKind ?? 'other'
-  const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
   return (
     <ExternalAgentCard
@@ -87,11 +83,11 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
           : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
       }
-      action={desktopAgent && (
+      action={action?.kind === 'app' && (
         <ExternalClientCta
-          label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-          onClick={() => onOpenAgent(desktopAgent)}
-          busy={opening !== null}
+          label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
+          onClick={action.open}
+          busy={action.busy}
         />
       )}
     >

@@ -1,4 +1,5 @@
 import { prepareRestartResources } from './logic/restart-preparation'
+import { createRestartedOrchestrator } from './logic/restart-orchestrator'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
 // Restarting a LOCAL (PTY) heal agent on a terminal run: rebuild the
 // orchestrator, re-attach the streams, and hand the user's guidance to the fresh
@@ -11,15 +12,13 @@ import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import type { ServerContext } from '../../server-context'
 import { findFeature } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
-import { RunOrchestrator } from './logic/runtime/orchestrator'
 import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
 import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
 import { reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { RunnerLog } from './logic/runtime/runner-log'
-import {
-  restore,
-} from './logic/runtime/env-switcher/switch'
+import type { AutoHealConfig } from './logic/runtime/run-orchestrator-types'
+import { restore } from './logic/runtime/env-switcher/switch'
 import type { makeAttachRunStreams } from './run-stream-wiring'
 import { settleOrchestratorRun } from './logic/settle-run'
 import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
@@ -92,44 +91,41 @@ export function makeRestartLocalHeal(
         runnerLog.warn(`Heal restart rejected: ${(prepared.error as Error).message}`)
         return { ok: false, reason: 'not-restartable' as const }
       }
-      const { portMap, backups, repoBranchSnapshots } = prepared
-
-      let orch: RunOrchestrator
+      let autoHeal: AutoHealConfig
       try {
-        orch = new RunOrchestrator({
-          feature,
-          env,
-          runId,
-          runDir,
-          portMap,
-	          ptyFactory,
-          runnerLog,
-          autoHeal: {
+        autoHeal = {
+          agent: agentChoice,
+          buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
+            mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+            models: models.heal,
+          }),
+          buildCyclePrompt: buildOrchestratorHealPrompt({
             agent: agentChoice,
-            buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              models: models.heal,
-            }),
-            buildCyclePrompt: buildOrchestratorHealPrompt({
-              agent: agentChoice,
-              projectRoot: projectRoot,
-              runDir,
-              personalWikiPath: projectConfig.personalWikiPath,
-            }),
-          },
-          models,
-          repoBranchSnapshots,
-          initialHealCycles: manifest.healCycles,
-          runStateSink: runStore,
-          dirtySpecHooks: dirtySpecStore,
-        })
+            projectRoot,
+            runDir,
+            personalWikiPath: projectConfig.personalWikiPath,
+          }),
+        }
       } catch (err) {
-        if (backups) restore(backups)
+        // Local healing cannot launch without its prompt; retesting can still
+        // proceed without auto-heal, so this policy stays with the caller.
+        if (prepared.backups) restore(prepared.backups)
         runnerLog.warn(`Heal restart failed: ${(err as Error).message}`)
         return { ok: false, reason: 'spawn-failed' as const }
       }
-
-      attachRunStreams(orch, runnerLog, feature.name, backups)
+      const restarted = createRestartedOrchestrator({
+        feature, env, runId, runDir,
+        initialHealCycles: manifest.healCycles,
+        resources: prepared,
+        ptyFactory, runnerLog,
+        runStateSink: runStore,
+        dirtySpecHooks: dirtySpecStore,
+        attachRunStreams,
+        failureLogPrefix: 'Heal restart failed',
+        modeOptions: { autoHeal, models },
+      })
+      if (!restarted.ok) return restarted
+      const { orch } = restarted
       const broker = brokers.get(runId)!
       // Clear the previous heal session's pane buffer (and signal live
       // subscribers via `reset`) so the new REPL streams into an empty

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 
 /** The shared mono value + Copy/Copied control used for commands and agent
  * prompts. Clipboard failure is deliberately quiet: the value remains visible
@@ -14,16 +14,8 @@ export function CopyField({ value, label, testId, buttonTestId, disabled }: {
    *  whose demo isn't installed). The value stays readable either way. */
   disabled?: boolean
 }) {
-  const [copied, setCopied] = useState(false)
-  const onCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // The visible value remains the fallback when clipboard access is unavailable.
-    }
-  }
+  const { copy, copiedKey } = useClipboardCopy()
+  const copied = copiedKey === value
   return (
     <div
       data-testid={testId}
@@ -44,7 +36,7 @@ export function CopyField({ value, label, testId, buttonTestId, disabled }: {
         type="button"
         data-testid={buttonTestId}
         disabled={disabled}
-        onClick={() => void onCopy()}
+        onClick={() => void copy(value)}
         aria-label={`Copy ${label}`}
         className="shrink-0 border-l px-2 text-[10px] uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         style={{

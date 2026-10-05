@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useNow } from '@/shared/state/use-now'
 import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { RunLifecycleEvent } from '@shared/run-state'
@@ -236,19 +236,11 @@ export function RecoveryTimeline({
 }
 
 export function useTimelineNow(events: RunLifecycleEvent[]): number {
-  const [now, setNow] = useState(() => Date.now())
   const lastPhase = events.at(-1)?.phase
   const lastUpdatedAt = events.at(-1)?.updatedAt
   const tick = Boolean(lastPhase && !isTerminalLifecyclePhase(lastPhase))
 
-  useEffect(() => {
-    setNow(Date.now())
-    if (!tick) return undefined
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [tick, lastUpdatedAt])
-
-  return now
+  return useNow({ enabled: tick, intervalMs: 30_000, resetKey: lastUpdatedAt, refreshOnReset: true })
 }
 
 export function formatLifecycleTime(iso: string): string {

@@ -2,6 +2,7 @@ import type { GettingStartedWorkflow, GettingStartedOwner, GettingStartedTarget,
 import fs from 'fs'
 import path from 'path'
 import { isUnsettledRunStatus } from '../../../../../../shared/run-state'
+import { atomicReplace } from '../../../../../../shared/lib/atomic-write'
 
 /** Resolves a claim's linked record to its live status. One method pair over
  *  the target union (rather than one pair per kind) so adding a target kind is
@@ -51,8 +52,7 @@ function readState(file: string): GettingStartedSessionState {
 function writeState(file: string, state: GettingStartedSessionState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
-  fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-  fs.renameSync(tmp, file)
+  atomicReplace(file, `${JSON.stringify(state, null, 2)}\n`, { temporaryPath: tmp })
 }
 
 /**

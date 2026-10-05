@@ -1,3 +1,4 @@
+import { CleanupInventoryFrame } from './CleanupInventoryFrame'
 import { useCleanupInventory } from '../state/use-cleanup-inventory'
 import { useCleanupSelection } from '../state/use-cleanup-selection'
 import { useCleanupAction } from '../state/use-cleanup-action'
@@ -7,7 +8,7 @@ import * as runsApi from '@/shared/api/runs'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { ConfirmModal, useEscapeToClose } from '@/shared/ui/Overlays'
-import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, FolderGlyph, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
+import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph, SortHeader } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
 import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
@@ -119,36 +120,36 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         </div>
       </PageHeader>
 
-      {view === 'runs' && (
-        <CleanupToolbar presets={presets} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={busy} loading={inventory.loading} onRefresh={refresh}>
-          {totals && <>
-            <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
-            <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
-            <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
-          </>}
-        </CleanupToolbar>
-      )}
-
-      {view === 'runs' && listing !== null && error && <CleanupRefreshError error={error} />}
-      {view === 'runs' && actionError && (
-        <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
-      )}
-
       {/* Body */}
       {view === 'portify' ? (
         <PortifySection now={now} onNavigateToPortify={onNavigateToPortify} />
       ) : view === 'worktrees' ? (
         <WorktreesSection now={now} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
-        {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Computing folder sizes…" />}
-        {!loading && error && listing === null && (
-          <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load cleanup data" hint={error} action={{ label: 'Retry', onClick: () => void refresh() }} />
-        )}
-        {!loading && !error && rows.length === 0 && (
-          <CleanupEmptyState icon={<FolderGlyph />} title="No runs on disk" hint="Test, verify, boot and benchmark runs show up here with their disk usage once you record them." />
-        )}
-        {rows.length > 0 && (
+        <CleanupInventoryFrame
+          initialLoading={loading}
+          hasSnapshot={listing !== null}
+          error={error}
+          itemCount={rows.length}
+          onRetry={refresh}
+          loadingTitle="Computing folder sizes…"
+          errorTitle="Couldn't load cleanup data"
+          emptyState={
+            <CleanupEmptyState icon={<FolderGlyph />} title="No runs on disk" hint="Test, verify, boot and benchmark runs show up here with their disk usage once you record them." />
+          }
+          toolbar={
+            <CleanupToolbar presets={presets} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={busy} loading={inventory.loading} onRefresh={refresh}>
+              {totals && <>
+                <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
+                <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
+                <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
+              </>}
+            </CleanupToolbar>
+          }
+          actionError={actionError && (
+            <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+          )}
+        >
           <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
             <thead>
               {/* Column headers speak the system's rubric voice (mono caps). */}
@@ -229,8 +230,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
               ))}
             </tbody>
           </table>
-        )}
-        </div>
+        </CleanupInventoryFrame>
       )}
 
       {view === 'runs' && selected.size > 0 && (

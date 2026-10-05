@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 // Flights REST — checkpoint answers and the pause/resume/autopilot/redo/delete
 // lifecycle. Split out of flights.ts; handler bodies are unchanged.
 import fs from 'fs'
@@ -127,13 +128,12 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
           { feature: record.feature, repoPaths: record.repoPaths }, req.params.id,
         )
       }
-      const { manifest } = resumeFlight(req.params.id, conductorDeps, externalAgentSession)
-      if (gettingStartedSession) {
-        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
-      }
-      return manifest
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), (attach) => {
+        const { manifest } = resumeFlight(req.params.id, conductorDeps, externalAgentSession)
+        attach({ kind: 'flight', id: manifest.flightId })
+        return manifest
+      })
     } catch (err) {
-      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
       if (err instanceof GettingStartedBusyError) {
         reply.code(409)
         return { type: err.type, error: err.message, active: err.active }
@@ -204,23 +204,22 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
             { feature: record.feature, repoPaths: record.repoPaths }, req.params.id,
           )
         }
-        const { manifest } = redoFlight(req.params.id, conductorDeps, {
-          fromStage: req.body?.fromStage as FlightStageKey | undefined,
-          feedback: req.body?.feedback,
-          // A full redo re-resolves the model plan against today's config
-          // (D9); redoFlight itself ignores this on a jump, where the stored
-          // plan matches the surviving stage evidence.
-          ...(record
-            ? { models: resolveFlightModels(deps.projectRoot, record.opts.agent ?? 'claude', undefined) }
-            : {}),
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), (attach) => {
+          const { manifest } = redoFlight(req.params.id, conductorDeps, {
+            fromStage: req.body?.fromStage as FlightStageKey | undefined,
+            feedback: req.body?.feedback,
+            // A full redo re-resolves the model plan against today's config
+            // (D9); redoFlight itself ignores this on a jump, where the stored
+            // plan matches the surviving stage evidence.
+            ...(record
+              ? { models: resolveFlightModels(deps.projectRoot, record.opts.agent ?? 'claude', undefined) }
+              : {}),
+          })
+          attach({ kind: 'flight', id: manifest.flightId })
+          reply.code(201)
+          return manifest
         })
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
-        }
-        reply.code(201)
-        return manifest
       } catch (err) {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         if (err instanceof GettingStartedBusyError) {
           reply.code(409)
           return { type: err.type, error: err.message, active: err.active }

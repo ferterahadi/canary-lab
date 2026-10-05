@@ -400,6 +400,25 @@ describe('ChangesTab', () => {
     expect(mocks.openEditor).toHaveBeenCalledWith({ file: '/logs/runs/r1/fixes/mighty-cns.patch' })
   })
 
+  it.each(['missing', 'rejected'])('does not report a copied patch path when clipboard is %s', async (mode) => {
+    const prior = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: mode === 'missing' ? undefined : { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+    try {
+      const many = Array.from({ length: 11 }, (_, i) => `src/api/f${i}.ts`)
+      await render(<ChangesTab runId="r1" fixCapture={{ ...fixCapture, repos: [{ ...fixCapture.repos[0], files: 11, fileNames: many }] }} />)
+      await click('changes-all-files-mighty-cns')
+      await click('changes-patch-copy-mighty-cns')
+      expect(container.textContent).not.toContain('Path copied')
+      expect(text('changes-patch-copy-mighty-cns')).toBe('Copy path')
+    } finally {
+      if (prior) Object.defineProperty(navigator, 'clipboard', prior)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
   it('opens the propose dialog from a repo card', async () => {
     await render(<ChangesTab runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
     await click('changes-propose-mighty-cns')

@@ -3,14 +3,14 @@ import type {
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
   ExternalAgentCard,
   ExternalClientCta,
   ExternalMetaFact,
   ExternalStatusPill,
   pillPalette,
-  useOpenAgentApp,
+  useExternalClientAction,
   type PillPalette,
 } from '@/shared/ui/ExternalAgentCard'
 
@@ -115,10 +115,7 @@ export function evaluationOutputPanel(
 // sessionRef and stream through AgentSessionView instead.)
 export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTaskView; log: string }) {
   const clientKind = (task.clientKind ?? 'other') as ExternalClientKind
-  const { opening, error: openError, open } = useOpenAgentApp()
-  // Jump-to-agent: prefer the client's own conversation deep-link; otherwise
-  // launch the desktop app for a known client. PTY/unknown → no CTA.
-  const desktopAgent = clientKindToDesktopAgent(clientKind)
+  const { action, error: openError } = useExternalClientAction({ clientKind, sessionUrl: task.externalSessionUrl })
   const { label, palette } = exportStatusPill(task.status)
   return (
     <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
@@ -136,14 +133,14 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
           )
         }
         body={exportBodyCopy(task.status)}
-        action={task.externalSessionUrl ? (
-          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={task.externalSessionUrl} />
+        action={action?.kind === 'link' ? (
+          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={action.href} />
         ) : (
-          desktopAgent && (
+          action && (
             <ExternalClientCta
-              label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-              onClick={() => open(desktopAgent)}
-              busy={opening !== null}
+              label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
+              onClick={action.open}
+              busy={action.busy}
             />
           )
         )}

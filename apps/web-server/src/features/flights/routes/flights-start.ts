@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner, GettingStartedWorkflow } from '../../../../../../shared/getting-started'
 // Flights REST — starting a flight and the plan-features task surface.
 // Split out of flights.ts; handler bodies are unchanged.
@@ -199,27 +200,27 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
       }
     }
 
+    const feature = body.feature.trim()
     try {
-      const { manifest } = startFlight(
-        {
-          feature: body.feature.trim(),
-          repoPaths: resolved,
-          description,
-          opts,
-          ...(externalAgentSession ? { externalAgentSession } : {}),
-          ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
-          ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
-          ...(body.feedback ? { feedback: body.feedback } : {}),
-        },
-        conductorDeps,
-      )
-      if (gettingStartedSession) {
-        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
-      }
-      reply.code(201)
-      return manifest
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), (attach) => {
+        const { manifest } = startFlight(
+          {
+            feature,
+            repoPaths: resolved,
+            description,
+            opts,
+            ...(externalAgentSession ? { externalAgentSession } : {}),
+            ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
+            ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
+            ...(body.feedback ? { feedback: body.feedback } : {}),
+          },
+          conductorDeps,
+        )
+        attach({ kind: 'flight', id: manifest.flightId })
+        reply.code(201)
+        return manifest
+      })
     } catch (err) {
-      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
       if (err instanceof FlightConflictError) {
         reply.code(409)
         return { error: err.message, type: 'flight_conflict', existingFlightId: err.existingFlightId }

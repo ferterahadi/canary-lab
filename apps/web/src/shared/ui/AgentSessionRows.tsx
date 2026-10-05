@@ -1,8 +1,8 @@
 import { Suspense, lazy, memo, type ReactNode } from 'react'
 import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
 import { LOG_KIND_LABEL, type ExternalSessionActivity, type LogLine } from './activity-log'
-import { clientKindToDesktopAgent, clientLabel } from './external-client-branding'
-import { useOpenAgentApp } from './ExternalAgentCard'
+import { clientLabel } from './external-client-branding'
+import { useExternalClientAction } from './ExternalAgentCard'
 
 // The markdown stack (react-markdown + remark-gfm → micromark) is the heaviest
 // dependency in the bundle and only agent prose needs it — loaded lazily so a
@@ -203,27 +203,26 @@ export function Timestamp({ value }: { value: string }) {
  *  the client app. One home for the session divider and the log modal, which
  *  both have to send the reader to where the conversation actually lives. */
 export function ExternalOpenAction({ session }: { session: ExternalSessionActivity }) {
-  const { opening, error, open } = useOpenAgentApp()
-  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
+  const { action, error } = useExternalClientAction({ clientKind: session.clientKind, sessionUrl: session.sessionUrl })
   const agent = clientLabel(session.clientKind, 'External agent')
-  if (session.sessionUrl) {
+  if (action?.kind === 'link') {
     return (
-      <a href={session.sessionUrl} target="_blank" rel="noreferrer" className="agentts-extaction" aria-label={`Open ${agent} session`}>
+      <a href={action.href} target="_blank" rel="noreferrer" className="agentts-extaction" aria-label={`Open ${agent} session`}>
         Open in {agent} <span aria-hidden>→</span>
       </a>
     )
   }
-  if (!desktopAgent) return null
+  if (!action) return null
   return (
     <>
       <button
         type="button"
         className="agentts-extaction"
         title={`No exact session link was provided; opens the ${agent} app.`}
-        disabled={opening !== null}
-        onClick={() => open(desktopAgent)}
+        disabled={action.busy}
+        onClick={action.open}
       >
-        {opening ? 'Opening…' : `Open ${agent} app`} {!opening && <span aria-hidden>→</span>}
+        {action.busy ? 'Opening…' : `Open ${agent} app`} {!action.busy && <span aria-hidden>→</span>}
       </button>
       {error && <span className="agentts-exterror" role="alert">{error}</span>}
     </>

@@ -1,3 +1,4 @@
+import { newestFirst } from '../../../../../../shared/journal-order'
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -5,7 +6,6 @@ import path from 'path'
 import {
   splitJournalSections,
   filterSections,
-  newestFirst,
   parseStructured,
   readJournal,
 } from './journal-store'

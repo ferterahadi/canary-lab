@@ -39,6 +39,7 @@ import { coverageRoutes, resolveCoverageJobModels } from './coverage'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../logic/coverage/jobs/store'
 
 import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-paths'
 
 let tmpDir: string
 
@@ -63,6 +64,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await app.close()
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
@@ -270,15 +272,11 @@ describe('coverage routes', () => {
     await app.ready()
 
     const sessionId = 'test-session-log-' + Date.now()
-    // Write a minimal claude log under ~/.claude/projects/<encoded-tmpDir>/<sessionId>.jsonl
-    const homeDir = os.homedir()
-    const encodedDir = tmpDir.replace(/\//g, '-').replace(/^-/, '')
-    const projectsDir = path.join(homeDir, '.claude', 'projects')
-    // Scan for any existing project dir that matches, or create a synthetic one.
-    // We use a dedicated test subdir so we can clean it up.
-    const testProjectDir = path.join(projectsDir, `test-canary-lab-${Date.now()}`)
+    // Keep the real-filesystem fixture isolated from the user's agent sessions.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(tmpDir, 'claude-config'))
+    const logFile = claudeSessionLogPath(tmpDir, sessionId)
+    const testProjectDir = path.dirname(logFile)
     fs.mkdirSync(testProjectDir, { recursive: true })
-    const logFile = path.join(testProjectDir, `${sessionId}.jsonl`)
     fs.writeFileSync(logFile, JSON.stringify({ type: 'system', subtype: 'init', cwd: tmpDir, version: '1.0.0', tools: [] }) + '\n')
 
     try {

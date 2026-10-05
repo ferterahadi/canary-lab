@@ -43,6 +43,21 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
 
+it('orders journal entries after invalidation without remounting the reader', async () => {
+  const first = { ...entry('first'), iteration: 1 }
+  const second = { ...entry('second'), iteration: 2 }
+  const legacy = { ...entry('legacy'), iteration: null }
+  api.listJournal.mockResolvedValue([first, legacy, second])
+  await renderJournal()
+  const output = element.querySelector('output')
+  expect(journal.value).toEqual([second, first, legacy])
+  const newest = { ...entry('newest'), iteration: 3 }
+  api.listJournal.mockResolvedValue([legacy, first, newest, second])
+  await act(async () => invalidate())
+  expect(element.querySelector('output')).toBe(output)
+  expect(journal.value).toEqual([newest, second, first, legacy])
+})
+
 it('does not let an older journal poll restore pending evidence after accepted completion', async () => {
   const older = deferred<JournalSection[]>()
   api.listJournal.mockResolvedValueOnce([entry('Old pending')]).mockReturnValueOnce(older.promise).mockResolvedValue([entry('New completed', 'all_tests_passed')])

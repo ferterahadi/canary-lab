@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import { findFeature } from '../../../shared/feature-loader'
@@ -139,17 +140,16 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         }
       }
       try {
-        const orch = bootRunId
-          ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
-          : await deps.startVerification(feature.name, input)
-        deps.store.registry.set(orch.runId, orch)
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: orch.runId })
-        }
-        reply.code(201)
-        return { runId: orch.runId, executionType: 'verify' }
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), async (attach) => {
+          const orch = bootRunId
+            ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
+            : await deps.startVerification(feature.name, input)
+          deps.store.registry.set(orch.runId, orch)
+          attach({ kind: 'run', id: orch.runId })
+          reply.code(201)
+          return { runId: orch.runId, executionType: 'verify' }
+        })
       } catch (err) {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         reply.code(statusCodeOf(err))
         return { error: errorMessageOf(err) }
       }

@@ -70,16 +70,6 @@ export function filterSections(
   })
 }
 
-// Newest first — sort by iteration number descending. Sections without an
-// iteration number sink to the bottom (unlikely in practice).
-export function newestFirst(sections: readonly JournalSection[]): JournalSection[] {
-  return [...sections].sort((a, b) => {
-    const ai = a.iteration ?? -Infinity
-    const bi = b.iteration ?? -Infinity
-    return bi - ai
-  })
-}
-
 // Re-uses the canonical parser for the structured-fields view used by the
 // route response. Wrapped here so the journal-store module is the one place
 // the route handler talks to.

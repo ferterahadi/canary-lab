@@ -1,4 +1,5 @@
 import { prepareRestartResources } from './logic/restart-preparation'
+import { createRestartedOrchestrator } from './logic/restart-orchestrator'
 import { createExternalHealSession } from './logic/heal/external-heal-session'
 // The dependency object the runs REST surface is registered with: every callback
 // the routes hand back into the run loop. Split out of index.ts, where it was a
@@ -409,8 +410,6 @@ export function buildRunsRouteDeps(
         runnerLog.warn(`Run restart rejected: ${(prepared.error as Error).message}`)
         return { ok: false, reason: 'not-restartable' as const }
       }
-      const { portMap, backups, repoBranchSnapshots } = prepared
-
       const projectConfig = loadProjectConfig(projectRoot)
       const preserveExternal = manifest.healMode === 'external'
       const preserveManual = manifest.healMode === 'manual'
@@ -447,34 +446,26 @@ export function buildRunsRouteDeps(
         }
       }
 
-      let orch: RunOrchestrator
-      try {
-        orch = new RunOrchestrator({
-          feature,
-          env,
-          runId,
-          runDir,
-          portMap,
-          ptyFactory,
-          runnerLog,
+      const restarted = createRestartedOrchestrator({
+        feature, env, runId, runDir,
+        initialHealCycles: manifest.healCycles,
+        resources: prepared,
+        ptyFactory, runnerLog,
+        runStateSink: runStore,
+        dirtySpecHooks: dirtySpecStore,
+        attachRunStreams,
+        failureLogPrefix: 'Run restart failed',
+        modeOptions: {
           autoHeal,
           manualHeal: preserveManual,
           externalHeal: preserveExternal,
           externalHealSession: preserveExternal ? manifest.externalHealSession : undefined,
           ...(models ? { models } : {}),
-          repoBranchSnapshots,
-          initialHealCycles: manifest.healCycles,
-          runStateSink: runStore,
-          dirtySpecHooks: dirtySpecStore,
           projectRoot,
-        })
-      } catch (err) {
-        if (backups) restore(backups)
-        runnerLog.warn(`Run restart failed: ${(err as Error).message}`)
-        return { ok: false, reason: 'spawn-failed' as const }
-      }
-
-      attachRunStreams(orch, runnerLog, feature.name, backups)
+        },
+      })
+      if (!restarted.ok) return restarted
+      const { orch } = restarted
       const broker = brokers.get(runId)!
       broker.push('agent', '\n[orchestrator] Retesting remaining failed, skipped, and pending tests...\n')
       registry.set(runId, orch)

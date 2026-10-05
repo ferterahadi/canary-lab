@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import * as workspaceApi from '@/shared/api/workspace'
-import { BrandMark, clientTint, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { BrandMark, clientTint, clientKindToDesktopAgent, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 
 // The shared shell for every "an external MCP client is driving this in its own
 // window" surface — external heal, draft authoring, port-ification, and coverage
@@ -85,6 +85,23 @@ export function useOpenAgentApp() {
     }
   }, [])
   return { opening, error, open }
+}
+
+export type ExternalClientAction =
+  | { kind: 'link'; href: string }
+  | { kind: 'app'; agent: 'claude' | 'codex'; open: () => Promise<void>; busy: boolean }
+  | null
+
+export function useExternalClientAction({ clientKind, sessionUrl }: {
+  clientKind: ExternalClientKind
+  sessionUrl?: string
+}): { action: ExternalClientAction; error: string | null } {
+  const { opening, error, open } = useOpenAgentApp()
+  const agent = clientKindToDesktopAgent(clientKind)
+  const action: ExternalClientAction = sessionUrl
+    ? { kind: 'link', href: sessionUrl }
+    : agent ? { kind: 'app', agent, open: () => open(agent), busy: opening !== null } : null
+  return { action, error }
 }
 
 interface ExternalAgentCardProps {

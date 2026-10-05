@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 // Runs REST — start/heal/lifecycle actions: start a run, pause/cancel heal, write
 // to the agent, restart, abort, delete. Split out of runs.ts; bodies unchanged.
@@ -104,102 +105,97 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         return { type: err.type, error: err.message, active: err.active }
       }
     }
-    if (healAgent) {
-      const active = findActiveRunForFeature(deps.store, feature, env)
-      if (active) {
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: active.manifest.runId })
+    let reservedRunId: string | undefined
+    try {
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), async (attach) => {
+        if (healAgent) {
+          const active = findActiveRunForFeature(deps.store, feature, env)
+          if (active) {
+            attach({ kind: 'run', id: active.manifest.runId })
+            // A caller that explicitly declined the claim must not grab the reuse
+            // claim either — the whole point of claimable:false is leaving the loop
+            // for a real client. Policy suppression (a PTY kind) still funnels
+            // through broker.claim, which rejects with its own reason.
+            const claim = healAgent.claimable !== false
+              ? deps.broker?.claim(active.manifest.runId, {
+                  sessionId: healAgent.sessionId,
+                  clientKind: healAgent.clientKind,
+                  ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
+                  ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
+                }) ?? null
+              : null
+            reply.code(200)
+            return {
+              runId: active.manifest.runId,
+              reused: true,
+              status: active.manifest.status,
+              claimed: claim ? claim.accepted : false,
+              claim,
+              ...(claimSuppressed
+                ? {
+                    claimSuppressed: true,
+                    message:
+                      'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
+                  }
+                : {}),
+              ...(req.body?.forceNew
+                ? {
+                    ignoredForceNew: true,
+                    warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
+                  }
+                : {}),
+            }
+          }
         }
-        // A caller that explicitly declined the claim must not grab the reuse
-        // claim either — the whole point of claimable:false is leaving the loop
-        // for a real client. Policy suppression (a PTY kind) still funnels
-        // through broker.claim, which rejects with its own reason.
-        const claim = healAgent.claimable !== false
-          ? deps.broker?.claim(active.manifest.runId, {
-              sessionId: healAgent.sessionId,
-              clientKind: healAgent.clientKind,
-              ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
-              ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
-            }) ?? null
-          : null
-        reply.code(200)
+        const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
+          ? req.body.isolation
+          : undefined
+        const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
+        const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
+        reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
+        const outcome = await deps.startRun(
+          feature, env, externalRunReq, isolation, executionType, req.body?.models,
+          updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
+        )
+        if (outcome.kind === 'collision') {
+          // Same-repo collision and the caller didn't choose how to handle it.
+          // Nothing started — surface the choice so the UI / MCP client can ask.
+          reply.code(409)
+          return {
+            type: 'repo_collision_requires_choice',
+            conflictingRunId: outcome.conflictingRunId,
+            conflictingFeature: outcome.conflictingFeature,
+            repoPaths: outcome.repoPaths,
+            options: ['worktree', 'queue'] as const,
+            // `error` is what the GUI shows (the client only lifts `error` into
+            // Error.message, so without it this 409 rendered as literally
+            // "HTTP 409"); `message` keeps the agent-facing re-send instructions.
+            error: `Another run (${outcome.conflictingFeature}) is using the same app. Wait for it to finish, then try again.`,
+            message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
+          }
+        }
+        if (outcome.kind === 'queued') {
+          attach({ kind: 'run', id: outcome.runId })
+          reply.code(202)
+          return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
+        }
+        // started — the factory registers the orchestrator; set here too so the
+        // registration is guaranteed regardless of factory implementation.
+        deps.store.registry.set(outcome.orch.runId, outcome.orch)
+        attach({ kind: 'run', id: outcome.orch.runId })
+        reply.code(201)
         return {
-          runId: active.manifest.runId,
-          reused: true,
-          status: active.manifest.status,
-          claimed: claim ? claim.accepted : false,
-          claim,
+          runId: outcome.orch.runId,
           ...(claimSuppressed
             ? {
                 claimSuppressed: true,
                 message:
-                  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
-              }
-            : {}),
-          ...(req.body?.forceNew
-            ? {
-                ignoredForceNew: true,
-                warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
+                  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run started without a heal claim. Drive heal from an interactive Claude/Codex client or the web UI.',
               }
             : {}),
         }
-      }
-    }
-    const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
-      ? req.body.isolation
-      : undefined
-    const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
-    const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
-    const reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
-    try {
-      const outcome = await deps.startRun(
-        feature, env, externalRunReq, isolation, executionType, req.body?.models,
-        updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
-      )
-      if (outcome.kind === 'collision') {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
-        // Same-repo collision and the caller didn't choose how to handle it.
-        // Nothing started — surface the choice so the UI / MCP client can ask.
-        reply.code(409)
-        return {
-          type: 'repo_collision_requires_choice',
-          conflictingRunId: outcome.conflictingRunId,
-          conflictingFeature: outcome.conflictingFeature,
-          repoPaths: outcome.repoPaths,
-          options: ['worktree', 'queue'] as const,
-          // `error` is what the GUI shows (the client only lifts `error` into
-          // Error.message, so without it this 409 rendered as literally
-          // "HTTP 409"); `message` keeps the agent-facing re-send instructions.
-          error: `Another run (${outcome.conflictingFeature}) is using the same app. Wait for it to finish, then try again.`,
-          message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
-        }
-      }
-      if (outcome.kind === 'queued') {
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.runId })
-        }
-        reply.code(202)
-        return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
-      }
-      // started — the factory registers the orchestrator; set here too so the
-      // registration is guaranteed regardless of factory implementation.
-      deps.store.registry.set(outcome.orch.runId, outcome.orch)
-      if (gettingStartedSession) {
-        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.orch.runId })
-      }
-      reply.code(201)
-      return {
-        runId: outcome.orch.runId,
-        ...(claimSuppressed
-          ? {
-              claimSuppressed: true,
-              message:
-                'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run started without a heal claim. Drive heal from an interactive Claude/Codex client or the web UI.',
-            }
-          : {}),
-      }
+      })
     } catch (err) {
-      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
       const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
         : 500

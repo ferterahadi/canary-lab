@@ -1,3 +1,4 @@
+import { useNow } from '@/shared/state/use-now'
 import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as benchmarkApi from '@/shared/api/benchmark'
@@ -137,15 +138,8 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
 }
 
 export function SetupView({ m }: { m: BenchmarkManifest }) {
-  const [elapsed, setElapsed] = useState(0)
-
-  useEffect(() => {
-    const start = new Date(m.startedAt).getTime()
-    const tick = () => setElapsed(Math.max(0, Math.round((Date.now() - start) / 1000)))
-    tick()
-    const t = setInterval(tick, 1000)
-    return () => clearInterval(t)
-  }, [m.startedAt])
+  const now = useNow({ resetKey: m.startedAt, refreshOnReset: true })
+  const elapsed = Math.max(0, Math.round((now - new Date(m.startedAt).getTime()) / 1000))
 
   return (
     <div style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 980, display: 'flex', flexDirection: 'column', height: '100%' }}>

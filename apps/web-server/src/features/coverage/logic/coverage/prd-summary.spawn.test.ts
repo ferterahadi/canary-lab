@@ -110,8 +110,6 @@ describe('defaultRunAgent — pre-aborted signal', () => {
     const controller = new AbortController()
     controller.abort()
 
-    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 50 }))
-
     await expect(summarizePrd(
       {
         collection: TEST_COLLECTION,
@@ -120,6 +118,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
       },
       { resolveAgents: () => ['claude'] },
     )).rejects.toThrow(/PRD summary failed: prd summary cancelled/)
+    expect(mockSpawn).not.toHaveBeenCalled()
   })
 })
 
@@ -563,7 +562,7 @@ describe('cancellation waits for the persisted agent job', () => {
       record: { jobId: 'wait-for-close', feature: 'checkout', stage: 'prd-summary', agent: 'codex' as const },
       logsDir,
     }
-    const pending = summarizePrd({ collection: TEST_COLLECTION, signal: controller.signal, agentJob }, { resolveAgents: () => ['codex'] })
+    const pending = summarizePrd({ collection: TEST_COLLECTION, signal: controller.signal, agentJob }, { resolveAgents: () => ['codex', 'claude'] })
     const finished = vi.fn()
     const observed = pending.then(finished, finished)
     try {
@@ -576,6 +575,7 @@ describe('cancellation waits for the persisted agent job', () => {
       await expect(pending).rejects.toThrow('prd summary cancelled')
       await observed
       expect(finished).toHaveBeenCalledTimes(1)
+      expect(mockSpawn).toHaveBeenCalledTimes(1)
       expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
         status: 'failed', endedAt: expect.any(String),
       })

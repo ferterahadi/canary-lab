@@ -1,3 +1,4 @@
+import { useNow } from '@/shared/state/use-now'
 import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as discoveryRepairApi from '@/shared/api/discovery-repair'
@@ -727,13 +728,7 @@ function useElapsed(iso: string | undefined): string | null {
     const t = Date.parse(iso)
     return Number.isFinite(t) ? t : null
   }, [iso])
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (startedAt === null) return
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [startedAt])
+  const now = useNow({ enabled: startedAt !== null, resetKey: startedAt, refreshOnReset: startedAt !== null })
   if (startedAt === null) return null
   const ms = now - startedAt
   // A negative or absurd delta means the transcript's clock disagrees with the
