@@ -202,10 +202,9 @@ export class RunStore extends EventEmitter implements RunStateSink {
     this.emitEvent({ kind: 'journal-changed', runId })
   }
 
-  /** The Playwright reporter owns e2e-summary.json because it runs in a child
-   *  process. Its directory watcher calls this after an atomic summary write
-   *  so run-detail subscribers can read and push the new step immediately. */
-  notifySummaryChanged(runId: string): void {
+  /** External artifact writers notify subscribers to read the latest detail.
+   * This does not mutate the manifest, lifecycle or history index. */
+  notifyDetailChanged(runId: string): void {
     this.emitEvent({ kind: 'changed', runId })
   }
 

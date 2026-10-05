@@ -1,7 +1,7 @@
 import type { ExecutionType } from '@shared/verification'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
-import type { RunStatus } from '@shared/run-state'
+import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-state'
@@ -157,7 +157,7 @@ export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting
   const pending = pendingSpecEdits ?? 0
   return (
     <>
-      {pending > 0 && (
+      {pending > 0 && !isTerminalRunStatus(status) && (
         <Chip
           chrome="border"
           tone="var(--text-muted)"

@@ -53,15 +53,7 @@ export async function request<T>(
   fetchImpl: FetchLike,
 ): Promise<T> {
   const res = await fetchImpl(url, init)
-  const text = await res.text()
-  let body: unknown = null
-  if (text.length > 0) {
-    try {
-      body = JSON.parse(text)
-    } catch {
-      body = text
-    }
-  }
+  const body = await readResponseBody(res)
   if (!res.ok) {
     // Surface the server's `{ error }` message (most routes return one) as the
     // Error message so callers showing `e.message` get the real reason, not a
@@ -73,4 +65,14 @@ export async function request<T>(
     throw new ApiError(res.status, body, message)
   }
   return body as T
+}
+
+export async function readResponseBody(res: Response): Promise<unknown> {
+  const text = await res.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
 }

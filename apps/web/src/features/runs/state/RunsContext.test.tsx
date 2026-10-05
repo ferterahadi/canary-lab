@@ -215,7 +215,7 @@ describe('RunsProvider', () => {
       if (refreshed.verdict === 'incompatible') expect(container.textContent).toContain('validation command failed')
       else expect(container.querySelector('[data-testid="service-dependency-blocker"]')).toBeNull()
     }
-    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('shows a confirmed service failure in an open Overview from a run stream update', () => {
@@ -245,7 +245,7 @@ describe('RunsProvider', () => {
       } },
     }) }))
     expect(container.querySelector('[data-testid="service-failure-evidence"]')?.textContent).toContain('Watch compiler reported a failed build.')
-    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('opens the run stream, applies frames, and exposes active run state', () => {

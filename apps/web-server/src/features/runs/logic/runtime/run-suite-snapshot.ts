@@ -1,3 +1,4 @@
+import type { AdoptSpecEditsResult, RestoreSpecEditsResult } from '../run-control-results'
 // The run-start suite snapshot (D9). Canary Lab's verdict must stay outside the
 // agent's control, and the cheapest way an agent turns a run green is to edit
 // the spec while the run is live. Detection (`dirty-specs`) only *notices*
@@ -22,14 +23,6 @@ import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteRevi
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
-
-export type AdoptSpecEditsResult =
-  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
-
-export type RestoreSpecEditsResult =
-  | { ok: true; restored: string[] }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
 
 export type RestoreReviewedSuiteResult =
   | { ok: true; restored: string[]; revision: string }

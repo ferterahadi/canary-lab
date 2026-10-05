@@ -158,6 +158,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -458,20 +460,21 @@ describe('detail redesign (R53–R68)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
-    // The flight's run is the hero (run-9, 8/8 — stated once, by the tile).
-    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('8/8')
+    // The new standalone run is the hero; it must never borrow run-9's result.
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Run live')
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).not.toContain('8/8')
     // The feature's other real runs list below — boot sessions stay hidden. Each
     // row is labelled by its run REF and ordinal, not by the feature name every
     // row shares (R82).
     const previous = container.querySelector('[data-testid="previous-runs"]')
     expect(previous).toBeTruthy()
     expect(previous?.textContent).toContain('Previous runs')
-    expect(previous?.textContent).toContain('run 2 of 2')
+    expect(previous?.textContent).toContain('run 1 of 2')
     expect(previous?.textContent).not.toContain('checkout')
     const previousButtons = previous!.querySelectorAll('button')
     expect(previousButtons.length).toBe(1)
     await act(async () => { previousButtons[0]?.click() })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-live')
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
   })
 
   it('R61: the summary strip shows elapsed, coverage, run verdict, docs and report readiness', async () => {

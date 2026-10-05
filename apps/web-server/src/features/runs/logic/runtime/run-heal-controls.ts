@@ -4,7 +4,7 @@
 // the pause / cancel / restart controls the UI drives into it. Split out of
 // orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
-import type { CancelHealResult, PauseResult } from './run-orchestrator-types'
+import type { CancelHealResult, PauseResult } from '../run-control-results'
 import { waitForPlaywrightExit } from './run-playwright'
 import { recordHealEnd } from './run-heal-agent'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'

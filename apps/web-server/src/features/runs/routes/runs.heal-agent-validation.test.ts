@@ -341,7 +341,7 @@ describe('POST /api/runs/:runId/restart — default reason', () => {
 
 describe('POST /api/runs/:runId/agent-input — unexpected interject failure reason', () => {
   it('409s directly (without attempting restartHeal) when interjectHealAgent fails for a reason other than no-agent-running', async () => {
-    // OrchestratorInterjectResult's type only declares 'no-agent-running' as
+    // InterjectResult's type only declares 'no-agent-running' as
     // a failure reason; this exercises the route's defensive fallback for an
     // orchestrator implementation that returns something else.
     const stub: OrchestratorLike = {

@@ -1,4 +1,4 @@
-import type { CleanupWorktree } from '@/shared/api/types-cleanup'
+import type { CleanupWorktree } from '@shared/cleanup-listing'
 import type { CleanupListing, PortifyCleanupEntry } from '@shared/cleanup-listing'
 import type { ExecutionType } from '@shared/verification'
 import type { RunStatus } from '@shared/run-state'

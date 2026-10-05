@@ -78,7 +78,7 @@ export function FlightPage({
   /** Opens the changed-tests review — the run hero's "verdict from run-start
    *  snapshot · N pending edits" link. Omitted, the hero states the fact
    *  without a link. */
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   /** The routed stage selection (`?stage=…`) and its setter — App owns them so
    *  the pick survives a drill-through and a refresh. Pass both or neither. */
   stage?: FlightStageKey | null

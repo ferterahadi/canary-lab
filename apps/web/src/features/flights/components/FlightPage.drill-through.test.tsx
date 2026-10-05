@@ -158,6 +158,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -191,7 +193,7 @@ beforeEach(() => {
   mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
-  mocks.listRuns.mockResolvedValue([])
+  mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'passed', startedAt: '2026-01-01T00:00:00Z' }])
   mocks.listJournal.mockResolvedValue([])
   mocks.downloadTask.mockResolvedValue(undefined)
   mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
@@ -290,6 +292,39 @@ describe('stage summary + drill-through (R6)', () => {
     expect(drill?.textContent).toContain('Latest run')
     await act(async () => { drill?.click() })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('a paused flight shows the newest Verify execution and every drill targets it instead of the old flight run', async () => {
+    const onOpenRun = vi.fn()
+    const onOpenSpecReview = vi.fn()
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' },
+      { runId: 'verify-latest', feature: 'checkout', status: 'passed', executionType: 'verify', env: 'staging', startedAt: '2026-01-02T00:00:00Z' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'verify-latest', manifest: { runId: 'verify-latest', status: 'passed', executionType: 'verify', healCycles: 0, services: [],
+        suiteSnapshot: { kind: 'taken', dir: '/workspace/suite', takenAt: '2026-01-02T00:00:00Z', digest: 'abc123' },
+        specEdits: { checkedAt: '2026-01-02T00:01:00Z', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] },
+      }, summary: { total: 16, passed: 16, failed: [] },
+    })
+    const saved = manifest({ status: 'paused', currentStage: 'specs-coverage', links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'failed', healCycles: 9 } } : {}),
+      })),
+    })
+    await renderWithDrill(saved, { onOpenRun, onOpenSpecReview })
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')!.click())
+    const hero = container.querySelector('[data-testid="test-run-hero"]')!
+    expect(hero.textContent).toContain('Verify latest')
+    expect(hero.textContent).toContain('16/16')
+    expect(hero.textContent).not.toContain('9 of 10')
+    expect(container.querySelector('[data-testid="previous-runs"]')?.textContent).toContain('Run run-9')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')!.click())
+    expect(onOpenRun).toHaveBeenCalledExactlyOnceWith('checkout', 'verify-latest')
+    await act(async () => hero.querySelector<HTMLButtonElement>('[data-testid="run-hero-spec-edits"]')!.click())
+    expect(onOpenSpecReview).toHaveBeenCalledExactlyOnceWith('checkout', 'verify-latest')
+    expect(saved.links?.runId).toBe('run-9')
+    expect(saved.stages.find((stage) => stage.key === 'run')?.status).toBe('pending')
   })
 
   it('R82: clicking a failing test drills to the run detail carrying that test as the focus', async () => {
@@ -407,10 +442,10 @@ describe('stage summary + drill-through (R6)', () => {
     // The rung names the fact (label over value); the link IS the value.
     const rung = link?.closest('[title]')
     expect(rung?.textContent).toContain('Verdict from')
-    expect(link?.textContent).toContain('recorded tests · 2 pending test-file changes · 1 hint')
+    expect(link?.textContent).toContain('recorded tests · 2 recorded unexecuted test-file changes · 1 hint')
     expect(rung?.getAttribute('title')).toMatch(/2 test-file changes made since the run started were not run/)
     await act(async () => { link?.click() })
-    expect(onOpenSpecReview).toHaveBeenCalledTimes(1)
+    expect(onOpenSpecReview).toHaveBeenCalledExactlyOnceWith('checkout', 'run-9')
   })
 
   it('states the snapshot provenance without a link when nothing is pending, and flags a run that had no snapshot', async () => {

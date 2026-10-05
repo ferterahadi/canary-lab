@@ -20,6 +20,7 @@ export type RunsStreamFrame =
 
 export interface RunsState {
   runs: RunIndexEntry[]
+  indexLoaded: boolean
   details: Record<string, RunDetail>
   transients: Record<string, TransientAction>
   connection: ConnectionState
@@ -28,6 +29,7 @@ export interface RunsState {
 
 export const initialRunsState: RunsState = {
   runs: [],
+  indexLoaded: false,
   details: {},
   transients: {},
   connection: 'connecting',
@@ -50,7 +52,7 @@ export type RunsAction =
 export function runsReducer(state: RunsState, action: RunsAction): RunsState {
   switch (action.type) {
     case 'snapshot':
-      return { ...state, runs: action.runs, details: action.details }
+      return { ...state, runs: action.runs, indexLoaded: true, details: action.details }
     case 'http-detail':
     case 'update': {
       const entry = runIndexEntry(action.detail.manifest)
@@ -80,7 +82,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       }
     }
     case 'list-changed':
-      return { ...state, runs: action.runs, transients: pruneTerminalTransients(state.transients, action.runs) }
+      return { ...state, runs: action.runs, indexLoaded: true, transients: pruneTerminalTransients(state.transients, action.runs) }
     case 'connection':
       return { ...state, connection: action.status }
     case 'transient-set':
@@ -96,7 +98,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       return { ...state, errors: rest }
     }
     case 'http-list':
-      return { ...state, runs: action.runs }
+      return { ...state, runs: action.runs, indexLoaded: true }
   }
 }
 

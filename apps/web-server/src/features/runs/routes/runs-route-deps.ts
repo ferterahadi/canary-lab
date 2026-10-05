@@ -1,3 +1,4 @@
+import type { RunArtifactObserver } from '../logic/run-artifact-observer'
 import type { RepositoryObserver } from '../../../shared/repository-observer'
 
 import type { RunQueueDiagnostics } from '../../../../../../shared/run-queue'
@@ -26,6 +27,7 @@ export interface StartRunOptions {
 }
 
 export interface RunsRouteDeps {
+  runArtifactObserver?: Pick<RunArtifactObserver, 'observe'>
   repositoryObserver?: Pick<RepositoryObserver, 'readStatus'>
   runRequests?: RunStartRequests
   featuresDir: string

@@ -334,7 +334,7 @@ export function App() {
           <RunDetailColumn
             runId={selectedRunId}
             onOpenPlaywrightSettings={(f) => openConfig(f, 'playwright')}
-            onOpenSpecReview={() => setSpecReviewOpen(true)}
+            onOpenSpecReview={openPendingReview}
             onOpenEvaluationReport={openEvaluationReport}
             totalTests={specTotalTests}
             /* Honoured only when the focus belongs to the run being shown, so a
@@ -478,7 +478,7 @@ export function App() {
               /* The run hero's "verdict from run-start snapshot · N pending
                  edits" link lands on the same review the status-bar pill
                  opens — one dialog, routed once (?dialog=tests-review). */
-              onOpenSpecReview={() => setSpecReviewOpen(true)}
+              onOpenSpecReview={openPendingReview}
             />
           : <ResizablePanels panels={WORKSPACE_PANELS} contentByPanel={contentByPanel} />}
         </Suspense>

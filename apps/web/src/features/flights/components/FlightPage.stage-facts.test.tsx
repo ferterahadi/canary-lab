@@ -174,6 +174,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -721,6 +723,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it("the latest run's numbers are a quiet stats line, not a second band of metric tiles", async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -761,6 +764,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('a service that never came up keeps its danger hue — the verdict chip does not say that', async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -792,6 +796,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('R82: while the run is live the hero shows the repair state and the failures found so far — no repair journal', async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'healing', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: { runId: 'run-9', status: 'healing', healCycles: 1 },
@@ -1234,10 +1239,10 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
   })
 
-  it('Test Run: the hero renders its shape before any run exists', async () => {
+  it('Test Run: a confirmed empty history explains that no runs exist', async () => {
     await open('run')
     expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Latest run')
-    expect(container.querySelector('[data-testid="test-run-hero-skeleton"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('No test runs yet')
     // The history band announces the three core metrics a completed first run
     // will populate, so its resting and settled shapes match.
     const facts = container.querySelector('[data-testid="stage-facts"]')

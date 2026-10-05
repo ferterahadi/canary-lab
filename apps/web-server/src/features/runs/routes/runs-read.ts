@@ -44,6 +44,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
+    deps.runArtifactObserver?.observe(req.params.runId)
     const detail = deps.store.get(req.params.runId)
     if (!detail) return notFound(reply, 'run')
     return withSingleAttemptDetailState(detail, deps.store.logsDir)

@@ -1,3 +1,5 @@
+import { useRuns } from '@/features/runs/state/RunsContext'
+import { featureTestRuns } from '@/shared/lib/feature-test-runs'
 import { ACTIVITY_CHIP } from './FlightChipState'
 import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -234,7 +236,6 @@ export function StageDetail({
   stage: recordedStage,
   companion: recordedCompanion,
   runLive,
-  activeRunId,
   activePortifyWorkflowId,
   activity,
   externalHistory,
@@ -261,9 +262,6 @@ export function StageDetail({
   companion: FlightStage | null
   /** A run for this feature is live right now (R64) — the run row polls. */
   runLive?: boolean
-  /** Run identity supplied by the live run stream for a derived Flight. Real
-   *  flight records keep their own stage/link identity instead. */
-  activeRunId?: string
   /** Portify's own live-store identity. Unlike the one-verb feature Activity
    *  map, this survives when a simultaneous test run is the louder activity. */
   activePortifyWorkflowId?: string
@@ -289,7 +287,7 @@ export function StageDetail({
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
   /** The run hero's link into the changed-tests review. */
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
   drill: FlightDrillThroughs
@@ -325,6 +323,9 @@ export function StageDetail({
         ? 'docs'
         : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
   const runMerged = stage.key === 'run'
+  const runIndex = useRuns({ reconcile: runMerged })
+  const suiteRuns = featureTestRuns(runIndex.runs, flight.feature)
+  const latestRun = suiteRuns[0]
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
   // R83: the pane keeps its settled layout in every state. Missing slots stay
@@ -383,9 +384,12 @@ export function StageDetail({
     mapping: coverageJob?.models?.mapping?.[coverageAgent],
   } : undefined
   const modelChips = flightRowModelChips(row.key, coverageOwnsCurrent ? coverageModels : flight.opts.models)
-  const drillThrough = stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
+  // The run shortcut shares the suite selection; other stages drill into their own evidence.
+  const drillThrough = runMerged
+    ? latestRun && drill.onOpenRun ? { label: 'Latest run →', onClick: () => drill.onOpenRun?.(flight.feature, latestRun.runId) } : null
+    : stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
-    ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
+    ? latestRun?.runId
     : undefined
   const pausedKind = coverageOwnsCurrent ? null : pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
@@ -393,8 +397,9 @@ export function StageDetail({
   // the run detail poll, so StageDetail no longer fetches it here (R80). The
   // hero renders from this evidence immediately (before its first poll) and
   // enriches from the live run detail; healEnd rides the run stage's evidence.
-  const runEv = (stage.evidence ?? {}) as Record<string, unknown>
-  const runCev = (companion?.evidence ?? {}) as Record<string, unknown>
+  const recordedRunId = (stage.evidence as Record<string, unknown> | undefined)?.runId ?? flight.links?.runId
+  const runEv = (recordedRunId === runId ? stage.evidence ?? {} : {}) as Record<string, unknown>
+  const runCev = (recordedRunId === runId ? companion?.evidence ?? {} : {}) as Record<string, unknown>
   const runEvidence: RunStageEvidence = {
     runId,
     status: typeof runEv.status === 'string' ? runEv.status : undefined,
@@ -806,6 +811,10 @@ export function StageDetail({
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
+          featureRuns={suiteRuns}
+          indexLoaded={runIndex.indexLoaded}
+          indexError={runIndex.indexError}
+          connection={runIndex.connection}
           awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}

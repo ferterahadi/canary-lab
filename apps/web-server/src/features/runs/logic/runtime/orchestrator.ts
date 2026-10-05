@@ -1,3 +1,4 @@
+import type { InterjectResult } from '../run-control-results'
 import { createRunContext, type RunContext } from './run-context'
 import { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 import { recordFullSuiteTerminalRestartFallback, runPlaywright, runVerification, verificationPlanForSummary } from './run-playwright'
@@ -30,7 +31,7 @@ import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits } from './run-suite-
 import { removeSuiteRuntimeInputs } from './suite-runtime-inputs'
 import { markStoppedEarly, noteHealCycle, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import { prepareRunForExecution } from './run-setup'
-import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
+import type { OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
 export class RunOrchestrator extends EventEmitter {
   /** Every field this class used to declare. Shared by reference with the

@@ -1,9 +1,9 @@
+import type { WatchDirectory } from './run-file-watcher'
 import { EventEmitter } from 'events'
 import fs from 'fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   startSummaryChangeWatcher,
-  type WatchDirectory,
 } from './summary-change-watcher'
 
 interface FakeWatch {

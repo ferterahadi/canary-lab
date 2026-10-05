@@ -1,3 +1,4 @@
+import { createRunArtifactObserver } from './logic/run-artifact-observer'
 
 import type { FastifyInstance } from 'fastify'
 import { runsRoutes } from './routes/runs'
@@ -34,7 +35,9 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     ptyFactory,
   } = ctx
 
-  await app.register(journalRoutes, { logsDir, journalPath })
+  const runArtifactObserver = createRunArtifactObserver({ store: runStore, log: (error) => app.log.warn({ err: error }, 'Run artifact observation failed; reads will retry') })
+  app.addHook('onClose', async () => runArtifactObserver.dispose())
+  await app.register(journalRoutes, { logsDir, journalPath, runArtifactObserver })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
   // a setter-style hook on the route deps.
@@ -50,7 +53,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   const { scheduler } = scheduling
   const restartLocalHeal = makeRestartLocalHeal(ctx, attachRunStreams)
   const runsDeps = buildRunsRouteDeps(ctx, { attachRunStreams, restartExternalRun, scheduling, restartLocalHeal })
-  await app.register(runsRoutes, runsDeps)
+  await app.register(runsRoutes, { ...runsDeps, runArtifactObserver })
   // The external-heal handoff route reads `deps.restartLocalHeal` at request
   // time, so binding it after the runs route is registered is still in time.
   externalHealDeps.restartLocalHeal = (runId, guidance) => restartLocalHeal(runId, guidance)

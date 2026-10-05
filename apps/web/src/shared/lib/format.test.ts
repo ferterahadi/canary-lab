@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
 import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
@@ -143,5 +143,19 @@ describe('shortRunRef', () => {
     expect(shortRunRef('run_z6kc')).toBe('z6kc')
     expect(shortRunRef('ab')).toBe('ab')
     expect(shortRunRef('x-y')).toBe('x-y')
+  })
+})
+
+
+describe('formatLocalDateTime', () => {
+  it('uses local medium date and time and preserves equivalent offset instants', () => {
+    const iso = '2026-10-05T06:02:30Z'
+    const expected = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(iso))
+    expect(formatLocalDateTime(iso)).toBe(expected)
+    expect(formatLocalDateTime('2026-10-05T14:02:30+08:00')).toBe(expected)
+  })
+
+  it.each(['', 'not-a-date'])('retains invalid input %j', (input) => {
+    expect(formatLocalDateTime(input)).toBe(input)
   })
 })

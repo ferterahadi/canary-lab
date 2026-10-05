@@ -506,3 +506,28 @@ it('allows a domain retry after rejection and supersedes it on manual refresh', 
   expect(fetcher).toHaveBeenCalledTimes(4)
   expect(resource.error).toBeNull()
 })
+
+it('combines pending polling with settled reconciliation and supersedes hung rounds', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn().mockResolvedValue('pending')
+  let live!: LiveResource<string>
+  function Combined() {
+    live = useLiveResource(null, 'combined', fetcher, { pollWhile: value => value === 'pending', pollIntervalMs: 2000, reconcileMs: 15_000, pauseWhenHidden: true })
+    return <span>{live.value}</span>
+  }
+  await act(async () => root.render(<Combined />))
+  await act(async () => vi.advanceTimersByTimeAsync(14_000))
+  expect(fetcher).toHaveBeenCalledTimes(8)
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(8)
+  fetcher.mockResolvedValue('settled')
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(container.textContent).toBe('settled')
+  fetcher.mockImplementationOnce(() => new Promise(() => {})).mockResolvedValue('recovered')
+  await act(async () => vi.advanceTimersByTimeAsync(14_000))
+  expect(container.textContent).toBe('settled')
+  await act(async () => vi.advanceTimersByTimeAsync(15_000))
+  expect(container.textContent).toBe('recovered')
+  const revisions = fetcher.mock.calls.map(call => call[1].readRevision)
+  expect(new Set(revisions).size).toBe(revisions.length)
+})

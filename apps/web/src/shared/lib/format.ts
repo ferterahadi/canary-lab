@@ -111,3 +111,12 @@ export function shortRunRef(runId: string): string {
   const tail = runId.split(/[-_]/).pop()
   return tail && tail.length >= 3 ? tail : runId
 }
+
+export function formatLocalDateTime(iso: string): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return iso
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(new Date(time))
+}

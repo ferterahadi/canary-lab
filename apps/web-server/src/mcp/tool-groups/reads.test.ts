@@ -1,3 +1,5 @@
+import { RunStore } from '../../features/runs/logic/run-store'
+import { createRegistry } from '../../features/runs/logic/run-registry'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -454,4 +456,21 @@ describe('get_verification_result', () => {
     expect(await call('get_verification_result', { executionId: 'run-1' }))
       .toMatchObject({ executionId: 'run-1' })
   })
+})
+
+it('reads current persisted completed-run evidence after direct external writes', async () => {
+  const store = new RunStore(logsDir, createRegistry())
+  const manifest = runDetail({}, { status: 'passed' }).manifest
+  store.bootstrap(manifest)
+  const { call } = harness({ store })
+  expect(await call('get_run', { runId: 'run-1', includeRaw: true })).toMatchObject({ manifest: { status: 'passed' } })
+  const dir = path.join(logsDir, 'runs', 'run-1')
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ ...manifest, status: 'failed' }))
+  const event = { id: 'external', phase: 'completed', headline: 'Direct file evidence', updatedAt: '2026-01-01T00:00:00Z' }
+  fs.writeFileSync(path.join(dir, 'lifecycle-events.jsonl'), JSON.stringify(event) + '\npartial')
+  fs.writeFileSync(path.join(dir, 'diagnosis-journal.md'), 'external journal')
+  expect(await call('get_run', { runId: 'run-1', includeRaw: true })).toMatchObject({ manifest: { status: 'failed' }, lifecycleEvents: [event] })
+  const snapshot = await call('get_run_snapshot', { runId: 'run-1' })
+  expect(snapshot).toMatchObject({ runId: 'run-1', status: 'failed' })
+  expect(JSON.stringify(snapshot)).toContain('diagnosis-journal.md')
 })

@@ -107,3 +107,9 @@ describe('RunRow (R80 hero props)', () => {
     expect(onSelect).toHaveBeenCalledWith(run)
   })
 })
+
+it.each(['passed', 'failed', 'aborted'] as const)('does not label historical changes as pending for a %s run', (status) => {
+    renderRow({ run: { ...run, status, pendingSpecEdits: 2 } })
+    expect(container.querySelector('[data-testid="run-pending-edits"]')).toBeNull()
+    expect(container.textContent).toContain(status[0].toUpperCase() + status.slice(1))
+  })

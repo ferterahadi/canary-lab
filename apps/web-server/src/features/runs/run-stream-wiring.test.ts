@@ -1,3 +1,4 @@
+import type { RunFileWatcher } from './logic/run-file-watcher'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import fs from 'fs'
@@ -16,7 +17,6 @@ import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { RunOrchestrator } from './logic/runtime/orchestrator'
 import { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type {
-  SummaryChangeWatcher,
   SummaryChangeWatcherOptions,
 } from './logic/summary-change-watcher'
 import type { ServerContext } from '../../server-context'
@@ -260,7 +260,7 @@ describe('makeAttachRunStreams — pane fan-out', () => {
     const runnerLog = newRunnerLog('r-1')
     const close = vi.fn()
     let watcherOptions: SummaryChangeWatcherOptions | undefined
-    const startSummaryWatcher = vi.fn((options: SummaryChangeWatcherOptions): SummaryChangeWatcher => {
+    const startSummaryWatcher = vi.fn((options: SummaryChangeWatcherOptions): RunFileWatcher => {
       watcherOptions = options
       return { close }
     })

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  ApiError,
+  ApiError, readResponseBody, request,
 } from './internal'
 import {
   downloadEvaluationExportTask,
@@ -114,5 +114,46 @@ describe('api client core', () => {
     expect(asBranchMismatch(new Error('nope'))).toBeNull()
     expect(asBranchMismatch(new ApiError(500, body))).toBeNull()
     expect(asBranchMismatch(new ApiError(409, { type: 'repo_collision_requires_choice' }))).toBeNull()
+  })
+})
+
+describe('response body parsing', () => {
+  it.each([
+    ['', null], ['null', null], ['false', false], ['0', 0], ['"hello"', 'hello'],
+    ['{"value":1}', { value: 1 }], ['[1,"two"]', [1, 'two']],
+    ['not json', 'not json'], ['  \n', '  \n'],
+  ])('preserves the body semantics of %j', async (text, expected) => {
+    const response = new Response(text as string)
+    const read = vi.spyOn(response, 'text')
+    await expect(readResponseBody(response)).resolves.toEqual(expected)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(response.bodyUsed).toBe(true)
+  })
+
+  it('propagates body-read and network failures unchanged', async () => {
+    const failure = new Error('stream closed')
+    const response = new Response('partial')
+    vi.spyOn(response, 'text').mockRejectedValue(failure)
+    await expect(readResponseBody(response)).rejects.toBe(failure)
+    await expect(request('/api/example', {}, vi.fn().mockResolvedValue(response))).rejects.toBe(failure)
+    await expect(request('/api/example', {}, vi.fn().mockRejectedValue(failure))).rejects.toBe(failure)
+  })
+
+  it('keeps server messages for ordinary requests and HTTP messages for downloads', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{"error":"archive unavailable"}', { status: 409 }))
+    await expect(request('/api/example', {}, fetchImpl)).rejects.toMatchObject({
+      message: 'archive unavailable', status: 409, body: { error: 'archive unavailable' },
+    })
+    await expect(downloadEvaluationExportTask({
+      taskId: 'export-1', runId: 'run-1', feature: 'checkout', mode: 'raw', producer: 'internal',
+      status: 'failed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', downloadReady: false,
+    }, { fetchImpl, documentRef: {} as Document })).rejects.toMatchObject({
+      message: 'HTTP 409', status: 409, body: { error: 'archive unavailable' },
+    })
+  })
+
+  it.each(['', 'false', '0', 'plain text', '{"error":42}'])('keeps the HTTP fallback message for %j', async (body) => {
+    await expect(request('/api/example', {}, vi.fn(async () => new Response(body, { status: 500 }))))
+      .rejects.toMatchObject({ message: 'HTTP 500' })
   })
 })

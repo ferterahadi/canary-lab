@@ -1,3 +1,4 @@
+import type { RunArtifactObserver } from '../logic/run-artifact-observer'
 import { newestFirst } from '../../../../../../shared/journal-order'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
@@ -6,6 +7,7 @@ import { readJournal, filterSections } from '../logic/journal-store'
 import type { JournalSection } from '../../../../../../shared/run-detail'
 
 export interface JournalRouteDeps {
+  runArtifactObserver?: Pick<RunArtifactObserver, 'observe'>
   logsDir: string
   /** Legacy root journal fallback for callers that do not select a run. */
   journalPath?: string
@@ -51,6 +53,7 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
     async (req) => {
       const journalPath = resolveJournalPath(req.query.run)
       if (!journalPath) return []
+      if (req.query.run) deps.runArtifactObserver?.observe(req.query.run)
       const sections = inferRunLocalFields(readJournal(journalPath).sections, req.query.run)
       let filtered = filterSections(sections, {
         feature: req.query.feature,

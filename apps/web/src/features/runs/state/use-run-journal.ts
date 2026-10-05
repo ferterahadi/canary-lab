@@ -7,6 +7,8 @@ export function useRunJournal(feature: string, runId: string, refreshKey = 0) {
   return useLiveResource('journal', JSON.stringify([feature, runId]),
     async () => newestFirst(await listJournal({ feature, run: runId })), {
       scope: runId,
+      reconcileMs: 15_000,
+      pauseWhenHidden: true,
       cache: 'run-journal',
       refreshKey,
       pollIntervalMs: 2000,

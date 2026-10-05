@@ -1,4 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import type { WorktreeEntry, WorktreeOwnerKind } from '@shared/worktree-inventory'
+import type { CleanupWorktree } from '@shared/cleanup-listing'
+import { describe, it, expect, vi, expectTypeOf } from 'vitest'
 import {
   cleanupRuns,
   cleanupWorktrees,
@@ -70,3 +72,12 @@ describe('cleanup api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/cleanup/portify', { method: 'GET' })
   })
 })
+
+
+expectTypeOf<Awaited<ReturnType<typeof cleanupWorktrees>>>().toEqualTypeOf<{ worktrees: CleanupWorktree[] }>()
+expectTypeOf<Omit<CleanupWorktree, 'active'>>().toEqualTypeOf<WorktreeEntry>()
+expectTypeOf<CleanupWorktree['active']>().toEqualTypeOf<boolean>()
+expectTypeOf<WorktreeOwnerKind>().toEqualTypeOf<'run' | 'benchmark' | 'portify' | 'unknown'>()
+expectTypeOf<WorktreeEntry['ownerId']>().toEqualTypeOf<string | null>()
+expectTypeOf<WorktreeEntry['slot']>().toEqualTypeOf<string | null>()
+expectTypeOf<WorktreeEntry['ageMs']>().toEqualTypeOf<number | null>()

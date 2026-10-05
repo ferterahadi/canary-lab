@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/shared/lib/format'
 import { useState } from 'react'
 import { useRunJournal } from '../state/use-run-journal'
 import type { JournalSection } from '@shared/run-detail'
@@ -25,6 +26,7 @@ interface Props {
 
 export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: Props) {
   const { value: entries, error } = useRunJournal(feature, runId, refreshKey)
+  const occurrences = new Map<string, number>()
 
   return (
     <RunPane padded>
@@ -39,9 +41,13 @@ export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: P
         <EmptyState {...(healCycles > 0 ? EMPTY_COPY.journalNoEntries : EMPTY_COPY.journalPassed)} />
       ) : (
         <ul className="space-y-3">
-          {entries.map((entry, i) => (
-            <EntryCard key={`${entry.iteration ?? 'x'}:${i}`} entry={entry} />
-          ))}
+          {entries.map((entry) => {
+            // Newer iterations must not remount existing cards or their dialogs.
+            const identity = JSON.stringify([runId, entry.iteration, entry.timestamp])
+            const occurrence = occurrences.get(identity) ?? 0
+            occurrences.set(identity, occurrence + 1)
+            return <EntryCard key={`${identity}:${occurrence}`} entry={entry} />
+          })}
         </ul>
       )}
     </RunPane>
@@ -129,15 +135,6 @@ function EntryCard({ entry }: { entry: JournalSection }) {
       />
     </li>
   )
-}
-
-function formatLocalDateTime(iso: string): string {
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(new Date(time))
 }
 
 function FieldRow({ field }: { field: { key: string; value: string } }) {

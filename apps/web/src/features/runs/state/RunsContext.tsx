@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
+import { createRunDetailObserver } from './run-detail-observer'
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import * as verificationApi from '@/shared/api/verification'
 import { createObservedReads } from '@/shared/state/observed-reads'
@@ -51,10 +52,9 @@ interface RunsContextValue {
     feature: string,
     input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ) => Promise<string>
-  /** Lazily hydrate a run detail that was omitted from the initial WS
-   *  snapshot. Terminal runs use this path so selecting historical rows does
-   *  not leave the detail pane waiting forever. */
-  loadRunDetail: (runId: string) => Promise<void>
+  observeRunDetail: (runId: string) => () => void
+  observeRunIndex: () => () => void
+  indexError: string | null
   /** Action helpers — set the transient flag, call the API, clear the flag
    *  on success/failure. Errors land in `state.errors[runId]`. */
   abort: (runId: string) => Promise<void>
@@ -88,6 +88,90 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
   const detailLoadsRef = useRef(createObservedReads())
+  const indexReadsRef = useRef(createObservedReads())
+  const [indexError, setIndexError] = useState<string | null>(null)
+  const refresh = useCallback(async (): Promise<void> => {
+    const reads = indexReadsRef.current
+    reads.invalidate('index')
+    const token = reads.begin('index')!
+    try {
+      const runs = await runsApi.listRuns()
+      if (reads.current('index', token)) {
+        dispatch({ type: 'http-list', runs })
+        setIndexError(null)
+      }
+    } catch (error) {
+      if (reads.current('index', token)) setIndexError(errorMessage(error))
+    } finally {
+      reads.finish('index', token)
+    }
+  }, [])
+  // Reuse the store's demand-driven recovery scheduler. An open history view
+  // reconciles every 15 seconds, including when the latest-run push was lost.
+  const [indexObserver] = useState(() => createRunDetailObserver({
+    exists: () => true,
+    active: () => false,
+    read: () => { void refresh() },
+    invalidate: () => indexReadsRef.current.invalidate('index'),
+    hidden: () => document.visibilityState === 'hidden',
+  }))
+  const observeRunIndex = useCallback(() => indexObserver.subscribe('index'), [indexObserver])
+
+  const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
+    const reads = detailLoadsRef.current
+    // The subscription manager owns deduplication; every scheduled round may
+    // supersede a hung predecessor, so begin always follows invalidation.
+    reads.invalidate(runId)
+    const token = reads.begin(runId)!
+    try {
+      const detail = await runsApi.getRunDetail(runId)
+      if (reads.current(runId, token)) {
+        dispatch({ type: 'http-detail', runId, detail })
+      }
+    } catch {
+      // Missing detail is non-fatal for the global run store. The list row
+      // remains usable, and a future WS update can still hydrate the detail.
+    } finally {
+      reads.finish(runId, token)
+    }
+  }, [])
+
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const [detailObserver] = useState(() => createRunDetailObserver({
+    exists: (id) => stateRef.current.runs.some((run) => run.runId === id),
+    active: (id) => isActiveRunStatus(stateRef.current.details[id]?.manifest.status ?? stateRef.current.runs.find((run) => run.runId === id)?.status),
+    read: (id) => { void loadRunDetail(id) },
+    invalidate: (id) => detailLoadsRef.current.invalidate(id),
+    hidden: () => document.visibilityState === 'hidden',
+  }))
+  const connectedOnce = useRef(false)
+  const observeRunDetail = useCallback((id: string) => detailObserver.subscribe(id), [detailObserver])
+  useEffect(() => { detailObserver.sync() }, [detailObserver, state.runs, state.details])
+  useEffect(() => {
+    if (state.connection !== 'live') return
+    if (connectedOnce.current) {
+      detailObserver.refresh()
+      indexObserver.refresh()
+    }
+    connectedOnce.current = true
+  }, [detailObserver, indexObserver, state.connection])
+  useEffect(() => {
+    const refresh = () => {
+      detailObserver.refresh()
+      indexObserver.refresh()
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      detailObserver.close()
+      indexObserver.close()
+    }
+  }, [detailObserver, indexObserver])
 
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
@@ -119,6 +203,8 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
         }
         const action = frameToAction(frame)
         if (action) {
+          indexReadsRef.current.invalidate('index')
+          if (action.type === 'snapshot' || action.type === 'list-changed') setIndexError(null)
           // A later stream observation supersedes reads already in flight.
           // Invalidate their tokens so a late response cannot undo a stop or
           // resurrect a removed run, and a new observation can read again.
@@ -134,18 +220,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
 
     return () => {
       detailLoads.clear()
+      indexReadsRef.current.clear()
       connection.close()
     }
   }, [wsUrl, WebSocketImpl])
-
-  // ── HTTP fallback ─────────────────────────────────────────────────
-
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      const runs = await runsApi.listRuns()
-      dispatch({ type: 'http-list', runs })
-    } catch { /* surfaced via connection state */ }
-  }, [])
 
   // ── Actions ───────────────────────────────────────────────────────
 
@@ -199,23 +277,6 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     return runId
   }, [refresh, state.connection])
 
-  const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
-    const reads = detailLoadsRef.current
-    const token = reads.begin(runId)
-    if (!token) return
-    try {
-      const detail = await runsApi.getRunDetail(runId)
-      if (reads.current(runId, token)) {
-        dispatch({ type: 'http-detail', runId, detail })
-      }
-    } catch {
-      // Missing detail is non-fatal for the global run store. The list row
-      // remains usable, and a future WS update can still hydrate the detail.
-    } finally {
-      reads.finish(runId, token)
-    }
-  }, [])
-
   const abort = useCallback((runId: string) => runAction(runId, 'aborting', () => runsApi.stopRun(runId)), [runAction])
   const deleteRun = useCallback((runId: string) => runAction(runId, 'deleting', () => runsApi.deleteRun(runId)), [runAction])
   const pauseHeal = useCallback((runId: string) => runAction(runId, 'pausing', () => runsApi.pauseHealRun(runId)), [runAction])
@@ -230,13 +291,15 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     refresh,
     startRun,
     startVerification,
-    loadRunDetail,
+    observeRunDetail,
+    observeRunIndex,
+    indexError,
     abort,
     delete: deleteRun,
     pauseHeal,
     cancelHeal,
     clearError,
-  }), [state, refresh, startRun, startVerification, loadRunDetail, abort, deleteRun, pauseHeal, cancelHeal, clearError])
+  }), [state, refresh, startRun, startVerification, observeRunDetail, observeRunIndex, indexError, abort, deleteRun, pauseHeal, cancelHeal, clearError])
 
   return <RunsContext.Provider value={value}>{children}</RunsContext.Provider>
 }
@@ -250,6 +313,8 @@ function useRunsContext(): RunsContextValue {
 }
 
 export interface UseRunsResult {
+  indexLoaded: boolean
+  indexError: string | null
   runs: RunIndexEntry[]
   connection: ConnectionState
   /** Per-run transient flags. Map shape avoids forcing the consumer to
@@ -278,10 +343,13 @@ export interface UseRunsResult {
   clearError: (runId: string) => void
 }
 
-export function useRuns(): UseRunsResult {
+export function useRuns({ reconcile = false }: { reconcile?: boolean } = {}): UseRunsResult {
   const ctx = useRunsContext()
+  useEffect(() => reconcile ? ctx.observeRunIndex() : undefined, [reconcile, ctx.observeRunIndex])
   return {
     runs: ctx.state.runs,
+    indexLoaded: ctx.state.indexLoaded,
+    indexError: ctx.indexError,
     connection: ctx.state.connection,
     transients: ctx.state.transients,
     errors: ctx.state.errors,
@@ -321,17 +389,11 @@ export function useRun(runId: string | null | undefined): UseRunResult {
   const detail = runId ? ctx.state.details[runId] : undefined
   const indexed = runId ? ctx.state.runs.find((r) => r.runId === runId) : undefined
   const status = detail?.manifest.status ?? indexed?.status
+  const available = !!indexed
   useEffect(() => {
-    if (!runId || !indexed) return
-    if (!detail) {
-      void ctx.loadRunDetail(runId)
-    }
-    if (!isActiveRunStatus(status)) return
-    const timer = setInterval(() => {
-      void ctx.loadRunDetail(runId)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [ctx.loadRunDetail, detail, indexed, runId, status])
+    if (!runId || !available) return
+    return ctx.observeRunDetail(runId)
+  }, [ctx.observeRunDetail, available, runId])
   if (!runId) {
     return { detail: undefined, status: undefined, transient: null, displayStatus: undefined, error: null }
   }

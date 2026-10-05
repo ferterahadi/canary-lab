@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/shared/lib/format'
 import { useNow } from '@/shared/state/use-now'
 import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
@@ -189,7 +190,7 @@ export function RecoveryTimeline({
               <time
                 className="tabular-nums text-[10px]"
                 dateTime={row.ts}
-                title={formatLifecycleDateTime(row.ts)}
+                title={formatLocalDateTime(row.ts)}
                 style={{ color: 'var(--text-muted)' }}
               >
                 {formatLifecycleTime(row.ts)}
@@ -258,15 +259,6 @@ export function formatLifecycleDate(iso: string): string {
   const time = Date.parse(iso)
   if (!Number.isFinite(time)) return iso
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(time))
-}
-
-export function formatLifecycleDateTime(iso: string): string {
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(new Date(time))
 }
 
 export function alertClass(tone: 'info' | 'success' | 'warning' | 'error'): string {

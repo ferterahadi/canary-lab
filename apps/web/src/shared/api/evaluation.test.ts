@@ -119,7 +119,7 @@ describe('evaluation api', () => {
       createElement: vi.fn().mockReturnValue(link),
     } as unknown as Document
     const urlApi = {
-      createObjectURL: vi.fn().mockReturnValue('blob:export'),
+      createObjectURL: vi.fn((_blob: Blob) => 'blob:export'),
       revokeObjectURL: vi.fn(),
     }
     const fetchImpl = vi.fn().mockResolvedValue(new Response(new Blob(['zip']), { status: 200 }))
@@ -141,6 +141,8 @@ describe('evaluation api', () => {
     )
 
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports/task%2F1/download', { method: 'GET' })
+    const downloaded = urlApi.createObjectURL.mock.calls[0][0] as Blob
+    expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(new TextEncoder().encode('zip'))
     expect(link.href).toBe('blob:export')
     expect(link.download).toBe(`${archiveBase ?? 'canary-lab-evaluation-checkout-flow-run'}.zip`)
     expect(link.click).toHaveBeenCalled()

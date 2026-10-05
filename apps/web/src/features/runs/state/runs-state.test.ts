@@ -213,6 +213,7 @@ describe('runsReducer', () => {
 
   it('removed drops the run from runs, details, transients, and errors', () => {
     const start: RunsState = {
+      indexLoaded: true,
       runs: [entry({ runId: 'r1' }), entry({ runId: 'r2' })],
       details: { r1: detail(), r2: detail({ runId: 'r2' }) },
       transients: { r1: 'aborting', r2: 'deleting' },

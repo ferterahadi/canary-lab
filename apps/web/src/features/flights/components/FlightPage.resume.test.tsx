@@ -450,6 +450,7 @@ describe('FlightPage', () => {
   })
 
   it('R82: pausing on the Test Run step KEEPS the run on screen — the pane never goes blank', async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'healing', startedAt: '2026-01-01T00:00:00Z' }])
     // The "I lost my progress" report. Pausing flips the open row back to
     // `pending` (keeping its startedAt) but deliberately does NOT abort the run,
     // so the run and its evidence are still there — the old gate

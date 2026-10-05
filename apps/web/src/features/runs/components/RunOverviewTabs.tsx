@@ -1,3 +1,4 @@
+import { RecordedTestChanges } from './RecordedTestChanges'
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useMemo } from 'react'
 import type { RepoBranchSnapshot, ServiceManifestEntry, RunManifest } from '@shared/run-manifest'
@@ -65,6 +66,7 @@ export interface RunOverviewTabProps {
   view: RunViewModel
   services: ServiceManifestEntry[]
   repoBranches: RepoBranchSnapshot[]
+  onCompareTests?: () => void
   onOpenEvaluationReport?: (feature: string) => void
   /** Opens the boot-failure dialog from the failing service's card. */
   onOpenBootFailure?: () => void
@@ -75,6 +77,7 @@ export function RunOverviewTab({
   view,
   services,
   repoBranches,
+  onCompareTests,
   onOpenEvaluationReport,
   onOpenBootFailure = () => {},
 }: RunOverviewTabProps) {
@@ -126,6 +129,7 @@ export function RunOverviewTab({
           {runFacts(manifest, duration).map((fact) => <RunFactRow key={fact.label} fact={fact} />)}
         </dl>
       </section>
+      <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
       {/* For a boot-only session the held-state message is the point of the
           screen, so surface it on the overview (normal runs keep it in the
           Run Logs timeline only). */}
@@ -302,9 +306,11 @@ export function externalHealClientLabel(kind: NonNullable<RunManifest['externalH
 export function VerifyOverviewTab({
   manifest,
   view,
+  onCompareTests,
 }: {
   manifest: RunManifest
   view: RunViewModel
+  onCompareTests?: () => void
 }) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const verification = manifest.verification
@@ -329,6 +335,7 @@ export function VerifyOverviewTab({
           </>
         )}
       </dl>
+      <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
       {view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}

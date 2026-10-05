@@ -47,7 +47,7 @@ export function RunDetailColumn({
   onBootFailureOpenChange,
 }: {
   runId: string | null
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
@@ -191,7 +191,7 @@ export function RunDetailColumn({
         </div>
         {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
         {view.waiting?.kind === 'test-review' && onOpenSpecReview && (
-          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={onOpenSpecReview} />
+          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={() => onOpenSpecReview(m.feature, m.runId)} />
         )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
@@ -213,13 +213,14 @@ export function RunDetailColumn({
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
           isVerify ? (
-            <VerifyOverviewTab manifest={m} view={view} />
+            <VerifyOverviewTab manifest={m} view={view} onCompareTests={onOpenSpecReview ? () => onOpenSpecReview(m.feature, m.runId) : undefined} />
           ) : (
             <RunOverviewTab
               manifest={m}
               view={view}
               services={services}
               repoBranches={repoBranches}
+              onCompareTests={onOpenSpecReview ? () => onOpenSpecReview(m.feature, m.runId) : undefined}
               onOpenEvaluationReport={onOpenEvaluationReport}
               onOpenBootFailure={() => setBootFailureDialogOpen(true)}
             />

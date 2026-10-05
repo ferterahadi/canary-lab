@@ -195,7 +195,8 @@ export function useLiveResource<T>(
       }
       // Join sibling readers, never a previous reconciliation round or a read
       // started before reconnect/focus. A hung HTTP request cannot stall recovery.
-      const readRevision = JSON.stringify([readKey, reconcileMs ? Math.floor(Date.now() / reconcileMs) : 0, event?.type, event?.timeStamp])
+      const cadence = pollWhileRef.current?.(current) ? Math.min(pollIntervalMs ?? 2500, reconcileMs ?? Infinity) : reconcileMs
+      const readRevision = JSON.stringify([readKey, cadence ? Math.floor(Date.now() / cadence) : 0, event?.type, event?.timeStamp])
       Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
         .then((next) => {
           if (!alive || request !== requested) return
@@ -214,12 +215,22 @@ export function useLiveResource<T>(
     }
     fetch()
     let timer: ReturnType<typeof setInterval> | undefined
+    let reconciliation: ReturnType<typeof setInterval> | undefined
     const schedule = () => {
       clearInterval(timer)
-      if (polling && !(pauseWhenHidden && document.visibilityState === 'hidden')) {
+      clearInterval(reconciliation)
+      if (pauseWhenHidden && document.visibilityState === 'hidden') return
+      if (pollWhileRef.current) {
         timer = setInterval(() => {
-          if (reconcileMs || pollWhileRef.current?.(current)) fetch()
-        }, reconcileMs ?? pollIntervalMs ?? 2500)
+          if (pollWhileRef.current?.(current)) fetch()
+        }, pollIntervalMs ?? 2500)
+      }
+      if (reconcileMs) {
+        reconciliation = setInterval(() => {
+          // Pending work already has its faster reader. Settling changes the
+          // predicate, not the lifetime of the slower recovery timer.
+          if (!pollWhileRef.current?.(current)) fetch()
+        }, reconcileMs)
       }
     }
     schedule()
@@ -241,6 +252,7 @@ export function useLiveResource<T>(
     return () => {
       alive = false
       clearInterval(timer)
+      clearInterval(reconciliation)
       clearTimeout(retryTimer)
       clearTimeout(lease)
       window.removeEventListener('focus', fetch)

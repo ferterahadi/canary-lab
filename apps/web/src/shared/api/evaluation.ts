@@ -5,7 +5,7 @@ import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { ApiError, defaultOpts, readResponseBody, request, type ClientOptions } from './internal'
 import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 
 export function startEvaluationExport(
@@ -88,15 +88,5 @@ export async function downloadEvaluationExportTask(
   } finally {
     link.remove()
     urlApi.revokeObjectURL(href)
-  }
-}
-
-async function readResponseBody(res: Response): Promise<unknown> {
-  const text = await res.text()
-  if (!text) return null
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
   }
 }

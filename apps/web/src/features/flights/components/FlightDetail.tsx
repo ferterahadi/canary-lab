@@ -106,7 +106,7 @@ export function FlightDetail({
   onClose: () => void
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
@@ -310,10 +310,6 @@ export function FlightDetail({
   // A verify run is a run in verify mode — the run row must read live for it
   // exactly as for a normal run.
   const runLive = featureActivity != null && ACTIVITY_STAGE[featureActivity.kind] === 'run'
-  // A recorded flight keeps pointing at the run it conducted. A DERIVED flight
-  // has no such record, so its live run identity comes from the shared run
-  // stream. This is display-only: it never navigates or starts another run.
-  const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
   const railRows = useMemo(() => flight ? presentedFlightRows({
     feature: flight.feature,
     stages: flight.stages,
@@ -792,7 +788,6 @@ export function FlightDetail({
               stage={stage}
               companion={companionStage}
               runLive={runLive}
-              activeRunId={derivedActiveRunId}
               activePortifyWorkflowId={featurePortify?.workflowId}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
@@ -839,16 +834,6 @@ export function stageDrillThrough(
 ): { label: string; onClick: () => void } | null {
   if (stage.status === 'running') return null
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  if (stage.key === 'run' || stage.key === 'heal') {
-    const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
-    if (runId && drill.onOpenRun) {
-      const open = drill.onOpenRun
-      // R82: names WHICH run it opens. The stage now lists the previous runs
-      // underneath (each with its own open action), so a bare "run detail" left
-      // the user guessing which of them this button meant.
-      return { label: 'Latest run →', onClick: () => open(flight.feature, runId) }
-    }
-  }
   // Requirements drills to the same ledger — that's where the distilled
   // requirements become browsable rows. Gated on the folded prd-summary
   // companion, NOT on the docs row: the docs stage is `done` the moment its

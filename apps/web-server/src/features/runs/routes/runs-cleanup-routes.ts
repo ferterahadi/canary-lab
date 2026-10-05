@@ -1,3 +1,4 @@
+import type { CleanupWorktree } from '../../../../../../shared/cleanup-listing'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 // Runs REST — the cleanup surface: run/worktree listings, worktree open+delete,
 // and per-run artifact trimming. Split out of runs.ts; bodies unchanged.
@@ -27,7 +28,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
     const sourceRoots = await featureRepoRoots(deps.featuresDir)
     const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
     return {
-      worktrees: entries.map((e) => ({
+      worktrees: entries.map<CleanupWorktree>((e) => ({
         ...e,
         active:
           (e.ownerKind === 'run' || e.ownerKind === 'benchmark') && e.ownerId

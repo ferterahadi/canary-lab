@@ -83,7 +83,7 @@ export function makeAttachRunStreams(
     stopSummaryWatcher()
     summaryWatcher = startSummaryWatcher({
       summaryPath: buildRunPaths(runDirFor(logsDir, runId)).summaryPath,
-      onChange: () => runStore.notifySummaryChanged(runId),
+      onChange: () => runStore.notifyDetailChanged(runId),
       onError: (error) => runnerLog.warn(`summary watcher failed: ${error.message}`),
     })
     broker.resetPane('playwright')

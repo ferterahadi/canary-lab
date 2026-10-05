@@ -165,7 +165,7 @@ describe('RunStore', () => {
     const events: RunStoreEvent[] = []
     store.onEvent((event) => events.push(event))
 
-    store.notifySummaryChanged('r-summary-1')
+    store.notifyDetailChanged('r-summary-1')
 
     expect(events).toEqual([{ kind: 'changed', runId: 'r-summary-1' }])
     expect(readManifest(store.manifestPath('r-summary-1'))?.status).toBe('running')
