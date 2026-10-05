@@ -1,3 +1,4 @@
+import type { EditorChoice } from '../../../../../../shared/project-config'
 import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import fs from 'fs'
 import path from 'path'
@@ -12,7 +13,7 @@ import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { findFeature } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { notFound } from '../../../shared/http-error'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the

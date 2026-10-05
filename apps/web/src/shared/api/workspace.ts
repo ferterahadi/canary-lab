@@ -1,9 +1,10 @@
+import type { EditorChoice } from '@shared/project-config'
 // Workspace-level actions: editor/app launch, filesystem browse, git, version.
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { VersionStatus, UpdateJobManifest } from '@shared/version-status'
 import { defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
-import type { EditorChoice } from './config'
+
 
 // Current vs latest published version + the self-update job state.
 export function getVersionStatus(opts?: ClientOptions): Promise<VersionStatus> {

@@ -1,3 +1,4 @@
+import type { EditorChoice } from '../../../../../../shared/project-config'
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../logic/runtime/store'
@@ -7,7 +8,7 @@ import type { HealAgent } from '../../agent-sessions/logic/agent-binary'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { overlayDir } from '../logic/runtime/overlay'
-import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { notFound } from '../../../shared/http-error'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.

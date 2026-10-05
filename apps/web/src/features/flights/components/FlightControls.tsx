@@ -1,3 +1,4 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import * as flightsApi from '@/shared/api/flights'
 import * as configApi from '@/shared/api/config'
@@ -91,7 +92,7 @@ export function ContinueMenu({
   const [modelsGate, setModelsGate] = useState<{
     body: flightsApi.StartFlightBody
     agent: 'claude' | 'codex'
-    config: configApi.ProjectConfig
+    config: ProjectConfigResponse
   } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
   const menuMode = flight.status === 'paused' || recordlessEntry !== undefined || coverageRecovery !== undefined

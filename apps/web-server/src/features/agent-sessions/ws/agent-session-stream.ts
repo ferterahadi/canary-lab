@@ -1,20 +1,18 @@
+import { resolveRunAgentSessionRef } from '../logic/run-agent-session-ref'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
   type AgentSessionRef,
   loadAgentSessionMeta,
-  locateMostRecentAgentSessionRef,
-  parseAgentSessionRefFile,
   resolveManifestSessionRef,
   resolveWorkflowAgentRef,
-  selectAgentSessionRef,
 } from '../logic/agent-session-log'
 import { findClaudeLogBySessionId, locateCodexSessionLog } from '../logic/agent-session-paths'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import { tailAgentSession } from '../logic/agent-session-tailer'
 import { paths as draftPaths } from '../../wizard/logic/draft-store'
-import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
+import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
 import { coverageJobStore, type CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
@@ -87,7 +85,7 @@ export async function agentSessionStreamRoutes(
         return
       }
       const runDir = runDirFor(deps.logsDir, req.params.runId)
-      attachTail(socket, { ref: resolveRunRef(runDir), discoverRef: () => resolveRunRef(runDir) })
+      attachTail(socket, { ref: resolveRunAgentSessionRef(runDir), discoverRef: () => resolveRunAgentSessionRef(runDir) })
     },
   )
 
@@ -202,16 +200,6 @@ function resolveEvaluationExportRef(
   const task = readEvaluationExportTask(logsDir, taskId)
   if (!task) return null
   return resolveManifestSessionRef(task.sessionRef, { projectRoot, startedAt: task.createdAt })
-}
-
-function resolveRunRef(runDir: string): AgentSessionRef | null {
-  const found = locateMostRecentAgentSessionRef(runDir)
-  if (found) return found
-  const refPath = buildRunPaths(runDir).agentSessionRefPath
-  let raw: string | null = null
-  try { raw = fs.readFileSync(refPath, 'utf-8') } catch { return null }
-  const parsed = raw ? parseAgentSessionRefFile(raw) : null
-  return parsed ? selectAgentSessionRef(parsed) : null
 }
 
 function parseStage(value: string | undefined): 'planning' | 'generating' | null {

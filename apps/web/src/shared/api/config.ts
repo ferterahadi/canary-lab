@@ -3,7 +3,8 @@ import type { OnboardingSamples } from '@shared/getting-started'
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { FeatureTests } from './types'
-import type { AgentModelsConfig, KnownModelOption } from '@shared/agent-models'
+import type { ProjectConfigResponse } from '@shared/project-config'
+import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions, runId?: string): Promise<FeatureTests> {
@@ -307,38 +308,6 @@ export function putEnvsetSlot(
 
 // ─── project config ───────────────────────────────────────────────────────
 
-// `external` was retired in 2.2.0 — the server migrates a stored value to
-// `claude` on load, so this mirror never sees it.
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
-// `system` remains a launch result and an older-server compatibility value;
-// the settings UI exposes only auto/vscode/cursor.
-export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
-
-export interface ProjectConfig {
-  healAgent: HealAgentChoice
-  editor: EditorChoice
-  /** Optional for the same reason `autoProposePr` is: an older server omits
-   *  them, and every reader falls back (empty plans / false). */
-  agentModels?: AgentModelsConfig
-  /** Ask which models to use at every launch instead of applying
-   *  `agentModels` silently. */
-  askModelsOnLaunch?: boolean
-  personalWikiPath: string | null
-  /** Open a draft PR automatically when a run heals green. Declared here because
-   *  SettingsModal has always read and written it — the field was live on the
-   *  server and in the UI but missing from this mirror, which `apps/web` never
-   *  caught (the build tsconfig covers `shared`/`cli`/runtime only). */
-  autoProposePr?: boolean
-  /** Offer Getting Started from the status bar. The historical field name is
-   *  retained for config compatibility; runnable fixtures now sit inside the
-   *  guided Getting Started journey. Workspace-level, so turning it off
-   *  settles it for the project rather than one browser. Optional for the same
-   *  reason `autoProposePr` is: an older server omits it, and every reader tests
-   *  `!== false` so absent means on. */
-  showDemo?: boolean
-  port?: number
-}
-
 export interface PortChangeResult {
   restarting: boolean
   port?: number
@@ -348,38 +317,16 @@ export interface PortChangeResult {
   activeRuns?: number
 }
 
-export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
+export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfigResponse> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ProjectConfig>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
-}
-
-// Mirrors agent-sessions/logic/agent-probe.ts (the module itself shells out,
-// so the client mirrors the shapes). Informational only — no launch blocks on
-// it; the remedy line feeds the warning strip.
-export type AgentProbeState = 'ok' | 'auth' | 'missing'
-
-export interface AgentProbe {
-  agent: 'claude' | 'codex'
-  state: AgentProbeState
-  binaryPath: string | null
-  version: string | null
-  /** Optional for compatibility with Canary Lab servers from before runtime
-   *  model discovery. Empty means the UI keeps its curated fallback. */
-  models?: readonly KnownModelOption[]
-  remedy: string | null
-}
-
-export interface AgentProbeSnapshot {
-  probedAt: string
-  claude: AgentProbe
-  codex: AgentProbe
+  return request<ProjectConfigResponse>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
 }
 
 /** CLI presence/auth/version and discoverable models behind the model-cockpit
  *  surfaces. `fresh` skips the server's 30s cache. */
-export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshot> {
+export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshotResponse> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<AgentProbeSnapshot>(
+  return request<AgentProbeSnapshotResponse>(
     `${baseUrl}/api/agent-probe${fresh ? '?fresh=1' : ''}`,
     { method: 'GET' },
     fetchImpl,
@@ -395,11 +342,11 @@ export function getOnboardingSamples(opts?: ClientOptions): Promise<OnboardingSa
 }
 
 export function putProjectConfig(
-  config: Partial<ProjectConfig>,
+  config: Partial<ProjectConfigResponse>,
   opts?: ClientOptions,
-): Promise<ProjectConfig> {
+): Promise<ProjectConfigResponse> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ProjectConfig>(
+  return request<ProjectConfigResponse>(
     `${baseUrl}/api/project-config`,
     {
       method: 'PUT',

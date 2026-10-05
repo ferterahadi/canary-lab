@@ -89,3 +89,17 @@ describe('CoverageGeneratingPane', () => {
     expect(container.textContent).not.toContain('Open Codex')
   })
 })
+
+it('preserves coverage whitespace and the mounted log scroller across updates', () => {
+  render({ ...BASE_JOB, producer: 'external', log: '   ' })
+  const wrapper = container.querySelector('[data-testid="coverage-external-monitor"]')!
+  const log = container.querySelector('pre')!
+  expect(log.textContent).toBe('   ')
+  log.scrollTop = 32
+  render({ ...BASE_JOB, producer: 'external', kind: 'summary', log: 'next line' })
+  expect(container.querySelector('[data-testid="coverage-external-monitor"]')).toBe(wrapper)
+  expect(container.querySelector('pre')).toBe(log)
+  expect(log.scrollTop).toBe(32)
+  expect(log.textContent).toBe('next line')
+  expect(container.textContent).toContain('Summarizing')
+})

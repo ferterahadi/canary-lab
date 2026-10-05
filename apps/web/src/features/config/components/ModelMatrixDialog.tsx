@@ -1,3 +1,4 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useState } from 'react'
 import * as configApi from '@/shared/api/config'
@@ -21,7 +22,7 @@ interface Props {
   onClose: () => void
   /** Fired with the server's response after a successful save — the settings
    *  dialog behind updates its summary lines from it. */
-  onSaved: (config: configApi.ProjectConfig) => void
+  onSaved: (config: ProjectConfigResponse) => void
 }
 
 export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Props) {

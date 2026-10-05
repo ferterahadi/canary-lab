@@ -1,18 +1,19 @@
+import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
 import { useEffect, useState } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { AgentProbeSnapshot } from '@/shared/api/config'
+
 import { KNOWN_MODEL_OPTIONS, type KnownModelOption, type ModelAgentKind } from '@shared/agent-models'
 
 /** One shared read for both model-picking surfaces. The endpoint is already
  *  cached and single-flight on the server; launch gates wait until Customize is
  *  opened, while Project Settings enables it immediately for its probe strip. */
 export function useAgentModelOptions(agent: ModelAgentKind, enabled = true): {
-  probe: AgentProbeSnapshot | null
+  probe: AgentProbeSnapshotResponse | null
   probeBusy: boolean
   retryProbe: () => void
   modelOptions: readonly KnownModelOption[]
 } {
-  const [probe, setProbe] = useState<AgentProbeSnapshot | null>(null)
+  const [probe, setProbe] = useState<AgentProbeSnapshotResponse | null>(null)
   const [probeBusy, setProbeBusy] = useState(enabled)
   const [retryCount, setRetryCount] = useState(0)
 

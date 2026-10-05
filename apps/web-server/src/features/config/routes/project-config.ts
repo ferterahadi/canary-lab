@@ -1,3 +1,4 @@
+import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../../../../shared/project-config'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -12,9 +13,6 @@ import {
   normalizePersonalWikiPath,
   resolveProjectPort,
   saveProjectConfig,
-  type EditorChoice,
-  type HealAgentChoice,
-  type ProjectConfig,
 } from '../../runs/logic/runtime/launcher/project-config'
 import { normalizeAgentModels } from '../../../../../../shared/agent-models'
 import { isWithin } from '../logic/path-containment'

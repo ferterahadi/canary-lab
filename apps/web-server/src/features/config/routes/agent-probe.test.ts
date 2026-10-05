@@ -1,7 +1,8 @@
+import type { AgentProbeSnapshot } from '../../../../../../shared/agent-probe'
 import { describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 import { agentProbeRoutes } from './agent-probe'
-import type { AgentProbeSnapshot } from '../../agent-sessions/logic/agent-probe'
+
 
 const snapshot: AgentProbeSnapshot = {
   probedAt: '2026-08-28T00:00:00.000Z',

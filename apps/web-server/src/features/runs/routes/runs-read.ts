@@ -1,3 +1,4 @@
+import { resolveRunAgentSessionRef } from '../../agent-sessions/logic/run-agent-session-ref'
 import { proposalRecord } from '../logic/pr/proposal-record'
 // Runs REST — reads: index, detail, verification report, agent session, and the
 // Playwright artifact stream. Split out of runs.ts; handler bodies are unchanged.
@@ -19,11 +20,6 @@ import { EMPTY_AGENT_MODELS } from '../../../../../../shared/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { readableTerminalLog } from '../logic/runtime/log-enrichment'
-import {
-  locateMostRecentAgentSessionRef,
-  parseAgentSessionRefFile,
-  selectAgentSessionRef,
-} from '../../agent-sessions/logic/agent-session-log'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
 import { isTerminalRunStatus, type RunProposedPr } from '../../../../../../shared/run-state'
@@ -301,18 +297,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       return { reason: 'run-not-found' }
     }
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-    // Prefer the most-recently-modified agent JSONL on disk over the
-    // orchestrator-written ref file. The ref file is only updated when the
-    // heal loop's cleanup runs cleanly — a SIGKILL'd server or a one-off
-    // locator miss leaves it pointing at a stale agent (e.g. claude) even
-    // when codex has since produced newer cycles for the same runDir. Fall
-    // back to the ref file when no on-disk logs are locatable.
-    const refPath = buildRunPaths(runDir).agentSessionRefPath
-    let raw: string | null = null
-    try { raw = fs.readFileSync(refPath, 'utf-8') } catch { /* missing or unreadable */ }
-    const parsed = raw ? parseAgentSessionRefFile(raw) : null
-    const ref = locateMostRecentAgentSessionRef(runDir)
-      ?? (parsed ? selectAgentSessionRef(parsed) : null)
+    const ref = resolveRunAgentSessionRef(runDir)
     if (!ref) {
       reply.code(404)
       return { reason: 'no-session-ref' }

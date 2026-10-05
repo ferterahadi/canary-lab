@@ -1,3 +1,4 @@
+import type { ProjectConfig } from '../../../../../../../shared/project-config'
 import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -6,7 +7,7 @@ import { autoProposeFixes, shouldAutoPropose } from './auto-propose'
 import type { RunContext } from '../runtime/run-context'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import type { RunFixCapture } from '../../../../../../../shared/run-state'
-import type { ProjectConfig } from '../runtime/launcher/project-config'
+
 import type { PrPreflight } from './pr-preflight'
 
 const capture: RunFixCapture = {

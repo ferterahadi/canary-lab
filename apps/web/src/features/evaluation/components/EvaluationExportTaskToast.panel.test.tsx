@@ -80,3 +80,19 @@ describe('ExternalEvaluationPanel', () => {
     expect(container.textContent).toContain('Download it from the list')
   })
 })
+
+it('trims evaluation output and retains scrollers as status changes', () => {
+  render(BASE_TASK, '   ')
+  const wrapper = container.querySelector('[data-testid="evaluation-external-monitor"]')!
+  const log = container.querySelector('pre')!
+  expect(log.textContent).toContain('Waiting for the client')
+  wrapper.scrollTop = 20
+  log.scrollTop = 32
+  render({ ...BASE_TASK, status: 'failed' }, '  failure details  ')
+  expect(container.querySelector('[data-testid="evaluation-external-monitor"]')).toBe(wrapper)
+  expect(container.querySelector('pre')).toBe(log)
+  expect(wrapper.scrollTop).toBe(20)
+  expect(log.scrollTop).toBe(32)
+  expect(log.textContent).toBe('failure details')
+  expect(container.textContent).toContain('Failed')
+})

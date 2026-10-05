@@ -1,5 +1,6 @@
+import type { HealAgentChoice } from '../../../../../shared/project-config'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HealAgentChoice } from './logic/runtime/launcher/project-config'
+
 
 // `pickAvailableHealAgent` shells out to check whether each CLI is installed,
 // which is the one edge a unit test can't reproduce — and the only thing this

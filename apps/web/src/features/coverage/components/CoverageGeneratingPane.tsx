@@ -1,10 +1,11 @@
+import { ExternalAgentMonitor } from '@/shared/ui/ExternalAgentMonitor'
 import { useNow } from '@/shared/state/use-now'
 import { pinnedPlanSummary } from '@shared/agent-models'
 import type { CoverageJobManifest } from '@shared/coverage/types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill, useExternalClientAction } from '@/shared/ui/ExternalAgentCard'
+import { type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
@@ -123,56 +124,18 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 // on the shared ExternalAgentCard so it matches external heal / portify / draft.
 export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
   const clientKind = (job.externalClientKind ?? 'other') as ExternalClientKind
-  const { action, error: openError } = useExternalClientAction({ clientKind, sessionUrl: job.externalSessionUrl })
   return (
     <div data-testid="coverage-external-monitor">
-      <ExternalAgentCard
+      <ExternalAgentMonitor
         clientKind={clientKind}
-        eyebrow="External agent session"
-        headline={clientLabel(clientKind)}
-        subtitle={job.externalConversationName}
-        statusPill={
-          <ExternalStatusPill
-            label={job.kind === 'summary' ? 'Summarizing' : 'Mapping'}
-            palette={pillPalette('var(--border-focus)')}
-          />
-        }
-        meta={
-          job.externalSessionId && (
-            <ExternalMetaFact label="Session" title={job.externalSessionId}>
-              <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(job.externalSessionId)}</span>
-            </ExternalMetaFact>
-          )
-        }
+        sessionUrl={job.externalSessionUrl}
+        sessionId={job.externalSessionId}
+        conversationName={job.externalConversationName}
+        statusPill={<ExternalStatusPill label={job.kind === 'summary' ? 'Summarizing' : 'Mapping'} palette={pillPalette('var(--border-focus)')} />}
         body="Mapping runs in your connected client — open it to follow the agent's reasoning. Canary tracks the job here and recomputes the ledger when the client submits."
-        action={action?.kind === 'link' ? (
-          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={action.href} />
-        ) : (
-          action && (
-            <ExternalClientCta
-              label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
-              onClick={action.open}
-              busy={action.busy}
-            />
-          )
-        )}
-      >
-        <pre
-          data-testid="coverage-external-log"
-          style={{
-            margin: '12px 0 0', maxHeight: 300, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
-            color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          }}
-        >
-          {job.log || 'Waiting for the client to submit mappings…'}
-        </pre>
-
-        {openError && (
-          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
-            {openError}
-          </div>
-        )}
-      </ExternalAgentCard>
+        displayLog={job.log || 'Waiting for the client to submit mappings…'}
+        logTestId="coverage-external-log"
+      />
     </div>
   )
 }

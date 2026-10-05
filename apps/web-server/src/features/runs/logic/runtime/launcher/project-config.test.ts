@@ -1,3 +1,4 @@
+import type { ProjectConfig } from '../../../../../../../../shared/project-config'
 import { afterEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -11,7 +12,6 @@ import {
   projectConfigPath,
   resolveProjectPort,
   saveProjectConfig,
-  type ProjectConfig,
 } from './project-config'
 
 const tmpDirs: string[] = []

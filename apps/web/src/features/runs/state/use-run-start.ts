@@ -1,3 +1,4 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 import { useCallback, useEffect, useState } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import * as benchmarkApi from '@/shared/api/benchmark'
@@ -162,7 +163,7 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
     // skip it — they spawn no heal/commit agents. Config unreachable → start
     // with defaults rather than dead-ending the Run button on a probe.
     if (mode !== 'boot') {
-      let config: configApi.ProjectConfig | null = null
+      let config: ProjectConfigResponse | null = null
       try { config = await configApi.getProjectConfig() } catch { /* gate is best-effort */ }
       if (config?.askModelsOnLaunch === true) {
         setModelsPrompt({

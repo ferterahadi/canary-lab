@@ -1,3 +1,4 @@
+import type { AgentProbe, AgentProbeSnapshot } from '../../../../../../shared/agent-probe'
 import { execFile } from 'child_process'
 import type { KnownModelOption } from '../../../../../../shared/agent-models'
 import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './agent-binary'
@@ -12,27 +13,6 @@ import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './age
  * current without baking release ids into Canary Lab. Claude's documented
  * aliases remain curated fallback data in agent-models.ts.
  */
-
-export type AgentProbeState = 'ok' | 'auth' | 'missing'
-
-export interface AgentProbe {
-  agent: HealAgent
-  state: AgentProbeState
-  binaryPath: string | null
-  version: string | null
-  /** Models this installed CLI currently exposes to users. Empty when the CLI
-   *  has no discovery command or discovery fails; configuring remains usable
-   *  through Agent default and Custom id. */
-  models: readonly KnownModelOption[]
-  /** One-line fix for the warning strip; null when state is `ok`. */
-  remedy: string | null
-}
-
-export interface AgentProbeSnapshot {
-  probedAt: string
-  claude: AgentProbe
-  codex: AgentProbe
-}
 
 /** Runs one CLI invocation; `ok` mirrors exit 0. Failure text is irrelevant —
  *  every caller decides from `ok` + stdout. */

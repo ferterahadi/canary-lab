@@ -1,16 +1,13 @@
+import { ExternalAgentMonitor } from '@/shared/ui/ExternalAgentMonitor'
 import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
-  ExternalAgentCard,
-  ExternalClientCta,
-  ExternalMetaFact,
   ExternalStatusPill,
   pillPalette,
-  useExternalClientAction,
   type PillPalette,
 } from '@/shared/ui/ExternalAgentCard'
 
@@ -115,52 +112,19 @@ export function evaluationOutputPanel(
 // sessionRef and stream through AgentSessionView instead.)
 export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTaskView; log: string }) {
   const clientKind = (task.clientKind ?? 'other') as ExternalClientKind
-  const { action, error: openError } = useExternalClientAction({ clientKind, sessionUrl: task.externalSessionUrl })
   const { label, palette } = exportStatusPill(task.status)
   return (
     <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
-      <ExternalAgentCard
+      <ExternalAgentMonitor
         clientKind={clientKind}
-        eyebrow="External agent session"
-        headline={clientLabel(clientKind)}
-        subtitle={task.conversationName}
+        sessionUrl={task.externalSessionUrl}
+        sessionId={task.sessionId}
+        conversationName={task.conversationName}
         statusPill={<ExternalStatusPill label={label} palette={palette} />}
-        meta={
-          task.sessionId && (
-            <ExternalMetaFact label="Session" title={task.sessionId}>
-              <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(task.sessionId)}</span>
-            </ExternalMetaFact>
-          )
-        }
         body={exportBodyCopy(task.status)}
-        action={action?.kind === 'link' ? (
-          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={action.href} />
-        ) : (
-          action && (
-            <ExternalClientCta
-              label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
-              onClick={action.open}
-              busy={action.busy}
-            />
-          )
-        )}
-      >
-        <pre
-          data-testid="evaluation-external-log"
-          style={{
-            margin: '12px 0 0', maxHeight: 300, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
-            color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          }}
-        >
-          {log.trim() || 'Waiting for the client to submit the evaluation wording…'}
-        </pre>
-
-        {openError && (
-          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
-            {openError}
-          </div>
-        )}
-      </ExternalAgentCard>
+        displayLog={log.trim() || 'Waiting for the client to submit the evaluation wording…'}
+        logTestId="evaluation-external-log"
+      />
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -71,9 +72,9 @@ export function upsertWorkspace(
   // workspace being upserted is always kept, even on a transiently-missing
   // mount, because it is re-added below.
   registry.workspaces = registry.workspaces.filter(
-    (workspace) => samePath(workspace.path, resolved) || fs.existsSync(workspace.path),
+    (workspace) => sameWorkspacePath(workspace.path, resolved) || fs.existsSync(workspace.path),
   )
-  const existing = registry.workspaces.find((workspace) => samePath(workspace.path, resolved))
+  const existing = registry.workspaces.find((workspace) => sameWorkspacePath(workspace.path, resolved))
 
   if (existing) {
     existing.name = path.basename(resolved)
@@ -104,13 +105,6 @@ function realpathOrResolve(candidate: string): string {
   }
 }
 
-function samePath(left: string, right: string): boolean {
-  const a = path.normalize(left)
-  const b = path.normalize(right)
-  return process.platform === 'win32'
-    ? a.toLowerCase() === b.toLowerCase()
-    : a === b
-}
 
 function isWorkspaceEntry(value: unknown): value is CanaryLabWorkspace {
   if (!value || typeof value !== 'object') return false

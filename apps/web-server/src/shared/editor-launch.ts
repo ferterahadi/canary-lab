@@ -1,5 +1,6 @@
+import type { EditorChoice } from '../../../../shared/project-config'
 import { spawn, spawnSync } from 'child_process'
-import type { EditorChoice } from '../features/runs/logic/runtime/launcher/project-config'
+
 
 export type EditorTarget =
   | { kind: 'directory'; path: string }

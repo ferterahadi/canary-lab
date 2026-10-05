@@ -1,3 +1,4 @@
+import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -93,7 +94,7 @@ export function registerActiveServer(
   const kept = readRaw(opts.homeDir).filter(
     (existing) =>
       existing.pid !== entry.pid &&
-      !samePath(existing.projectRoot, resolved) &&
+      !sameWorkspacePath(existing.projectRoot, resolved) &&
       isAlive(existing.pid),
   )
   writeFile([...kept, { projectRoot: resolved, port: entry.port, pid: entry.pid, updatedAt: now }], opts.homeDir)
@@ -108,7 +109,7 @@ export function unregisterActiveServer(
   const resolvedRoot = match.projectRoot ? path.resolve(match.projectRoot) : undefined
   const kept = readRaw(opts.homeDir).filter((entry) => {
     if (match.pid !== undefined && entry.pid === match.pid) return false
-    if (resolvedRoot !== undefined && samePath(entry.projectRoot, resolvedRoot)) return false
+    if (resolvedRoot !== undefined && sameWorkspacePath(entry.projectRoot, resolvedRoot)) return false
     return true
   })
   writeFile(kept, opts.homeDir)
@@ -135,7 +136,7 @@ export function resolveActiveServer(
   const explicit = env.CANARY_LAB_PROJECT_ROOT?.trim()
   if (explicit) {
     const resolved = path.resolve(explicit)
-    const match = servers.find((server) => samePath(server.projectRoot, resolved))
+    const match = servers.find((server) => sameWorkspacePath(server.projectRoot, resolved))
     if (match) return match
   }
 
@@ -163,11 +164,6 @@ function isAtOrUnder(child: string, parent: string): boolean {
   return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep)
 }
 
-function samePath(left: string, right: string): boolean {
-  const a = path.normalize(left)
-  const b = path.normalize(right)
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
-}
 
 function isServerEntry(value: unknown): value is ActiveServerEntry {
   if (!value || typeof value !== 'object') return false
