@@ -1,5 +1,5 @@
 import { STAGE_DEPENDS_ON, type FlightManifest, type FlightStage } from '@shared/flights/types'
-import { formatCount } from '@/shared/lib/format'
+import { formatCount, formatElapsedSeconds } from '@/shared/lib/format'
 import type { HealEnd } from '@shared/run-state'
 import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from '@shared/lib/plural'
@@ -69,15 +69,7 @@ export function formatDuration(startedAt?: string, endedAt?: string): string | n
   if (!startedAt || !endedAt) return null
   const ms = Date.parse(endedAt) - Date.parse(startedAt)
   if (!Number.isFinite(ms) || ms < 0) return null
-  return formatMs(ms)
-}
-
-function formatMs(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+  return formatElapsedSeconds(Math.round(ms / 1000))
 }
 
 /** Milliseconds of actual work a stage did. Reads the banked work clock
@@ -107,7 +99,7 @@ export function formatStageDuration(
   const a = stageWorkMs(primary)
   const b = stageWorkMs(folded)
   if (a == null && b == null) return null
-  return formatMs((a ?? 0) + (b ?? 0))
+  return formatElapsedSeconds(Math.round(((a ?? 0) + (b ?? 0)) / 1000))
 }
 
 /** `skipReason` is a mixed field: the conductor writes prose for evidence-based

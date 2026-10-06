@@ -1,4 +1,4 @@
-import type { RunStoreEvent } from '../features/runs/logic/run-store'
+import { waitForRunCondition } from './wait-for-run-condition'
 import type { RunDetail } from '../../../../shared/run-detail'
 import type { ClientKind } from '../../../../shared/run-mode'
 import {
@@ -286,51 +286,21 @@ export async function waitForHealTask(
   const bootDetail = deps.store.get(runId)
   if (bootDetail && isActiveBootRun(bootDetail)) return { ok: true, value: bootSessionValue(bootDetail) }
   ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
-  const immediate = classifyWaitForHealTask(deps, runId, sessionId)
-  if (immediate) return immediate
-
-  return await new Promise<WaitForHealTaskResult>((resolve) => {
-    let settled = false
-    const finish = (result: WaitForHealTaskResult): void => {
-      if (settled) return
-      settled = true
-      deps.store.offEvent(onEvent)
-      clearTimeout(timeout)
-      clearInterval(heartbeat)
-      resolve(result)
-    }
-    const check = (): void => {
-      const result = classifyWaitForHealTask(deps, runId, sessionId)
-      if (result) finish(result)
-    }
-    const onEvent = (event: RunStoreEvent): void => {
-      if (event.runId && event.runId !== runId) return
-      check()
-    }
-    const beat = (): void => {
+  return waitForRunCondition({
+    store: deps.store,
+    runId,
+    read: () => classifyWaitForHealTask(deps, runId, sessionId),
+    timeoutMs,
+    maxWaitMs: WAIT_FOR_HEAL_TASK_WINDOW_MS,
+    onTimeout: () => {
+      const detail = deps.store.get(runId)
+      return { ok: true, value: stillWaitingValue(runId, detail ?? null) }
+    },
+    heartbeat: { intervalMs: 5_000, beat: () => {
       const detail = deps.store.get(runId)
       if (!detail || isTerminalRunStatus(detail.manifest.status)) return
       ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
       deps.broker.heartbeat(runId, sessionId, 'waiting')
-    }
-    deps.store.onEvent(onEvent)
-    // Clamp the actual block to the window cap regardless of the requested
-    // timeout_ms — bounds the request lifetime so it can't outlive a client's
-    // JSON-RPC request timeout. On elapse we return `still_waiting`, not a
-    // terminal `timeout`: the run is still going, the agent just re-calls.
-    const windowMs = Math.min(Math.max(timeoutMs, 1), WAIT_FOR_HEAL_TASK_WINDOW_MS)
-    const timeout = setTimeout(() => {
-      const detail = deps.store.get(runId)
-      finish({ ok: true, value: stillWaitingValue(runId, detail ?? null) })
-    }, windowMs)
-    const heartbeat = setInterval(beat, 5_000)
-    // Unconditional: both are `NodeJS.Timeout`, which always carries `unref`, so
-    // a `typeof` guard here was an arm no test could reach. If a future runtime
-    // returns a bare handle instead, this is a compile error rather than a timer
-    // that silently holds the process open.
-    timeout.unref()
-    heartbeat.unref()
-    beat()
-    check()
+    } },
   })
 }

@@ -66,6 +66,18 @@ function writeEnvset(env: string, contents: string): void {
 }
 
 describe('verification targets', () => {
+  it('uses shared env syntax, preserves last valid URL precedence, and ignores malformed keys', () => {
+    writeEnvset('production', [
+      '# shared syntax', '', 'API_SERVER_URL="https://first.example.com"',
+      "API_SERVER_URL = 'https://last.example.com'", 'API_SERVER_URL=not-a-url',
+      '9INVALID_URL=https://invalid.example.com', 'BAD KEY_URL=https://space.example.com',
+      'export EXPORTED_URL=https://export.example.com', 'DOCS_URL=ftp://docs.example.com',
+      'NOT_TARGET=https://ignored.example.com',
+    ].join('\r\n'))
+    expect(deriveVerificationTargets(feature(), 'production').targetUrls).toEqual({ 'api-server': 'https://last.example.com' })
+    expect(remoteOnlyTargets(feature(), 'production')).toEqual({ API_SERVER_URL: 'https://last.example.com' })
+  })
+
   it('derives stable target ids from start command names and maps envset URL vars', () => {
     writeEnvset('production', 'GATEWAY_URL=https://api.example.com\n')
 

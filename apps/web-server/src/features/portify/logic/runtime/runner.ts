@@ -1,3 +1,4 @@
+import { DEFAULT_HEALTH_DEADLINE_MS } from '../../../runs/logic/runtime/service-readiness'
 import { isTerminalPortifyStatus } from '../../../../../../../shared/portify-index'
 import fs from 'fs'
 import path from 'path'
@@ -70,7 +71,7 @@ export interface ActiveWorkflow {
 
 export function createPortifyRunner(deps: PortifyRunnerDeps) {
   const active = new Map<string, ActiveWorkflow>()
-  const healthDeadlineMs = deps.healthDeadlineMs ?? 60000
+  const healthDeadlineMs = deps.healthDeadlineMs ?? DEFAULT_HEALTH_DEADLINE_MS
 
   // Admission for a new workflow. One workflow PER FEATURE (a second on the same
   // feature would fight over its featureDir config + overlay path); different

@@ -854,6 +854,19 @@ for existing callers. Once the signal gate accepts a file, it wakes the heal
 loop immediately. Timed wakeups still check cancellation and agent liveness,
 including the grace period for agents that write a signal just before exiting.
 
+The run launcher and standalone port verification share the readiness engine in
+`apps/web-server/src/features/runs/logic/runtime/service-readiness.ts`. Both
+check process failures before and after asynchronous probes, so a late healthy
+response cannot override an observed exit or completed compiler failure. Port
+verification probes its services concurrently and retains its own temporary
+process cleanup, dependency/port diagnostics, and solo-baseline triage. The run
+adapter retains manifest events, held boot sessions, and post-readiness monitoring.
+
+Heal-task and test-review waits share subscription and timer ownership through
+`apps/web-server/src/mcp/wait-for-run-condition.ts`. Each caller supplies its
+durable outcome reader and timeout response; test approval still requires a
+receipt, and heal waits retain their claim heartbeat and bounded wait window.
+
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
 continues the same run until pass or terminal failure. At teardown, Canary Lab

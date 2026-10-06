@@ -2,19 +2,18 @@ import fs from 'fs'
 import path from 'path'
 import type { ServiceSpec } from './run-orchestrator-types'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
-import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
+import { readinessProbe, waitForServiceReadiness } from './service-readiness'
+import { readWatchCompilerFailure } from './watch-compiler-result'
+import { redactDiagnosticText } from './diagnostic-redaction'
 import { compressLogByTemplate } from './log-template'
 // Services spawn children (`npx tsx`), so teardown kills the process GROUP or
 // grandchildren survive and keep the port bound. The shared helper carries the
 // pgid sanity guard (a pid ≤ 1 must never be negated into a broadcast kill).
 import { killTree } from './run-spawn'
 
-// Standalone "boot these services, wait for health, then tear down" primitive,
-// lifted from RunOrchestrator's private spawn/health loop minus the run-state
-// sink and event emission. Used by the port-ification verifier to boot a stack
-// TWICE concurrently on two disjoint port maps and assert both come up — proof
-// that ports are honored per-process and won't clash. The orchestrator keeps
-// its own copy for now (this is additive); collapsing the two is a follow-up.
+// Standalone adapter for port verification's two concurrent stacks. Service
+// readiness shares the run engine; this adapter owns temporary processes and
+// port/dependency diagnostics rather than persisted run lifecycle state.
 
 // Why a boot never became ready, inferred from the process's own output:
 //  - 'dependency'    — the app crashed reaching a downstream (DB/queue/host
@@ -57,10 +56,6 @@ export interface BootProbeOptions {
    *  this resolver is provided we append a pointer to the full log so the agent
    *  reading the failure can `Read` the complete output instead of guessing. */
   fullLogPathFor?: (safeName: string) => string | undefined
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 // Most recent bytes of a service's output to keep for crash diagnosis — bounded
@@ -156,78 +151,82 @@ export function diagnoseBootOutput(raw: string): { evidence?: string; kind: Boot
  * call teardown() in a finally block.
  */
 export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeResult> {
-  const healthCheck = opts.healthCheck ?? isHealthy
-  const pollInterval = opts.healthPollIntervalMs ?? 500
-  const fallbackDeadline = opts.healthDeadlineMs ?? 60000
   const ptys: PtyHandle[] = []
-  let torndown = false
-  // Tail of each service's output, kept so a timeout can report WHY it failed
-  // (e.g. a crash on an unreachable dependency) rather than just "timed out".
+  const subscriptions: Array<{ dispose(): void }> = []
   const buffers = new Map<string, string>()
-
+  let torndown = false
+  let failure: BootProbeFail | undefined
   const teardown = (): void => {
     if (torndown) return
     torndown = true
+    for (const subscription of subscriptions) subscription.dispose()
     for (const pty of ptys) killTree(pty, 'SIGTERM')
   }
-
-  for (const svc of opts.specs) {
-    const pty = opts.ptyFactory({
-      command: `LOG_MODE=plain ${svc.command}`,
-      cwd: svc.cwd,
-      env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
-    })
-    ptys.push(pty)
-    // Always capture for diagnostics; tee to the caller's sink too if provided.
-    pty.onData((chunk) => {
-      const next = (buffers.get(svc.safeName) ?? '') + chunk
-      buffers.set(svc.safeName, next.length > DIAG_BUFFER_CAP ? next.slice(-DIAG_BUFFER_CAP) : next)
-      if (opts.onOutput) {
-        try { opts.onOutput(svc.safeName, chunk) } catch { /* ignore */ }
-      }
-    })
-  }
-
-  for (const svc of opts.specs) {
-    const probe = svc.healthProbe
-    if (!probe) continue // no probe → can't verify this one; skip (Playwright would race it too)
-
-    const isHttp = 'http' in probe
-    const transport: 'http' | 'tcp' = isHttp ? 'http' : 'tcp'
-    const deadlineMs =
-      (isHttp ? probe.http.deadlineMs : probe.tcp.deadlineMs) ?? fallbackDeadline
-    const attempt = isHttp
-      ? () => healthCheck(probe.http.url, probe.http.timeoutMs)
-      : () => isTcpListening(coerceTcpPort(probe.tcp.port), probe.tcp.host ?? '127.0.0.1', probe.tcp.timeoutMs)
-    const detail = isHttp ? `url=${probe.http.url}` : `port=${probe.tcp.port}`
-
-    const deadline = Date.now() + deadlineMs
-    let ready = false
-    while (Date.now() < deadline) {
-      if (await attempt()) { ready = true; break }
-      await delay(pollInterval)
-    }
-    if (!ready) {
-      const { evidence, kind } = diagnoseBootOutput(buffers.get(svc.safeName) ?? '')
-      const rawLog = opts.fullLogPathFor?.(svc.safeName)
-      // Prefer an ANSI-stripped, deduped copy; fall back to the raw path when
-      // the log isn't on disk (e.g. no tee wired) or can't be cleaned.
-      const fullLog = rawLog ? (writeCleanBootLog(rawLog) ?? rawLog) : undefined
-      return {
-        ok: false,
-        failedService: svc.name,
-        transport,
-        detail:
-          `Timed out waiting for ${transport.toUpperCase()} readiness (${detail}).` +
-          (evidence ? `\nProcess output:\n${evidence}` : '') +
-          (fullLog ? `\nFull boot log: ${fullLog}` : ''),
-        kind,
-        teardown,
-      }
+  const fail = (svc: ServiceSpec, message: string): void => {
+    if (failure || torndown) return
+    const { evidence, kind } = diagnoseBootOutput(buffers.get(svc.safeName) ?? '')
+    const rawLog = opts.fullLogPathFor?.(svc.safeName)
+    const fullLog = rawLog ? (writeCleanBootLog(rawLog) ?? rawLog) : undefined
+    failure = {
+      ok: false, failedService: svc.name,
+      ...(svc.healthProbe ? { transport: readinessProbe(svc.healthProbe).transport } : {}),
+      detail: message + (evidence ? `\nProcess output:\n${evidence}` : '')
+        + (fullLog ? `\nFull boot log: ${fullLog}` : ''),
+      kind, teardown,
     }
   }
 
-  return { ok: true, teardown }
+  for (const svc of opts.specs) {
+    if (failure) break
+    try {
+      const pty = opts.ptyFactory({
+        command: `LOG_MODE=plain ${svc.command}`,
+        cwd: svc.cwd,
+        env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
+      })
+      ptys.push(pty)
+      let compilerTail = ''
+      subscriptions.push(pty.onData((chunk) => {
+        const next = (buffers.get(svc.safeName) ?? '') + chunk
+        buffers.set(svc.safeName, next.slice(-DIAG_BUFFER_CAP))
+        if (opts.onOutput) {
+          try { opts.onOutput(svc.safeName, chunk) } catch { /* best-effort tee; readiness still observes output */ }
+        }
+        const compiler = readWatchCompilerFailure(compilerTail, chunk)
+        compilerTail = compiler.tail
+        if (compiler.failed) fail(svc, `Watch compiler reported a failed build for ${svc.name}.`)
+      }))
+      subscriptions.push(pty.onExit(({ exitCode, signal }) => {
+        fail(svc, `Service process exited during readiness (code ${exitCode}${signal == null ? '' : `, signal ${signal}`}).`)
+      }))
+    } catch (error) {
+      fail(svc, `Canary could not spawn the service process: ${redactDiagnosticText(error instanceof Error ? error.message : String(error))}`)
+      teardown()
+      return failure!
+    }
+  }
+
+  try {
+    await Promise.all(opts.specs.map(async (svc) => {
+      if (!svc.healthProbe) return // Preserve the existing no-probe policy.
+      const probe = readinessProbe(svc.healthProbe)
+      const result = await waitForServiceReadiness({
+        probe: svc.healthProbe,
+        healthCheck: opts.healthCheck,
+        pollIntervalMs: opts.healthPollIntervalMs,
+        deadlineMs: opts.healthDeadlineMs,
+        interruption: () => torndown ? { status: 'cancelled' } : failure ? { status: 'service-failed' } : null,
+      })
+      if (result.status === 'timed-out') {
+        fail(svc, `Timed out waiting for ${probe.transport.toUpperCase()} readiness (${probe.target}).`)
+      }
+    }))
+  } catch (error) {
+    // Even an unexpected probe error must not strand a partially booted stack.
+    teardown()
+    throw error
+  }
+  return failure ?? { ok: true, teardown }
 }
 
 /** Convenience for callers that want per-instance log files under a dir. */

@@ -1,3 +1,4 @@
+import { DEFAULT_HEALTH_POLL_MS, DEFAULT_HEALTH_DEADLINE_MS } from './service-readiness'
 // Everything one run knows about itself: what was fixed at construction, what
 // was injected, and the state that changes as the run proceeds.
 //
@@ -206,7 +207,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
   const repoPathOverrides: Record<string, string> = {}
   for (const handle of worktreeHandles) repoPathOverrides[handle.repoName] = handle.localPath
   const logsRoot = path.dirname(path.dirname(opts.runDir))
-  const healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
+  const healthPollIntervalMs = opts.healthPollIntervalMs ?? DEFAULT_HEALTH_POLL_MS
 
   return {
     runId: opts.runId,
@@ -245,7 +246,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     emit,
 
     healthPollIntervalMs,
-    healthDeadlineMs: opts.healthDeadlineMs ?? 60_000,
+    healthDeadlineMs: opts.healthDeadlineMs ?? DEFAULT_HEALTH_DEADLINE_MS,
     autoHeal: opts.autoHeal,
     ...(opts.models === undefined ? {} : { models: opts.models }),
     manualHeal: opts.manualHeal ?? false,

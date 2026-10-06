@@ -270,7 +270,7 @@ describe('pollUntilReady', () => {
   })
 
   it('files a passing probe under the heal phase when a cycle is in flight', async () => {
-    const { ctx } = ctxFor({ status: 'healing' })
+    const { ctx } = ctxFor({ status: 'healing', servicePtys: new Map([['api', {} as never]]) })
     const svc = svcSpec()
 
     await pollUntilReady(ctx, svc, 'tcp', async () => true)
@@ -284,7 +284,7 @@ describe('pollUntilReady', () => {
   })
 
   it('files the same pass under service boot on a normal run', async () => {
-    const { ctx } = ctxFor({ status: 'running' })
+    const { ctx } = ctxFor({ status: 'running', servicePtys: new Map([['api', {} as never]]) })
 
     await pollUntilReady(ctx, svcSpec(), 'tcp', async () => true)
 
@@ -478,7 +478,7 @@ describe('confirmed service failures', () => {
   })
 
   it('stops other readiness polls when a ready service fails', async () => {
-    const { ctx } = ctxFor()
+    const { ctx } = ctxFor({ servicePtys: new Map([['web', {} as never]]) })
     const svc = svcSpec({ name: 'web', safeName: 'web', healthProbe: { tcp: { port: 5999, deadlineMs: 100 } } })
     await pollUntilReady(ctx, svc, 'tcp', async () => {
       ctx.serviceFailure = {

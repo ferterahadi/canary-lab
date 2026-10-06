@@ -1090,6 +1090,10 @@ describe('stageStateLine — external-work hand-off', () => {
 })
 
 describe('stageWorkMs / formatStageDuration — the work clock', () => {
+  it.each([[59_499, '59s'], [59_500, '1m 00s'], [3_599_500, '1h 00m']])('rounds %s ms before formatting the stage duration', (activeMs, expected) => {
+    expect(formatStageDuration({ activeMs })).toBe(expected)
+  })
+
   afterEach(() => vi.useRealTimers())
 
   it('prefers the banked work clock over the wall-clock span', () => {

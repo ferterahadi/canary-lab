@@ -1,3 +1,4 @@
+import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 import { listFiles } from '../../../shared/list-files'
 import { stripTerminalEscapes } from '../../../shared/terminal-text'
 import fs from 'fs'
@@ -404,29 +405,13 @@ function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefin
   for (const file of listFiles(setDir)) {
     const raw = safeRead(file)
     if (!raw) continue
-    for (const line of raw.split(/\r?\n/)) {
-      const parsed = parseDotenvLine(line)
-      if (!parsed) continue
-      const { key, value } = parsed
+    for (const { key, value } of parseDotenv(raw).entries) {
       if (!/^https?:\/\//i.test(value)) continue
       if (!/(^|_)URL$|TARGET_URL|BASE_URL|GATEWAY_URL/.test(key)) continue
       out[key] = value
     }
   }
   return out
-}
-
-function parseDotenvLine(line: string): { key: string; value: string } | null {
-  const trimmed = line.trim()
-  if (!trimmed || trimmed.startsWith('#')) return null
-  const idx = trimmed.indexOf('=')
-  if (idx <= 0) return null
-  const key = trimmed.slice(0, idx).trim()
-  let value = trimmed.slice(idx + 1).trim()
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    value = value.slice(1, -1)
-  }
-  return { key, value }
 }
 
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
