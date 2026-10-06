@@ -1,3 +1,5 @@
+import { SPEC_INVENTORY_VERSION, type SpecInventoryVersion } from '../../../../../../../shared/spec-files'
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -66,7 +68,7 @@ export function listFeatureSpecs(featureDir: string): SpecInfo[] {
   return listSpecFiles(featureDir).map((abs) => {
     let source = ''
     try {
-      source = fs.readFileSync(abs, 'utf8')
+      source = readSpecSource(abs)
     } catch {
       /* unreadable spec → no tests */
     }
@@ -78,11 +80,11 @@ export function listFeatureSpecs(featureDir: string): SpecInfo[] {
 // Every readable spec's content under the feature dir, keyed by rel path. A
 // missing / unreadable spec contributes no entry (callers treat absence as
 // "nothing to attest" rather than a phantom change).
-function readSpecSources(featureDir: string): Record<string, string> {
+function readSpecSources(featureDir: string, version: SpecInventoryVersion = SPEC_INVENTORY_VERSION): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const abs of listSpecFiles(featureDir)) {
+  for (const abs of listSpecFiles(featureDir, version)) {
     try {
-      out[path.relative(featureDir, abs)] = fs.readFileSync(abs, 'utf8')
+      out[path.relative(featureDir, abs)] = readSpecSource(abs)
     } catch {
       /* missing/unreadable spec contributes no content */
     }
@@ -95,8 +97,8 @@ function hashSources(sources: Record<string, string>): SpecHashes {
 }
 
 // Content-hash every spec under the feature dir, keyed by rel path.
-export function hashFeatureSpecs(featureDir: string): SpecHashes {
-  return hashSources(readSpecSources(featureDir))
+export function hashFeatureSpecs(featureDir: string, version: SpecInventoryVersion = SPEC_INVENTORY_VERSION): SpecHashes {
+  return hashSources(readSpecSources(featureDir, version))
 }
 
 // Hash of each individual test's body (via the same AST extractor used for
@@ -114,7 +116,7 @@ export function hashFeatureSpecTests(featureDir: string): SpecHashes {
   for (const abs of listSpecFiles(featureDir)) {
     const rel = path.relative(featureDir, abs)
     try {
-      Object.assign(out, hashTestBodies(rel, fs.readFileSync(abs, 'utf8')))
+      Object.assign(out, hashTestBodies(rel, readSpecSource(abs)))
     } catch {
       /* missing/unreadable spec contributes no hash */
     }

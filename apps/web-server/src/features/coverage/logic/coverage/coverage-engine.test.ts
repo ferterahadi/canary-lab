@@ -197,7 +197,7 @@ describe('collectTests — duplicate test name union', () => {
       })
       `,
     )
-    // Add a second top-level spec file (listSpecFiles only scans one level of e2e/)
+    // Add a second top-level spec file
     // with the same test name but tagged R2.
     fs.writeFileSync(
       path.join(dir, 'e2e', 'b.spec.ts'),

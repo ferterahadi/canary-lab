@@ -1,3 +1,4 @@
+import { listSpecFiles } from '../../../../../../shared/spec-files'
 import { capturedEnvsetCount } from './envset-evidence'
 import fs from 'fs'
 import path from 'path'
@@ -14,10 +15,6 @@ import type { FeatureStageEvidence } from '../../../../../../shared/flights/stag
 //   - the stage-entry validator (routes/flights.ts) gating a `fromStage` jump,
 //   - the /api/features `evidence` payload driving the picker's derived rail
 //     (a feature with no flight record still shows which steps are done).
-
-/** Spec-file shapes the specs-coverage stage produces (mirrors the validator's
- *  historical regex — broader than feature-loader's `.spec.ts`-only listing). */
-const SPEC_FILE_RE = /\.spec\.[cm]?[jt]sx?$/
 
 /** A captured envset exists: `envsets/<env>/` is non-empty. With no `env`
  *  given, ANY non-empty envset directory counts (the derived rail asks "was
@@ -88,9 +85,8 @@ export function hasPrdSummary(featureDir: string): boolean {
 
 /** The specs-coverage stage's artifact — at least one authored spec under e2e/. */
 export function hasAuthoredSpecs(featureDir: string): boolean {
-  const e2eDir = path.join(featureDir, 'e2e')
   try {
-    return fs.readdirSync(e2eDir).some((f) => SPEC_FILE_RE.test(f))
+    return listSpecFiles(featureDir).length > 0
   } catch {
     return false
   }

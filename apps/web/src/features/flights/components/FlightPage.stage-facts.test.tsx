@@ -1196,14 +1196,14 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="feature-setup-skeleton"]')).toBeNull()
   })
 
-  it('Requirements: both halves render — source docs and the distilled output', async () => {
+  it('Requirements: one card holds both halves — the summary slot and the source docs', async () => {
     await open('docs')
     const panel = container.querySelector('[data-testid="flight-docs-panel"]')
     expect(panel).not.toBeNull()
     // Not "No source docs." — that sentence reads as a finding on a step that
     // has not run yet.
     expect(panel?.textContent).not.toContain('No source docs')
-    expect(container.querySelector('[data-testid="flight-distilled-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="flight-requirements-card"]')).not.toBeNull()
     expect(panel?.querySelectorAll('[data-testid="skeleton-bar"]').length ?? 0).toBeGreaterThan(0)
   })
 

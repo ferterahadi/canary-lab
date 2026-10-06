@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../shared/spec-files'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -203,7 +204,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       const realDir = fs.realpathSync(feature.featureDir)
       const abs = path.join(realDir, rel)
       let currentSource = ''
-      try { currentSource = fs.readFileSync(abs, 'utf8') } catch { /* unreadable — no tests to diff */ }
+      try { currentSource = readSpecSource(abs) } catch { /* unreadable — no tests to diff */ }
       const { tests: currentTests } = extractTestsFromSource(rel, currentSource, feature.semanticRules)
 
       const repoRel = path.relative(root, abs)
@@ -283,7 +284,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     for (const file of specFiles) {
       let source = ''
       if (recorded && !recorded.dir) unavailableSources.add(file)
-      else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
+      else try { source = readSpecSource(file) } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')

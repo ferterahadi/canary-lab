@@ -93,7 +93,7 @@ export function FailingTests({
         ))}
       </ul>
       {hidden > 0 && (
-        <div className="mt-2" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+        <div className="mt-2">
           {onOpenAll ? (
             <button
               type="button"

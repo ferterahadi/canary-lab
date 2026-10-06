@@ -1,3 +1,4 @@
+import { listSpecFiles as sharedListSpecFiles, type SpecInventoryVersion } from '../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../shared/launcher/types'
@@ -84,15 +85,6 @@ export function suiteAvailability(featuresDir: string, name: string): SuiteAvail
     : { kind: 'config-missing', featureDir: discoveryDir, configPath: path.join(discoveryDir, 'feature.config.cjs'), diagnostic: 'Suite configuration is missing: feature.config.cjs, .js, or .ts was not found.' }
 }
 
-// Find a spec file glob result for a feature. Returns absolute paths.
-export function listSpecFiles(featureDir: string): string[] {
-  const e2eDir = path.join(featureDir, 'e2e')
-  if (!fs.existsSync(e2eDir)) return []
-  const out: string[] = []
-  for (const entry of fs.readdirSync(e2eDir, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
-      out.push(path.join(e2eDir, entry.name))
-    }
-  }
-  return out.sort()
+export function listSpecFiles(featureDir: string, version?: SpecInventoryVersion): string[] {
+  return sharedListSpecFiles(featureDir, version)
 }

@@ -8,8 +8,8 @@ import { useLiveResource } from './use-live-resource'
 export type TestLoadFailure = { kind: 'discovery' | 'config' | 'removed' | 'request'; message: string }
 type Observation = { specs?: FeatureSpecFile[]; failure?: TestLoadFailure; requestError?: string; attempt: number }
 
-/** Roster reads share ordering and local retention. Only the visible Tests
- * column opts into the existing brief retry burst and missing-suite recovery. */
+/** Roster reads share ordering and local retention. The visible Tests column
+ * also reconciles healthy workspace source when a file event is missed. */
 export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKey, recover = false }: {
   feature: string | null
   runId?: string
@@ -28,12 +28,18 @@ export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKe
     try {
       const specs = await (runId || recover ? configApi.getFeatureTests(feature!, undefined, runId) : configApi.getFeatureTests(feature!))
       const diagnostic = specs.find((spec) => spec.discoveryError)?.discoveryError
+      if (!diagnostic) burst.attempts = 0
       return { specs, attempt, failure: diagnostic ? { kind: 'discovery', message: diagnostic } : undefined }
     } catch (error) {
       return { attempt, failure: classifyLoadError(error), requestError: error instanceof Error ? error.message : 'Failed to load test source' }
     }
   }, { retainOnError: true, refreshKey,
     retryDelayMs: (next) => recover && next?.failure && next.failure.kind !== 'removed' && next.attempt < 3 ? 1000 : undefined,
+    // Suites created after startup may have no dirty-spec watcher yet. Reuse
+    // the shared reader's ordered polling; historical snapshots stay immutable.
+    pollWhile: (next) => recover && !runId && !!next?.specs && !next.failure,
+    pollIntervalMs: 5000,
+    pauseWhenHidden: true,
   })
   const observation = resource.value
   const failure = observation?.failure ?? null

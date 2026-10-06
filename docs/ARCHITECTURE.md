@@ -934,8 +934,21 @@ summary producer. Before accepting authored specs, the shared
 formats source, rejects unresolved syntax/comma-expression errors, and reports
 nested conditionals for review. External drafts and internal Flight authoring
 share this acceptance path; the `test-readability` CLI applies the same policy
-to existing source without modifying recorded run artifacts. Playwright listing
-and TypeScript validation run concurrently;
+to existing source without modifying recorded run artifacts.
+
+Spec inventory has one owner, `shared/spec-files.ts`. Suite consumers scan `e2e/`
+recursively for `.spec` and `.test` files ending in `.ts`, `.tsx`, `.js`, `.jsx`,
+`.mts`, `.cts`, `.mjs`, or `.cjs`. Evaluation and readability tools use the same
+scanner with their own selected roots. Descendant symlinks and generated trees
+are excluded. Playwright resolves runtime test names; its discovery cache hashes
+nested file paths and contents. The visible Tests column reconciles healthy
+workspace rosters every five seconds to recover missed file events; historical
+rosters stay event-driven and retain the existing error-retry policy. New snapshots and certificates record
+`specInventoryVersion: 2`; absent metadata retains the historical flat `.spec.ts`
+inventory and discloses that limitation. The standalone certificate checker is
+bundled from the shared scanner, with only Node built-ins in its output.
+
+Playwright listing and TypeScript validation run concurrently;
 both finish before mapping or another authoring pass. Flight mapping caches
 examined test/requirement pairs, including unmappable answers, and invalidates
 reuse when test bodies, shared helpers, support files, configuration, dependency

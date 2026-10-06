@@ -644,3 +644,16 @@ it('defaults blank list entries to local but still rejects blank capture environ
   fs.writeFileSync(source, 'KEY=value\n')
   expect(() => captureFeatureEnvFiles(ctx(), { feature: 'blank_envs', sources: [{ sourcePath: source, env: ' ', slot: 'api.env' }] })).toThrow('invalid env name:  ')
 })
+
+
+it('accepts and re-reads nested JavaScript and TypeScript draft specs', async () => {
+  const featureDir = writeFeatureConfig('nested')
+  const files = ['e2e/00-seed/case.spec.mts', 'e2e/10-senders/case.test.js'].map((file, index) => ({
+    path: file,
+    content: `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'; test('case ${index}', async () => { expect(true).toBe(true) })`,
+  }))
+  const written = files.map((file) => path.join(featureDir, file.path))
+  expect(await applyExternalDraftFiles({ featureDir, files })).toMatchObject({ ok: true, written })
+  expect(await applyExternalDraftFiles({ featureDir })).toMatchObject({ ok: true, written })
+  expect(fs.readFileSync(written[1], 'utf8')).toContain('toBe(true)')
+})

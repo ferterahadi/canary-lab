@@ -150,6 +150,9 @@ describe('stage reset (R78 restart wipe)', () => {
       const e2eDir = path.join(featureDir, 'e2e')
       fs.mkdirSync(e2eDir, { recursive: true })
       fs.writeFileSync(path.join(e2eDir, 'authored.spec.ts'), '// spec\n')
+      fs.mkdirSync(path.join(e2eDir, 'phase'))
+      fs.writeFileSync(path.join(e2eDir, 'phase/case.test.js'), '// nested spec')
+      fs.writeFileSync(path.join(e2eDir, 'phase/helper.js'), '// helper')
       const docsDir = path.join(featureDir, 'docs')
       fs.mkdirSync(docsDir, { recursive: true })
       fs.writeFileSync(path.join(docsDir, '_coverage-state.json'), '{}')
@@ -161,6 +164,8 @@ describe('stage reset (R78 restart wipe)', () => {
 
       const specs = fs.existsSync(e2eDir) ? fs.readdirSync(e2eDir).filter((f) => f.endsWith('.spec.ts')) : []
       expect(specs).toEqual([])
+      expect(fs.existsSync(path.join(e2eDir, 'phase/case.test.js'))).toBe(false)
+      expect(fs.readFileSync(path.join(e2eDir, 'phase/helper.js'), 'utf8')).toBe('// helper')
       expect(fs.existsSync(path.join(docsDir, '_coverage-state.json'))).toBe(false)
       expect(fs.existsSync(path.join(docsDir, '_coverage-mappings.json'))).toBe(false)
       // An EARLIER stage's artifact — a restart at specs-coverage must not touch it.

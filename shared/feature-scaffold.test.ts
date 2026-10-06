@@ -115,20 +115,17 @@ describe('validateGeneratedFeatureFiles', () => {
       .filter((file) => !file.path.endsWith('.spec.ts'))
     const r = validateGeneratedFeatureFiles('demo_login', files)
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toBe('missing required e2e/*.spec.ts file')
+    if (!r.ok) expect(r.error).toBe('missing required spec or test file under e2e/')
   })
 
-  it('rejects a spec nested below e2e/', () => {
-    // Playwright's testDir is `./e2e` and is not recursive here, so a nested
-    // spec would be silently skipped rather than run.
+  it('accepts a spec nested below e2e/', () => {
     const files = buildFeatureScaffold({ featureName: 'demo_login' })
     files.push({
       path: 'e2e/nested/deep.spec.ts',
       content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n",
     })
     const r = validateGeneratedFeatureFiles('demo_login', files)
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('must live directly under e2e/')
+    expect(r).toEqual({ ok: true })
   })
 
   it('rejects a feature.config.cjs that does not declare the expected fields', () => {
@@ -203,7 +200,7 @@ describe('validateGeneratedSpecFiles', () => {
       },
     ])
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('directly under e2e/')
+    if (!r.ok) expect(r.error).toContain('under e2e/')
   })
 
   it('rejects an empty set, duplicates, and a set with no spec at all', () => {
@@ -218,7 +215,7 @@ describe('validateGeneratedSpecFiles', () => {
     // Non-spec files are allowed alongside specs, but on their own they mean
     // the generation produced no runnable test.
     expect(validateGeneratedSpecFiles([{ path: 'e2e/helpers.ts', content: 'export const x = 1\n' }]))
-      .toEqual({ ok: false, error: 'missing required e2e/*.spec.ts file' })
+      .toEqual({ ok: false, error: 'missing required spec or test file under e2e/' })
   })
 
   it('rejects external specs that escape the feature directory or skip the fixture', () => {

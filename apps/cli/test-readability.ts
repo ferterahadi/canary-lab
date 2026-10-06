@@ -1,10 +1,10 @@
+import { scanSpecFiles, readSpecSource } from '../../shared/spec-files'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describeReadabilityIssue, inspectTestReadability, type TestReadabilityIssue } from '../../shared/test-readability'
 import { runAsScript } from './run-as-script'
 
 const EXCLUDED = new Set(['node_modules', 'dist', 'logs', 'test-results', 'playwright-report', '__fixtures__', '__snapshots__', '.git', '.claude', '.codex', '.agents'])
-const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/
 const USAGE = 'canary-lab test-readability <file-or-directory...> [--fix] [--rules-only] [--json]'
 
@@ -18,30 +18,27 @@ export interface ReadabilityFileReport {
 
 function collectFiles(targets: string[]): string[] {
   const files = new Set<string>()
-  const visit = (target: string, explicit: boolean): void => {
+  const visit = (target: string): void => {
     const absolute = path.resolve(target)
     if (absolute.split(path.sep).some((part) => EXCLUDED.has(part))) {
-      if (explicit) throw new Error(`Refusing generated artifacts or fixture source: ${absolute}`)
-      return
+      throw new Error(`Refusing generated artifacts or fixture source: ${absolute}`)
     }
     const stat = fs.lstatSync(absolute)
     if (fs.realpathSync(absolute).split(path.sep).some((part) => EXCLUDED.has(part))) {
-      if (explicit) throw new Error(`Refusing generated artifacts or fixture source: ${absolute}`)
-      return
+      throw new Error(`Refusing generated artifacts or fixture source: ${absolute}`)
     }
     if (stat.isSymbolicLink()) {
-      if (explicit) throw new Error(`Refusing a symbolic link: ${absolute}`)
-      return
+      throw new Error(`Refusing a symbolic link: ${absolute}`)
     }
     if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(absolute)) visit(path.join(absolute, entry), false)
-    } else if (stat.isFile() && (explicit ? SOURCE_FILE : TEST_FILE).test(absolute) && !absolute.endsWith('.d.ts')) {
+      for (const file of scanSpecFiles(absolute, { excludedDirectories: EXCLUDED })) files.add(file)
+    } else if (stat.isFile() && SOURCE_FILE.test(absolute) && !absolute.endsWith('.d.ts')) {
       files.add(absolute)
-    } else if (explicit) {
+    } else {
       throw new Error(`Expected a JavaScript/TypeScript source file or test directory: ${absolute}`)
     }
   }
-  for (const target of targets) visit(target, true)
+  for (const target of targets) visit(target)
   if (files.size === 0) throw new Error('No test files found in the selected paths.')
   return [...files].sort()
 }
@@ -49,7 +46,7 @@ function collectFiles(targets: string[]): string[] {
 export async function checkTestFiles(targets: string[], options: Options = {}): Promise<ReadabilityFileReport[]> {
   const prepared = []
   for (const file of collectFiles(targets)) {
-    const original = fs.readFileSync(file, 'utf8')
+    const original = readSpecSource(file)
     const result = await inspectTestReadability(original, file, options)
     prepared.push({ file, original, result })
   }
@@ -57,7 +54,7 @@ export async function checkTestFiles(targets: string[], options: Options = {}): 
     // Formatting is asynchronous. Check the entire batch again before the first
     // write so an editor/agent's intervening change cannot be overwritten.
     for (const { file, original } of prepared) {
-      if (fs.readFileSync(file, 'utf8') !== original) throw new Error(`File changed during inspection; retry: ${file}`)
+      if (readSpecSource(file) !== original) throw new Error(`File changed during inspection; retry: ${file}`)
     }
     for (const { file, result } of prepared) {
       if (result.changed) fs.writeFileSync(file, result.code, 'utf8')

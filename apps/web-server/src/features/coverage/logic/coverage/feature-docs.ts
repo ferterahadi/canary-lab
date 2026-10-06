@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { findFeature, listSpecFiles } from '../../../../shared/feature-loader'
@@ -257,8 +258,8 @@ export function clearPrdSummary(args: { featuresDir: string; feature: string }):
   const untagged: string[] = []
   for (const file of listSpecFiles(featureDir)) {
     let source = ''
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
-    const next = stripCoverageTags(source)
+    try { source = readSpecSource(file) } catch { continue }
+    const next = stripCoverageTags(source, file)
     if (next !== source) {
       fs.writeFileSync(file, next)
       untagged.push(path.relative(featureDir, file))

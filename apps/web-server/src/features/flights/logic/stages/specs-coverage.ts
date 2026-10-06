@@ -1,3 +1,4 @@
+import { listSpecFiles } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
@@ -32,7 +33,7 @@ import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
-// The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
+// The specs↔coverage loop: the agent edits <featureDir>/e2e/ recursively in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
 // validation re-reads and gates what landed on disk, a deterministic dry-run
 // (playwright --list + tsc --noEmit) catches specs that don't compile, then
@@ -131,7 +132,7 @@ export function buildSpecsPrompt(args: {
   configPath: string
   requirements: unknown
   gaps: GapRow[]
-  /** Absolute feature dir — the agent edits <featureDir>/e2e/*.spec.ts in place. */
+  /** Absolute feature dir — the agent edits <featureDir>/e2e/ recursively in place. */
   featureDir: string
   iteration: number
   /** Compile/list errors from the previous iteration; '' when it validated clean. */
@@ -444,7 +445,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     forceInternalMap = false,
   ): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    // The producer edited <featureDir>/e2e/*.spec.ts in place; re-read what
+    // The producer edited <featureDir>/e2e/ recursively in place; re-read what
     // landed on disk and gate it through the same draft validation as the
     // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
     publishProgress(ctx, ledger, prep.target, state, 'validating')
@@ -640,15 +641,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       const m = ctx.manifest()
       const featureDir = featureDirFor(deps, m.feature)
       if (!fs.existsSync(featureDir)) return
-      const e2eDir = path.join(featureDir, 'e2e')
-      let wipedSpecs = false
-      if (fs.existsSync(e2eDir)) {
-        for (const entry of fs.readdirSync(e2eDir)) {
-          if (!entry.endsWith('.spec.ts')) continue
-          fs.rmSync(path.join(e2eDir, entry), { force: true })
-          wipedSpecs = true
-        }
-      }
+      const specs = listSpecFiles(featureDir)
+      for (const file of specs) fs.rmSync(file, { force: true })
+      const wipedSpecs = specs.length > 0
       const docsDir = path.join(featureDir, 'docs')
       for (const name of [COVERAGE_STATE_JSON, LEGACY_MAPPINGS_JSON]) {
         fs.rmSync(path.join(docsDir, name), { force: true })

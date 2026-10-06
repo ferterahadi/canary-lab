@@ -1,3 +1,4 @@
+import { SPEC_INVENTORY_VERSION } from '../../../../../../../shared/spec-files'
 import type { AdoptSpecEditsResult, RestoreSpecEditsResult } from '../run-control-results'
 // The run-start suite snapshot (D9). Canary Lab's verdict must stay outside the
 // agent's control, and the cheapest way an agent turns a run green is to edit
@@ -343,7 +344,7 @@ export function snapshotSuite(ctx: RunContext): void {
     throw new Error(`Suite runtime input setup failed before tests started: ${reason}`)
   }
   ctx.stateSink.patchManifest(ctx.runId, {
-    suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
+    suiteSnapshot: { kind: 'taken', specInventoryVersion: SPEC_INVENTORY_VERSION, dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
   })
 }
 
@@ -373,7 +374,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adopti
     ctx.suiteDir = target
     materializeSuiteRuntimeInputs(ctx)
     ctx.stateSink.patchManifest(ctx.runId, {
-      suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
+      suiteSnapshot: { kind: 'taken', specInventoryVersion: SPEC_INVENTORY_VERSION, dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
       ...adoptionPatch(),
     })
     originalMoved = false

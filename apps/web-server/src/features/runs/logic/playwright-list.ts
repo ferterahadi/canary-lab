@@ -1,5 +1,6 @@
+import { listSpecFiles, readSpecSource } from '../../../../../../shared/spec-files'
+import { createHash } from 'node:crypto'
 import { spawn } from 'child_process'
-import fs from 'fs'
 import path from 'path'
 
 // Asks Playwright to enumerate the resolved test list for a feature directory
@@ -72,19 +73,10 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>()
 
 function cacheSignature(featureDir: string): string {
-  const e2eDir = path.join(featureDir, 'e2e')
-  if (!fs.existsSync(e2eDir)) return 'no-e2e'
-  const parts: string[] = []
-  for (const entry of fs.readdirSync(e2eDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
-      const p = path.join(e2eDir, entry.name)
-      try {
-        const stat = fs.statSync(p)
-        parts.push(`${entry.name}:${stat.mtimeMs}:${stat.size}`)
-      } catch { /* ignore */ }
-    }
-  }
-  return parts.join('|')
+  return listSpecFiles(featureDir).map((file) => {
+    const digest = createHash('sha256').update(readSpecSource(file)).digest('hex')
+    return `${path.relative(featureDir, file)}:${digest}`
+  }).join('|')
 }
 
 function collectSpecs(
@@ -154,15 +146,15 @@ export async function listPlaywrightTests(
   opts: ListPlaywrightTestsOpts = {},
 ): Promise<PlaywrightListEntry[] | null> {
   if (opts.fresh) cache.delete(featureDir)
-  const signature = cacheSignature(featureDir)
   const cached = cache.get(featureDir)
-  if (cached && cached.signature === signature) return cached.entries
+  const cachedSignature = cached ? cacheSignature(featureDir) : undefined
+  if (cached && cached.signature === cachedSignature) return cached.entries
 
   const spawner = opts.spawner ?? defaultPlaywrightListSpawner
   const timeoutMs = opts.timeoutMs ?? 15_000
   const inv = spawner(featureDir)
 
-  const stdout = await new Promise<string | null>((resolve) => {
+  const discovery = new Promise<string | null>((resolve) => {
     let out = ''
     let err = ''
     let settled = false
@@ -213,6 +205,9 @@ export async function listPlaywrightTests(
     })
   })
 
+  // Start the cold Playwright process before source enrichment pays its reads.
+  const signature = cachedSignature ?? cacheSignature(featureDir)
+  const stdout = await discovery
   if (stdout === null) return null
 
   let report: PwListReport
@@ -227,7 +222,8 @@ export async function listPlaywrightTests(
   const entries: PlaywrightListEntry[] = []
   collectSpecs(report.suites, rootDir, entries)
 
-  cache.set(featureDir, { signature, entries })
+  if (signature === cacheSignature(featureDir)) cache.set(featureDir, { signature, entries })
+  else cache.delete(featureDir)
   return entries
 }
 

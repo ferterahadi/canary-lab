@@ -104,7 +104,7 @@ export interface StoppedEarlyInfo {
  *  copy failed and the run fell back to the live feature dir — said out loud so
  *  no surface claims a boundary that was never there. */
 export type RunSuiteSnapshot =
-  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string; specInventoryVersion?: 1 | 2 }
   | { kind: 'unavailable'; at: string; reason: string }
 
 /** Who took a live spec edit into the run. `human`: the adopt route in Canary

@@ -357,7 +357,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="empty-dropzone"]')).toBeNull()
   })
 
-  it('the distilled summary gets its own card — artifact pill, count, and a ledger drill', async () => {
+  it('the distilled summary roots the docs tree — artifact pill, count, nested sources, and a ledger drill', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'specs-coverage',
@@ -382,24 +382,24 @@ describe('checkpoint display language (R71/W3)', () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
 
     // The stage's OUTPUT is visible and openable, not just a status chip.
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Requirements found · 6')
-    expect(distilled?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')).toBeTruthy()
-    // The generated artifact stays OUT of the source-docs card — one card per half.
-    const sourceCard = container.querySelector('[data-testid="flight-docs-panel"] > div')
-    expect(sourceCard?.textContent).toContain('okr.md')
-    expect(sourceCard?.textContent).not.toContain('_prd-summary.md')
-    // The summary chip rides the card it describes, not the inputs card.
-    expect(distilled?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
-    expect(sourceCard?.querySelector('[data-testid="docs-summary-chip"]')).toBeNull()
+    const card = container.querySelector('[data-testid="flight-requirements-card"]')
+    expect(card?.textContent).toContain('Requirements found · 6')
+    expect(card?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
+    // One tree: the summary on top, the sources it came from nested under it
+    // and open by default — the same shape as the coverage rail.
+    const summaryPill = card?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')
+    expect(summaryPill?.textContent).toContain('Generated from 1 doc')
+    expect(card?.querySelector('[data-testid="summary-source-docs"] [data-testid="doc-pill-okr.md"]')).toBeTruthy()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="doc-disclosure-_prd-summary.md"]')?.click() })
+    expect(card?.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
     // Never dead-end: the stage drills to where the requirements are browsable,
     // from the SAME header slot every other stage's drill-through uses.
-    expect(distilled?.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
+    expect(card?.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-docs"]')?.click() })
     expect(onOpenCoverage).toHaveBeenCalledWith('checkout')
   })
 
-  it('while distilling, the output card holds the space instead of leaving a blank gap', async () => {
+  it('while distilling, the summary slot holds the space instead of leaving a blank gap', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'prd-summary',
@@ -418,11 +418,11 @@ describe('checkpoint display language (R71/W3)', () => {
     // Drill wired, so the gate below is what's under test — not a missing prop.
     await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Turning the docs into requirements')
+    const card = container.querySelector('[data-testid="flight-requirements-card"]')
+    expect(card?.querySelector('[data-testid="docs-summary-status"]')?.textContent).toContain('Turning the docs into requirements')
     // No count yet, and no drill to a ledger that has nothing in it — the docs
     // row is already `done` here, so only the folded summary can gate it.
-    expect(distilled?.textContent).not.toContain('·')
+    expect(card?.textContent).not.toContain('Requirements found')
     expect(container.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
   })
 
@@ -454,7 +454,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(summary?.textContent).not.toContain('Needs approval')
   })
 
-  it('once the agent is writing, the output card reports it and shows the words arriving', async () => {
+  it('once the agent is writing, the summary slot reports it and shows the words arriving', async () => {
     // The state the user shut their machine down in: the agent was two-thirds
     // through a 27k-character answer and the card said only "progress in
     // Activity below" — pointing at a panel that gains no row until the whole
@@ -479,7 +479,7 @@ describe('checkpoint display language (R71/W3)', () => {
     })
     await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
+    const distilled = container.querySelector('[data-testid="flight-requirements-card"]')
     expect(distilled?.textContent).toContain('Writing the answer — 27,627 characters so far')
     // The old copy promised progress somewhere it wasn't; it must not survive.
     expect(distilled?.textContent).not.toContain('progress in Activity below')

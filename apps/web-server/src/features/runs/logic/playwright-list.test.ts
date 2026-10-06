@@ -304,3 +304,35 @@ describe('discoveryFailureOutput', () => {
     expect(discoveryFailureOutput('x'.repeat(10000), '')).toHaveLength(8000)
   })
 })
+
+
+it('invalidates cached discovery on nested same-size edits, additions, renames, and removals', async () => {
+  const dir = path.join(tmpDir, 'e2e/phase')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'case.test.js')
+  fs.writeFileSync(file, '// a')
+  const stat = fs.statSync(file)
+  let calls = 0
+  const spawner: PlaywrightListSpawner = (cwd) => {
+    calls++
+    return jsonSpawner({ config: { rootDir: cwd }, suites: [] })(cwd)
+  }
+  await listPlaywrightTests(tmpDir, { spawner })
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(1)
+  fs.writeFileSync(file, '// b')
+  fs.utimesSync(file, stat.atime, stat.mtime)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(2)
+  const added = path.join(dir, 'added.spec.mts')
+  fs.writeFileSync(added, '// extra')
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(3)
+  const renamed = path.join(dir, 'renamed.spec.mts')
+  fs.renameSync(added, renamed)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(4)
+  fs.unlinkSync(renamed)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(5)
+})

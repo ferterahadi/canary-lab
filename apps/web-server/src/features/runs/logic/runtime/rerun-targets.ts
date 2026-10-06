@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
 import { normalizeKnownTestRecord } from './known-test-record'
 // Turning a Playwright run's summary + manifest into a verdict: pass counts,
@@ -9,7 +10,6 @@ import { normalizeKnownTestRecord } from './known-test-record'
 // live orchestrator. Stays in logic/runtime/ deliberately: sibling modules
 // here resolve paths via __dirname.
 
-import fs from 'fs'
 import path from 'path'
 import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
 import { summaryEntryName } from '../../../../../../../shared/test-names'
@@ -97,7 +97,7 @@ export function computeRerunTargetsOrdered(
   let parsedAny = false
   for (const file of files) {
     let source = ''
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    try { source = readSpecSource(file) } catch { continue }
     const result = extractTestsFromSource(file, source)
     if (result.parseError && result.tests.length === 0) continue
     parsedAny = true
@@ -187,7 +187,7 @@ export function computeNonPassedTargets(
   let parsedAny = false
   for (const file of files) {
     let source = ''
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    try { source = readSpecSource(file) } catch { continue }
     const result = extractTestsFromSource(file, source)
     if (result.parseError && result.tests.length === 0) continue
     parsedAny = true
@@ -243,7 +243,7 @@ export function serialSpecFiles(featureDir: string): Set<string> {
     // A spec listed but unreadable (removed or re-permissioned since the
     // listing) is treated as non-serial: this only ever widens a rerun, so
     // guessing "serial" off a file we cannot read would be the unsafe default.
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    try { source = readSpecSource(file) } catch { continue }
     if (SERIAL_DECLARATION.test(source)) out.add(path.resolve(file))
   }
   return out

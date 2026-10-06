@@ -1,3 +1,10 @@
+import { runManifest } from '../../runs/logic/__fixtures__/run-manifest'
+import { collectTests } from '../../coverage/logic/coverage/service'
+import { sourceTestRoster } from '../../runs/logic/suite-test-roster'
+import { hashFeatureSpecs, computePendingEdits } from '../../runs/logic/dirty-specs/detect'
+import { computeRerunTargetsOrdered, serialSpecFiles } from '../../runs/logic/runtime/rerun-targets'
+import { hasAuthoredSpecs } from '../../flights/logic/stage-evidence'
+import { loadSourceTests } from '../../evaluation/logic/test-review/source-analysis'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -71,12 +78,13 @@ const failingSpawner: PlaywrightListSpawner = (featureDir) => ({
   cwd: featureDir,
 })
 
-async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: DirtySpecStore } = {}) {
+async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: DirtySpecStore; logsDir?: string } = {}) {
   const app = Fastify()
   await app.register(featuresRoutes, {
     featuresDir,
     playwrightListSpawner: opts.spawner ?? failingSpawner,
     dirtySpecStore: opts.dirtySpecStore,
+    logsDir: opts.logsDir,
   })
   return app
 }
@@ -515,4 +523,51 @@ it.each([new Error('discovery unavailable'), 'discovery unavailable'])('reports 
     expect(response.statusCode).toBe(200)
     expect(response.json()[0].discoveryDiagnostics).toContain('discovery unavailable')
   } finally { await app.close() }
+})
+
+
+describe('nested spec inventory across consumers', () => {
+  for (const discover of [true, false]) it(`lists nested specs with ${discover ? 'resolved generated cases' : 'AST fallback'}`, async () => {
+    const dir = writeFeature('nested')
+    for (const phase of ['00-seed', '10-senders']) {
+      fs.mkdirSync(path.join(dir, 'e2e', phase), { recursive: true })
+    }
+    const first = path.join(dir, 'e2e/00-seed/case.spec.ts')
+    const second = path.join(dir, 'e2e/10-senders/case.test.jsx')
+    fs.writeFileSync(first, `test('seed', { tag: ['@req-R1'] }, async () => { expect(true).toBe(true) })`)
+    fs.writeFileSync(second, `test.describe.configure({ mode: 'serial' });
+      test('sender', async () => { const node = <button>Send</button>; expect(node).toBeTruthy() })`)
+    const spawner = discover ? jsonSpawner(() => ({ config: { rootDir: dir }, suites: [
+      { file: first, specs: [{ title: 'seed', file: first, line: 1 }, { title: 'generated seed', file: first, line: 1 }] },
+      { file: second, specs: [{ title: 'sender', file: second, line: 2 }] },
+    ] })) : failingSpawner
+    const logsDir = path.join(tmpDir, 'logs')
+    const app = await build({ spawner, logsDir })
+    try {
+      const response = await app.inject('/api/features/nested/tests')
+      expect(response.statusCode).toBe(200)
+      const groups = response.json()
+      expect(groups.map((group: { file: string }) => group.file)).toEqual([first, second])
+      expect(groups.flatMap((group: { tests: Array<{ name: string }> }) => group.tests.map((test) => test.name)))
+        .toEqual(discover ? ['generated seed', 'seed', 'sender'] : ['seed', 'sender'])
+      expect(groups[1].tests[0].bodySource).toContain('button')
+      expect(sourceTestRoster(dir).map((test) => test.title)).toEqual(['seed', 'sender'])
+      expect(collectTests(dir).tests.map((test) => test.name)).toEqual(['seed', 'sender'])
+      expect(hasAuthoredSpecs(dir)).toBe(true)
+      expect(serialSpecFiles(dir)).toEqual(new Set([second]))
+      expect(computeRerunTargetsOrdered(dir, { failed: [{ name: 'test-case-sender' }] })).toMatchObject({ kind: 'targeted', locations: [`${second}:2`, `${first}:1`] })
+      expect([...loadSourceTests(dir).values()].map((test) => test.title)).toEqual(['seed', 'sender'])
+      expect(Object.keys(hashFeatureSpecs(dir))).toEqual(['e2e/00-seed/case.spec.ts', 'e2e/10-senders/case.test.jsx'])
+      const baseline = path.join(tmpDir, 'baseline')
+      fs.cpSync(dir, baseline, { recursive: true })
+      fs.writeFileSync(second, `test('sender', async () => { expect(false).toBe(true) })`)
+      expect(computePendingEdits(dir, baseline)).toMatchObject([{ file: 'e2e/10-senders/case.test.jsx', change: 'modified', affectedTests: ['sender'] }])
+      const runDir = path.join(logsDir, 'runs/run-1')
+      fs.mkdirSync(runDir, { recursive: true })
+      fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(runManifest({ feature: 'nested', suiteSnapshot: { kind: 'taken', dir: baseline, takenAt: '2026-01-01', digest: 'fixture' } })))
+      const review = await app.inject('/api/features/nested/test-source-comparison?runId=run-1')
+      expect(review.statusCode).toBe(200)
+      expect(review.json().differences).toMatchObject([{ file: 'e2e/10-senders/case.test.jsx', affectedTests: ['sender'] }])
+    } finally { await app.close() }
+  })
 })

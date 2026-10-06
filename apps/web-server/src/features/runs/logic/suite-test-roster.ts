@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
@@ -13,7 +14,7 @@ export function sourceTestRoster(dir: string): PlaywrightListEntry[] {
     if (!fs.realpathSync(file).startsWith(`${fs.realpathSync(dir)}${path.sep}`)) {
       throw Object.assign(new Error('Test source is outside the suite.'), { statusCode: 409 })
     }
-    const source = fs.readFileSync(file, 'utf8')
+    const source = readSpecSource(file)
     return extractTestMetadataFromSource(file, source, { expandParametrised: true }).tests.map((test) => ({
       file, line: test.line, title: test.name, originFile: file, originLine: test.line,
       ...(test.unresolvedTitle ? { unresolvedTitle: true } : {}),

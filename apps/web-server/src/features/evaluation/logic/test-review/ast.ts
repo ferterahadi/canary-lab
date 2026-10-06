@@ -1,21 +1,9 @@
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
 import fs from 'fs'
 import path from 'path'
 import ts from 'typescript'
 import { isTestCall } from '../../../../shared/test-declaration'
-
-export function listSpecFiles(featureDir: string): string[] {
-  const out: string[] = []
-  const visit = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) visit(full)
-      else if (/\.(?:spec|test)\.[tj]sx?$/.test(entry.name)) out.push(full)
-    }
-  }
-  visit(featureDir)
-  return out.sort()
-}
 
 export function sourceKey(location: string): string {
   const { file, line } = parseSourceLocation(location)
@@ -127,7 +115,7 @@ export function resolveImport(fromFile: string, specifier: string): string | und
 
 export function safeRead(file: string): string | null {
   try {
-    return fs.readFileSync(file, 'utf-8')
+    return readSpecSource(file)
   } catch {
     return null
   }

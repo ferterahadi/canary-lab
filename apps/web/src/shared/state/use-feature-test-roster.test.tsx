@@ -50,7 +50,7 @@ it('makes exactly three attempts one second apart for non-removal failures, then
   expect(api.getFeatureTests).toHaveBeenCalledTimes(6)
 })
 
-it.each(['suite-removed', 'discovery-failed'])('recovers workspace %s at ten seconds without broad periodic reads', async (code) => {
+it.each(['suite-removed', 'discovery-failed'])('recovers workspace %s at ten seconds, then reconciles healthy source', async (code) => {
   api.getFeatureTests.mockRejectedValue(new ApiError(code === 'suite-removed' ? 404 : 422, { code, error: 'missing config' }))
   await render({ recover: true })
   await tick(2000)
@@ -63,7 +63,7 @@ it.each(['suite-removed', 'discovery-failed'])('recovers workspace %s at ten sec
   expect(api.getFeatureTests).toHaveBeenCalledTimes(attempts + 1)
   expect(value.specs?.[0].file).toBe('restored.spec.ts')
   await tick(30000)
-  expect(api.getFeatureTests).toHaveBeenCalledTimes(attempts + 1)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(attempts + 7)
 })
 
 it('retains accepted rosters during failure, clears removal, and preserves discovery diagnostics', async () => {
@@ -142,9 +142,11 @@ it('cancels a scheduled retry when an event replaces it', async () => {
   await render({ recover: true })
   await tick(500)
   await act(async () => invalidate('tests'))
-  await tick(5000)
+  await tick(4999)
   expect(api.getFeatureTests).toHaveBeenCalledTimes(2)
   expect(value.specs?.[0].file).toBe('fresh.ts')
+  await tick(1)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(3)
 })
 
 it.each([
@@ -160,4 +162,36 @@ it.each([
   expect(value.failure?.message).toContain(message)
   expect(value.error).toBe(error instanceof Error ? error.message : 'Failed to load test source')
   expect(value.confirmed).toBe(false)
+})
+
+
+it('reconciles a missed nested edit after five seconds and preserves newer responses', async () => {
+  await render({ recover: true })
+  api.getFeatureTests.mockResolvedValue(roster('e2e/phase/nested.test.js'))
+  await tick(4999)
+  expect(value.specs?.[0].file).toBe('current.spec.ts')
+  await tick(1)
+  expect(value.specs?.[0].file).toBe('e2e/phase/nested.test.js')
+  const stale = deferred<FeatureSpecFile[]>()
+  api.getFeatureTests.mockReturnValueOnce(stale.promise).mockResolvedValue(roster('e2e/phase/newer.test.js'))
+  await tick(5000)
+  await act(async () => invalidate('tests'))
+  await act(async () => stale.resolve(roster('e2e/phase/obsolete.test.js')))
+  expect(value.specs?.[0].file).toBe('e2e/phase/newer.test.js')
+  await act(async () => root.render(null))
+  const calls = api.getFeatureTests.mock.calls.length
+  await tick(10000)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(calls)
+})
+
+it('starts a fresh error retry burst after healthy reconciliation reads', async () => {
+  await render({ recover: true })
+  await tick(15000)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(4)
+  api.getFeatureTests.mockRejectedValue(new Error('offline'))
+  await tick(7000)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(7)
+  expect(value.failure?.kind).toBe('request')
+  await tick(10000)
+  expect(api.getFeatureTests).toHaveBeenCalledTimes(7)
 })

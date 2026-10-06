@@ -1,18 +1,20 @@
+import { scanSpecFiles } from '../../../../../../../shared/spec-files'
+import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import fs from 'fs'
 import ts from 'typescript'
 import { formatCodeForDisplay, formatSourceSnippetForDisplay } from '../../../../../../../shared/code-display-format'
 import { assertionFor, collectDirectAssertions, dedupeAssertions, helperAssertion, isNoiseHelper } from './assertions'
-import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, listSpecFiles, resolveImport, safeRead, stringArg } from './ast'
+import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead, stringArg } from './ast'
 import { cleanSnippet, dedupe } from './text'
 import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion } from './types'
 
 export function loadSourceTests(featureDir: string | undefined): Map<string, SourceTest> {
   const out = new Map<string, SourceTest>()
   if (!featureDir || !fs.existsSync(featureDir)) return out
-  for (const file of listSpecFiles(featureDir)) {
+  for (const file of scanSpecFiles(featureDir)) {
     const source = safeRead(file)
     if (source === null) continue
-    const src = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const src = parseSource(file, source).sourceFile
     const imports = readRelativeImports(file, src)
     const externalImports = readExternalImports(src)
     const helpers = new Map<string, HelperDefinition>()
@@ -94,7 +96,7 @@ export function readExternalImports(src: ts.SourceFile): string[] {
 export function readHelperDefinition(imported: ImportedHelper, seen: Set<string>): HelperDefinition | undefined {
   const source = safeRead(imported.file)
   if (source === null) return undefined
-  const src = ts.createSourceFile(imported.file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const src = parseSource(imported.file, source).sourceFile
   const imports = readRelativeImports(imported.file, src)
   const externalImports = readExternalImports(src)
   let found: HelperDefinition | undefined

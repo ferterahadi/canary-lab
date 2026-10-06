@@ -83,8 +83,8 @@ export function RunRow({
    *  the run is still going, for a surface whose status chip already names a
    *  finished run's outcome — dot and chip then said the same thing twice. A
    *  live run keeps it because the pulse says "still moving", which the chip
-   *  cannot. The lane stays reserved either way, so titles hold one left edge
-   *  (HERO_ROW.TEXT_INDENT) and nothing shifts when a run settles. */
+   *  cannot. A finished run reserves no lane, so its title sits flush on the
+   *  card's text column with the kicker above it. */
   dot?: 'always' | 'live'
   /** 'time' (default) is a clock time; 'day' adds the day unless it is today,
    *  for a list whose rows span days. */
@@ -122,9 +122,8 @@ export function RunRow({
         className={`group flex w-full items-center gap-2 text-left ${CHROME_CLASS[chrome]}`}
         title={`Go to run ${run.runId}`}
       >
-        {dot === 'always' || !isTerminalRunStatus(run.status)
-          ? <StatusDot state={presentation.dot} pulse={presentation.pulse} halo={presentation.pulse && presentation.dot !== 'booted'} className="shrink-0" />
-          : <span aria-hidden="true" className="cl-status-dot" />}
+        {(dot === 'always' || !isTerminalRunStatus(run.status))
+          && <StatusDot state={presentation.dot} pulse={presentation.pulse} halo={presentation.pulse && presentation.dot !== 'booted'} className="shrink-0" />}
         <span className="flex min-w-0 flex-1 flex-col">
           <span
             className={`truncate text-[13px] ${chrome === 'row' ? '' : 'group-hover:underline'}`}

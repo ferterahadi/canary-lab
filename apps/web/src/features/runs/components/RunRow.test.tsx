@@ -69,18 +69,16 @@ describe('RunRow (R80 hero props)', () => {
     expect(container.textContent).not.toContain(':4123')
   })
 
-  it("dot='live' hides a finished run's dot but keeps its lane, so titles hold one left edge", () => {
+  it("dot='live' drops a finished run's dot and its lane, so the title sits flush", () => {
     renderRow({ dot: 'live' })
-    const lead = container.querySelector('button')?.firstElementChild
-    expect(lead?.className).toBe('cl-status-dot')
-    expect(lead?.getAttribute('aria-hidden')).toBe('true')
+    expect(container.querySelector('button .cl-status-dot')).toBeNull()
     // The chip still names the outcome — the dot was only repeating it.
     expect(container.textContent).toContain('Failed')
   })
 
   it("dot='live' keeps the status dot while the run is still going", () => {
     renderRow({ dot: 'live', run: { ...run, status: 'healing' } })
-    expect(container.querySelector('button')?.firstElementChild?.className).not.toBe('cl-status-dot')
+    expect(container.querySelector('button .cl-status-dot')).not.toBeNull()
   })
 
   it('showDuration appends a finished run\'s duration, and says nothing for a live one', () => {

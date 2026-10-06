@@ -322,29 +322,26 @@ interface RunStat {
  *  has, on the same left edge.
  *
  *  Composed here rather than stacked out of `SkeletonRows`, because a generic row
- *  list drew every block flush at x=0 — a left edge no value in this card ever
- *  lands on. It also made the widest bar in the card a 7px sub-line and the two
- *  test rows identical twins, so the placeholders promised a layout the card does
- *  not have. Everything now hangs off `HERO_ROW`, the same constant RunRow's
- *  stats line and the failure rows use.
+ *  list made the widest bar in the card a 7px sub-line and the two test rows
+ *  identical twins, so the placeholders promised a layout the card does not
+ *  have. The identity and stats blocks sit flush on the card's text column like
+ *  the settled run; the failure rows use `HERO_ROW`'s dot lane.
  *
  *  Widths follow what actually arrives: a short "Run 4f2a" title over a longer
  *  meta line, then wrapping test titles over a shorter tag line. */
 function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
   return (
     <div data-testid="test-run-hero-skeleton" className="flex flex-col">
-      {/* Identity row — RunRow's dot size and two-line text column, flush. */}
-      <div className="flex items-center gap-2 pb-0.5">
-        <SkeletonBead awaiting={awaiting} size={8.8} />
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <SkeletonBar awaiting={awaiting} width="28%" height={10} />
-          <SkeletonBar awaiting={awaiting} width="52%" height={7} />
-        </div>
+      {/* Identity row — RunRow's two-line text column, flush: a finished run
+          carries no dot lane. */}
+      <div className="flex min-w-0 flex-col gap-1.5 pb-0.5">
+        <SkeletonBar awaiting={awaiting} width="28%" height={10} />
+        <SkeletonBar awaiting={awaiting} width="52%" height={7} />
       </div>
 
       {/* Tests · Repairs · Services land in these rungs: a short label over a
           shorter value, a column apart, exactly where RunStatsLine puts them. */}
-      <div className="mt-3 flex gap-x-7" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+      <div className="mt-3 flex gap-x-7">
         {[64, 72, 80].map((w) => (
           <div key={w} className="flex flex-col gap-1.5">
             <SkeletonBar awaiting={awaiting} width={`${w}px`} height={7} />
@@ -379,7 +376,6 @@ function RunStatsLine({ stats }: { stats: RunStat[] }) {
     <dl
       data-testid="run-hero-stats"
       className="m-0 mt-3 flex flex-wrap gap-x-7 gap-y-2.5"
-      style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}
     >
       {stats.map((s) => (
         <div key={s.label} className="flex min-w-0 flex-col gap-0.5" {...(s.title ? { title: s.title } : {})}>

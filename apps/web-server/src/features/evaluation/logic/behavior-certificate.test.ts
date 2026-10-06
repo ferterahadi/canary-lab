@@ -1,9 +1,10 @@
+import { build } from 'vite'
 import { runManifest } from '../../runs/logic/__fixtures__/run-manifest'
 import { execFileSync, spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { RunSummary, RunDetail } from '../../../../../../shared/run-detail'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { suiteDigest } from '../../runs/logic/runtime/run-suite-snapshot'
@@ -17,7 +18,16 @@ import { buildBehaviorCertificate, requirementFingerprint } from './behavior-cer
 // and re-checked with the real standalone checker under a real node — a certificate
 // whose checker was never run against it would be a claim about a claim.
 
-const CHECKER = path.resolve(__dirname, '../../../../assets', BEHAVIOR_CERTIFICATE_CHECKER_FILENAME)
+const checkerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-checker-bundle-'))
+const CHECKER = path.join(checkerDir, BEHAVIOR_CERTIFICATE_CHECKER_FILENAME)
+beforeAll(async () => {
+  await build({ configFile: false, logLevel: 'silent', build: {
+    outDir: checkerDir, emptyOutDir: false, minify: false,
+    lib: { entry: path.resolve(__dirname, '../../../../assets', BEHAVIOR_CERTIFICATE_CHECKER_FILENAME), formats: ['es'], fileName: () => BEHAVIOR_CERTIFICATE_CHECKER_FILENAME },
+    rollupOptions: { external: (id) => id.startsWith('node:') },
+  } })
+})
+afterAll(() => fs.rmSync(checkerDir, { recursive: true, force: true }))
 
 const SPEC = `import { test, expect } from '@playwright/test'
 
@@ -407,8 +417,44 @@ describe('buildBehaviorCertificate — without a run-start snapshot', () => {
 describe('the bundled checker', () => {
   it('is plain Node with no imports beyond the runtime', () => {
     const source = fs.readFileSync(CHECKER, 'utf8')
-    expect(source.match(/^import .* from '([^']+)'/gm)!.map((line) => line.replace(/.* from '([^']+)'/, '$1')))
+    expect(source.match(/^import .* from ['"]([^'"]+)['"]/gm)!.map((line) => line.replace(/.* from ['"]([^'"]+)['"]/, '$1')).sort())
       .toEqual(['node:crypto', 'node:fs', 'node:path'])
     expect(() => execFileSync(process.execPath, ['--check', CHECKER])).not.toThrow()
+  })
+})
+
+
+describe('versioned spec inventory', () => {
+  it('certifies nested mixed-format files and rejects a nested edit in the standalone checker', () => {
+    const nested = path.join(snapshotDir, 'e2e/phase/case.test.js')
+    fs.mkdirSync(path.dirname(nested), { recursive: true })
+    fs.writeFileSync(nested, `test('extra', async () => { expect(true).toBe(true) })`)
+    const m = snapshotted({ suiteSnapshot: { kind: 'taken', dir: snapshotDir, takenAt: '2026-01-01', digest: suiteDigest(snapshotDir), specInventoryVersion: 2 } })
+    const cert = buildBehaviorCertificate(detail(m))
+    expect(cert.suite.specInventoryVersion).toBe(2)
+    expect(cert.suite.files.map((file) => file.path)).toEqual(['e2e/cart.spec.ts', 'e2e/phase/case.test.js'])
+    expect(cert.suite.runStartCheck).toBe('matches')
+    expect(runChecker(cert).status).toBe(0)
+    fs.appendFileSync(nested, '\n// edited')
+    const checked = runChecker(cert)
+    expect(checked.status).toBe(1)
+    expect(checked.out).toContain('e2e/phase/case.test.js: sha256 differs')
+  })
+
+  it('preserves old flat hashes and discloses their incomplete inventory', () => {
+    const m = snapshotted()
+    const originalDigest = m.suiteSnapshot!.kind === 'taken' ? m.suiteSnapshot!.digest : ''
+    fs.mkdirSync(path.join(snapshotDir, 'e2e/phase'))
+    fs.writeFileSync(path.join(snapshotDir, 'e2e/phase/case.spec.ts'), '// not historically hashed')
+    const cert = buildBehaviorCertificate(detail(m))
+    expect(cert.suite.specInventoryVersion).toBe(1)
+    expect(cert.suite.digest).toBe(originalDigest)
+    expect(cert.suite.runStartCheck).toBe('matches')
+    expect(cert.suite.files.map((file) => file.path)).toEqual(['e2e/cart.spec.ts'])
+    expect(cert.notProven.some((text) => text.includes('historical flat'))).toBe(true)
+    delete cert.suite.specInventoryVersion
+    const checked = runChecker(cert)
+    expect(checked.status).toBe(0)
+    expect(checked.out).toContain('historical inventory checks only top-level')
   })
 })

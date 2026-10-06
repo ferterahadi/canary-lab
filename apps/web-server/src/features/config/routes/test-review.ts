@@ -1,3 +1,4 @@
+import { readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
@@ -28,7 +29,7 @@ function confinedFile(root: string, relative: string): string {
 }
 
 function readSource(file: string): string {
-  try { return fs.readFileSync(file, 'utf8') } catch (error) {
+  try { return readSpecSource(file) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
     throw error
   }
@@ -72,7 +73,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     const feature = findFeature(deps.featuresDir, req.params.name)
     if (!feature) return reply.code(404).send({ error: 'Suite not found' })
     const file = req.query.file
-    const supportingFile = !!file && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)
+    const supportingFile = !!file && !isSpecFile(file)
     if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || (supportingFile && !req.query.runId)) {
       return reply.code(400).send({ error: 'A suite-relative test file is required' })
     }

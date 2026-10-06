@@ -163,6 +163,7 @@ describe('snapshotSuite', () => {
     expect(sink.patches).toEqual([{
       suiteSnapshot: {
         kind: 'taken',
+        specInventoryVersion: 2,
         dir: ctx.paths.suiteSnapshotDir,
         takenAt: expect.any(String),
         digest: suiteDigest(live),
