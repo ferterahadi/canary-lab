@@ -3,7 +3,7 @@ import type { EditorChoice } from '@shared/project-config'
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { VersionStatus, UpdateJobManifest } from '@shared/version-status'
-import { defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestJson, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 
 // Current vs latest published version + the self-update job state.
@@ -27,32 +27,14 @@ export function startVersionUpdate(opts?: ClientOptions): Promise<UpdateJobManif
 }
 
 export function openAgentApp(agent: 'claude' | 'codex', opts?: ClientOptions): Promise<{ opened: boolean }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ opened: boolean }>(
-    `${baseUrl}/api/open-agent`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agent }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ opened: boolean }>(`/api/open-agent`, 'POST', { agent }, opts)
 }
 
 export function openEditor(
   target: { file: string; line?: number; column?: number; editor?: EditorChoice },
   opts?: ClientOptions,
 ): Promise<{ opened: boolean; editor: EditorChoice }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ opened: boolean; editor: EditorChoice }>(
-    `${baseUrl}/api/open-editor`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(target),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ opened: boolean; editor: EditorChoice }>(`/api/open-editor`, 'POST', target, opts)
 }
 
 // Opens the whole project root (the workspace repo) in the configured editor.
@@ -128,32 +110,14 @@ export function checkoutWorkspaceBranch(
   branch: string,
   opts?: ClientOptions,
 ): Promise<GitRepoStatus> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<GitRepoStatus>(
-    `${baseUrl}/api/workspace/checkout`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: absolutePath, branch }),
-    },
-    fetchImpl,
-  )
+  return requestJson<GitRepoStatus>(`/api/workspace/checkout`, 'POST', { path: absolutePath, branch }, opts)
 }
 
 export function cloneRepository(
   body: { cloneUrl: string; parentDir: string; repoName: string },
   opts?: ClientOptions,
 ): Promise<{ localPath: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ localPath: string }>(
-    `${baseUrl}/api/workspace/clone`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ localPath: string }>(`/api/workspace/clone`, 'POST', body, opts)
 }
 
 export interface GitRepoStatus {
@@ -182,14 +146,5 @@ export function checkoutRepoBranch(
   branch: string,
   opts?: ClientOptions,
 ): Promise<GitRepoStatus> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<GitRepoStatus>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/checkout`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ branch }),
-    },
-    fetchImpl,
-  )
+  return requestJson<GitRepoStatus>(`/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/checkout`, 'POST', { branch }, opts)
 }

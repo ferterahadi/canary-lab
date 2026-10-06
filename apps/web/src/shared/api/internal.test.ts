@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  ApiError, readResponseBody, request,
+  ApiError, readResponseBody, request, requestJson,
 } from './internal'
 import {
   downloadEvaluationExportTask,
@@ -16,6 +16,39 @@ import {
   deleteDraft,
 } from './wizard'
 import { fail } from './__fixtures__/response'
+
+describe('JSON requests', () => {
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)('sends a %s through the configured client', async (method) => {
+    const fetchImpl = vi.fn(async () => new Response('{"saved":true}'))
+    await expect(requestJson('/api/items/a%2Fb', method, { value: 'x' }, { baseUrl: 'http://local', fetchImpl }))
+      .resolves.toEqual({ saved: true })
+    expect(fetchImpl).toHaveBeenCalledWith('http://local/api/items/a%2Fb', {
+      method, headers: { 'content-type': 'application/json' }, body: '{"value":"x"}',
+    })
+  })
+
+  it.each([{}, null, false, 0, '', []])('serializes a supplied %j body', async (body) => {
+    const fetchImpl = vi.fn(async () => new Response(''))
+    await expect(requestJson('/api/items', 'POST', body, { fetchImpl })).resolves.toBeNull()
+    expect(fetchImpl).toHaveBeenCalledWith('/api/items', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })
+  })
+
+  it('omits both body and JSON headers for undefined', async () => {
+    const fetchImpl = vi.fn(async () => new Response(''))
+    await requestJson('/api/items', 'POST', undefined, { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/items', { method: 'POST' })
+  })
+
+  it('keeps server errors and network failures', async () => {
+    await expect(requestJson('/api/items', 'POST', {}, { fetchImpl: vi.fn(async () => fail(409, { error: 'conflict' })) }))
+      .rejects.toMatchObject({ status: 409, message: 'conflict', body: { error: 'conflict' } })
+    const failure = new Error('offline')
+    await expect(requestJson('/api/items', 'POST', {}, { fetchImpl: vi.fn().mockRejectedValue(failure) }))
+      .rejects.toBe(failure)
+  })
+})
 
 describe('api client core', () => {
   it('throws ApiError with null body when evaluation export download response is empty', async () => {

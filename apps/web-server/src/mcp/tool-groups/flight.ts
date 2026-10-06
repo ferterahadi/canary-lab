@@ -17,7 +17,7 @@ import {
 import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse, FlightEntryOptions } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
-import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, errorResult, gettingStartedBusyResult } from '../tool-support'
 
 export function registerFlightTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -285,12 +285,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // Resuming the Getting Started demo flight re-claims the workspace demo
       // session, so it can collide with another active demo exactly like start.
       if (resumed.statusCode === 409 && resumedBody.type === 'getting_started_busy') {
-        return asJsonResult({
-          type: 'getting_started_busy',
-          active: resumedBody.active,
-          message: resumedBody.error,
-          next: 'Follow the active demo in its current owner; do not start another run or Flight.',
-        })
+        return gettingStartedBusyResult({ active: resumedBody.active, message: resumedBody.error, variant: 'flight' })
       }
       if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String(resumedBody.error ?? '')}`)
       const view = flightView(resumed.body)
@@ -344,12 +339,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     })
     const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string; active?: unknown }
     if (started.statusCode === 409 && startedBody.type === 'getting_started_busy') {
-      return asJsonResult({
-        type: 'getting_started_busy',
-        active: startedBody.active,
-        message: startedBody.error,
-        next: 'Follow the active demo in its current owner; do not start another run or Flight.',
-      })
+      return gettingStartedBusyResult({ active: startedBody.active, message: startedBody.error, variant: 'flight' })
     }
     if (started.statusCode === 409 && startedBody.type === 'flight_exists_requires_choice') {
       return asJsonResult({
@@ -465,6 +455,21 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     })
   })
 
+  const stopFlight = async (flightId: string, action: 'pause' | 'abort'): Promise<CallToolResult> => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/${action}`,
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`${action} failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    // Failed stops leave the hand-off active; forget its contact only on success.
+    forgetHandOffContact(handOffContact, flightId)
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  }
+
   // Two tools rather than one with a mode argument: pause is safe and resumable,
   // abort is terminal and by this repo's convention gates on `confirm` (pattern:
   // abort_run). A single mode-arg tool cannot express "confirm required only for
@@ -476,21 +481,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     inputSchema: {
       flightId: z.string(),
     },
-  }, async ({ flightId }) => {
-    if (!deps.flightsRequest) return flightsUnavailable()
-    const resp = await deps.flightsRequest({
-      method: 'POST',
-      url: `/api/flights/${encodeURIComponent(flightId)}/pause`,
-    })
-    if (resp.statusCode !== 200) {
-      return errorResult(`pause failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
-    }
-    // The hand-off is settled or the flight is stopping: drop its contact
-    // record so the ledger cannot grow across a long-lived server.
-    forgetHandOffContact(handOffContact, flightId)
-    const view = flightView(resp.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
-  })
+  }, async ({ flightId }) => stopFlight(flightId, 'pause'))
 
   registerTool('abort_flight', {
     description:
@@ -500,21 +491,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       confirm: z.literal(true).describe('Must be true. Aborting is terminal — pause_flight is the resumable stop.'),
     },
     annotations: { destructiveHint: true, idempotentHint: false },
-  }, async ({ flightId }) => {
-    if (!deps.flightsRequest) return flightsUnavailable()
-    const resp = await deps.flightsRequest({
-      method: 'POST',
-      url: `/api/flights/${encodeURIComponent(flightId)}/abort`,
-    })
-    if (resp.statusCode !== 200) {
-      return errorResult(`abort failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
-    }
-    // The hand-off is settled or the flight is stopping: drop its contact
-    // record so the ledger cannot grow across a long-lived server.
-    forgetHandOffContact(handOffContact, flightId)
-    const view = flightView(resp.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
-  })
+  }, async ({ flightId }) => stopFlight(flightId, 'abort'))
 
   registerTool('stop_flight_agent', {
     description:

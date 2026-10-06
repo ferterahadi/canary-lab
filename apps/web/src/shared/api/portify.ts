@@ -3,7 +3,7 @@ import type { PortifyStatus } from '@shared/portify-index'
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { ClientKind, RunProducer } from '@shared/run-mode'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
 import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export interface PortifyBootInstance {
@@ -56,12 +56,7 @@ export function startPortify(
   input: { feature: string; agent?: 'claude' | 'codex'; maxAttempts?: number },
   opts?: ClientOptions,
 ): Promise<{ workflowId: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ workflowId: string }>(
-    `${baseUrl}/api/portify`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
-    fetchImpl,
-  )
+  return requestJson<{ workflowId: string }>(`/api/portify`, 'POST', input, opts)
 }
 
 export function getPortify(workflowId: string, opts?: ClientOptions): Promise<PortifyManifest> {
@@ -96,12 +91,7 @@ export function revisePortify(
   feedback: string,
   opts?: ClientOptions,
 ): Promise<PortifyManifest> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<PortifyManifest>(
-    `${baseUrl}/api/portify/${encodeURIComponent(workflowId)}/revise`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }) },
-    fetchImpl,
-  )
+  return requestJson<PortifyManifest>(`/api/portify/${encodeURIComponent(workflowId)}/revise`, 'POST', { feedback }, opts)
 }
 
 export function removePortify(workflowId: string, opts?: ClientOptions): Promise<{ workflowId: string; removed: true }> {

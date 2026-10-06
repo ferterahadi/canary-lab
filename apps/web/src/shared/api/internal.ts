@@ -67,6 +67,22 @@ export async function request<T>(
   return body as T
 }
 
+export function requestJson<T>(
+  pathname: string,
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  body: unknown,
+  opts?: ClientOptions,
+): Promise<T> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<T>(`${baseUrl}${pathname}`, {
+    method,
+    ...(body === undefined ? {} : {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  }, fetchImpl)
+}
+
 export async function readResponseBody(res: Response): Promise<unknown> {
   const text = await res.text()
   if (!text) return null

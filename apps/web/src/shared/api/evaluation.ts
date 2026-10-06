@@ -5,7 +5,7 @@ import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
-import { ApiError, defaultOpts, readResponseBody, request, type ClientOptions } from './internal'
+import { requestJson, ApiError, defaultOpts, readResponseBody, request, type ClientOptions } from './internal'
 import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 
 export function startEvaluationExport(
@@ -13,16 +13,7 @@ export function startEvaluationExport(
   mode: EvaluationExportMode,
   opts?: ClientOptions,
 ): Promise<EvaluationExportTaskView> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<EvaluationExportTaskView>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/evaluation-export`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    },
-    fetchImpl,
-  )
+  return requestJson<EvaluationExportTaskView>(`/api/runs/${encodeURIComponent(runId)}/evaluation-export`, 'POST', { mode }, opts)
 }
 
 export function getEvaluationExportTask(

@@ -5,6 +5,7 @@ import type { CoverageFreshness, CoverageRecoveryAction } from '../../../../../.
 import type { CoverageLedger, PrdSummary } from '../../../../../../../shared/coverage/types'
 import { docsDirFor, isGeneratedDoc } from './docs-collection'
 import type { MappingInferenceSnapshot } from './mapping-cache'
+import { mappingInputMatches } from './mapping-validity'
 import type { CoverageRunState } from './run-state'
 
 export function coverageRevision(value: unknown): string {
@@ -40,7 +41,7 @@ export function deriveCoverageFreshness(args: {
   const changedTests = Object.entries(snapshot.tests).filter(([name, fingerprint]) => {
     if (!inference) return false
     const prior = inference.tests[name]
-    return !prior || prior.fingerprint !== fingerprint || Object.entries(snapshot.requirements).some(([id, hash]) => prior.requirements[id] !== hash)
+    return !mappingInputMatches(fingerprint, snapshot.requirements, prior)
   }).map(([name]) => name)
   const removedTests = Object.keys(inference?.tests ?? {}).filter((name) => !(name in snapshot.tests))
   changedTests.push(...removedTests)

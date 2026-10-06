@@ -223,6 +223,38 @@ export function ActionButton({
   )
 }
 
+function RunIconAction({ disabled, label, onClick, className, children }: {
+  disabled: boolean
+  label: string
+  onClick: (e: React.MouseEvent) => void
+  className: string
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        if (disabled) { e.stopPropagation(); return }
+        onClick(e)
+      }}
+      onKeyDown={(e) => {
+        if (disabled) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation()
+          onClick(e as unknown as React.MouseEvent)
+        }
+      }}
+      className={className}
+    >
+      {children}
+    </span>
+  )
+}
+
 // Icon-only ghost trash button. Square hover surface (16×16 visual / 20×20
 // hit area) keeps the row dense; hover reveals a soft rose fill so the
 // affordance is unmistakable. When `disabled`, it shows at low opacity with
@@ -249,23 +281,7 @@ export function RetestIconButton({
     ? 'Retesting remaining tests…'
     : 'Retest remaining: reruns failed, skipped, and pending tests'
   return (
-    <span
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        if (disabled) { e.stopPropagation(); return }
-        onClick(e)
-      }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation()
-          onClick(e as unknown as React.MouseEvent)
-        }
-      }}
+    <RunIconAction disabled={disabled} label={label} onClick={onClick}
       className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         spinning
           ? 'cursor-wait text-accent/70'
@@ -287,7 +303,7 @@ export function RetestIconButton({
         <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
         <path d="M13.5 2v3.5H10" />
       </svg>
-    </span>
+    </RunIconAction>
   )
 }
 
@@ -301,23 +317,9 @@ export function DeleteIconButton({
   onClick: (e: React.MouseEvent) => void
 }) {
   return (
-    <span
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      aria-label={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
-      title={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
-      onClick={(e) => {
-        if (disabled) { e.stopPropagation(); return }
-        onClick(e)
-      }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation()
-          onClick(e as unknown as React.MouseEvent)
-        }
-      }}
+    <RunIconAction disabled={disabled}
+      label={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
+      onClick={onClick}
       className={`ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         disabled
           ? 'cursor-not-allowed text-idle/50'
@@ -327,7 +329,7 @@ export function DeleteIconButton({
       <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
         <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
       </svg>
-    </span>
+    </RunIconAction>
   )
 }
 

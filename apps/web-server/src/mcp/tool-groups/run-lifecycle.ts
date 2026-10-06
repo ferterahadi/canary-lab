@@ -15,6 +15,8 @@ import {
   claimRun,
   errorResult,
   failureResult,
+  gettingStartedBusyResult,
+  repoCollisionResult,
   findContinuingRunForFeature,
   resolveRunRef,
   runCandidate,
@@ -362,12 +364,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           update_repos,
         )
         if (outcome.kind === 'getting-started-busy') {
-          return asJsonResult({
-            type: 'getting_started_busy',
-            active: outcome.active,
-            message: outcome.message,
-            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-          })
+          return gettingStartedBusyResult({ ...outcome, variant: 'run' })
         }
         if (outcome.kind === 'repo-update-refused') {
           // A tracked repo could not be brought to its upstream tip. Nothing
@@ -387,15 +384,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (outcome.kind === 'collision') {
           // Same-repo collision and the client didn't choose. Nothing started —
           // ask the user, then re-call start_run with isolation:"worktree"|"queue".
-          return askIsolation(coverageDecision, () => asJsonResult({
-            type: 'repo_collision_requires_choice',
-            conflictingRunId: outcome.conflictingRunId,
-            conflictingFeature: outcome.conflictingFeature,
-            repoPaths: outcome.repoPaths,
-            options: outcome.options,
-            message: outcome.message,
-            nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message)
+          return askIsolation(coverageDecision, () => repoCollisionResult(outcome), outcome.message)
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -486,12 +475,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       try {
         const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
         if (outcome.kind === 'getting-started-busy') {
-          return asJsonResult({
-            type: 'getting_started_busy',
-            active: outcome.active,
-            message: outcome.message,
-            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-          })
+          return gettingStartedBusyResult({ ...outcome, variant: 'run' })
         }
         if (outcome.kind === 'repo-update-refused') {
           // Boots honour the feature's `track: 'upstream'` setting too, so a
@@ -510,15 +494,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           })
         }
         if (outcome.kind === 'collision') {
-          return ask(() => asJsonResult({
-            type: 'repo_collision_requires_choice',
-            conflictingRunId: outcome.conflictingRunId,
-            conflictingFeature: outcome.conflictingFeature,
-            repoPaths: outcome.repoPaths,
-            options: outcome.options,
-            message: outcome.message,
-            nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message)
+          return ask(() => repoCollisionResult(outcome), outcome.message)
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({

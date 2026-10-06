@@ -2,7 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { VerificationConfig, VerificationTarget } from '@shared/verification'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
 
 export interface VerificationTargetIndex {
   targets: VerificationTarget[]
@@ -40,16 +40,7 @@ export function createVerificationConfig(
   body: { name: string; targetUrls: Record<string, string>; playwrightEnvsetId: string },
   opts?: ClientOptions,
 ): Promise<VerificationConfig> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<VerificationConfig>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-configs`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<VerificationConfig>(`/api/features/${encodeURIComponent(feature)}/verification-configs`, 'POST', body, opts)
 }
 
 export function updateVerificationConfig(
@@ -58,16 +49,7 @@ export function updateVerificationConfig(
   body: { name: string; targetUrls: Record<string, string>; playwrightEnvsetId: string },
   opts?: ClientOptions,
 ): Promise<VerificationConfig> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<VerificationConfig>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verification-configs/${encodeURIComponent(configId)}`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<VerificationConfig>(`/api/features/${encodeURIComponent(feature)}/verification-configs/${encodeURIComponent(configId)}`, 'PUT', body, opts)
 }
 
 export function executeVerification(
@@ -75,14 +57,5 @@ export function executeVerification(
   body: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   opts?: ClientOptions,
 ): Promise<{ runId: string; executionType: 'verify' }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ runId: string; executionType: 'verify' }>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/verifications`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ runId: string; executionType: 'verify' }>(`/api/features/${encodeURIComponent(feature)}/verifications`, 'POST', body, opts)
 }

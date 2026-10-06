@@ -5,7 +5,7 @@ import type { OnboardingSamples } from '@shared/getting-started'
 import type { FeatureTests } from './types'
 import type { ProjectConfigResponse } from '@shared/project-config'
 import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { requestJson, ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions, runId?: string): Promise<FeatureTests> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -66,16 +66,7 @@ export function putFeatureConfigDoc(
   value: ConfigValue,
   opts?: ClientOptions,
 ): Promise<ParsedConfigDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ParsedConfigDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/config-doc`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ value }),
-    },
-    fetchImpl,
-  )
+  return requestJson<ParsedConfigDoc>(`/api/features/${encodeURIComponent(name)}/config-doc`, 'PUT', { value }, opts)
 }
 
 /** Fully un-portify a feature: restore the pre-Portify feature config (slots +
@@ -99,16 +90,7 @@ export async function deleteFeature(
   confirmName: string,
   opts?: ClientOptions,
 ): Promise<void> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  await request<unknown>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}`,
-    {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ confirmName }),
-    },
-    fetchImpl,
-  )
+  await requestJson<unknown>(`/api/features/${encodeURIComponent(name)}`, 'DELETE', { confirmName }, opts)
 }
 
 export function getPlaywrightConfig(name: string, opts?: ClientOptions): Promise<ParsedConfigDoc> {
@@ -125,16 +107,7 @@ export function putPlaywrightConfig(
   value: ConfigValue,
   opts?: ClientOptions,
 ): Promise<ParsedConfigDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ParsedConfigDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/playwright`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ value }),
-    },
-    fetchImpl,
-  )
+  return requestJson<ParsedConfigDoc>(`/api/features/${encodeURIComponent(name)}/playwright`, 'PUT', { value }, opts)
 }
 
 export interface McpHealth {
@@ -201,16 +174,7 @@ export function createEnvset(
   env: string,
   opts?: ClientOptions,
 ): Promise<{ env: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ env: string }>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ env }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ env: string }>(`/api/features/${encodeURIComponent(name)}/envsets`, 'POST', { env }, opts)
 }
 
 export async function deleteEnvset(
@@ -231,16 +195,7 @@ export function addEnvsetSlot(
   body: { sourcePath: string; slotName?: string; target?: string; description?: string },
   opts?: ClientOptions,
 ): Promise<{ slot: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ slot: string }>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/slots`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ slot: string }>(`/api/features/${encodeURIComponent(name)}/envsets/slots`, 'POST', body, opts)
 }
 
 export async function deleteEnvsetSlot(
@@ -294,16 +249,7 @@ export function putEnvsetSlot(
   entries: { key: string; value: string }[],
   opts?: ClientOptions,
 ): Promise<EnvsetSlotDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<EnvsetSlotDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entries }),
-    },
-    fetchImpl,
-  )
+  return requestJson<EnvsetSlotDoc>(`/api/features/${encodeURIComponent(name)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`, 'PUT', { entries }, opts)
 }
 
 // ─── project config ───────────────────────────────────────────────────────
@@ -345,16 +291,7 @@ export function putProjectConfig(
   config: Partial<ProjectConfigResponse>,
   opts?: ClientOptions,
 ): Promise<ProjectConfigResponse> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ProjectConfigResponse>(
-    `${baseUrl}/api/project-config`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    },
-    fetchImpl,
-  )
+  return requestJson<ProjectConfigResponse>(`/api/project-config`, 'PUT', config, opts)
 }
 
 // Change the UI/MCP port. The server persists it and restarts the UI; a 409
@@ -365,17 +302,8 @@ export async function changeProjectPort(
   confirm: boolean,
   opts?: ClientOptions,
 ): Promise<PortChangeResult> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
-    return await request<PortChangeResult>(
-      `${baseUrl}/api/project-config/port`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ port, confirm }),
-      },
-      fetchImpl,
-    )
+    return await requestJson<PortChangeResult>(`/api/project-config/port`, 'POST', { port, confirm }, opts)
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object') {
       return e.body as PortChangeResult

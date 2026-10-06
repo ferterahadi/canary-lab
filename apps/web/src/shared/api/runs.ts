@@ -9,7 +9,7 @@ import type { RunIndexEntry } from '@shared/run-index'
 import type { RunDetail, JournalSection } from '@shared/run-detail'
 import type { GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
 export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestJson, ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 export function listRuns(
   query: { feature?: string } = {},
@@ -138,7 +138,6 @@ export function startRun(
     models?: { heal?: StageModelChoice; commit?: StageModelChoice }
   },
 ): Promise<{ runId: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { feature }
   if (opts?.env) body.env = opts.env
   if (opts?.isolation) body.isolation = opts.isolation
@@ -146,15 +145,7 @@ export function startRun(
   if (opts?.models) body.models = opts.models
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   if (opts?.gettingStartedWorkflow) body.gettingStartedWorkflow = opts.gettingStartedWorkflow
-  return request<{ runId: string }>(
-    `${baseUrl}/api/runs`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ runId: string }>(`/api/runs`, 'POST', body, opts)
 }
 
 // Mid-Run Heal: ask the server to interrupt a running test and start the heal
@@ -192,16 +183,7 @@ export function sendAgentInput(
   data: string,
   opts?: ClientOptions,
 ): Promise<{ status: 'sent' | 'restarted' }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ status: 'sent' | 'restarted' }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/agent-input`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ data }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ status: 'sent' | 'restarted' }>(`/api/runs/${encodeURIComponent(runId)}/agent-input`, 'POST', { data }, opts)
 }
 
 export function restartRun(
@@ -226,16 +208,7 @@ export function applyRunFixes(
   repoName?: string,
   opts?: ClientOptions,
 ): Promise<{ results: ApplyFixResult[]; allOk: boolean }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ results: ApplyFixResult[]; allOk: boolean }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-fixes`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(repoName === undefined ? {} : { repoName }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ results: ApplyFixResult[]; allOk: boolean }>(`/api/runs/${encodeURIComponent(runId)}/apply-fixes`, 'POST', repoName === undefined ? {} : { repoName }, opts)
 }
 
 // What applying would land on, per captured repo, read live. `foreignDirty`
@@ -260,16 +233,7 @@ export function openRunRepo(
   repoName: string,
   opts?: ClientOptions,
 ): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ opened: boolean; path: string; editor?: string; error?: string }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/open-repo`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoName }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ opened: boolean; path: string; editor?: string; error?: string }>(`/api/runs/${encodeURIComponent(runId)}/open-repo`, 'POST', { repoName }, opts)
 }
 
 // The captured patch as text, for the Changes tab's inline diff. 404 when the
@@ -321,29 +285,18 @@ export function adoptSpecEdits(
   | { status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
   | { status: 'approved-for-new-run'; review_revision: string; newRunRequired: true }
 > {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, {
-    method: 'POST',
-    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, 'POST', opts?.expectedRevision ? { expectedRevision: opts.expectedRevision } : undefined, opts)
 }
 
 export function acceptRunTestReview(runId: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/accept-test-review`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/accept-test-review`, 'POST', { expectedRevision }, opts)
 }
 
 export function restoreSpecEdits(
   runId: string,
   opts?: TestReviewDecisionOptions,
 ): Promise<{ status: 'restored'; restored: string[] } | TestReviewReceipt> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, {
-    method: 'POST',
-    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, 'POST', opts?.expectedRevision ? { expectedRevision: opts.expectedRevision } : undefined, opts)
 }
 
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,
@@ -394,14 +347,5 @@ export function createReadableRunLog(
   file: string,
   opts?: ClientOptions,
 ): Promise<{ path: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ path: string }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/readable-log`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ file }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/readable-log`, 'POST', { file }, opts)
 }

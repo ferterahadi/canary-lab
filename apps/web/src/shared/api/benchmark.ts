@@ -3,7 +3,7 @@
 
 import type { BenchmarkIndexEntry, SabotageLevel } from '@shared/benchmark-index'
 import type { BenchmarkManifest, SabotageSkillSummary } from '@/features/benchmark/api/benchmark-types'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
 import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function listBenchmarks(opts?: ClientOptions): Promise<BenchmarkIndexEntry[]> {
@@ -56,12 +56,7 @@ export function startBenchmark(
   input: { feature: string; skill: string; level: SabotageLevel; iterations: number; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
 ): Promise<{ benchmarkId: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ benchmarkId: string }>(
-    `${baseUrl}/api/benchmarks`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
-    fetchImpl,
-  )
+  return requestJson<{ benchmarkId: string }>(`/api/benchmarks`, 'POST', input, opts)
 }
 
 export function abortBenchmark(id: string, opts?: ClientOptions): Promise<{ ok: boolean }> {
@@ -83,12 +78,7 @@ export function openBenchmarkWorktree(
   target: 'frozen' | 'A' | 'B',
   opts?: ClientOptions,
 ): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/open-worktree`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) },
-    fetchImpl,
-  )
+  return requestJson(`/api/benchmarks/${encodeURIComponent(id)}/open-worktree`, 'POST', { target }, opts)
 }
 
 // Clear a finished benchmark's worktrees. Two-phase, mirroring the route: call
@@ -100,12 +90,7 @@ export function clearBenchmarkWorktrees(
   confirm: boolean,
   opts?: ClientOptions,
 ): Promise<{ confirmed: boolean; willClear: number; cleared: number; freedBytes: number; alreadyCleared?: boolean }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/clear-worktrees`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }) },
-    fetchImpl,
-  )
+  return requestJson(`/api/benchmarks/${encodeURIComponent(id)}/clear-worktrees`, 'POST', { confirm }, opts)
 }
 
 

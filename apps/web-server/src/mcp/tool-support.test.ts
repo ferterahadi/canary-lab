@@ -1,5 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import { asJsonResult, asToonResult, errorResult, failureResult, hasText, isToolErrorPayload, summarizeUnifiedDiff } from './tool-support'
+import { asJsonResult, asToonResult, errorResult, failureResult, gettingStartedBusyResult, repoCollisionResult, hasText, isToolErrorPayload, summarizeUnifiedDiff } from './tool-support'
+
+describe('workflow rejection contracts', () => {
+  const active = { sessionId: 'demo-1', workflow: 'run', owner: 'external' as const, target: { kind: 'run', id: 'run-1' } }
+  const value = (result: ReturnType<typeof asJsonResult>) => JSON.parse((result.content[0] as { text: string }).text)
+
+  it('preserves the distinct demo, run and flight steering fields', () => {
+    const shared = { type: 'getting_started_busy', active, message: 'busy' }
+    expect(value(gettingStartedBusyResult({ active, message: 'busy' }))).toEqual({
+      ...shared, nextSteps: ['follow the active demo in its current owner; do not start another Getting Started workflow'],
+    })
+    expect(value(gettingStartedBusyResult({ active, message: 'busy', variant: 'run' }))).toEqual({
+      ...shared, nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+    })
+    expect(value(gettingStartedBusyResult({ active, message: 'busy', variant: 'flight' }))).toEqual({
+      ...shared, next: 'Follow the active demo in its current owner; do not start another run or Flight.',
+    })
+  })
+
+  it('does not manufacture missing flight response fields', () => {
+    expect(value(gettingStartedBusyResult({ variant: 'flight' }))).toEqual({
+      type: 'getting_started_busy', next: 'Follow the active demo in its current owner; do not start another run or Flight.',
+    })
+  })
+
+  it('keeps the collision payload and its required human choice', () => {
+    expect(value(repoCollisionResult({ kind: 'collision', conflictingRunId: 'run-1', conflictingFeature: 'shop',
+      repoPaths: ['/repo/shop'], options: ['worktree', 'queue'], message: 'choose isolation' }))).toEqual({
+      type: 'repo_collision_requires_choice', conflictingRunId: 'run-1', conflictingFeature: 'shop',
+      repoPaths: ['/repo/shop'], options: ['worktree', 'queue'], message: 'choose isolation', nextSteps: ['ask_user_worktree_or_queue'],
+    })
+  })
+})
 
 // The small result-shaping helpers every tool group returns through. They earn
 // their own suite because each one is used at a dozen call sites: proving the

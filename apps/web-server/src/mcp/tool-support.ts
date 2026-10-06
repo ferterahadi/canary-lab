@@ -16,7 +16,7 @@ import type { DraftRecord, ExternalDraftStage } from '../../../../shared/draft-t
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
-import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
+import type { CanaryLabMcpDeps, GettingStartedBusyActive, McpStartRunOutcome } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
 
 /** The feature-authoring context an MCP tool passes to a shared writer. Built
@@ -274,15 +274,33 @@ export function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
 }
 
-/** The rejection every demo-starting tool returns when another Getting Started
- *  demo already holds the workspace. Same shape as start_run's busy arm so a
- *  client handles one contract. */
-export function gettingStartedBusyResult(busy: { active: GettingStartedBusyActive; message: string }): CallToolResult {
+type GettingStartedBusyResponse =
+  | { active: GettingStartedBusyActive; message: string; variant?: 'default' | 'run' }
+  | { active?: unknown; message?: string; variant: 'flight' }
+
+/** Keep the existing tool-specific steering fields while sharing the rejection. */
+export function gettingStartedBusyResult(busy: GettingStartedBusyResponse): CallToolResult {
   return asJsonResult({
     type: 'getting_started_busy',
     active: busy.active,
     message: busy.message,
-    nextSteps: ['follow the active demo in its current owner; do not start another Getting Started workflow'],
+    ...(busy.variant === 'flight'
+      ? { next: 'Follow the active demo in its current owner; do not start another run or Flight.' }
+      : { nextSteps: [busy.variant === 'run'
+        ? 'follow the active demo in its current owner; do not start another run or flight'
+        : 'follow the active demo in its current owner; do not start another Getting Started workflow'] }),
+  })
+}
+
+export function repoCollisionResult(outcome: Extract<McpStartRunOutcome, { kind: 'collision' }>): CallToolResult {
+  return asJsonResult({
+    type: 'repo_collision_requires_choice',
+    conflictingRunId: outcome.conflictingRunId,
+    conflictingFeature: outcome.conflictingFeature,
+    repoPaths: outcome.repoPaths,
+    options: outcome.options,
+    message: outcome.message,
+    nextSteps: ['ask_user_worktree_or_queue'],
   })
 }
 

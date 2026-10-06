@@ -585,6 +585,21 @@ describe('get_flight — a hand-off nobody is working', () => {
     expect(String(second.next)).not.toContain('STALLED HAND-OFF')
   })
 
+  it.each(['pause', 'abort'])('clears contact only after a successful %s', async (action) => {
+    let statusCode = 409
+    const { call, text } = flightHarness({ reply: (req) => req.method === 'POST'
+      ? { statusCode, body: statusCode === 200 ? plainFlight(action === 'pause' ? 'paused' : 'aborted') : { error: 'refused' } }
+      : { statusCode: 200, body: handOff() } })
+    await call('get_flight', { flightId: 'fl-1' })
+    expect(await text(`${action}_flight`, { flightId: 'fl-1', confirm: true })).toBe(`${action} failed (409): refused`)
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toBeUndefined()
+    statusCode = 200
+    await call(`${action}_flight`, { flightId: 'fl-1', confirm: true })
+    // The fixture returns the same old hand-off again to expose whether the
+    // successful stop forgot its contact; a failed stop must keep that contact.
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toMatchObject({ neverPolled: true })
+  })
+
   it('leaves a fresh hand-off alone', async () => {
     const { call } = flightHarness({
       reply: { statusCode: 200, body: handOff({ updatedAt: new Date().toISOString() }) },

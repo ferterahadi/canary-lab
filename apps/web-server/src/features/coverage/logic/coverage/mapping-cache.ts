@@ -9,6 +9,7 @@ import type { AnnotateTestInput } from './annotate-engine'
 import { docsDirFor, readDocsCollection } from './docs-collection'
 import { PRD_SUMMARY_JSON } from './prd-summary-render'
 import { CoverageInputReads } from './input-reads'
+import { mappingInputMatches } from './mapping-validity'
 
 export interface MappingTestInput extends AnnotateTestInput {
   file: string
@@ -125,8 +126,8 @@ export function unexaminedMappingTests(
 ): MappingTestInput[] {
   return tests.filter((test) => {
     const prior = cache?.version === 2 ? cache.tests?.[test.name] : undefined
-    return !snapshot.tests[test.name] || prior?.fingerprint !== snapshot.tests[test.name]
-      || Object.entries(snapshot.requirements).some(([id, fingerprint]) => prior.requirements?.[id] !== fingerprint)
+    return !snapshot.tests[test.name] || !mappingInputMatches(snapshot.tests[test.name], snapshot.requirements,
+      prior ? { fingerprint: prior.fingerprint, requirements: prior.requirements ?? {} } : undefined)
   })
 }
 
