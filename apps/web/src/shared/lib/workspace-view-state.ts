@@ -114,6 +114,7 @@ export interface PersistedView {
   /** Current source is the default. False explicitly opens the selected run's
    *  recorded tests (URL only). True remains supported for older links. */
   currentTests?: boolean
+  approval?: string | null
   reviewFocus?: ReviewFocus
   view: WorkspaceView
   feature: string | null
@@ -238,6 +239,7 @@ export function readPersistedView(): PersistedView {
     const returnFlight = v === 'flights' ? null : params.get('from') || null
     const change = params.get('reviewChange')
     const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && (params.get('reviewFile') || params.get('reviewBase') === 'run' || params.get('reviewMode')) ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), ...(params.get('reviewFile') ? { file: params.get('reviewFile')! } : {}), line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
+    const approval = dialog === 'notifications' && params.get('approval') ? { approval: params.get('approval') } : {}
     const review = reviewFocus ? { reviewFocus } : {}
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
@@ -245,8 +247,8 @@ export function readPersistedView(): PersistedView {
     const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
       ? { currentTests: source === 'current' } : {}
     const log = flightLog ? { flightLog } : {}
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...tests }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...approval, ...tests }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...approval, ...tests }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -271,6 +273,7 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.run && state.currentTests !== undefined
       ? state.currentTests ? 'current' : 'recorded' : null)
     setOrDelete(params, 'dialog', state.dialog)
+    setOrDelete(params, 'approval', state.dialog === 'notifications' ? state.approval ?? null : null)
     // `wf` qualified the retired portify dialog (R50), `task` the retired
     // evaluation dialog (R29), and `draft` the retired external-authoring
     // dialog (authoring now surfaces on the flight's specs-coverage stage) —

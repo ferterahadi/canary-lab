@@ -27,6 +27,7 @@ export type InvalidationTopic =
   | 'flights'
   | 'pre-flights'
   | 'notifications'
+  | 'approvals'
   | 'journal'
   | 'project-config'
   | 'onboarding'

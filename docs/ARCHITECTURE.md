@@ -1340,8 +1340,17 @@ link, or the per-repo reason there is none.
   legacy peers. Missing requirements, run/boot isolation, verification URLs,
   standalone portify review and unanswered flight checkpoints can elicit input.
   Existing explicit inputs and autopilot decisions bypass the ask. Unsupported
-  clients receive chat or UI-link recovery instructions; decline/cancel leaves
-  work pending. Form responses are validated and bound to their operation and
+  clients receive a browser link for form decisions. `approval-store.ts` persists
+  the shared question and receipt under workspace logs/approvals; Notifications
+  and the banner above Flight expose the same ID as the native chat form.
+  Browser answers replay the owning command's revision checks and share its
+  single-settlement receipt with native answers. `wait_for_approval` delivers
+  the original result to agents when the browser resolves the question.
+  Client decline/cancel keeps a browser-backed form pending. Some MCP hosts
+  leave a native form displayed after browser resolution; dismissing it returns
+  the receipt. The app refreshes open views through `approvals-changed`, with
+  periodic reconciliation for missed events. URL-mode checkpoints retain their
+  existing domain-owned UI and completion checks. Form responses are validated and bound to their operation and
   reviewed revision; in-process receipts prevent duplicate application on retry.
   Open requests expire after 30 minutes and across server restarts. URL-mode
   document input uses the coverage document rail. Secret entry uses a scoped,
@@ -1369,7 +1378,7 @@ link, or the per-repo reason there is none.
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
   no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
-  setup-installed default**: one always-loaded `exec` tool dispatching all 70 atomic
+  setup-installed default**: one always-loaded `exec` tool dispatching all registered atomic
   handlers). `lifecycle` and `full` remain direct-tool rollback/debug surfaces. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional

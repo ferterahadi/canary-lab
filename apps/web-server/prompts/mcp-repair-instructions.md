@@ -119,12 +119,21 @@ Use the shipped canary-lab-repair-discovery skill for the complete workflow.
 
 ## User input through MCP 2.0
 
-Let the owning MCP command request missing input with SDK 2.0 elicitation
-(`input_required`). The client collects the response and retries the command.
-Do not answer a user form yourself or ask the same question in chat first.
-Existing user instructions and autopilot choices still apply without another ask.
-On `needs-input`, leave work pending after decline/cancel, stale input, or an
-unfinished UI action; never retry or repeat the question automatically. Chat is
-only the fallback when elicitation is unavailable. Never collect passwords, API
-keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
-Setup and reconnection questions still use chat while MCP is unavailable.
+Use the native Canary connector in the requesting chat so SDK 2.0 elicitation
+(`input_required`) reaches the human there. Do not substitute a shell MCP client,
+answer a form yourself, or recreate the question in chat. Existing explicit
+instructions and autopilot choices still apply without another ask.
+
+Form decisions have one shared record. The native form links to the same approval
+in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
+the ID; repeat on `still_waiting`. The human answers once in either surface.
+A browser answer resolves the server decision; some clients keep their native
+form visible until the human dismisses it. Dismissal then returns the stored
+result. Client decline/cancel alone does not represent a human decision.
+
+Without an `approvalId`, leave `needs-input` pending after decline/cancel, stale
+input, or an unfinished UI action; do not automatically retry or repeat the
+question. Setup/reconnection can use chat while MCP is unavailable. Never collect
+passwords, API keys, or access tokens in chat or form elicitation; use the returned
+Canary UI URL for secret entry.

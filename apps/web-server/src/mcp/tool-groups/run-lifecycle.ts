@@ -198,7 +198,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const askCoverage = (change: CoverageChange): CallToolResult | InputRequiredResult => {
       const spec = {
         ...coverageQuestion(change),
-        message: `${change.freshness.reasons.join(' ')} Previous coverage percentages do not describe the current tests. Update coverage before running, or run now for diagnostics with coverage still marked stale?`,
+        message: 'The coverage report may not match the current tests. Update it first, or run the tests anyway?',
         fallback: () => asJsonResult({
           type: 'coverage_update_requires_choice',
           runStarted: false,

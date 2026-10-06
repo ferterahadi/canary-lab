@@ -231,7 +231,7 @@ describe('MCP HTTP server (smoke)', () => {
         coverageStale: true,
       })
       expect(answer).toHaveBeenCalledTimes(2)
-      expect(answer.mock.calls[0]?.[0].params).toMatchObject({ message: expect.stringContaining('Previous coverage percentages') })
+      expect(answer.mock.calls[0]?.[0].params).toMatchObject({ message: expect.stringContaining('The coverage report may not match the current tests') })
       expect(answer.mock.calls[1]?.[0].params).toMatchObject({ message: expect.stringContaining('other-storefront-suite') })
     } finally {
       if (client) await client.close().catch(() => undefined)

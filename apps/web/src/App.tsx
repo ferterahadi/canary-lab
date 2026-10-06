@@ -1,3 +1,4 @@
+import { useApprovals } from './shared/state/use-approvals'
 import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { coverageGeneratingFlight as generatingFlightFor } from './features/flights/lib/workspace-flights'
 import { useCoverageRecalculation } from './shared/state/use-coverage-recalculation'
@@ -367,6 +368,8 @@ export function App() {
     onStartFlight: handleStartFlight,
   }
 
+  const approvals = useApprovals()
+  const pendingApprovals = approvals.items.filter((item) => item.status === 'pending')
   const review = {
     features,
     onFeaturesChanged: refreshFeatures,
@@ -394,8 +397,14 @@ export function App() {
         returnToFlight={returnFlight ? { flightId: returnFlight, label: returnFlightLabel, onOpen: openFlight } : null}
         onOpenPortify={openPortifyStage}
         onNavigateToRun={navigateToRun}
-        notificationControl={<NotificationCenter open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
+        notificationControl={<NotificationCenter approvals={approvals} approvalFocus={nav.approval} open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
       />
+      {(pendingApprovals.length > 0 || approvals.error) && <div role="status" className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2 text-xs">
+        <span>{approvals.error ? 'Approval status unavailable. Retrying…' : `${pendingApprovals.length} approval${pendingApprovals.length === 1 ? '' : 's'} waiting for you`}</span>
+        {pendingApprovals.map((item) => <button key={item.id} className="cl-button px-2 py-1" onClick={() => { nav.setApproval(item.id); nav.setNotificationsOpen(true) }}>
+          Review approval{item.feature ? ` · ${item.feature}` : ''}
+        </button>)}
+      </div>}
       {pendingStarts.map((pending) => <PendingRunStartNotice key={pending.requestId} pending={pending}
         onDismiss={dismissPendingStart} onRunStarted={(runId) => navigateToRun(pending.feature, runId)}
         onReview={openPendingReview} />)}

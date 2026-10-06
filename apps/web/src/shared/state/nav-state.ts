@@ -43,6 +43,7 @@ export interface NavState {
   /** The changed-tests review (routed ?dialog=tests-review) — the status bar's
    *  "Tests changed" pill and the run hero's snapshot link both open it. */
   specReviewOpen: boolean
+  approval?: string | null
   notificationsOpen: boolean
   /** The run whose boot-failure detail is open (routed ?dialog=boot-failure on
    *  that `run`). Stored as the run id, like `focusTest`, so selecting another
@@ -107,6 +108,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     verifyOpen: persisted.dialog === 'verification',
     specReviewOpen: persisted.dialog === 'tests-review',
     notificationsOpen: persisted.dialog === 'notifications',
+    approval: persisted.approval,
     bootFailureFor: persisted.dialog === 'boot-failure' ? persisted.run : null,
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
@@ -166,6 +168,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     feature: state.feature,
     run: state.run,
     dialog: routedDialog(state),
+    ...(state.notificationsOpen && state.approval ? { approval: state.approval } : {}),
     flight: state.flight,
     flightStage: state.flightStage,
     flightLog: state.flightLog,

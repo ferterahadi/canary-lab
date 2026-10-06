@@ -604,3 +604,12 @@ it('ignores unknown review categories and clears the category when switching to 
   persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', change: 'added' } }))
   expect(window.location.search).not.toContain('reviewChange')
 })
+
+
+it('round-trips a shared approval within Notifications without broadcasting its selection to other tabs', () => {
+  persistView(view({ view: 'flights', flight: 'feature:shop', dialog: 'notifications', approval: 'decision-1' }))
+  expect(readPersistedView()).toMatchObject({ view: 'flights', flight: 'feature:shop', dialog: 'notifications', approval: 'decision-1' })
+  expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('approval')
+  persistView(view({ dialog: null, approval: 'decision-1' }))
+  expect(window.location.search).not.toContain('approval=')
+})

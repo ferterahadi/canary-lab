@@ -10,6 +10,11 @@ import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/s
 import type { McpClientFacts } from '../client-surface'
 import { registerRunLifecycleTools } from './run-lifecycle'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { withApprovals } from '../approval-context'
+import { ApprovalStore } from '../approval-store'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const approvalTemp = trackTempDirs('run-approvals-')
 
 // The run-lifecycle tools: start_run's four-way entrypoint (continue a healing
 // run / resolve a run_ref / restart a failed run / start fresh), boot_services,
@@ -469,7 +474,7 @@ describe('start_run: starting fresh', () => {
 
     const opened = await raw('start_run', START, context()) as InputRequiredResult
     expect(opened.inputRequests).toMatchObject({ answer: { params: {
-      message: expect.stringContaining('Previous coverage percentages do not describe the current tests'),
+      message: expect.stringContaining('The coverage report may not match the current tests'),
       requestedSchema: { properties: { choice: { enum: ['Update coverage first', 'Run now with stale coverage'] } } },
     } } })
     const answered = await raw('start_run', START, context(opened.requestState, {
@@ -587,6 +592,27 @@ describe('start_run: starting fresh', () => {
     })
     expect(startRun).toHaveBeenCalledTimes(2)
     expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('resumes both real start_run questions from the browser and delivers the final result to an agent wait', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+    const approvals = new ApprovalStore(approvalTemp())
+    const invoke = withApprovals('start_run', (args, ctx) => raw('start_run', args, ctx),
+      { approvals, getUiUrl: () => 'http://localhost:1234' } as CanaryLabMcpDeps)
+    const first = await invoke(START, context()) as InputRequiredResult
+    const firstId = String(first.requestState)
+    await approvals.answer(firstId, { choice: 'Run now with stale coverage' })
+    const next = JSON.parse(toolResultText(await approvals.wait(firstId, 0)))
+    expect(next).toMatchObject({ status: 'needs-input', reviewUrl: expect.stringContaining('approval=') })
+    expect(next.approvalId).not.toBe(firstId)
+    const waiting = approvals.wait(next.approvalId, 30_000)
+    await approvals.answer(next.approvalId, { isolation: 'worktree' })
+    expect(JSON.parse(toolResultText(await waiting))).toMatchObject({ runId: 'run-new', coverageStale: true })
+    expect(startRun).toHaveBeenCalledTimes(2)
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+    expect(approvals.list().every((r) => r.status === 'answered')).toBe(true)
   })
 
   it('rejects an approval when the coverage revision changes while the form is open', async () => {

@@ -607,7 +607,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
       ['cleanup', 'runs'], ['cleanup', 'worktrees'], ['cleanup', 'portify'],
       ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined], ['pre-flights', undefined],
-      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
+      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined], ['approvals', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
     expect(api.getVersionStatus.mock.calls.length).toBe(2)

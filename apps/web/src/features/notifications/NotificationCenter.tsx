@@ -1,3 +1,5 @@
+import { ApprovalCards } from '@/shared/ui/ApprovalCards'
+import type { ApprovalsResource } from '@/shared/state/use-approvals'
 import { useState } from 'react'
 import type { NotificationTarget, WorkspaceNotification } from '@shared/notifications/types'
 import { timeAgo } from '@/shared/lib/format'
@@ -29,7 +31,9 @@ function notificationAction(item: WorkspaceNotification): string {
     : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
 }
 
-export function NotificationCenter({ open, onOpenChange, onNavigate }: {
+export function NotificationCenter({ open, onOpenChange, onNavigate, approvals, approvalFocus }: {
+  approvals?: ApprovalsResource
+  approvalFocus?: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onNavigate: (target: NotificationTarget) => void
@@ -37,6 +41,7 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
   const inbox = useNotifications()
   const [showHistory, setShowHistory] = useState(false)
   const items = [...inbox.items].sort((a, b) => attentionRank(a) - attentionRank(b) || b.createdAt.localeCompare(a.createdAt))
+  const approvalCount = approvals?.items.filter((item) => item.status === 'pending').length ?? 0
   const attention = items.filter(needsAttention)
   const history = items.filter((item) => !needsAttention(item))
   const visible = showHistory ? history : attention
@@ -108,12 +113,12 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
     <>
       <StatusPill
         name="Notifications"
-        dotState={inbox.error ? 'failed' : attention.length ? 'warning' : 'idle'}
-        count={attention.length}
+        dotState={inbox.error ? 'failed' : attention.length + approvalCount ? 'warning' : 'idle'}
+        count={attention.length + approvalCount}
         countTone={hasWeakerHint ? 'boot' : undefined}
         onClick={() => onOpenChange(true)}
-        title={inbox.error ?? `${attention.length} need attention. ${history.length} in history.`}
-        ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${attention.length} need attention`}
+        title={inbox.error ?? `${attention.length + approvalCount} need attention. ${history.length} in history.`}
+        ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${attention.length + approvalCount} need attention`}
       />
       <Modal
         open={open}
@@ -131,14 +136,15 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
         stableScrollGutter
         subheader={
           <nav className="flex gap-5 border-b border-line px-5 pt-2" aria-label="Notification filter">
-            <button className={`cl-tab ${!showHistory ? 'cl-tab-active' : ''}`} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length}</span></button>
+            <button className={`cl-tab ${!showHistory ? 'cl-tab-active' : ''}`} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length + approvalCount}</span></button>
             <button className={`cl-tab ${showHistory ? 'cl-tab-active' : ''}`} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length}</span></button>
           </nav>
         }
       >
+        {approvals && <ApprovalCards approvals={approvals} focus={approvalFocus} />}
         {inbox.error && <div role="alert" className="px-5 pt-3 text-xs text-danger">{inbox.error} <button className="cl-button px-2 py-1" onClick={() => { void inbox.refresh() }}>Retry</button></div>}
         {inbox.loading && <p className="p-5 text-xs text-secondary">Loading notifications…</p>}
-        {!inbox.loading && !inbox.error && !visible.length && (
+        {!inbox.loading && !inbox.error && !visible.length && !approvalCount && !approvalFocus && (
           <div className="px-5 py-6">
             <EmptyState
               testId="notification-center-empty"

@@ -54,6 +54,8 @@ export interface WorkspaceNavigation {
   reviewFocus?: ReviewFocus
   setReviewFocus: (focus: ReviewFocus | undefined) => void
   specReviewOpen: boolean
+  approval: string | null
+  setApproval: (id: string | null) => void
   notificationsOpen: boolean
   setNotificationsOpen: (open: boolean) => void
   flightStartFor: string | null
@@ -167,6 +169,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigFor(feature, tab)
   }, [setConfigFor])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
+  const [approval, setApproval] = useState<string | null>(SEED.approval ?? null)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
   const [bootFailureFor, setBootFailureFor] = useState<string | null>(SEED.bootFailureFor)
   const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
@@ -223,6 +226,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    approval,
     notificationsOpen,
     bootFailureFor,
     flightStartFor,
@@ -252,7 +256,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests, approval])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -315,6 +319,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    approval,
     notificationsOpen,
     flightStartFor,
     flightStartFresh,
@@ -340,6 +345,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setSpecReviewOpen,
     bootFailureFor,
     setBootFailureFor,
+    setApproval,
     setNotificationsOpen,
     setFlightStartFor,
     setFlightStartNew,

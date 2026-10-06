@@ -1,3 +1,4 @@
+import type { ApprovalStore } from './approval-store'
 import type { RepositoryObserver } from '../shared/repository-observer'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
@@ -113,6 +114,7 @@ export interface CanaryLabMcpDeps {
   isRepoActive?: (feature: string, repo: string) => boolean
   coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>
   testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
+  approvals?: ApprovalStore
   getUiUrl?: () => string | undefined
   discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   store: RunStore
