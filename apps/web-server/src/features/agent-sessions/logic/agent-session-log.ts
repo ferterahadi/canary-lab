@@ -129,26 +129,29 @@ export function writeWorkflowAgentRef(
   opts: { agent: AgentKind; cwd: string; spawnedAt: string; sessionId?: string },
   homeDir: string = os.homedir(),
 ): void {
+  if (opts.agent === 'claude' && opts.sessionId) {
+    writeClaudeWorkflowAgentRef(dir, opts.cwd, opts.sessionId, homeDir)
+  } else {
+    persistWorkflowAgentRef(dir, () => ({
+      activeAgent: 'codex', codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt },
+    }))
+  }
+}
+
+export function writeClaudeWorkflowAgentRef(dir: string, cwd: string, sessionId: string, homeDir: string = os.homedir()): void {
+  persistWorkflowAgentRef(dir, () => ({
+    activeAgent: 'claude',
+    sessions: { claude: { agent: 'claude', sessionId, logPath: claudeSessionLogPath(cwd, sessionId, homeDir) } },
+  }))
+}
+
+function persistWorkflowAgentRef(
+  dir: string,
+  build: () => AgentSessionRefFile | { activeAgent: 'codex'; codexDiscovery: { cwd: string; spawnedAt: string } },
+): void {
   try {
-    const file =
-      opts.agent === 'claude' && opts.sessionId
-        ? {
-            activeAgent: 'claude' as const,
-            sessions: {
-              claude: {
-                agent: 'claude' as const,
-                sessionId: opts.sessionId,
-                logPath: claudeSessionLogPath(opts.cwd, opts.sessionId, homeDir),
-              },
-            },
-          }
-        : { activeAgent: 'codex' as const, codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt } }
-    // Create the sidecar dir first: a flight's per-stage dir (flightDir/<stage>)
-    // is NOT pre-created by the store, so without this the write ENOENTs and the
-    // catch below swallows it — the agent's session is orphaned (its JSONL still
-    // lands in ~/.claude/projects, but no ref points the UI at it → a blank
-    // Activity rail even though the agent ran). Idempotent for callers whose dir
-    // already exists (benchmark, coverage).
+    const file = build()
+    // Flight stages and Portify callers may not have created their sidecar dir.
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'agent-session.json'), JSON.stringify(file, null, 2))
   } catch {

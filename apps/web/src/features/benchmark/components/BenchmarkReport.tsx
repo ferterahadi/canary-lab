@@ -1,3 +1,4 @@
+import { downloadBlob } from '@/shared/lib/download'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BenchmarkArm,
@@ -172,15 +173,7 @@ export function fmtTokens(n: number): string {
 
 /** Trigger a client-side file download (no server round-trip). */
 export function downloadText(filename: string, text: string, mime: string): void {
-  const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  downloadBlob(new Blob([text], { type: mime }), filename)
 }
 
 /** Render the benchmark report as a shareable markdown artifact. */

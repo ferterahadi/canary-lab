@@ -6,6 +6,8 @@ import type { ChildProcess } from 'child_process'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import * as agentProcess from '../../../agent-sessions/logic/agent-process'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
+import { resolveWorkflowAgentRef, writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
 
 // Stub `claude`/`codex` on PATH with no-op executables so the test never spawns
 // a real agent, regardless of what's installed on the machine.
@@ -28,6 +30,7 @@ afterAll(() => {
   try { fs.rmSync(binDir, { recursive: true, force: true }) } catch { /* ignore */ }
 })
 afterEach(() => {
+  vi.unstubAllEnvs()
   for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
   roots.length = 0
 })
@@ -117,6 +120,27 @@ describe('runPortifyAgent', () => {
 })
 
 describe('writePortifyClaudeRef', () => {
+  it('creates a missing workflow directory and round-trips the shared reference under a configured Claude home', () => {
+    const cwd = fs.realpathSync(tmp())
+    const dir = path.join(cwd, 'nested', 'workflow')
+    vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(cwd, 'agent-config'))
+    writePortifyClaudeRef(dir, cwd, 'session-123')
+    expect(resolveWorkflowAgentRef(dir)).toEqual({
+      agent: 'claude', sessionId: 'session-123', logPath: claudeSessionLogPath(cwd, 'session-123'),
+    })
+    const other = path.join(cwd, 'general-workflow')
+    writeWorkflowAgentRef(other, { agent: 'claude', cwd, sessionId: 'session-123', spawnedAt: '2026-01-01T00:00:00Z' })
+    expect(fs.readFileSync(path.join(dir, 'agent-session.json'), 'utf8')).toBe(fs.readFileSync(path.join(other, 'agent-session.json'), 'utf8'))
+  })
+
+  it('keeps reference writes best-effort when the destination cannot be a directory', () => {
+    const cwd = tmp()
+    const blocked = path.join(cwd, 'blocked')
+    fs.writeFileSync(blocked, 'keep')
+    expect(() => writePortifyClaudeRef(blocked, cwd, 'session-123')).not.toThrow()
+    expect(fs.readFileSync(blocked, 'utf8')).toBe('keep')
+  })
+
   it('writes an agent-session.json ref pointing at the claude log', () => {
     const dir = tmp()
     writePortifyClaudeRef(dir, dir, 'sess-123')

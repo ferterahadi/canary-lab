@@ -1,3 +1,4 @@
+import { downloadBlob } from '@/shared/lib/download'
 import type { PlaywrightArtifactGroup } from '@shared/run-detail'
 import { evaluationArchiveFilename } from '@shared/evaluation-archive-naming'
 import { isTerminalRunStatus as isSharedTerminalRunStatus } from '@shared/run-state'
@@ -43,22 +44,10 @@ export async function downloadEvaluationReport(
   } = {},
 ): Promise<void> {
   const fetchImpl = opts.fetchImpl ?? fetch
-  const documentRef = opts.documentRef ?? document
-  const urlApi = opts.urlApi ?? URL
   const res = await fetchImpl(evaluationHref(runId))
   if (!res.ok) throw new Error(`evaluation export failed: HTTP ${res.status}`)
-  const href = urlApi.createObjectURL(await res.blob())
-  const link = documentRef.createElement('a')
-  try {
-    link.href = href
-    link.download = evaluationFilename(feature, runId)
-    link.style.display = 'none'
-    documentRef.body.appendChild(link)
-    link.click()
-  } finally {
-    link.remove()
-    urlApi.revokeObjectURL(href)
-  }
+  downloadBlob(await res.blob(), evaluationFilename(feature, runId), opts)
+
 }
 
 export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined): boolean {

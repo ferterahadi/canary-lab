@@ -1,3 +1,4 @@
+import { runCleanupFailure } from './run-cleanup-response'
 import type { CleanupWorktree } from '../../../../../../shared/cleanup-listing'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 // Runs REST — the cleanup surface: run/worktree listings, worktree open+delete,
@@ -96,15 +97,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
   // HTTP codes here.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/trim', async (req, reply) => {
     const result = deps.store.trimArtifacts(req.params.runId)
-    if (!result.ok) {
-      if (result.reason === 'not-found') return notFound(reply, 'run')
-      reply.code(409)
-      return {
-        error: result.reason === 'active'
-          ? 'run is still active; abort it first'
-          : 'run is still active; reap or abort first',
-      }
-    }
+    if (!result.ok) return runCleanupFailure(reply, result)
     return { freedBytes: result.freedBytes ?? 0 }
   })
 }

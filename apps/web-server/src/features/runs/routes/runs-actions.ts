@@ -1,3 +1,4 @@
+import { runCleanupFailure } from './run-cleanup-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 // Runs REST — start/heal/lifecycle actions: start a run, pause/cancel heal, write
@@ -539,15 +540,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // status codes.
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const result = deps.store.delete(req.params.runId)
-    if (!result.ok) {
-      if (result.reason === 'not-found') return notFound(reply, 'run')
-      reply.code(409)
-      return {
-        error: result.reason === 'active'
-          ? 'run is still active; abort it first'
-          : 'run is still active; reap or abort first',
-      }
-    }
+    if (!result.ok) return runCleanupFailure(reply, result)
     reply.code(204)
     return ''
   })

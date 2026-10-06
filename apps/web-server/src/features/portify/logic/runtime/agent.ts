@@ -1,8 +1,7 @@
 import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
-import path from 'path'
 import { type ChildProcess } from 'child_process'
-import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
+import { writeClaudeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
@@ -116,13 +115,5 @@ export function runPortifyAgent(opts: {
 // log so the shared AgentSessionView can render the agent timeline (same ref
 // shape the benchmark setup view uses).
 export function writePortifyClaudeRef(workflowDir: string, cwd: string, sessionId: string): void {
-  try {
-    // Route through the canonical resolver so this honors CLAUDE_CONFIG_DIR and
-    // the realpath/encoding rules instead of recomputing the path by hand.
-    const logPath = claudeSessionLogPath(cwd, sessionId)
-    const ref = { activeAgent: 'claude', sessions: { claude: { agent: 'claude', sessionId, logPath } } }
-    fs.writeFileSync(path.join(workflowDir, 'agent-session.json'), JSON.stringify(ref, null, 2))
-  } catch {
-    /* best-effort — the UI falls back to the text log */
-  }
+  writeClaudeWorkflowAgentRef(workflowDir, cwd, sessionId)
 }

@@ -1,3 +1,4 @@
+import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createRestartedOrchestrator } from './logic/restart-orchestrator'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
@@ -7,8 +8,6 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 // the runs route (agent-input → restartHeal) and the external-heal handoff call
 // it, so it always needed to be shared.
 import path from 'path'
-import { isRestartableRunStatus } from '../../../../../shared/run-state'
-import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import type { ServerContext } from '../../server-context'
 import { findFeature } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
@@ -21,7 +20,6 @@ import type { AutoHealConfig } from './logic/runtime/run-orchestrator-types'
 import { restore } from './logic/runtime/env-switcher/switch'
 import type { makeAttachRunStreams } from './run-stream-wiring'
 import { settleOrchestratorRun } from './logic/settle-run'
-import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
 
 export function makeRestartLocalHeal(
   ctx: ServerContext,
@@ -48,12 +46,8 @@ export function makeRestartLocalHeal(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
-      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
-      if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
-      if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
-      if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
-        return { ok: false, reason: 'new-run-required' as const }
-      }
+      const eligibility = checkRestartEligibility(manifest, runDirFor(logsDir, runId), 'heal')
+      if (!eligibility.ok) return eligibility
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
       const feature = findFeature(featuresDir, manifest.feature)

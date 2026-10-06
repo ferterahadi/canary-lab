@@ -1,3 +1,4 @@
+import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createRestartedOrchestrator } from './logic/restart-orchestrator'
 import { createExternalHealSession } from './logic/heal/external-heal-session'
@@ -6,7 +7,7 @@ import { createExternalHealSession } from './logic/heal/external-heal-session'
 // 430-line object literal inline in `register` — the closures it is built from
 // now arrive as an explicit `parts` argument instead of being captured.
 import path from 'path'
-import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared/run-state'
+import { isActiveRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
@@ -35,7 +36,6 @@ import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../.
 import { assertStableSpecSelection } from '../../shared/playwright-config'
 import { assertNoPendingRunReview } from './logic/runtime/run-review-gate'
 import { RunnerLog } from './logic/runtime/runner-log'
-import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import {
   restore,
 } from './logic/runtime/env-switcher/switch'
@@ -44,7 +44,6 @@ import type { ExecutionType } from '../../../../../shared/verification'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
 import { settleOrchestratorRun } from './logic/settle-run'
-import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
 
 export interface RunsRouteDepsParts {
   attachRunStreams: ReturnType<typeof makeAttachRunStreams>
@@ -381,13 +380,8 @@ export function buildRunsRouteDeps(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
-      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
-      if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
-      if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
-      if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
-      if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
-        return { ok: false, reason: 'new-run-required' as const }
-      }
+      const eligibility = checkRestartEligibility(manifest, runDirFor(logsDir, runId), 'run')
+      if (!eligibility.ok) return eligibility
 
       const feature = findFeature(featuresDir, manifest.feature)
       if (!feature) return { ok: false, reason: 'not-restartable' as const }
