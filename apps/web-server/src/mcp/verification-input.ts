@@ -19,11 +19,11 @@ export function requestVerificationUrls(
     z.url().refine((value) => {
       const url = new URL(value)
       return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && url.hostname !== 'replace.invalid'
-    }).describe(`Base URL for ${target.name}. HTTP or HTTPS; no credentials or placeholder URLs.`),
+    }).describe(`${target.name} URL (http:// or https://). Do not include passwords or placeholder addresses.`),
   ])))
   return requestUserInput(request, ctx.clientFacts(), {
     scope, revision: [revision, targets], mode: 'form', schema,
-    message: `Provide the deployed service URLs for ${feature.name}. Saving this configuration does not run tests.`,
+    message: `Enter the service URLs to test for ${feature.name}. This saves the settings without running tests.`,
     fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', targets,
       next: 'ASK THE USER for these target URLs in chat, then retry with targetUrls. Never invent URLs or select production implicitly.' }),
   }, save)

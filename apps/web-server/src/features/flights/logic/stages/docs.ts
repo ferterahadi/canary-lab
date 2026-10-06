@@ -254,8 +254,8 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     const docs = userDocs(featureDirFor(deps, m.feature))
     const hasDocs = docs.length > 0
     const base = hasDocs
-      ? `${docs.length} requirement doc(s) ready for "${m.feature}"${linked.length > 0 ? ` (${linked.length} linked from your intent)` : ''}. Add more, then continue — or have an agent gather requirements guided by the intent.`
-      : `No requirement docs yet for "${m.feature}". Add docs yourself, or have an agent gather them guided by the intent.`
+      ? `${docs.length} requirement document${docs.length === 1 ? '' : 's'} ready for "${m.feature}". Continue, add more, or ask an agent to collect requirements from the repo or code changes.`
+      : `Add requirements for "${m.feature}": provide documents, or ask an agent to collect them from the repo or code changes.`
     const note = attempt ? describeAttempt(attempt) : ''
     return {
       kind: 'checkpoint',

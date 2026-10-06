@@ -28,6 +28,7 @@ import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE, NEW_RUN_REQUIRED_NEXT_STEPS } from '../../shared/single-attempt'
 import { findFeature } from '../../shared/feature-loader'
 import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
+import { repositoryIsolationMessage } from '../../shared/approval-messages'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -170,7 +171,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const hosts = Object.values(target.targetOrigins).join(', ')
       const spec = {
         ...remoteQuestion(target),
-        message: `${feature} boots no services in "${target.env}" and targets deployed hosts (${hosts}). A run's repair cycle edits local code those hosts never read. Check them with Verify, or run with repair anyway?`,
+        message: `${feature} targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
         fallback: () => asJsonResult({
           type: 'remote_target_requires_choice',
           runStarted: false,
@@ -395,7 +396,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (outcome.kind === 'collision') {
           // Same-repo collision and the client didn't choose. Nothing started —
           // ask the user, then re-call start_run with isolation:"worktree"|"queue".
-          return askIsolation(coverageDecision, () => repoCollisionResult(outcome), outcome.message)
+          return askIsolation(coverageDecision, () => repoCollisionResult(outcome), repositoryIsolationMessage(outcome.conflictingFeature))
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -480,7 +481,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     // One `chosen` for both entries: the fresh ask never runs it (it returns the
     // question), and the answering call reaches it through `applyUserInput`.
     const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
-    const ask = (fallback: () => CallToolResult, message = 'Boot in an isolated worktree now, or queue until the repositories are free?') =>
+    const ask = (fallback: () => CallToolResult, message: string) =>
       requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
     const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
       try {
@@ -505,7 +506,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           })
         }
         if (outcome.kind === 'collision') {
-          return ask(() => repoCollisionResult(outcome), outcome.message)
+          return ask(() => repoCollisionResult(outcome), repositoryIsolationMessage(outcome.conflictingFeature))
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -572,7 +573,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       revision: [detail.manifest.startedAt, detail.manifest.status, detail.manifest.healCycles],
       mode: 'form',
       schema: z.object({ action: z.enum(['keep', 'abort']).describe('Keep the existing run, or stop it and its services.') }),
-      message: `Stop run ${runId} (${detail.manifest.feature}) and its services? Keeping it preserves the current repair cycle.`,
+      message: `Stop run ${runId} for ${detail.manifest.feature} and its services? Choose keep to let it continue.`,
       fallback: () => asJsonResult({
         type: 'abort_requires_confirmation', runId,
         message: 'Stop this run from its Run panel. confirm:true from an agent is not a human cancellation decision.',

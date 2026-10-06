@@ -87,7 +87,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
         kind: 'run-failed',
         // "repair", not "heal": the UI's own tile above this checkpoint says
         // "Repair cycles", and one subsystem gets one name.
-        message: `Run ${runId} ${status} after ${plural(manifest!.healCycles, 'repair cycle')}.${whyLine} Start a new run, or build the report as it stands?`,
+        message: `Run ${status} after ${plural(manifest!.healCycles, 'repair cycle')}.${whyLine} Start a new run, or report these results?`,
         options: [...CHECKPOINT_OPTIONS['run-failed']],
         data: evidence,
       },

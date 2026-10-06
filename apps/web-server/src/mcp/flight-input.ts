@@ -84,7 +84,7 @@ export async function requestFlightCheckpoint(
     url.searchParams.set('inputToken', issueCheckpointInput(flight))
     return requestUserInput(request, facts, {
       scope, mode: 'url', url: url.toString(),
-      message: secret ? 'Enter the missing environment values directly in Canary Lab. Secrets stay outside this conversation.' : 'Review this checkpoint or import the requirements in Canary Lab, then return here.',
+      message: secret ? 'Add the missing settings in Canary. Keep passwords and API keys out of chat.' : 'Review this step in Canary, then return here.',
       fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', flightId, url: url.toString(),
         next: `${elicitationAdviceFor(facts, 'url')} Open this Canary Lab URL to provide input, then resume. Never paste credentials into chat.` }),
     }, async () => {
@@ -98,7 +98,7 @@ export async function requestFlightCheckpoint(
   if (choices.length === 0) return fallback()
   const schema = z.object({
     choice: z.enum(choices as [string, ...string[]]),
-    feedback: z.string().max(4000).optional(),
+    feedback: z.string().max(4000).optional().describe('If requesting changes, say what to change.'),
   }).refine((value) => value.choice !== 'revise' || !!value.feedback?.trim())
   return requestUserInput(request, facts, {
     scope, revision: [flight.updatedAt, stage.key, cp], mode: 'form', schema,

@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { portifyReviewMessage } from '../../../../shared/approval-messages'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../../portify/logic/runtime/unportify'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
@@ -167,10 +168,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     kind: 'checkpoint',
     checkpoint: {
       kind: 'portify-apply',
-      message:
-        `${note ? `${note}\n\n` : ''}Canary started two copies of the app side by side and both came up. Save these port changes for "${feature}"? ` +
-        `Nothing goes into your repos — each run applies the changes to a scratch copy and undoes them afterwards. ` +
-        `Request changes to send the agent feedback for another pass. Decline and the changes are thrown away — runs stay one at a time, and a later flight can try again.`,
+      message: `${note ? `${note}\n\n` : ''}${portifyReviewMessage(feature)}`,
       options: [...CHECKPOINT_OPTIONS['portify-apply']],
       data: { workflowId, diff },
     },
@@ -289,11 +287,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     kind: 'checkpoint',
     checkpoint: {
       kind: 'portify-gate',
-      message:
-        `Make "${feature}" safe to run two at a time? Canary first verifies port injection already declared by the suite, ` +
-        `or reuses a saved port change for the same app. It proves readiness by starting two scratch copies on different ports. ` +
-        `An agent runs only when changes are needed; duration depends on the stack and the edits required. ` +
-        `Skip it and runs go one at a time — a later flight can ask again.`,
+      message: `Allow "${feature}" to run in parallel? Canary checks two app copies on different ports and asks an agent for changes only if needed. Skip to keep runs one at a time.`,
       options: [...CHECKPOINT_OPTIONS['portify-gate']],
     },
   })

@@ -130,7 +130,7 @@ describe.each([
       isolation ? { kind: 'started', runId, booted: true } : collision)
     const { raw } = harness({ startRun }, eliciting)
     const opened = await raw(tool, args, context()) as InputRequiredResult
-    expect(opened.inputRequests).toMatchObject({ answer: { params: { message: expect.stringContaining('run-9 is using /repo/shop'), requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } })
+    expect(opened.inputRequests).toMatchObject({ answer: { params: { message: expect.stringContaining('"search" is already using this app'), requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } })
     expect(startRun.mock.calls.every((callArgs) => callArgs[3] === undefined)).toBe(true)
 
     const answered = await raw(tool, args, context(opened.requestState, { action: 'accept', content: { isolation: 'worktree' } }))
@@ -904,7 +904,7 @@ describe('start_run: a suite that boots nothing and targets a deployed host', ()
     const { raw, startRun } = remote({}, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
     expect(opened.inputRequests).toMatchObject({ answer: { params: {
-      message: expect.stringContaining('targets deployed hosts (https://api.staging.example.com)'),
+      message: expect.stringContaining('targets https://api.staging.example.com (staging)'),
       requestedSchema: { properties: { choice: { enum: ['Verify the deployed target', 'Run with repair anyway'] } } },
     } } })
 

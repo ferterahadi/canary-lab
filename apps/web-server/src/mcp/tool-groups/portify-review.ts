@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { elicitationAdviceFor } from '../client-surface'
 import { requestUserInput, inputPending, inputFingerprint } from '../elicitation'
 import { asJsonResult, errorResult, summarizeUnifiedDiff, type ToolGroupContext } from '../tool-support'
+import { portifyReviewMessage } from '../../shared/approval-messages'
 
 export function registerPortifyReviewTool(ctx: ToolGroupContext): void {
   ctx.registerTool('review_portify', {
@@ -16,9 +17,9 @@ export function registerPortifyReviewTool(ctx: ToolGroupContext): void {
     return requestUserInput(request, facts, {
       scope: ['portify-review', ctx.deps.projectRoot, workflowId], revision: manifest,
       mode: 'form',
-      schema: z.object({ choice: z.enum(['save', 'revise', 'discard']), feedback: z.string().max(4000).optional() })
+      schema: z.object({ choice: z.enum(['save', 'revise', 'discard']), feedback: z.string().max(4000).optional().describe('If requesting changes, say what to change.') })
         .refine((value) => value.choice !== 'revise' || !!value.feedback?.trim()),
-      message: `Review ${manifest.feature}: ${JSON.stringify(proof)}. Save the verified overlay, request changes, or discard the scratch work?`,
+      message: portifyReviewMessage(manifest.feature),
       fallback: () => asJsonResult({ workflowId, ...proof, status: 'needs-input', reason: 'elicitation-unavailable',
         next: `${elicitationAdviceFor(facts, 'form')} Show the verified diff and ASK THE USER whether to save, revise, or discard. Use save_portify/cancel_portify with confirm:true only for their chosen action; revise_external_portify requires their feedback.` }),
     }, async (answer) => asJsonResult({

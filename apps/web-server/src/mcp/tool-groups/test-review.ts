@@ -133,7 +133,7 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     return requestUserInput(request, facts, {
       scope, revision: review_revision,
       mode: 'form', schema: z.object({ choice: z.enum(['Accept & commit', 'Restore recorded files']) }),
-      message: `Review ${review.files.length} changed suite files for ${review.feature} (${runId}). ${reviewUrl(review) ? `Optional comparison: ${reviewUrl(review)}. ` : ''}Patch: ${review.patchPath}. Revision ${review_revision}. Choose Accept & commit or Restore recorded files. Cancel leaves the review pending. Acceptance is not a passing test result.`,
+      message: `${review.feature} has ${review.files.length} changed test-suite file${review.files.length === 1 ? '' : 's'}. Accept and commit the changes, or restore the files used in the run? Approval does not mean the tests passed. Cancel leaves this pending.${reviewUrl(review) ? `\n\n[Compare changes in Canary](${reviewUrl(review)}).` : ''}`,
       fallback: () => asJsonResult(browserHandoff(review, request_id, waitToken, 'elicitation-unavailable', facts)),
       onNonAccept: async (reason) => asJsonResult(await continuation(request_id, runId, browserHandoff(review, request_id, waitToken, reason, facts))),
     }, async (answer) => {

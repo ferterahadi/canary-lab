@@ -112,8 +112,8 @@ function coverageStuckOutcome(
   reason: CoverageStopReason,
 ): StageOutcome {
   const message = reason === 'no-progress'
-    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Accept the gaps that are left, or retry after changing the requirements or tests.`
-    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Accept the gaps that are left, or try another pass.`
+    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Continue with these gaps, or retry?`
+    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Continue with these gaps, or try again?`
   return {
     kind: 'checkpoint',
     checkpoint: {

@@ -69,7 +69,7 @@ describe('document discovery before MCP 2.0 elicitation', () => {
     try {
       const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
       expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('requirements.md') } })
-      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('Previous path: unknown') } })
+      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('Where is the file now?') } })
       expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
     } finally {
       readlink.mockRestore()

@@ -140,9 +140,12 @@ describe('elicited domain input', () => {
     const tools = captureTools(registerPortifyTools, { getPortify: () => manifest }, facts)
     const args = { workflowId: 'w1' }
     const opened = await tools.raw('review_portify', args, context()) as InputRequiredResult
-    // No diff on this manifest: the review still reports diff stats rather than
-    // failing to summarize, because the verification is the proof being reviewed.
-    expect(JSON.stringify(opened.inputRequests)).toContain('diffStats')
+    // Keep the question readable; structured verification stays in the fallback.
+    expect(JSON.stringify(opened.inputRequests)).toContain('Save them for future runs')
+    const withoutForms = captureTools(registerPortifyTools, { getPortify: () => manifest }, { ...facts, elicitation: { form: false, url: false } })
+    expect(JSON.parse(text(await withoutForms.raw('review_portify', args, context())))).toMatchObject({
+      verification: manifest.verification, diffStats: expect.any(Object),
+    })
     const revised = JSON.parse(text(await tools.raw('review_portify', args, context(opened.requestState, { action: 'accept', content: { choice: 'revise', feedback: 'use the sibling overlay' } }))))
     expect(revised).toMatchObject({ decision: 'revise', feedback: 'use the sibling overlay', next: expect.stringContaining('revise_external_portify') })
   })

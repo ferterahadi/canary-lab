@@ -154,7 +154,7 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       kind: 'checkpoint',
       checkpoint: {
         kind: 'export-mode',
-        message: `How should the evaluation for "${m.feature}" be written? raw = fast report straight from the run evidence; localized = an agent rewrites the per-test reasoning for readability (slower).`,
+        message: `For "${m.feature}", create a quick report from the test results (raw), or have an agent rewrite the explanations for clarity (localized, slower)?`,
         options: [...CHECKPOINT_OPTIONS['export-mode']],
         data: { runId: m.links?.runId },
       },
