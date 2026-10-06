@@ -2,6 +2,32 @@ import { describe, it, expect } from 'vitest'
 import { writeCoversTag, writeCoversTags, coversTagTokens, stripCoverageTags } from './tag-writer'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 
+describe('shared tag parsing across extraction and edits', () => {
+  it.each(['tag', "'tags'", 'tags'])(
+    'uses the first %s property and preserves the other source when adding and removing mappings',
+    (key) => {
+      // Later aliases and computed keys must not displace the first literal
+      // property: all three consumers need to agree on which tags they own.
+      const before = "{ ...defaults, ['tag']: '@req-computed', "
+      const after = ", tag: ['@req-later'], timeout: 1000 }"
+      const body = "async () => { expect(1).toBe(1) }"
+      const source = `test('t', ${before}${key}: ['@smoke', \`@req-R1\`]${after}, ${body})`
+      const requirements = (text: string) => extractTestsFromSource('a.spec.ts', text).tests[0].requirements
+
+      expect(requirements(source)).toEqual(['R1'])
+      const tagged = writeCoversTag(source, 't', { requirements: ['R1', 'R2'] })
+      expect(tagged).toBe(`test('t', ${before}${key}: ['@smoke', '@req-R1', '@req-R2']${after}, ${body})`)
+      expect(requirements(tagged)).toEqual(['R1', 'R2'])
+      expect(writeCoversTag(tagged, 't', { requirements: ['R2'] })).toBe(tagged)
+
+      const stripped = stripCoverageTags(tagged)
+      expect(stripped).toBe(`test('t', ${before}${key}: ['@smoke']${after}, ${body})`)
+      expect(requirements(stripped)).toBeUndefined()
+      expect(stripCoverageTags(stripped)).toBe(stripped)
+    },
+  )
+})
+
 describe('coversTagTokens', () => {
   it('renders requirement + path tokens', () => {
     expect(coversTagTokens({ requirements: ['R1', 'R2'], pathTypes: ['happy', 'sad'] })).toEqual([

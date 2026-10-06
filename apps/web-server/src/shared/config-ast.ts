@@ -174,12 +174,7 @@ function objectNodeToValue(
   const out: ConfigObject = {}
   for (const prop of node.properties) {
     if (prop.type !== 'ObjectProperty' && prop.type !== 'Property') continue
-    const key = (() => {
-      const k = (prop as N.ObjectProperty).key
-      if (k.type === 'Identifier') return k.name
-      if (k.type === 'StringLiteral') return k.value
-      return null
-    })()
+    const key = propertyKeyName(prop)
     if (key == null) continue
     out[key] = nodeToValue(
       (prop as N.ObjectProperty).value as K.ExpressionKind,
@@ -366,42 +361,44 @@ export interface ReadResult extends ParsedConfig {
   source: string
 }
 
-export function readFeatureConfig(source: string): ReadResult {
+type ConfigKind = 'feature' | 'playwright'
+
+function parseConfig(source: string, kind: ConfigKind): { ast: ReturnType<typeof recast.parse>; node: N.ObjectExpression } {
   const ast = parseSource(source)
-  const loc = locateFeatureConfigObject(ast)
-  if (!loc) throw new Error('Unable to locate feature config object literal')
+  const locate = kind === 'feature' ? locateFeatureConfigObject : locatePlaywrightConfigObject
+  const loc = locate(ast)
+  if (!loc) throw new Error(`Unable to locate ${kind} config object literal`)
+  return { ast, node: loc.node }
+}
+
+function readConfig(source: string, kind: ConfigKind): ReadResult {
+  const { node } = parseConfig(source, kind)
   const complex: string[] = []
-  const value = objectNodeToValue(loc.node, complex, '')
+  const value = objectNodeToValue(node, complex, '')
   return { value, complexFields: complex, source }
+}
+
+function writeConfig(source: string, next: ConfigValue, kind: ConfigKind): string {
+  const { ast, node } = parseConfig(source, kind)
+  if (typeof next !== 'object' || next === null || Array.isArray(next)) {
+    throw new Error(`${kind === 'feature' ? 'Feature' : 'Playwright'} config must be a plain object`)
+  }
+  patchObjectLiteral(node, next as ConfigObject)
+  return printSource(ast)
+}
+
+export function readFeatureConfig(source: string): ReadResult {
+  return readConfig(source, 'feature')
 }
 
 export function writeFeatureConfig(source: string, next: ConfigValue): string {
-  const ast = parseSource(source)
-  const loc = locateFeatureConfigObject(ast)
-  if (!loc) throw new Error('Unable to locate feature config object literal')
-  if (typeof next !== 'object' || next === null || Array.isArray(next)) {
-    throw new Error('Feature config must be a plain object')
-  }
-  patchObjectLiteral(loc.node, next as { [k: string]: ConfigValue })
-  return printSource(ast)
+  return writeConfig(source, next, 'feature')
 }
 
 export function readPlaywrightConfig(source: string): ReadResult {
-  const ast = parseSource(source)
-  const loc = locatePlaywrightConfigObject(ast)
-  if (!loc) throw new Error('Unable to locate playwright config object literal')
-  const complex: string[] = []
-  const value = objectNodeToValue(loc.node, complex, '')
-  return { value, complexFields: complex, source }
+  return readConfig(source, 'playwright')
 }
 
 export function writePlaywrightConfig(source: string, next: ConfigValue): string {
-  const ast = parseSource(source)
-  const loc = locatePlaywrightConfigObject(ast)
-  if (!loc) throw new Error('Unable to locate playwright config object literal')
-  if (typeof next !== 'object' || next === null || Array.isArray(next)) {
-    throw new Error('Playwright config must be a plain object')
-  }
-  patchObjectLiteral(loc.node, next as { [k: string]: ConfigValue })
-  return printSource(ast)
+  return writeConfig(source, next, 'playwright')
 }

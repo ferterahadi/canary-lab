@@ -1,4 +1,5 @@
 import { isTestCall } from '../../../../shared/test-declaration'
+import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from '../../../../shared/test-tags'
 import ts from 'typescript'
 import type { PathType } from '../../../../../../../shared/coverage/types'
 
@@ -62,9 +63,7 @@ function planTagEdit(source: string, testName: string, tag: CoversTag): TagEdit 
   const visit = (node: ts.Node): void => {
     if (edit) return
     if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) === testName) {
-      const detail = node.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-        | ts.ObjectLiteralExpression
-        | undefined
+      const detail = findTestDetails(node)
       if (detail) {
         edit = planMergeIntoDetail(source, detail, wanted)
       } else {
@@ -100,12 +99,7 @@ function planMergeIntoDetail(
   detail: ts.ObjectLiteralExpression,
   tokens: string[],
 ): TagEdit | null {
-  const tagProp = detail.properties.find(
-    (p): p is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(p) &&
-      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
-      (p.name.text === 'tag' || p.name.text === 'tags'),
-  )
+  const tagProp = findTestTagProperty(detail)
 
   if (!tagProp) {
     // Details object exists but has no `tag` — add the property at the front.
@@ -118,11 +112,7 @@ function planMergeIntoDetail(
   }
 
   const value = tagProp.initializer
-  const existing: string[] = []
-  if (ts.isStringLiteralLike(value)) existing.push(value.text)
-  else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) if (ts.isStringLiteralLike(el)) existing.push(el.text)
-  }
+  const existing = readTagPropertyStrings(value)
   const merged: string[] = [...existing]
   for (const t of tokens) if (!merged.includes(t)) merged.push(t)
   if (merged.length === existing.length) return null // nothing new — no-op
@@ -179,20 +169,11 @@ function planStripEdit(
   call: ts.CallExpression,
   detail: ts.ObjectLiteralExpression,
 ): TagEdit | null {
-  const tagProp = detail.properties.find(
-    (p): p is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(p) &&
-      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
-      (p.name.text === 'tag' || p.name.text === 'tags'),
-  )
+  const tagProp = findTestTagProperty(detail)
   if (!tagProp) return null
 
   const value = tagProp.initializer
-  const existing: string[] = []
-  if (ts.isStringLiteralLike(value)) existing.push(value.text)
-  else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) if (ts.isStringLiteralLike(el)) existing.push(el.text)
-  }
+  const existing = readTagPropertyStrings(value)
   const kept = existing.filter((t) => !COVERAGE_TOKEN.test(t))
   if (kept.length === existing.length) return null // nothing coverage-owned — no-op
 
@@ -228,9 +209,7 @@ export function stripCoverageTags(source: string): string {
   const edits: TagEdit[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) !== null) {
-      const detail = node.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-        | ts.ObjectLiteralExpression
-        | undefined
+      const detail = findTestDetails(node)
       if (detail) {
         const edit = planStripEdit(source, node, detail)
         if (edit) edits.push(edit)

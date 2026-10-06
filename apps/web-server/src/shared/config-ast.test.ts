@@ -31,6 +31,27 @@ const FEATURE_PATTERN_C = `const config = {
 }
 module.exports = { config }`
 
+describe.each([
+  { kind: 'feature', label: 'Feature', source: FEATURE_PATTERN_A, read: readFeatureConfig, write: writeFeatureConfig },
+  { kind: 'playwright', label: 'Playwright', source: "export default { workers: 1 }", read: readPlaywrightConfig, write: writePlaywrightConfig },
+])('$kind config validation', ({ kind, label, source, read, write }) => {
+  it('preserves source exactly when writing back an unchanged value', () => {
+    const parsed = read(source)
+    expect(parsed.source).toBe(source)
+    expect(write(source, parsed.value)).toBe(source)
+  })
+
+  it.each([null, [], 5])('rejects %j with the config-specific error', (next) => {
+    expect(() => write(source, next)).toThrow(`${label} config must be a plain object`)
+  })
+
+  it('reports a missing config before validating the replacement', () => {
+    const message = `Unable to locate ${kind} config object literal`
+    expect(() => read('// empty')).toThrow(message)
+    expect(() => write('// empty', null)).toThrow(message)
+  })
+})
+
 describe('readFeatureConfig', () => {
   it('reads module.exports.config = {...}', () => {
     const r = readFeatureConfig(FEATURE_PATTERN_A)

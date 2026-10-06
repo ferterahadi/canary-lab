@@ -1,4 +1,5 @@
 import { unwrapExpression } from './unwrap-expression'
+import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from './test-tags'
 import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
 export type TestModifier = DeclarationModifier
 import ts from 'typescript'
@@ -206,34 +207,13 @@ export function parseTestTagList(tags: string[]): TestAnnotations {
   }
 }
 
-// Pull the string values out of a `tag` property in the test's details object
-// (`test('…', { tag: '@req-R1' }, …)` or `{ tag: ['@req-R1', '@path-happy'] }`).
-function readTagPropertyStrings(value: ts.Expression): string[] {
-  const out: string[] = []
-  if (ts.isStringLiteralLike(value)) {
-    out.push(value.text)
-  } else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) {
-      if (ts.isStringLiteralLike(el)) out.push(el.text)
-    }
-  }
-  return out
-}
-
 // Read coverage tags from a `test(...)` call's Playwright details object (the
 // argument that is an object literal). Absent / non-object → no tags.
 function parseTestTags(call: ts.CallExpression): TestAnnotations {
-  const detail = call.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-    | ts.ObjectLiteralExpression
-    | undefined
+  const detail = findTestDetails(call)
   if (!detail) return {}
-  for (const prop of detail.properties) {
-    if (!ts.isPropertyAssignment(prop)) continue
-    const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : ''
-    if (key !== 'tag' && key !== 'tags') continue
-    return parseTestTagList(readTagPropertyStrings(prop.initializer))
-  }
-  return {}
+  const prop = findTestTagProperty(detail)
+  return prop ? parseTestTagList(readTagPropertyStrings(prop.initializer)) : {}
 }
 
 // Union two annotation sources (Playwright tags take precedence in order, then
