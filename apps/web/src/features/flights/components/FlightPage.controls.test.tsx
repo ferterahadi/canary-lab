@@ -274,6 +274,127 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('flight controls (R48/R71)', () => {
+  it.each([
+    ['scout', 'Repo scan'], ['scaffold', 'Suite setup'], ['docs', 'Requirements'],
+    ['specs-coverage', 'Tests & coverage'], ['run', 'Test run'],
+    ['evaluation-export', 'Evaluation report'], ['portify', 'Parallel setup'],
+  ] as const)('integrates one shared evidence toolbar for %s', async (stage, label) => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: stage }))
+    await render('fl_1', { stage, onSelectStage: vi.fn() })
+    const card = container.querySelector('[data-testid="stage-facts-card"]')!
+    const toolbar = card.querySelector('[data-testid="stage-evidence-toolbar"]')!
+    expect(toolbar.querySelector('h2')?.textContent).toBe(label)
+    expect(toolbar.querySelector('[data-testid="stage-status-chip"]')).not.toBeNull()
+    expect(toolbar.querySelector('[data-testid="stage-actions"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-testid="stage-evidence-toolbar"]')).toHaveLength(1)
+    expect(toolbar.querySelectorAll('[data-testid="stage-status-chip"]')).toHaveLength(1)
+    expect(card.contains(container.querySelector('[data-testid="stage-facts"]'))).toBe(true)
+  })
+
+  it('keeps one guarded recovery action in the header and links Paused to the affected stage', async () => {
+    const record = manifest({ status: 'paused', pauseReason: 'stage-failed', currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'specs-coverage' ? 'failed' : 'done',
+        ...(key === 'specs-coverage' ? { error: "agent exited with code 2: unexpected argument '--full-auto'", endedAt: '2026-01-01T00:01:00Z' } : {}),
+      })),
+      attention: { state: 'actionable', stage: 'specs-coverage', title: 'Flight paused: Tests & coverage agent failed',
+        reason: 'Coverage is 45%; target is 100%.', checkedAt: 'now', revision: 'a' },
+    })
+    mocks.getFlight.mockResolvedValue(record)
+    let reject!: (error: Error) => void
+    mocks.resumeFlight.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail }))
+    // Explicitly browsing run history must not conceal a flight-level pause.
+    const onSelectStage = vi.fn()
+    await render('fl_1', { stage: 'run', onSelectStage })
+    expect(container.querySelector('[data-testid="flight-attention"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-attention-summary"]')).toBeNull()
+    const chip = container.querySelector<HTMLButtonElement>('button[data-testid="flight-status"]')!
+    expect(chip.title).toContain('Coverage is 45%')
+    await act(async () => chip.click())
+    expect(onSelectStage).toHaveBeenCalledWith('specs-coverage')
+    const button = container.querySelector<HTMLButtonElement>('header [data-testid="flight-continue"]')!
+    expect(button.textContent).toBe('Resume at Tests & coverage')
+    expect(container.querySelectorAll('[data-testid="flight-continue"]')).toHaveLength(1)
+    await act(async () => { button.click(); button.click() })
+    expect(mocks.resumeFlight).toHaveBeenCalledTimes(1)
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.disabled).toBe(true)
+    await act(async () => reject(new Error('Agent unavailable')))
+    expect(container.querySelector('[data-testid="flight-action-error"]')?.textContent).toContain('Agent unavailable')
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.disabled).toBe(false)
+  })
+
+  it('routes the attention recovery to stale Requirements instead of retrying the later failed stage', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'stage-failed', currentStage: 'specs-coverage',
+      attention: { state: 'actionable', stage: 'specs-coverage', remainingStage: 'prd-summary', title: 'Flight paused',
+        reason: 'Requirements must be refreshed', checkedAt: 'now', revision: 'a' },
+    }))
+    await render('fl_1')
+    const button = container.querySelector<HTMLButtonElement>('header [data-testid="flight-continue"]')!
+    expect(button.textContent).toBe('Run from Requirements')
+    await act(async () => button.click())
+    expect(container.querySelector('[data-testid="flight-redo-docs"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(mocks.resumeFlight).not.toHaveBeenCalled()
+  })
+
+  it('shows a compact stage reason and opens the historical failure in Activity only on request', async () => {
+    const ledger = structuredClone(LEDGER)
+    mocks.getFeatureCoverage.mockResolvedValue(ledger)
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'stage-failed', currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'specs-coverage' ? 'failed' : 'done',
+        ...(key === 'specs-coverage' ? { error: 'Recorded launch failure\nFull diagnostics', endedAt: '2026-01-01T00:01:00Z' } : {}),
+      })),
+      attention: { state: 'actionable', stage: 'specs-coverage', title: 'Flight paused', reason: 'Mapping is stale', checkedAt: 'now', revision: 'a' },
+    }))
+    const onOpenLog = vi.fn()
+    await render('fl_1', { stage: 'specs-coverage', onSelectStage: vi.fn(), onOpenLog })
+    expect(container.querySelector('[data-testid="flight-attention"]')).toBeNull()
+    const summary = container.querySelector('[data-testid="flight-attention-summary"]')!
+    expect(summary.textContent).toContain('Coverage is out of date')
+    expect(summary.textContent).toContain('Target 100%')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Out of date')
+    expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.getAttribute('aria-label')).toContain('Mapping is stale')
+    expect(container.querySelector('[data-testid="stage-facts-card"]')?.contains(summary)).toBe(true)
+    expect(container.textContent).not.toContain('Full diagnostics')
+    expect(container.querySelector('[data-testid="stage-error-detail"]')).toBeNull()
+    await act(async () => summary.querySelector<HTMLButtonElement>('button')!.click())
+    expect(onOpenLog).toHaveBeenCalledWith(expect.stringMatching(/^system:/))
+    expect(container.querySelector('[data-testid="stage-activity"]')?.textContent).toContain('Full diagnostics')
+    expect(mocks.resumeFlight).not.toHaveBeenCalled()
+  })
+
+  it('resolves and recovers attention in the already-open view without erasing history or starting work', async () => {
+    vi.useFakeTimers()
+    try {
+      const record = manifest({ status: 'paused', pauseReason: 'stage-failed', currentStage: 'specs-coverage',
+        stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'specs-coverage' ? 'failed' : 'done',
+          ...(key === 'specs-coverage' ? { error: 'Old launch error' } : {}),
+        })),
+        error: 'Old launch error', attention: { state: 'actionable', stage: 'specs-coverage', title: 'Flight paused',
+          reason: 'Below target', checkedAt: 'now', revision: 'a' },
+      })
+      mocks.getFlight.mockResolvedValue(record)
+      await render('fl_1')
+      const notice = container.querySelector('[data-testid="flight-attention-summary"]')
+      mocks.getFlight.mockResolvedValue({ ...record, attention: { ...record.attention, state: 'resolved',
+        title: 'Earlier failure resolved by current evidence.', reason: 'Remaining: Evaluation report', revision: 'b' } })
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(container.querySelector('[data-testid="flight-attention-summary"]')).toBe(notice)
+      expect(notice?.textContent).toContain('Earlier failure resolved by current evidence.')
+      expect(notice?.textContent).toContain('View earlier failure')
+      expect(container.textContent).not.toContain('Old launch error')
+      expect(container.querySelector('[data-testid="flight-continue"]')).toBeNull()
+      expect(container.querySelector('[data-testid="stage-error"]')).toBeNull()
+      expect(mocks.resumeFlight).not.toHaveBeenCalled()
+      expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('✓Verified')
+      expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.getAttribute('aria-label')).toContain('Earlier failure resolved')
+      mocks.getFlight.mockResolvedValue({ ...record, attention: { ...record.attention, state: 'unavailable', reason: 'Could not verify current state', revision: 'c' } })
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(notice?.textContent).toContain('Could not verify current state')
+      expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Unverified')
+      expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.getAttribute('aria-label')).toContain('Could not verify current state')
+      expect(container.querySelector('header')?.textContent).toContain('Check again')
+    } finally { vi.useRealTimers() }
+  })
+
   it('updates the rail warning and recovery menu while the Flight stays open', async () => {
     vi.useFakeTimers()
     try {

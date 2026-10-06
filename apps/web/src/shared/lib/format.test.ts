@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { dayTime, formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
 import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
@@ -23,6 +23,12 @@ describe('formatDuration', () => {
   })
   it('formats multi-minute durations as Mm Ss', () => {
     expect(formatDuration(125_000)).toBe('2m 5s')
+  })
+  it('rolls a rounded-up second into the next unit instead of printing 60', () => {
+    // 21m 59.6s used to print "21m 60s"; 59.96s used to print "60.0s".
+    expect(formatDuration(1_319_600)).toBe('22m 0s')
+    expect(formatDuration(59_960)).toBe('1m 0s')
+    expect(formatDuration(59_940)).toBe('59.9s')
   })
   it('returns em-dash for negative or non-finite input', () => {
     expect(formatDuration(-1)).toBe('—')
@@ -76,6 +82,22 @@ describe('shortDateTime', () => {
   })
   it('falls back to the raw input when it cannot parse', () => {
     expect(shortDateTime('garbage')).toBe('garbage')
+  })
+})
+
+describe('dayTime', () => {
+  it('says "Today" with a 24-hour time for a stamp from the current day', () => {
+    const now = new Date(2026, 9, 6, 18, 0, 0).getTime()
+    expect(dayTime(new Date(2026, 9, 6, 14, 48, 4).toISOString(), now)).toMatch(/^Today 14:48$/)
+  })
+  it('falls back to the short date for any other day', () => {
+    const now = new Date(2026, 9, 6, 18, 0, 0).getTime()
+    const iso = new Date(2026, 9, 3, 22, 27, 33).toISOString()
+    expect(dayTime(iso, now)).toBe(shortDateTime(iso))
+    expect(dayTime(iso, now)).not.toContain('Today')
+  })
+  it('falls back to the raw input when it cannot parse', () => {
+    expect(dayTime('garbage')).toBe('garbage')
   })
 })
 

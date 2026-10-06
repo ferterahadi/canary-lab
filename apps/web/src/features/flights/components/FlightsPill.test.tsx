@@ -119,7 +119,7 @@ describe('FlightsPill', () => {
     const rows = [...menu!.querySelectorAll('[data-testid^="flight-open-"]')]
     expect(rows[0]?.getAttribute('data-testid')).toBe('flight-open-fl_wait')
     act(() => { (rows[0] as HTMLButtonElement).click() })
-    expect(onOpen).toHaveBeenCalledWith('fl_wait')
+    expect(onOpen).toHaveBeenCalledWith('fl_wait', 'scout')
   })
 
   it('offers the flight command as the empty state (never dead-end)', () => {
@@ -766,7 +766,7 @@ it('searches inside collapsed groups and filters attention without treating queu
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
   expect(document.querySelectorAll('[data-testid^="flight-open-"]')).toHaveLength(3)
-  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs input'))!
+  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs attention'))!
   act(() => filter.click())
   expect(document.querySelector('[data-testid="flight-open-paused"]')).not.toBeNull()
   expect(document.querySelector('[data-testid="flight-open-queued"]')).toBeNull()

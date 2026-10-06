@@ -21,7 +21,7 @@ import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
 import { presentedIndexStages } from '../lib/external-work'
 import { activityRowKey, presentedFlightRows } from './presented-flight-rows'
-import type { StageRailRow } from './StageRail'
+import { stageRowKey, type StageRailRow } from './StageRail'
 
 /** One tiny cell per USER-VISIBLE stage (same rows as the flight detail rail —
  *  similarity hidden unless it needs a human, run+heal merged), colored by
@@ -72,7 +72,7 @@ export function FlightsPickerDialog({
   features: Array<{ name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }>
   coverageJobs?: CoverageJobIndexEntry[]
   portifyWorkflows?: PortifyIndexEntry[]
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
   onPickPreFlight: (taskId: string) => void
@@ -121,7 +121,7 @@ export function FlightsPickerDialog({
       subheader={
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
           <input className="cl-input min-w-0 flex-1 px-3 py-2 text-xs" aria-label="Search flights" placeholder="Search flights…" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs input <span className="ml-1">{attentionCount}</span></button>
+          <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs attention <span className="ml-1">{attentionCount}</span></button>
         </div>
       }
       footer={<p className="mr-auto text-[11px] text-secondary">Stage indicators show current step state and coverage freshness.</p>}
@@ -196,7 +196,7 @@ export function PickerRow({
   portifyWorkflows?: PortifyIndexEntry[]
   derivedStages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
   coverageWarning?: CoverageStageWarning
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
 }) {
@@ -215,7 +215,12 @@ export function PickerRow({
         <button
           type="button"
           data-testid={`flight-open-${row.flight.flightId}`}
-          onClick={() => onPick(row.flight!.flightId)}
+          onClick={() => {
+            const flight = row.flight!
+            const target = flight.attention?.stage ?? flight.currentStage
+            if (flightNeedsAttention(flight) && target) onPick(flight.flightId, stageRowKey(target))
+            else onPick(flight.flightId)
+          }}
           className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
           style={{ border: '1px solid transparent' }}
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
@@ -270,7 +275,7 @@ export function PickerGroupSection({
   derivedStagesByName?: ReadonlyMap<string, Array<{ key: FlightStageKey; status: FlightStageStatus }> | undefined>
   coverageWarnings?: ReadonlyMap<string, CoverageStageWarning>
   expandInitially?: boolean
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
 }) {

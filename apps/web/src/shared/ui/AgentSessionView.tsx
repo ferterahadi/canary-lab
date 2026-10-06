@@ -20,7 +20,7 @@ import { clientLabel } from './external-client-branding'
 import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
 import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
 import {
-  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, textKey, type ExternalSessionActivity, type LogLine,
+  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, systemLogId, type ExternalSessionActivity, type LogLine,
 } from './activity-log'
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
@@ -361,7 +361,7 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
     const occurrence = occurrences.get(line) ?? 0
     occurrences.set(line, occurrence + 1)
     // Hashed: the id rides the `?log=` deep link, and a line can be any length.
-    items.push({ kind: 'system', id: `system:${textKey(line)}:${occurrence}`, source: 'system', sequence: items.length,
+    items.push({ kind: 'system', id: systemLogId(line, occurrence), source: 'system', sequence: items.length,
       timestamp: parseSystemLine(line).timestamp, line })
   }
   externalSessions.forEach((session, index) => {

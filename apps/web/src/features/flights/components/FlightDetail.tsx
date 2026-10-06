@@ -13,17 +13,17 @@ import type {
 import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 import { usePortify } from '@/features/portify/state/PortifyContext'
 import { capitalizeFirst } from '@/shared/lib/format'
+import { hasFlightAttention } from '@shared/flights/attention'
 import { StatusDot } from '@/shared/ui/atoms'
 import { useEscapeToClose } from '@/shared/ui/Overlays'
 import { Chip } from '@/shared/ui/StatusChip'
 import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
-import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { ACTIVITY_CHIP, featureChipState, FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternalWorkPark, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_ICON, presentStageStatus } from './stage-meta'
+import { STAGE_BLURB, StageStatusIcon, presentStageStatus } from './stage-meta'
 import { STAGE_COMPANION, stageRowKey } from './StageRail'
 import { formatStageDuration } from './StageStatusLines'
 import {
@@ -43,7 +43,7 @@ import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { useFlightRecord } from '../state/use-flight-record'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
-import { coverageStageWarning, isCoverageWarningRow } from './coverage-stage-warning'
+import { coverageStageWarning } from './coverage-stage-warning'
 import { activityRowKey as rowKeyForActivity, presentedFlightRows } from './presented-flight-rows'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
@@ -171,6 +171,8 @@ export function FlightDetail({
   }, [activityRequest, setStageActivityOpen])
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
+  const actionPending = useRef(false)
+  const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [parallelSetupStarting, setParallelSetupStarting] = useState(false)
   // The existing Portify store remains the one owner for this long-running
@@ -217,6 +219,7 @@ export function FlightDetail({
       // an externally driven flight — the rest are placeholders `seeded` hides.
       opts: { env: 'local', coverageTarget: 100, yolo: false, ...(indexEntry.stageProducer ? { stageProducer: indexEntry.stageProducer } : {}) },
       status: indexEntry.status,
+      attention: indexEntry.attention,
       ...(indexEntry.pauseReason ? { pauseReason: indexEntry.pauseReason } : {}),
       currentStage: indexEntry.currentStage,
       stages: (indexEntry.stages ?? []).map((s) => ({ key: s.key, status: s.status })),
@@ -232,16 +235,23 @@ export function FlightDetail({
   const coverageNextAction = coverage.value?.freshness?.nextAction
   const coverageRecovery = coverageWarningText && coverage.confirmed && coverageNextAction && coverage.value?.freshness?.state !== 'updating'
     ? { stage: coverageNextAction.stage, warning: coverageWarningText } : undefined
+  const attentionRecovery = flight?.attention?.state === 'actionable' && flight.attention.remainingStage
+    && flight.attention.remainingStage !== flight.attention.stage
+    ? { stage: flight.attention.remainingStage, warning: flight.attention.reason } : coverageRecovery
   const seeded = !derivedManifest && !derivedFeature && !liveFlight && !fetched && seed != null
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
 
   /** Fire a flight control call: refetch on success, surface failure inline. */
   const act = useCallback((call: () => Promise<unknown>, onSuccess?: () => void): void => {
+    if (actionPending.current) return
+    actionPending.current = true
+    setActionBusy(true)
     setActionError(null)
-    call()
+    Promise.resolve().then(call)
       .then(() => { (onSuccess ?? refetch)() })
       .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => { actionPending.current = false; setActionBusy(false) })
   }, [refetch])
 
   const startParallelSetup = useCallback((): void => {
@@ -336,8 +346,11 @@ export function FlightDetail({
         || parallelSetup.status === 'done' || parallelSetup.status === 'skipped')
       ? report
       : undefined
+    const attentionStage = flight?.attention && (flight.attention.state === 'actionable' || flight.attention.state === 'unavailable')
+      && flight.attention.stage ? stageRowKey(flight.attention.stage) : null
     const pick =
-      railRows.find((s) => s.status === 'waiting-for-approval')
+      railRows.find((s) => s.key === attentionStage)
+      ?? railRows.find((s) => s.status === 'waiting-for-approval')
       ?? railRows.find((s) => s.key === coveragePhase)
       ?? railRows.find((s) => s.status === 'running'
         && !(reportForeground && s.key === 'portify'))
@@ -348,11 +361,15 @@ export function FlightDetail({
       ?? railRows.find((s) => s.status === 'pending')
       ?? [...railRows].reverse().find((s) => s.status === 'done')
     return pick?.key ?? null
-  }, [railRows, coveragePhase, coverageLanding])
+  }, [railRows, coveragePhase, coverageLanding, flight?.attention])
   const stageKey = selectedStage && railRows.some((stage) => stage.key === selectedStage)
     ? selectedStage
     : autoStage
   const row = railRows.find((s) => s.key === stageKey) ?? null
+  const stagePresentations = new Map(railRows.map((s) => [s.key, presentStageStatus(
+    s.status, s.key, s.key === activityRowKey ? featureActivity : undefined, undefined,
+    { attention: flight?.attention, coverageWarning: stageCoverageWarning },
+  )]))
   const stage = flight?.stages.find((s) => s.key === stageKey) ?? null
   // The pair-merged rows (run+heal, scaffold+env-capture, docs+prd-summary)
   // carry their folded companion so its facts/checkpoint/log surface too.
@@ -427,7 +444,9 @@ export function FlightDetail({
   const suiteActivityChip = activeCoverageJob
     ? ACTIVITY_CHIP[activeCoverageJob.kind === 'summary' ? 'condensing' : 'mapping']
     : runActivityChip ?? (externalSuiteWork && featureActivity && !genuineCheckpoint ? ACTIVITY_CHIP[featureActivity.kind] : null)
-  const tone = waitingChip?.tone ?? runActivityChip?.tone ?? (agentHolding
+  const headerAttention = hasFlightAttention(flight.attention) ? flight.attention : undefined
+  const headerAttentionStage = headerAttention?.stage
+  const tone = flight.attention?.state === 'resolved' ? 'var(--text-secondary)' : waitingChip?.tone ?? runActivityChip?.tone ?? (agentHolding
     ? FLIGHT_STATUS_TONE['running']
     : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status])
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
@@ -467,7 +486,10 @@ export function FlightDetail({
             // R81: a derived flight was never paused or interrupted — its steps
             // were simply completed outside the conductor, so it must not
             // borrow the record-only "paused by you / a stage failed" copy.
-            title={waitingChip ? waitingChip.title : runActivityChip ? runActivityChip.title : agentHolding
+            onClick={flight.status === 'paused' && headerAttentionStage
+              ? () => setSelectedStage(stageRowKey(headerAttentionStage)) : undefined}
+            title={headerAttention ? `${headerAttention.title}. ${headerAttention.reason}`
+              : waitingChip ? waitingChip.title : runActivityChip ? runActivityChip.title : agentHolding
               ? EXTERNAL_WORK_COPY.headerTitle
               : suiteActivityChip
               ? suiteActivityChip.title
@@ -563,7 +585,7 @@ export function FlightDetail({
               data-testid="flight-run-parallel-setup"
               onClick={startParallelSetup}
               disabled={parallelSetupStarting}
-              className="cl-button-primary px-2.5 py-1 disabled:cursor-wait disabled:opacity-65"
+              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-wait disabled:opacity-65"
               title="Start Parallel setup now. The remaining Flight can continue at the same time."
             >
               {parallelSetupStarting ? 'Starting…' : 'Run Parallel Setup'}
@@ -610,7 +632,12 @@ export function FlightDetail({
             {evalStage?.status === 'done' && (
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
-            {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
+            {flight.attention?.state === 'unavailable' && <button type="button" className="cl-button px-2.5 py-1 text-xs" onClick={refetch}>Check again</button>}
+            {flight.status === 'paused' && !activeCoverageJob && flight.attention?.state === 'actionable' && (
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight}
+                externalMutationOwner={externalMutationOwner} coverageRecovery={attentionRecovery} inline busy={actionBusy} />
+            )}
+            {!headerAttention && !activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
               <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner}
                 coverageRecovery={coverageRecovery} />
             )}
@@ -706,10 +733,8 @@ export function FlightDetail({
           {railRows.map((s) => {
             const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const selected = s.key === stageKey
-            const presentation = presentStageStatus(s.status, s.key, s.key === activityRowKey ? featureActivity : undefined)
-            const displayStatus = presentation.status
-            const warning = isCoverageWarningRow(s.key, stageCoverageWarning) ? stageCoverageWarning?.message : undefined
-            const t = warning ? 'var(--warning)' : presentation.tone
+            const presentation = stagePresentations.get(s.key)!
+            const t = presentation.tone
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
             // time, not wall clock: checkpoint parks and pauses don't count.
@@ -719,7 +744,7 @@ export function FlightDetail({
             // One custom tooltip owns the rail row. Status remains visible in its
             // icon and the selected-stage pane; folding it into the short stage
             // explanation made the hover copy needlessly dense.
-            const tooltip = warning ?? presentation.title ?? STAGE_BLURB[s.key]
+            const tooltip = presentation.title ?? STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
                 {section && (
@@ -734,14 +759,14 @@ export function FlightDetail({
                   type="button"
                   data-testid={`stage-rail-${s.key}`}
                   aria-current={selected ? 'true' : undefined}
-                  aria-label={warning ? `${s.label} — ${warning}` : `${s.label} — ${presentation.label}`}
+                  aria-label={`${s.label} — ${presentation.title ?? presentation.label}`}
                   onClick={() => setSelectedStage(s.key)}
                   className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
                 >
                   {/* Status hue stays a computed token string (one source of
                       truth in stageStatusTone), so this one keeps `color`. */}
                   <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
-                    {warning ? <AlertCircleIcon size={12} /> : STAGE_ICON[displayStatus]}
+                    <StageStatusIcon presentation={presentation} />
                   </span>
                   <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                     {s.label}
@@ -785,6 +810,7 @@ export function FlightDetail({
               flightId={flightId}
               flight={flight}
               row={row}
+              presentation={stagePresentations.get(row.key)!}
               stage={stage}
               companion={companionStage}
               runLive={runLive}

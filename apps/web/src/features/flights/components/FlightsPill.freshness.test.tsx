@@ -93,7 +93,7 @@ describe('Flights picker coverage freshness', () => {
     expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Tests & coverage — Coverage out of date.')
     act(() => cell().dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
     expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Idle')
-    expect(document.querySelector('button[aria-pressed="false"]')?.textContent).toContain('Needs input 0')
+    expect(document.querySelector('button[aria-pressed="false"]')?.textContent).toContain('Needs attention 0')
 
     // The broadcast can be missed: the same open row recovers on its bounded
     // coverage read, without navigation or a manual refresh.

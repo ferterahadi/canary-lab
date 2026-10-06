@@ -44,11 +44,11 @@ it('reconciles a quiet push channel, retains transient failures, and treats only
   const live = manifest()
   await render({ id: 'one', live }); expect(api.getFlight).not.toHaveBeenCalled()
   api.getFlight.mockRejectedValueOnce(new Error('offline'))
-  await advance(30000); expect(host.textContent).toBe('running'); expect(record.error).toBe('offline')
+  await advance(5000); expect(host.textContent).toBe('running'); expect(record.error).toBe('offline')
   api.getFlight.mockResolvedValueOnce(manifest('one', 'paused'))
-  await advance(30000); expect(host.textContent).toBe('paused')
+  await advance(5000); expect(host.textContent).toBe('paused')
   api.getFlight.mockRejectedValueOnce(new ApiError(404, {}))
-  await advance(30000); expect(host.textContent).toBe('Deleted')
+  await advance(5000); expect(host.textContent).toBe('Deleted')
   api.getFlight.mockResolvedValueOnce(manifest('one', 'done'))
   await act(async () => { record.refresh() }); expect(host.textContent).toBe('done')
 })
@@ -76,4 +76,15 @@ it('rejects a late 404 when a newer push has restored the flight', async () => {
   await render({ id: 'one', live: manifest('one', 'paused') })
   await act(async () => { reject(new ApiError(404, {})) })
   expect(host.textContent).toBe('paused'); expect(record.missing).toBe(false)
+})
+
+it('shows verification unavailable if a previously resolved attention read fails', async () => {
+  const live: FlightManifest = { ...manifest('one', 'paused'), attention: {
+    state: 'resolved', stage: 'specs-coverage', title: 'Earlier failure resolved by current evidence.',
+    reason: 'Target reached', revision: 'a', checkedAt: 'now',
+  } }
+  await render({ id: 'one', live })
+  api.getFlight.mockRejectedValueOnce(new Error('offline'))
+  await advance(5000)
+  expect(record.manifest?.attention).toMatchObject({ state: 'unavailable', title: 'Could not verify current state' })
 })

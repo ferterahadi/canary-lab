@@ -1672,3 +1672,19 @@ procedure.
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |
+
+### Flight attention ownership
+
+`apps/web-server/src/features/flights/logic/attention.ts` owns the read-time
+attention assessment. REST, the Flight stream, the notification runtime, and MCP
+reads consume it; the persisted flight remains its execution journal. Current
+requirements and target-aware coverage evidence can resolve an earlier failed
+Requirements or Tests & coverage stage without rewriting its error or starting
+work. Stages without equivalent completion checks remain actionable. Failed
+reads retain an unavailable assessment instead of claiming resolution.
+
+Workspace changes trigger reassessment, backed by five-second reconciliation.
+Paused-flight browser readers also reconcile every five seconds and reject reads
+superseded by a pushed update. Feature-change replies carry the same assessment;
+when this reader is configured their wait is bounded to ten seconds. Passive
+agent clients still need a tool response or an active wait to receive it.

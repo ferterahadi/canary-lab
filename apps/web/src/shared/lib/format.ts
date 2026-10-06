@@ -15,12 +15,14 @@ export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '—'
   if (ms < 1000) return `${ms}ms`
   const totalSeconds = ms / 1000
-  if (totalSeconds < 60) {
+  // The cut-offs sit where the printed value rolls over, not at the raw value:
+  // 59.96s prints as "60.0s" and 21m 59.6s as "21m 60s" if each part is
+  // rounded after the split.
+  if (totalSeconds < 59.95) {
     return `${totalSeconds.toFixed(1)}s`
   }
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = Math.round(totalSeconds - minutes * 60)
-  return `${minutes}m ${seconds}s`
+  const whole = Math.round(totalSeconds)
+  return `${Math.floor(whole / 60)}m ${whole % 60}s`
 }
 
 // A still-running clock, in whole seconds. Distinct from `formatDuration`: that
@@ -103,6 +105,18 @@ export function shortDateTime(iso: string): string {
   const t = Date.parse(iso)
   if (!Number.isFinite(t)) return iso
   return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/** "Today 14:02" for a stamp from the viewer's current day, otherwise
+ *  `shortDateTime` ("Oct 1, 14:02"). A bare clock time on a list that spans
+ *  days reads every row as tonight. Falls back to the raw input if it doesn't
+ *  parse. */
+export function dayTime(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return iso
+  const d = new Date(t)
+  if (d.toDateString() !== new Date(now).toDateString()) return shortDateTime(iso)
+  return `Today ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
 /** Short, stable run reference for an identity line — the trailing token of

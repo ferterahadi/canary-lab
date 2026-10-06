@@ -221,6 +221,8 @@ respond to the checkpoint instead of waiting.
 | `waiting-for-approval` | Respond via `respond_flight_checkpoint`. |
 | `waiting-for-approval` + `checkpoint.data.takeoverRequestedAt` | Stop external work and release with `choice: "run-internally"`; do not submit. |
 | `paused`, `pauseReason: "queued"` | Narrate as waiting — do NOT resume it. |
+| `paused` + `attention.state: "resolved"` | The earlier failure is historical and current evidence satisfies that stage. Describe remaining work; do not resume automatically. |
+| `paused` + `attention.state: "unavailable"` | Current evidence could not be verified. Re-read `get_flight` before recommending recovery. |
 | `paused`, other `pauseReason` | Re-call `start_flight` (OMIT `repoPaths` + `description`) to resume. |
 | `paused` + `remedy` in the result | A stage is blocked by uncommitted repo changes. Help the user clean each listed repo — `git stash push -u` (undoable) or commit — then `start_flight` resumes and the stage retries. |
 | `done` | Point the user at `links.evaluationZip`. |

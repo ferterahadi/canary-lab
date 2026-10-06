@@ -19,7 +19,7 @@ import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/
 // tested there); this module only maps store events to frames.
 
 export interface FlightsStreamDeps {
-  store: FlightStore
+  store: Pick<FlightStore, 'list' | 'get' | 'onEvent' | 'offEvent'>
 }
 
 export type FlightsStreamFrame =

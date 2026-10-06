@@ -164,7 +164,7 @@ export interface SystemLine {
 }
 
 export function parseSystemLine(line: string): SystemLine {
-  const match = /^\[([\w-]+)(?:@([^\]]+))?\]\s?(.*)$/.exec(line)
+  const match = /^\[([\w-]+)(?:@([^\]]+))?\]\s?([\s\S]*)$/.exec(line)
   if (!match) return { text: line }
   return { tag: match[1], ...(match[2] ? { timestamp: match[2] } : {}), text: match[3] }
 }
@@ -177,6 +177,11 @@ export function textKey(text: string): string {
     hash = Math.imul(hash, 0x01000193)
   }
   return (hash >>> 0).toString(36)
+}
+
+/** Shared by timeline rows and links that open a recorded system entry. */
+export function systemLogId(line: string, occurrence = 0): string {
+  return `system:${textKey(line)}:${occurrence}`
 }
 
 /** A conductor tag reads as a word in the verb column (`coverage` → Coverage). */

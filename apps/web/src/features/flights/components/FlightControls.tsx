@@ -73,6 +73,8 @@ export function ContinueMenu({
   externalMutationOwner,
   recordlessEntry,
   coverageRecovery,
+  inline = false,
+  busy = false,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -84,6 +86,8 @@ export function ContinueMenu({
    *  first record directly at this stage instead of reopening the launcher. */
   recordlessEntry?: FlightStageKey
   coverageRecovery?: { stage: FlightStageKey; warning: string }
+  inline?: boolean
+  busy?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -103,7 +107,7 @@ export function ContinueMenu({
   // A stale-coverage shortcut replaces Resume only when both enter the same
   // user-facing stage. Which rail row happens to be selected does not change
   // the available actions.
-  const replacesResume = recoveryStage !== undefined && (recoveryStage === resumeStage || resumeStage === null)
+  const replacesResume = recoveryStage !== undefined && (inline || recoveryStage === resumeStage || resumeStage === null)
 
   const startRecordless = (fromStage: FlightStageKey, feedback?: string): void => {
     if (preparing) return
@@ -144,22 +148,41 @@ export function ContinueMenu({
   // Escape-to-exit — one press dismisses the menu, not the whole page.
   useEscapeToClose(() => setOpen(false), open)
 
+  const resume = (): void => {
+    setOpen(false)
+    if (recordlessEntry) startRecordless(recordlessEntry)
+    else onAction(() => flightsApi.resumeFlight(flight.flightId))
+  }
+
+  // Inline, the button is the recovery itself: it opens the redo dialog or
+  // resumes directly, so it only announces a popup for the dialog.
+  const opensMenu = !inline && menuMode
+  const opensDialog = inline ? replacesResume : !menuMode
+  const inlineLabel = replacesResume ? `Run from ${recoveryLabel}` : `Resume at ${resumeTarget ?? 'unfinished step'}`
+  const coverageClause = flight.attention?.stage === 'specs-coverage' ? ` and author tests toward the ${flight.opts.coverageTarget}% coverage target` : ''
+  const inlineTitle = `May launch an agent${coverageClause}, then continue the flight.`
+
   return (
     <div ref={ref} className="relative shrink-0">
       <DisabledControlTooltip>
         <button
           type="button"
           data-testid="flight-continue"
-          aria-haspopup={menuMode ? 'menu' : 'dialog'}
-          aria-expanded={menuMode ? open : dialogOpen}
-          onClick={() => (menuMode ? setOpen((v) => !v) : setDialogOpen(true))}
-          disabled={externalMutationOwner != null || preparing}
+          aria-haspopup={opensMenu ? 'menu' : opensDialog ? 'dialog' : undefined}
+          aria-expanded={opensMenu ? open : opensDialog ? dialogOpen : undefined}
+          onClick={() => {
+            if (inline && replacesResume) { setRedoFrom(recoveryStage!); setDialogOpen(true) }
+            else if (inline && flight.status === 'paused') resume()
+            else if (menuMode) setOpen((v) => !v)
+            else setDialogOpen(true)
+          }}
+          disabled={externalMutationOwner != null || preparing || busy}
           title={externalMutationOwner
             ? externalMutationTooltip(externalMutationOwner, 'continue or repeat this flight')
-            : undefined}
+            : inline ? inlineTitle : undefined}
           className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
         >
-          Continue ▾
+          {busy ? 'Starting…' : inline ? inlineLabel : 'Continue ▾'}
         </button>
       </DisabledControlTooltip>
       {open && (
@@ -171,11 +194,8 @@ export function ContinueMenu({
             type="button"
             role="menuitem"
             data-testid="flight-resume"
-            onClick={() => {
-              setOpen(false)
-              if (recordlessEntry) startRecordless(recordlessEntry)
-              else onAction(() => flightsApi.resumeFlight(flight.flightId))
-            }}
+            onClick={resume}
+            disabled={busy}
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">

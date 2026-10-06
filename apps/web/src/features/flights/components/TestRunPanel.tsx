@@ -70,6 +70,7 @@ export function TestRunPanel({
   onError,
   awaiting,
   pausedNotice,
+  factsToolbar,
   mutationLockedReason,
 }: {
   feature: string
@@ -98,6 +99,7 @@ export function TestRunPanel({
   /** The shared stage recovery card. It sits after this panel's own facts band,
    *  matching every other stage without giving run history a second owner. */
   pausedNotice?: ReactNode
+  factsToolbar?: ReactNode
   /** External ownership leaves live run controls visible but inert. */
   mutationLockedReason?: string
 }) {
@@ -111,12 +113,9 @@ export function TestRunPanel({
   const healCycles = manifest?.healCycles ?? selectedEntry?.healCycles ?? evidence.healCycles ?? 0
   const healEnd = manifest?.healEnd ?? evidence.healEnd
 
-  const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1
-  const ordinal = idx >= 0 ? featureRuns.length - idx : null
   const previous = featureRuns
     .filter((r) => r.runId !== runId)
     .slice(0, 5)
-    .map((r) => ({ run: r, ordinal: featureRuns.length - featureRuns.findIndex((x) => x.runId === r.runId) }))
 
   // The identity row is a RunRow — same chrome as the runs list, so the run
   // reads as the one object it is. Prefer the live index entry; synthesize one
@@ -159,7 +158,7 @@ export function TestRunPanel({
           answer. It reports the HISTORY (how many runs, how they ended, how
           long they take); the hero below reports the latest run. Different
           scopes, so no number repeats. */}
-      <FactsGrid facts={runHistoryFacts(featureRuns)} awaiting={awaiting} />
+      <FactsGrid facts={runHistoryFacts(featureRuns)} awaiting={awaiting} toolbar={factsToolbar} />
 
       {pausedNotice}
       <p className="m-0 text-xs text-muted">Suite-wide test runs, including standalone executions. Flight progress is tracked separately.</p>
@@ -178,7 +177,11 @@ export function TestRunPanel({
             run={currentEntry}
             detail={detail ?? undefined}
             primaryLabel={`${currentEntry.executionType === 'verify' ? 'Verify' : 'Run'} ${runRef}`}
-            marker={ordinal != null ? `run ${ordinal} of ${featureRuns.length}` : undefined}
+            /* When, where and how long. No ordinal: "run 6 of 6" restated the
+               card's own "Latest run" kicker and the band's run count. No repair
+               count either — the Repair cycles stat right below states it. */
+            stamp="day"
+            showDuration
             showPorts={false}
             /* R82: the score is HIDDEN on the identity row — the stats line
                right below states it. Showing it here too (promoted beside the
@@ -190,6 +193,10 @@ export function TestRunPanel({
                start on the card's own left edge — and on the same column as the
                Previous runs titles below. */
             chrome="headline"
+            /* The verdict chip names a finished run's outcome; the dot stays
+               only while the run is live. */
+            dot="live"
+            arrow="always"
             /* Guarded on `runId` like the `onOpenFixes` wiring above: the hero
                also renders from a synthesized entry before the run list
                resolves, and this used to hand `onOpenRun` an undefined id in
@@ -229,9 +236,9 @@ export function TestRunPanel({
           background — the one block with no surface, its rubric 12px left of
           every card kicker and its rows carrying RunRow's own gutter — so it
           read as spill-over from the card above. The rows now sit flush on the
-          card's text column, the same edge the Latest run title uses, with no
-          dividers or fill, like the Failing tests rows. Each row is labelled by
-          its run REF and ordinal — the old list repeated the feature name on
+          card's text column, the same edge the Latest run title uses, unfilled
+          and split by hairlines. Each row is labelled by its run REF — the old
+          list repeated the feature name on
           every row, which is the one thing every row shares — and carries its own
           open action rather than relying on the row being secretly clickable. */}
       {previous.length > 0 && (
@@ -240,14 +247,22 @@ export function TestRunPanel({
           aside={<span className="cl-count-chip">{previous.length}</span>}
           testId="previous-runs"
         >
-          <ul className="m-0 flex list-none flex-col p-0">
-            {previous.map(({ run, ordinal: n }) => (
+          {/* Hairlines between rows: two-line rows with no fill and no rule
+              ran together, so the eye could not tell where one run ended. */}
+          <ul className="m-0 flex list-none flex-col divide-y divide-line p-0">
+            {previous.map((run) => (
               <RunRow
                 key={run.runId}
                 run={run}
                 detail={undefined}
                 primaryLabel={`${run.executionType === 'verify' ? 'Verify' : 'Run'} ${shortRunRef(run.runId)}`}
-                marker={`run ${n} of ${featureRuns.length}`}
+                /* The ordinal gave way to duration and repairs — position is
+                   already the list order and the kicker's count. Both come off
+                   the index entry, so no row needs a detail read. */
+                stamp="day"
+                showDuration
+                showRepairs
+                dot="live"
                 showPorts={false}
                 chrome="item"
                 /* The row IS the open action — its trailing arrow stops being

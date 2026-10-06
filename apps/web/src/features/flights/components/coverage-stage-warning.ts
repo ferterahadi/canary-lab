@@ -5,6 +5,7 @@ import { stageRowKey } from './StageRail'
 
 export interface CoverageStageWarning {
   message: string
+  label: string
   nextActionRow?: FlightStageKey
 }
 
@@ -27,7 +28,11 @@ export function coverageStageWarning(
             : nextActionRow === 'docs' ? 'Requirements changed; coverage out of date.'
               : freshness.changedTests.length > 0 ? 'Tests changed; coverage out of date.' : 'Coverage out of date.'
 
-  return { message, ...(nextActionRow ? { nextActionRow } : {}) }
+  const label = !confirmed || !freshness || freshness.state === 'unavailable' ? 'Unverified'
+    : freshness.state === 'updating' ? 'Updating'
+      : freshness.state === 'not-measured' ? 'Not measured'
+        : freshness.state === 'current' ? 'Run failed' : 'Out of date'
+  return { message, label, ...(nextActionRow ? { nextActionRow } : {}) }
 }
 
 export function isCoverageWarningRow(key: FlightStageKey, warning: CoverageStageWarning | undefined): boolean {

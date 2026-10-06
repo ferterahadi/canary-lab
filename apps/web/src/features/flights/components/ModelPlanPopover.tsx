@@ -42,7 +42,9 @@ export function ModelPlanPopover({
   useEscapeToClose(() => setOpen(false), open)
 
   return (
-    <div ref={ref} className="relative">
+    // A flex wrapper avoids the inline trigger's baseline/descender gap, which
+    // otherwise shifts the Models chip below adjacent toolbar controls.
+    <div ref={ref} className="relative inline-flex items-center">
       {children({ open, toggle: () => setOpen((v) => !v) })}
       {open && (
         <div

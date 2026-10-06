@@ -85,6 +85,8 @@ function specsCoverageEvidence({ deps, feature, featureDir }: EvidenceContext): 
   return {
     coveragePct: ledger.coveragePct,
     mappingState: ledger.state?.coverage,
+    summaryState: ledger.state?.summary,
+    freshnessState: ledger.freshness?.state,
     requirementCount: ledger.requirements.length,
     testsWritten: ledger.tests.length,
     covered: ledger.totals.covered,
@@ -228,16 +230,21 @@ export function workspaceStageEvidence(
   feature: string,
   keys: FlightStageKey[],
   env?: string,
+  strict = false,
 ): Partial<Record<FlightStageKey, EvidenceBlock>> {
   const wanted = keys.filter((k) => PROBES[k])
   if (wanted.length === 0) return {}
   let config: FeatureConfig | undefined
   try {
     config = findFeature(deps.featuresDir, feature)
-  } catch {
+  } catch (error) {
+    if (strict) throw error
     return {}
   }
-  if (!config?.featureDir) return {}
+  if (!config?.featureDir) {
+    if (strict) throw new Error('Suite configuration is unavailable')
+    return {}
+  }
   let settled: { value: ReturnType<typeof latestSettledRun> } | undefined
   const context: EvidenceContext = {
     deps, feature, config, featureDir: config.featureDir, env,
@@ -252,7 +259,8 @@ export function workspaceStageEvidence(
     try {
       const block = PROBES[key]!(context)
       if (block) out[key] = block
-    } catch {
+    } catch (error) {
+      if (strict) throw error
       // Probe failed — leave the stage as it was.
     }
   }

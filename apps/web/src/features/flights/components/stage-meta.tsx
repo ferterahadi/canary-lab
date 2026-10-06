@@ -1,3 +1,7 @@
+import type { FlightAttention } from '@shared/flights/attention'
+import { isCoverageWarningRow, type CoverageStageWarning } from './coverage-stage-warning'
+import { stageRowKey } from './StageRail'
+import { AlertCircleIcon } from '@/shared/ui/Icons'
 import type { RunWaitingState } from '@/features/runs/utils/run-waiting-state'
 import { presentActivityRunStatus, type FeatureActivity } from '../state/feature-activity'
 import type { ReactNode } from 'react'
@@ -126,34 +130,59 @@ export function stagePresentationStatus(status: FlightStageStatus, waiting?: Run
 
 /** Overlay one active run onto the Test run step without changing saved Flight
  * stage evidence. The rail, detail chip, and mini rail share this resolver. */
-export function presentStageStatus(recordedStatus: FlightStageStatus, rowKey: string, activity?: FeatureActivity, fallbackWaiting?: RunWaitingState) {
+export function presentStageStatus(recordedStatus: FlightStageStatus, rowKey: string, activity?: FeatureActivity, fallbackWaiting?: RunWaitingState, evidence?: { attention?: FlightAttention; coverageWarning?: CoverageStageWarning }) {
   const activeRun = rowKey === 'run' && activity?.runId != null
   const waiting = activeRun ? activity.waiting : fallbackWaiting
   const status = stagePresentationStatus(recordedStatus, waiting)
+  // One display decision for the rail and evidence toolbar. Attention remains
+  // server-owned; freshness only supplies the short label, never resolves it.
+  const attention = evidence?.attention
+  const affected = attention?.stage && stageRowKey(attention.stage) === rowKey
+  const warning = isCoverageWarningRow(rowKey as FlightStageKey, evidence?.coverageWarning) ? evidence?.coverageWarning : undefined
+  const base = { status, dot: undefined, pulse: false, warning: false }
+  if (affected && attention.state === 'unavailable') {
+    return { ...base, label: 'Unverified', tone: 'var(--warning)', title: attention.reason, warning: true }
+  }
+  if (affected && attention.state === 'actionable') {
+    return { ...base, label: warning?.label ?? 'Needs attention', tone: 'var(--warning)', title: attention.reason, warning: true }
+  }
+  if (affected && attention.state === 'resolved' && status !== 'running' && status !== 'waiting-for-approval') {
+    return { ...base, label: 'Verified', tone: 'var(--success)', title: attention.title }
+  }
+  if (warning && status !== 'running' && status !== 'waiting-for-approval' && !activeRun) {
+    return { ...base, label: warning.label, tone: 'var(--warning)', title: warning.message, warning: true }
+  }
   if (activeRun) {
     const run = presentActivityRunStatus(activity)!
-    return { status, label: run.label, tone: run.tone, dot: run.dot, pulse: run.pulse, title: run.title }
+    return { warning: false, status, label: run.label, tone: run.tone, dot: run.dot, pulse: run.pulse, title: run.title }
   }
-  return { status, label: waiting?.label ?? STAGE_STATUS_LABEL[status], tone: stageStatusTone(status),
+  return { warning: false, status, label: waiting?.label ?? STAGE_STATUS_LABEL[status], tone: stageStatusTone(status),
     dot: status === 'running' ? 'running' as const : undefined, pulse: false, title: undefined }
 }
 
-export function StageStatusChip({ status: recordedStatus, waiting, activity, rowKey }: { status: FlightStageStatus; waiting?: RunWaitingState; activity?: FeatureActivity; rowKey?: string }) {
-  const presentation = presentStageStatus(recordedStatus, rowKey ?? '', activity, waiting)
-  const status = presentation.status
+export type StagePresentation = ReturnType<typeof presentStageStatus>
+
+export function StageStatusChip(props: { presentation: StagePresentation } | { status: FlightStageStatus; waiting?: RunWaitingState; activity?: FeatureActivity; rowKey?: string }) {
+  const presentation = 'presentation' in props ? props.presentation
+    : presentStageStatus(props.status, props.rowKey ?? '', props.activity, props.waiting)
   return (
     <Chip
       testId="stage-status-chip"
       chrome="fill"
       tone={presentation.tone}
       fontSize={10}
-      icon={presentation.dot
-        ? <StatusDot state={presentation.dot} pulse={presentation.pulse} className="shrink-0" />
-        : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
+      icon={<StageStatusIcon presentation={presentation} />}
       label={capitalizeFirst(presentation.label)}
       title={presentation.title}
     />
   )
+}
+
+/** The same symbol accompanies a stage in the rail and its evidence toolbar. */
+export function StageStatusIcon({ presentation }: { presentation: StagePresentation }) {
+  if (presentation.warning) return <AlertCircleIcon size={12} />
+  if (presentation.dot) return <StatusDot state={presentation.dot} pulse={presentation.pulse} className="shrink-0" />
+  return <span aria-hidden="true">{presentation.label === 'Verified' ? STAGE_ICON.done : STAGE_ICON[presentation.status]}</span>
 }
 
 // ─── Checkpoint display vocabulary (R71/W3) ─────────────────────────────────

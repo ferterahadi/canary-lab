@@ -574,7 +574,7 @@ describe('trailer model (R14–R18)', () => {
     // The facts sit on the SAME card surface as the panels below them (one
     // stack of like blocks) — not bare above the first card.
     const factsCard = container.querySelector('[data-testid="stage-facts-card"]')
-    expect(factsCard?.textContent).toContain('At a glance')
+    expect(factsCard?.querySelector('[data-testid="stage-evidence-toolbar"] h2')?.textContent).toBe('Suite setup')
     expect(factsCard?.contains(container.querySelector('[data-testid="stage-facts"]'))).toBe(true)
     // R43: the setup panel — a block per config REPO, mirroring the Advanced
     // setup Service tab (Name ↔ NAME, Branch picker ↔ BRANCH, Start command ↔
@@ -845,5 +845,50 @@ describe('a skipped stage that HAS evidence keeps its settled mark', () => {
     }
     // A skip with nothing to show still reads as one.
     expect(row('scout')).toContain('↷')
+  })
+})
+
+describe('Suite setup without local services', () => {
+  async function openSetup(status: 'passed' | 'failed' = 'passed') {
+    mocks.getFeatureConfigDoc.mockResolvedValue({ parsed: { value: { repos: [{ name: 'warehouse' }] } } })
+    mocks.getRunDetail.mockResolvedValue({ runId: 'ordinary-proof', manifest: { status, services: [] } })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scaffold' || key === 'env-capture' ? 'skipped' as const : 'pending' as const,
+        ...(key === 'env-capture' ? {
+          evidence: { boot: { runId: 'ordinary-proof', services: [] } }, evidenceSource: 'workspace' as const,
+        } : {}),
+      })),
+    }))
+    const onOpenRun = vi.fn()
+    await render('fl_1', { stage: 'scaffold', onOpenRun })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')!.click() })
+    return onOpenRun
+  }
+
+  it('keeps setup done, explains no local boot, and opens the ordinary run proving setup', async () => {
+    const onOpenRun = await openSetup()
+    expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('✓')
+    const card = container.querySelector('[data-testid="stage-facts-card"]')!
+    expect(card.textContent).toContain('This suite requires no local services.')
+    expect(card.textContent).toContain('Local services')
+    expect(card.textContent).toContain('Not required')
+    expect(card.textContent).toContain('Not applicable')
+    expect(card.textContent).toContain('No capture count available')
+    expect(card.textContent).toContain('Setup confirmed by an existing successful run')
+    expect(container.querySelector('[data-testid="boot-check-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="boot-check-panel"]')).toBeNull()
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('ordinary-proof')
+    await act(async () => { card.querySelector<HTMLButtonElement>('[data-testid="suite-setup-proof"] button')!.click() })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'ordinary-proof')
+  })
+
+  it('does not call a failed ordinary run successful', async () => {
+    await openSetup('failed')
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Not required')
+    expect(container.querySelector('[data-testid="suite-setup-proof"]')).toBeNull()
   })
 })

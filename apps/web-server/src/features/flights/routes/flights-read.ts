@@ -21,10 +21,12 @@ import { recommendFlightContinuation } from '../../../../../../shared/flights/co
 export async function registerFlightReadRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
 
+  const reader = deps.flightAttention ?? store
+
   // the latest (list is newest-first) instead of destructively pruning disk.
   app.get('/api/flights', async () => {
     const seen = new Set<string>()
-    const flights = store.list().filter((e) => {
+    const flights = reader.list().filter((e) => {
       if (seen.has(e.feature)) return false
       seen.add(e.feature)
       return true
@@ -138,7 +140,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
   )
 
   app.get<{ Params: { id: string } }>('/api/flights/:id', async (req, reply) => {
-    const manifest = store.get(req.params.id)
+    const manifest = reader.get(req.params.id)
     if (!manifest) {
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }
@@ -186,7 +188,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
   // `git status`), never persisted. `remedy: null` = nothing actionable;
   // `repos: []` = the error is stale and everything is clean (just Continue).
   app.get<{ Params: { id: string } }>('/api/flights/:id/remedy', async (req, reply) => {
-    const manifest = store.get(req.params.id)
+    const manifest = reader.get(req.params.id)
     if (!manifest) {
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }

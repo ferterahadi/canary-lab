@@ -1,0 +1,125 @@
+/* Keep the vertical rhythm stable while titles, controls and metric columns
+   size naturally to their content and the card's available width. */
+.cl-stage-evidence {
+  container-type: inline-size;
+}
+
+.cl-stage-evidence-toolbar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cl-stage-evidence-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.cl-stage-evidence-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cl-stage-evidence-title > [data-testid='stage-status-chip'] {
+  flex-shrink: 0;
+}
+
+.cl-stage-evidence-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-left: auto;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.cl-stage-evidence-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  height: 28px;
+}
+
+.cl-stage-evidence-control:empty {
+  display: none;
+}
+
+.cl-stage-evidence-description {
+  height: 32px;
+  min-width: 0;
+  line-height: 16px;
+}
+
+.cl-stage-attention-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  line-height: 16px;
+}
+
+.cl-stage-evidence-facts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-rows: 100px;
+  gap: 8px;
+}
+
+.cl-stage-evidence-facts [data-testid='fact-tile'] {
+  height: 100%;
+}
+
+.cl-stage-evidence-facts [data-testid='fact-sub'] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  height: 32px;
+  line-height: 16px;
+}
+
+@container (max-width: 720px) {
+  .cl-stage-evidence-facts {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cl-stage-evidence-facts > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 520px) {
+  .cl-stage-evidence-heading {
+    flex-wrap: wrap;
+  }
+
+  .cl-stage-evidence-title {
+    width: 100%;
+    min-height: 28px;
+  }
+
+  .cl-stage-evidence-actions {
+    width: 100%;
+  }
+}
+
+@container (max-width: 300px) {
+  .cl-stage-evidence-facts {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 424px;
+  }
+
+  .cl-stage-attention-summary {
+    gap: 4px;
+  }
+}

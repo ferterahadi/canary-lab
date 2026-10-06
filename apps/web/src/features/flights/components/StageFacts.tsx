@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import './stage-evidence.css'
 import type { FlightManifest, FlightStage, FlightStageKey } from '@shared/flights/types'
 import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/portify'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
@@ -70,6 +71,7 @@ export interface StageBandData {
   ledger?: CoverageLedger | null
   /** The dry-run boot the env-capture stage performed, for its boot span. */
   boot?: RunDetail | null
+  setupError?: string | null
   /** The portify workflow, for attempts, instances and the overlay diff. */
   portify?: PortifyManifest | null
   portifyRecovery?: { error: string | null; missing: boolean; retry: () => void }
@@ -176,7 +178,9 @@ export function stageFacts(
   band: StageBandData = {},
 ): StageFact[] {
   const measured = measuredStageFacts(stage, flight, companion, band)
-  const contract = FACT_SLOTS[stage.key]
+  const contract = stage.key === 'scaffold' && band.config?.services === 0
+    ? slots('Local services', 'Boot time', 'Env files')
+    : FACT_SLOTS[stage.key]
   return contract ? materializeFactSlots(contract, measured) : measured
 }
 
@@ -269,6 +273,16 @@ function measuredStageFacts(
       ]
     }
     case 'scaffold': {
+      if (band.config?.services === 0) {
+        const captured = num(cev, 'captured')
+        return [
+          { label: 'Local services', value: 'Not required', sub: 'No start commands configured', help: 'This suite does not start local services.' },
+          { label: 'Boot time', value: 'Not applicable', sub: 'Nothing to start locally', help: 'No local boot is required for this suite.' },
+          ...(captured === null
+            ? [{ label: 'Env files', value: 'Not recorded', sub: 'No capture count available' }]
+            : envFileFacts(flight, captured)),
+        ]
+      }
       // This stage CONFIGURES, so its settings are not its evidence: the worker
       // count and the service list are inputs the user can edit six inches
       // below, and counting them here measures nothing. What it actually proved
@@ -948,19 +962,19 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       {f.awaiting ? (
         <FactPlaceholder awaiting={awaiting} />
       ) : f.big ? (
-        <div className="mt-1 flex items-baseline gap-1 leading-none">
+        <div data-testid="fact-value" className="mt-1 flex h-[22px] items-center gap-1 leading-none">
           <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
         </div>
       ) : (
         <div
-          className="mt-1 min-w-0 truncate cl-type-data"
+          data-testid="fact-value" className="mt-1 flex h-[22px] min-w-0 items-center cl-type-data"
           title={f.title ?? f.value}
           style={{ color: toneColor ?? 'var(--text-secondary)', ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}) }}
         >
-          {f.value}
+          <span className="truncate">{f.value}</span>
         </div>
       )}
-      {sub ? <div data-testid="fact-sub" className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
+      {sub ? <div data-testid="fact-sub" title={sub} className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
     </div>
   )
   return help ? <Tooltip label={help}>{tile}</Tooltip> : tile
@@ -972,29 +986,34 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
  *  Facts render as a responsive tile grid (R77): numeric facts get a large
  *  metric treatment (coverage %, pass N of M), text/path facts stay quiet — one
  *  layout that fits every stage's mix of scalar and sentence values. */
-export function FactsGrid({ facts, aside, awaiting = 'idle' }: {
+export function FactsGrid({ facts, aside, toolbar, footer, awaiting = 'idle' }: {
   facts: StageFact[]
   /** Passed to every tile: the pane's one awaiting state, so every placeholder
    *  in the band says the same thing about why it is empty. */
   awaiting?: AwaitingState
   /** The stage's one card-level action, on the kicker line (`PanelCard.aside`). */
   aside?: ReactNode
+  /** Shared stage heading and actions, integrated into the evidence card. */
+  toolbar?: ReactNode
+  footer?: ReactNode
 }) {
-  if (facts.length === 0) return null
+  if (facts.length === 0 && !toolbar) return null
   return (
     // Same column as every stage panel — the tile grid wraps inside it and
     // long values truncate within a tile, never sprawling the whole pane.
-    <div className={STAGE_COLUMN}>
-      <PanelCard kicker="At a glance" aside={aside} testId="stage-facts-card">
+    <div className={`${STAGE_COLUMN}${toolbar ? ' cl-stage-evidence' : ''}`}>
+      <PanelCard kicker={toolbar ? undefined : 'At a glance'} aside={aside} testId="stage-facts-card">
+        {toolbar}
         <div
           data-testid="stage-facts"
-          className="grid gap-2"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
+          className={toolbar ? 'cl-stage-evidence-facts' : 'grid gap-2'}
+          style={toolbar ? undefined : { gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
         >
           {facts.map((f, i) => (
             <FactTile key={`${f.label}-${i}`} fact={f} awaiting={awaiting} />
           ))}
         </div>
+        {footer}
       </PanelCard>
     </div>
   )

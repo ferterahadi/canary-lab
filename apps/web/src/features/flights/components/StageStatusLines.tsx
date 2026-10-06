@@ -5,6 +5,7 @@ import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from '@shared/lib/plural'
 import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
+import { flightAttentionOnStage } from '../lib/attention-history'
 import { stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { flightRailLabel } from '@shared/flights/stage-labels'
@@ -227,6 +228,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
 
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key } = stage
+  if (flightAttentionOnStage(flight, key, companion?.key)) return flight.attention!.reason
   // Skipped-with-evidence narrates as settled — same rule the rail draws, so
   // the row's ✓ and this sentence can't contradict each other.
   const status = settledStageStatus(stage)

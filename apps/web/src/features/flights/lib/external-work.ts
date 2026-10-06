@@ -1,3 +1,4 @@
+import { flightNeedsAttention, type FlightAttention } from '@shared/flights/attention'
 import type {
   FlightCheckpointKind,
   FlightIndexEntry,
@@ -152,10 +153,10 @@ export function externalMutationTooltip(owner: ExternalMutationOwner, action: st
  *  own agent drives never demands a click here, whatever it is parked on. */
 export function flightAwaitsUser(
   flight:
-    | { status: FlightStatus; checkpointKind?: FlightCheckpointKind; stageProducer?: 'internal' | 'external' }
+    | { status: FlightStatus; checkpointKind?: FlightCheckpointKind; stageProducer?: 'internal' | 'external'; attention?: FlightAttention }
     | null
     | undefined,
 ): boolean {
   if (!flight || flight.status !== 'waiting-for-approval') return false
-  return !isExternalWorkPark(flight) && !isExternallyDriven(flight)
+  return flightNeedsAttention(flight)
 }

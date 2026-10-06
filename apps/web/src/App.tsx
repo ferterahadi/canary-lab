@@ -30,6 +30,7 @@ import { useWorkspaceFlights } from './features/flights/state/use-workspace-flig
 import { resolveFeatureFlightTarget } from './features/flights/components/FlightChipState'
 import type { FeatureActivity } from './features/flights/state/feature-activity'
 import type { FlightsPillProps } from './features/flights/components/FlightsPill'
+import { stageRowKey } from './features/flights/components/StageRail'
 import { TERMINAL_RUN_STATUSES } from '@shared/run-state'
 import {
   derivedFlightFeature,
@@ -137,7 +138,7 @@ export function App() {
   const openFlightStage = useCallback((flightId: string, stage: FlightStageKey): void => {
     openFlight(flightId)
     // Opening a different flight resets its stage, so set the destination after.
-    setFlightStage(stage)
+    setFlightStage(stageRowKey(stage))
   }, [openFlight, setFlightStage])
 
   const openFeatureStage = useCallback((feature: string, stage: FlightStageKey): void => {
@@ -222,7 +223,8 @@ export function App() {
 
   const handleNotificationNavigate = (target: NotificationTarget): void => {
     if (target.kind === 'flight') {
-      openFlight(target.flightId)
+      if (target.stage) openFlightStage(target.flightId, target.stage)
+      else openFlight(target.flightId)
     } else if (target.kind === 'coverage') {
       setSelectedFeature(target.feature)
       openFlightStage(target.flightId ?? derivedFlightToken(target.feature), target.stage)
@@ -359,7 +361,7 @@ export function App() {
     portifyWorkflows,
     open: view === 'flights' && !selectedFlightId,
     onOpenChange: handleFlightsPickerOpenChange,
-    onOpenFlight: openFlight,
+    onOpenFlight: (id, stage) => { if (id && stage) openFlightStage(id, stage); else openFlight(id) },
     onOpenActivity: openActivity,
     onOpenPreFlight: handlePreFlightOpen,
     onStartFlight: handleStartFlight,

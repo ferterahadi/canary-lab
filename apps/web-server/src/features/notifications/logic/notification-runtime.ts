@@ -57,6 +57,8 @@ export function createNotificationRuntime(deps: NotificationRuntimeDeps) {
       for (const key of store.sourceKeys('flight:')) scope.add(key)
       const sources = flightNotificationSources(deps.flightStore.list())
       for (const source of sources) scope.add(source.key)
+      // An unavailable assessment is itself an actionable source with an
+      // explanation. Reconcile it so even a first read can create the notice.
       store.reconcile(sources, new Set(), scope)
     }, scope)
   }
@@ -233,6 +235,7 @@ export function createNotificationRuntime(deps: NotificationRuntimeDeps) {
   }
   const refreshAction = async (id: string): Promise<void> => {
     const item = store.list().find((entry) => entry.id === id)
+    if (item?.target?.kind === 'flight') { syncFlights(); return }
     if (item?.target?.kind !== 'test-review' || item.resolvedAt) return
     const feature = item.target.feature
     try {

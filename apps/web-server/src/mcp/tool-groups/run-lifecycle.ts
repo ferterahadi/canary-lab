@@ -48,6 +48,7 @@ const coverageChangeResponse = z.object({
     activeJobOwner: z.string().optional(),
     flightId: z.string().optional(),
     flightStatus: z.string().optional(),
+    flightAttention: z.object({ state: z.enum(['none', 'actionable', 'resolved', 'unavailable']), reason: z.string() }).optional(),
   }),
 })
 
@@ -105,12 +106,21 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const parsed = coverageChangeResponse.safeParse(await readCoverageUpdate(feature, deps))
       return parsed.success ? parsed.data.change : undefined
     }
+    const recoveryOwner = (change: CoverageChange, flightOwnsRecovery: boolean): string => {
+      if (change.activeJobId) {
+        return `Coverage job ${change.activeJobId}${change.activeJobOwner ? ` (${change.activeJobOwner})` : ''} already owns this update; follow it instead of starting another.`
+      }
+      if (change.flightAttention?.state === 'unavailable') {
+        return 'Could not verify current Flight state. Read get_flight again before choosing a recovery action.'
+      }
+      if (flightOwnsRecovery) {
+        return `Flight ${change.flightId}${change.flightStatus ? ` is ${change.flightStatus}` : ''} owns this update; resume it instead of starting duplicate coverage work.`
+      }
+      return 'Call start_external_coverage, submit the mapping, confirm freshness, then retry start_run.'
+    }
     const coverageRecovery = (change: CoverageChange): CallToolResult => {
-      const owner = change.activeJobId
-        ? `Coverage job ${change.activeJobId}${change.activeJobOwner ? ` (${change.activeJobOwner})` : ''} already owns this update; follow it instead of starting another.`
-        : change.flightId
-          ? `Flight ${change.flightId}${change.flightStatus ? ` is ${change.flightStatus}` : ''} owns this update; resume it instead of starting duplicate coverage work.`
-          : 'Call start_external_coverage, submit the mapping, confirm freshness, then retry start_run.'
+      const flightOwnsRecovery = Boolean(change.flightId) && change.flightAttention?.state !== 'resolved'
+      const owner = recoveryOwner(change, flightOwnsRecovery)
       return asJsonResult({
         type: 'coverage_update_required',
         runStarted: false,
@@ -118,8 +128,9 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         freshness: change.freshness,
         ...(change.activeJobId ? { activeJobId: change.activeJobId, activeJobOwner: change.activeJobOwner } : {}),
         ...(change.flightId ? { flightId: change.flightId, flightStatus: change.flightStatus } : {}),
+        ...(change.flightAttention ? { flightAttention: change.flightAttention } : {}),
         message: `Run not started. ${owner}`,
-        nextSteps: change.activeJobId || change.flightId
+        nextSteps: change.activeJobId || flightOwnsRecovery
           ? ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run']
           : ['start_external_coverage', 'submit_external_coverage', 'get_feature_coverage', 'start_run'],
       })

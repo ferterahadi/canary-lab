@@ -69,9 +69,40 @@ describe('RunRow (R80 hero props)', () => {
     expect(container.textContent).not.toContain(':4123')
   })
 
-  it('marker appends an extra meta segment (the run ordinal)', () => {
-    renderRow({ marker: 'run 2 of 2' })
-    expect(container.textContent).toContain('run 2 of 2')
+  it("dot='live' hides a finished run's dot but keeps its lane, so titles hold one left edge", () => {
+    renderRow({ dot: 'live' })
+    const lead = container.querySelector('button')?.firstElementChild
+    expect(lead?.className).toBe('cl-status-dot')
+    expect(lead?.getAttribute('aria-hidden')).toBe('true')
+    // The chip still names the outcome — the dot was only repeating it.
+    expect(container.textContent).toContain('Failed')
+  })
+
+  it("dot='live' keeps the status dot while the run is still going", () => {
+    renderRow({ dot: 'live', run: { ...run, status: 'healing' } })
+    expect(container.querySelector('button')?.firstElementChild?.className).not.toBe('cl-status-dot')
+  })
+
+  it('showDuration appends a finished run\'s duration, and says nothing for a live one', () => {
+    renderRow({ showDuration: true, run: { ...run, endedAt: '2026-05-31T10:18:02.000Z' } })
+    expect(container.textContent).toContain('18m 2s')
+    renderRow({ showDuration: true, run: { ...run, status: 'running' } })
+    expect(container.textContent).not.toMatch(/\dm \d+s/)
+  })
+
+  it('showRepairs appends the repair cycles a run used, and nothing for a clean run', () => {
+    renderRow({ showRepairs: true, run: { ...run, healCycles: 1 } })
+    expect(container.textContent).toContain('1 repair')
+    renderRow({ showRepairs: true, run: { ...run, healCycles: 10 } })
+    expect(container.textContent).toContain('10 repairs')
+    renderRow({ showRepairs: true })
+    expect(container.textContent).not.toContain('repair')
+  })
+
+  it("stamp='day' adds the day to a run from another day", () => {
+    renderRow({ stamp: 'day' })
+    expect(container.textContent).not.toContain('Today')
+    expect(container.textContent).toMatch(/May/)
   })
 
   it("passCount 'promoted' lifts the pass count out of the meta line", () => {

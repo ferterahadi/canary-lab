@@ -455,7 +455,8 @@ describe('detail redesign (R53–R68)', () => {
     const onOpenRun = vi.fn()
     await render('fl_1', { activity, onOpenRun })
     const runRail = container.querySelector('[data-testid="stage-rail-run"]')
-    expect(runRail?.textContent).toContain('▸')
+    expect(runRail?.querySelector('.cl-status-dot')).not.toBeNull()
+    expect(runRail?.getAttribute('aria-label')).toBe('Test run — Run in progress')
     expect(runRail?.textContent).not.toContain('✓')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
@@ -464,12 +465,13 @@ describe('detail redesign (R53–R68)', () => {
     expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Run live')
     expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).not.toContain('8/8')
     // The feature's other real runs list below — boot sessions stay hidden. Each
-    // row is labelled by its run REF and ordinal, not by the feature name every
-    // row shares (R82).
+    // row is labelled by its run REF, not by the feature name every row shares
+    // (R82), and carries no ordinal: position is the list order.
     const previous = container.querySelector('[data-testid="previous-runs"]')
     expect(previous).toBeTruthy()
     expect(previous?.textContent).toContain('Previous runs')
-    expect(previous?.textContent).toContain('run 1 of 2')
+    expect(previous?.textContent).toContain('Run run-9')
+    expect(previous?.textContent).not.toMatch(/run \d of \d/)
     expect(previous?.textContent).not.toContain('checkout')
     const previousButtons = previous!.querySelectorAll('button')
     expect(previousButtons.length).toBe(1)

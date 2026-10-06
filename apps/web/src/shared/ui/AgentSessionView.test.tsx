@@ -119,6 +119,30 @@ describe('System rows (flight conductor lines on the agent rail)', () => {
     expect(row.querySelector('.agentts-chev')).toBeNull()
   })
 
+  it('keeps a dated multiline failure in one Activity entry without an agent transcript', () => {
+    const error = "agent exited with code 2\nUsage: codex exec [OPTIONS]\nMore diagnostic detail"
+    render(`[failure@2026-01-01T00:01:00Z] Earlier failure\n${error}`)
+    expect(rows()).toHaveLength(1)
+    expect(part(rows()[0], 'sum')).toBe('Earlier failure')
+    expect(rows()[0].querySelector('.agentts-time')?.getAttribute('title')).toBe('2026-01-01T00:01:00Z')
+    expect(container.textContent).not.toContain('Usage:')
+    act(() => rows()[0].querySelector('button')!.click())
+    const modal = document.querySelector('[data-testid="activity-log-modal"]')!
+    for (const line of error.split('\n')) expect(modal.textContent).toContain(line)
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+  })
+
+  it('opens a historical system entry directly from its routed ID without a transcript', async () => {
+    const { systemLogId } = await import('./activity-log')
+    const line = '[failure@2026-01-01T00:01:00Z] Earlier failure\nLaunch failed before a session existed'
+    const close = vi.fn()
+    act(() => root.render(<AgentSessionView systemRows={{ pre: [line], post: [] }}
+      openLogId={systemLogId(line)} onOpenLogChange={close} />))
+    expect(document.querySelector('[data-testid="activity-log-modal"]')?.textContent).toContain('Launch failed before a session existed')
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+    expect(close).toHaveBeenCalledWith(null)
+  })
+
   it('cuts a line too long for its row to one line, and opens it pretty-printed', () => {
     const raw = JSON.stringify({ type: 'system', subtype: 'hook_response', output: 'x'.repeat(300) })
     render(`[evaluation] ${raw}`)

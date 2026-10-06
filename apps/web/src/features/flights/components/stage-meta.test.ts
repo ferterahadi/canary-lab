@@ -33,6 +33,13 @@ function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   } as FlightManifest
 }
 
+it('uses current attention evidence instead of claiming a displayed done mapping met the target', () => {
+  const stage: FlightStage = { key: 'specs-coverage', status: 'done' }
+  const attention = { state: 'actionable' as const, stage: 'specs-coverage' as const,
+    title: 'Flight paused', reason: 'Coverage mapping is stale; target is 100%.', revision: 'a', checkedAt: 'now' }
+  expect(stageStateLine(stage, flight({ attention }))).toBe(attention.reason)
+})
+
 /** A band-data coverage ledger. Only `totals` and `tests` drive the tiles under
  *  test, so the rest is a valid empty shell. */
 function ledger(over: Partial<CoverageLedger> = {}): CoverageLedger {

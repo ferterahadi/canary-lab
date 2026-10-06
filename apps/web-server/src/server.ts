@@ -1,3 +1,4 @@
+import { FlightAttentionReader } from './features/flights/logic/attention'
 import { bridgeCleanupEvents } from './shared/cleanup-events'
 import { createRepositoryObserver } from './shared/repository-observer'
 import path from 'path'
@@ -175,6 +176,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   runStore.onEvent(refreshRunCoverage)
   app.addHook('onListen', () => coverageMonitor.start())
   app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
+  const flightAttention = new FlightAttentionReader(flightStore, { featuresDir, logsDir }, workspaceEvents)
+  flightAttention.start()
+  app.addHook('onClose', async () => flightAttention.close())
   const gettingStartedRuntime = createGettingStartedRuntime({
     logsDir, runStore, flightStore, portifyStore, coverageJobStore, workspaceEvents,
     readDraft: (id) => readDraft(logsDir, id),
@@ -288,6 +292,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     portifyStore,
     coverageJobStore,
     coverageMonitor,
+    flightAttention,
     flightStore,
     planStore,
     dirtySpecStore,

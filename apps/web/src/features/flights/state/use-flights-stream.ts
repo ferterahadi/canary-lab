@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { listFlights } from '@/shared/api/flights'
+import { FLIGHT_ATTENTION_RECONCILE_MS } from '@shared/flights/attention'
+import { withUnverifiedAttention } from '../lib/attention-history'
 import {
   EMPTY_FLIGHTS_STREAM,
   flightsStreamReducer,
@@ -24,9 +27,14 @@ export interface UseFlightsStreamOptions {
   onReconnect?: () => void
 }
 
+const RECONNECTING_REASON = 'Could not verify current state. Reconnecting…'
+
 export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStreamState & { forgetFlight: (id: string) => void } {
   const [state, dispatch] = useReducer(flightsStreamReducer, EMPTY_FLIGHTS_STREAM)
-  const forgetFlight = useCallback((flightId: string) => dispatch({ type: 'removed', flightId }), [])
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const observed = useRef(0)
+  const forgetFlight = useCallback((flightId: string) => { observed.current++; dispatch({ type: 'removed', flightId }) }, [])
   const onReconnectRef = useRef(opts.onReconnect)
   onReconnectRef.current = opts.onReconnect
   const { wsBase, WebSocketImpl } = opts
@@ -47,7 +55,7 @@ export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStr
         },
         onMessage: (data) => {
           const frame = parseFlightsFrame(data)
-          if (frame) dispatch(frame)
+          if (frame) { observed.current++; dispatch(frame) }
         },
       })
     } catch {
@@ -56,6 +64,37 @@ export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStr
     }
     return () => conn?.close()
   }, [wsBase, WebSocketImpl])
+
+  useEffect(() => {
+    let closed = false
+    let request = 0
+    const timer = setInterval(() => {
+      if (!stateRef.current.flights.some((f) => f.status === 'paused')) return
+      const version = observed.current
+      const token = ++request
+      const superseded = (): boolean => closed || token !== request || version !== observed.current
+      listFlights().then((flights) => {
+        if (superseded()) return
+        const details = Object.fromEntries(flights.flatMap((entry) => {
+          const detail = stateRef.current.details[entry.flightId]
+          return detail && detail.updatedAt === entry.updatedAt
+            ? [[entry.flightId, { ...detail, attention: entry.attention }]] : []
+        }))
+        dispatch({ type: 'snapshot', flights, details })
+      }).catch(() => {
+        if (superseded()) return
+        // A retained resolution is not confirmed current while the read path
+        // is unavailable. The next successful snapshot replaces this warning.
+        const current = stateRef.current
+        dispatch({
+          type: 'snapshot',
+          flights: current.flights.map((f) => withUnverifiedAttention(f, RECONNECTING_REASON)),
+          details: Object.fromEntries(Object.entries(current.details).map(([id, m]) => [id, withUnverifiedAttention(m, RECONNECTING_REASON)])),
+        })
+      })
+    }, FLIGHT_ATTENTION_RECONCILE_MS)
+    return () => { closed = true; clearInterval(timer) }
+  }, [])
 
   return { ...state, forgetFlight }
 }

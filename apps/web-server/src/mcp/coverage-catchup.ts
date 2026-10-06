@@ -38,6 +38,6 @@ export function withCoverageCatchup(name: string, handler: CanaryLabToolHandler,
     }
     if (!feature) return result
     const [notificationUpdate, update] = await Promise.all([readNotificationUpdate(feature, deps), readCoverageUpdate(feature, deps)])
-    return { ...result, content: [...result.content, { type: 'text' as const, text: JSON.stringify({ coverageUpdate: update, notificationUpdate, guidance: 'Use current freshness, not historical percentages. If recovery is within your task, follow nextAction after respecting activeJobId and Flight ownership; otherwise report it. Save the revision for wait_for_feature_change.' }) }] }
+    return { ...result, content: [...result.content, { type: 'text' as const, text: JSON.stringify({ coverageUpdate: update, notificationUpdate, guidance: 'Use current freshness and flightAttention, not historical errors or percentages. Resolved attention does not authorize resuming a paused flight. If recovery is within your task, follow nextAction after respecting activeJobId and Flight ownership; otherwise report it. Save the revision for wait_for_feature_change.' }) }] }
   }
 }

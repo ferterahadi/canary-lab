@@ -1,3 +1,4 @@
+import { flightNeedsAttention } from '@shared/flights/attention'
 import { useState } from 'react'
 import type {
   FlightIndexEntry,
@@ -33,7 +34,7 @@ export interface FlightsPillProps {
    *  falls back to its own state (keeps this component's unit tests standalone). */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  onOpenFlight: (flightId: string | null) => void
+  onOpenFlight: (flightId: string | null, stage?: FlightStageKey) => void
   /** Open the real surface behind an activity-only row (no flight record). */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Open the flight launcher for a never-flown feature (R49). */
@@ -82,9 +83,7 @@ export function FlightsPill({
   // non-queued reason, OR a pre-flight settled and awaiting review. Independent
   // of any toast — it stays until the underlying state resolves.
   const waitingForReview = [...activity.values()].some((a) => a.waiting?.kind === 'test-review')
-  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some((f) =>
-    flightAwaitsUser(f)
-    || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
+  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some(flightNeedsAttention)
 
   const needsHuman = waitingForReview || waiting.length > 0 || preFlightReview.length > 0
   const tone = needsHuman ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
@@ -137,7 +136,7 @@ export function FlightsPill({
           features={features}
           coverageJobs={coverageJobs}
           portifyWorkflows={portifyWorkflows}
-          onPick={(id) => { setOpen(false); onOpenFlight(id) }}
+          onPick={(id, stage) => { setOpen(false); if (stage) onOpenFlight(id, stage); else onOpenFlight(id) }}
           onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
           onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}
           onPickPreFlight={(taskId) => { setOpen(false); onOpenPreFlight?.(taskId) }}

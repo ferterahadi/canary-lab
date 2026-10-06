@@ -24,6 +24,17 @@ beforeEach(() => {
   remedy.answer = null
 })
 
+it('carries the central assessment into agent reads without recommending automatic recovery of a resolved failure', async () => {
+  const attention = { state: 'resolved', stage: 'specs-coverage', title: 'Earlier failure resolved by current evidence.',
+    reason: 'Remaining: Evaluation report. Nothing has been started.', checkedAt: 'now', revision: 'a' }
+  const { call, requests } = flightHarness({ reply: { statusCode: 200,
+    body: plainFlight('paused', { attention, pauseReason: 'stage-failed', error: 'Historical launch error' }),
+  } })
+  const result = await call('get_flight', { flightId: 'fl-1' })
+  expect(result).toMatchObject({ attention, error: 'Historical launch error', next: expect.stringContaining('Do not resume automatically') })
+  expect(requests.every((request) => request.method === 'GET')).toBe(true)
+})
+
 /** `start_flight` reads the index first, then acts. Routes both legs. */
 function startRoutes(opts: {
   flights?: Array<Record<string, unknown>>

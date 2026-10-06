@@ -16,6 +16,7 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     repoPaths: m.repoPaths,
     group: m.opts.group,
     status: m.status,
+    ...(m.attention ? { attention: m.attention } : {}),
     pauseReason: m.pauseReason,
     // Which kind of stop a parked flight is on, so the slim consumers can tell
     // a question for the human from an `external-work` hand-off without

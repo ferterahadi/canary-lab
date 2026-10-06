@@ -15,6 +15,7 @@
 import type { ClientKind } from '../run-mode'
 import type { RunBootFailure } from '../run-state'
 import type { AgentStagePlans } from '../agent-models'
+import type { FlightAttention } from './attention'
 
 /** Canonical stage-record order. This stays stable for persisted manifests;
  *  normal drive priority and restart boundaries live in
@@ -459,6 +460,8 @@ export interface FlightExternalAgentSession {
 }
 
 export interface FlightManifest {
+  /** Server-owned read projection, absent from persisted execution history. */
+  attention?: FlightAttention
   flightId: string
   /** Feature this flight targets (created by the flight, or matched by the
    *  similarity stage). */
@@ -509,6 +512,7 @@ export interface FlightManifest {
 }
 
 export interface FlightIndexEntry {
+  attention?: FlightAttention
   id: string
   createdAt: string
   flightId: string

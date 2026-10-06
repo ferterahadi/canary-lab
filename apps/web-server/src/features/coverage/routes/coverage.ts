@@ -1,3 +1,4 @@
+import type { FlightAttentionReader } from '../../flights/logic/attention'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
@@ -36,6 +37,7 @@ import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../
 import { notFound } from '../../../shared/http-error'
 
 export interface CoverageRouteDeps {
+  flightAttention?: FlightAttentionReader
   coverageMonitor?: CoverageFreshnessMonitor
   featuresDir: string
   logsDir: string
@@ -94,15 +96,19 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     const timeout = Number(req.query.timeoutMs ?? 0)
     if (!Number.isFinite(timeout) || timeout < 0 || timeout > 30_000) throw Object.assign(new Error('timeoutMs must be between 0 and 30000'), { statusCode: 400 })
     const result = deps.coverageMonitor
-      ? await deps.coverageMonitor.wait(req.params.name, req.query.afterRevision, timeout)
+      ? await deps.coverageMonitor.wait(req.params.name, req.query.afterRevision, deps.flightAttention ? Math.min(timeout, 10_000) : timeout)
       : (() => {
           const ledger = computeFeatureCoverage({ ...deps, feature: req.params.name })
           return { changed: ledger.freshness!.revision !== req.query.afterRevision, change: { feature: req.params.name, freshness: ledger.freshness!, delivery: 'tool-response-and-wait' as const } }
         })()
     const flight = deps.flightStore?.latestForFeature(req.params.name)
+    const attention = flight ? deps.flightAttention?.get(flight.flightId)?.attention : undefined
+    const flightChange = flight
+      ? { flightId: flight.flightId, flightStatus: flight.status, ...(attention ? { flightAttention: attention } : {}) }
+      : {}
     const job = jobStore.activeFor(req.params.name, 'summary') ?? jobStore.activeFor(req.params.name, 'coverage')
     const owner = job ? jobStore.get(job.jobId)?.externalSessionId ?? job.producer ?? 'internal' : undefined
-    return { ...result, change: { ...result.change, ...(flight ? { flightId: flight.flightId, flightStatus: flight.status } : {}), ...(job ? { activeJobId: job.jobId, activeJobOwner: owner } : {}) } }
+    return { ...result, change: { ...result.change, ...flightChange, ...(job ? { activeJobId: job.jobId, activeJobOwner: owner } : {}) } }
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/docs', async (req, reply) => {

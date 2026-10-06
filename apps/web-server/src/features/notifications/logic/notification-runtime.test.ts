@@ -51,7 +51,7 @@ it('starts reconciliation explicitly and settles the inbox from a Flight store e
   expect(runtime.store.list()).toEqual([])
   runtime.start()
   const [active] = runtime.store.list()
-  expect(active.target).toEqual({ kind: 'flight', flightId: 'f1' })
+  expect(active.target).toEqual({ kind: 'flight', flightId: 'f1', stage: 'run' })
   expect(active.resolvedAt).toBeUndefined()
   await flush()
   const publish = vi.spyOn(events, 'publish')
@@ -74,6 +74,15 @@ it('reconciles run and dirty-store events but ignores its own workspace events',
   }
   await flush()
   expect(reconcile).not.toHaveBeenCalled()
+})
+
+it('creates an unavailable assessment notice without hiding the uncertainty', () => {
+  const attention = { state: 'unavailable' as const, stage: 'run' as const, title: 'Flight paused',
+    reason: 'Could not verify current state', checkedAt: 'now', revision: 'a' }
+  vi.spyOn(flights, 'list').mockImplementation(() => [{ ...flight, id: 'f1', attention }])
+  runtime.start()
+  expect(runtime.store.list()[0].body).toBe('Could not verify current state')
+  expect(runtime.store.list()[0].resolvedAt).toBeUndefined()
 })
 
 it.each<WorkspaceEvent>([

@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest } from '@shared/flights/types'
 import { useFlightsStream } from './use-flights-stream'
 import { flightIndexEntry } from '@shared/flights/index-entry'
+const { listFlights } = vi.hoisted(() => ({ listFlights: vi.fn() }))
+vi.mock('@/shared/api/flights', () => ({ listFlights }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // Minimal socket stand-in: the test drives `onmessage` / `onclose` directly.
@@ -64,6 +66,8 @@ const push = async (frame: unknown) => {
 }
 
 beforeEach(() => {
+  listFlights.mockReset()
+  listFlights.mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -75,9 +79,36 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('useFlightsStream', () => {
+  it('recovers missed attention pushes and rejects an older read after a newer push', async () => {
+    vi.useFakeTimers()
+    const paused = manifest({ status: 'paused', pauseReason: 'stage-failed', attention: {
+      state: 'actionable', stage: 'scout', title: 'Paused', reason: 'Failed', revision: 'a', checkedAt: 'now',
+    } })
+    await act(async () => { root.render(<Probe />) })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(paused)], details: { fl_1: paused } })
+    const resolved = { ...paused, attention: { ...paused.attention!, state: 'resolved' as const, revision: 'b' } }
+    listFlights.mockResolvedValue([flightIndexEntry(resolved)])
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(seen.at(-1)?.flights[0].attention?.state).toBe('resolved')
+    expect(seen.at(-1)?.details.fl_1.attention?.state).toBe('resolved')
+    let finish!: (value: ReturnType<typeof flightIndexEntry>[]) => void
+    listFlights.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    await push({ type: 'update', flightId: 'fl_1', manifest: paused })
+    await act(async () => finish([flightIndexEntry(resolved)]))
+    expect(seen.at(-1)?.flights[0].attention?.state).toBe('actionable')
+    listFlights.mockRejectedValue(new Error('offline'))
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(seen.at(-1)?.flights[0].attention?.state).toBe('unavailable')
+    listFlights.mockResolvedValue([flightIndexEntry(resolved)])
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(seen.at(-1)?.flights[0].attention?.state).toBe('resolved')
+  })
+
   it('connects to /ws/flights and applies the snapshot', async () => {
     await act(async () => { root.render(<Probe />) })
     expect(FakeSocket.opened).toEqual(['ws://test/ws/flights'])

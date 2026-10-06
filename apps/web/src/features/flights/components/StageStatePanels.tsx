@@ -22,7 +22,7 @@ import { currentStageForPair } from './stage-metrics'
  *  — one Continue, no confusion. Width is capped to line up with the repo-scan
  *  cards above (both on STAGE_COLUMN) so the stage reads as one column, not a full-bleed
  *  banner under narrow cards. */
-export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mutationLockedReason }: {
+export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mutationLockedReason, historyInActivity = false }: {
   flightId: string
   stageLabel: string
   detail: string
@@ -31,6 +31,8 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
   errorDetail?: FlightStageErrorDetail
   /** External ownership keeps repository remedies visible but inert. */
   mutationLockedReason?: string
+  /** The error text already has a dated Activity entry; keep only remedies here. */
+  historyInActivity?: boolean
 }) {
   const logName = errorDetail?.logPath ? errorDetail.logPath.split('/').pop() : null
   // Machine-actionable fix, derived server-side at read time (live git
@@ -66,27 +68,32 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
       })
   }
   const staleReason = confirmed ? undefined : 'Repository evidence is stale; waiting for a successful read.'
+  if (historyInActivity && !remedy && !errorDetail && !readError) return null
   return (
     <section
       data-testid="stage-error"
       className={`flex flex-col gap-2 ${panelCardClass('danger')} ${STAGE_COLUMN}`}
       style={panelCardStyle('danger')}
     >
-      <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-danger">✕</span>
-        <span data-testid="stage-error-title" className="cl-type-title text-danger">
-          {stageLabel} failed
-        </span>
-      </div>
-      <p className="cl-type-body text-secondary">
-        This step stopped on the error below. Fix it, then hit Continue at the top to try again.
-      </p>
-      <pre
-        data-testid="stage-error-detail"
-        className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 cl-type-meta border-line bg-canvas text-secondary font-mono"
-      >
-        {detail}
-      </pre>
+      {!historyInActivity && (
+        <>
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-danger">✕</span>
+            <span data-testid="stage-error-title" className="cl-type-title text-danger">
+              {stageLabel} failed
+            </span>
+          </div>
+          <p className="cl-type-body text-secondary">
+            This step stopped on the error below. Use the flight recovery control above to try again.
+          </p>
+          <pre
+            data-testid="stage-error-detail"
+            className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 cl-type-meta border-line bg-canvas text-secondary font-mono"
+          >
+            {detail}
+          </pre>
+        </>
+      )}
       {errorDetail && (
         <div className="cl-type-meta">
           <BootEvidenceRows failure={errorDetail} />
@@ -134,7 +141,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           {remedy.repos.length === 0 ? (
             // The error is stale: every repo is clean again (fixed by hand).
             <p className="cl-type-body text-secondary">
-              The repos are clean again — hit Continue at the top to try again.
+              The repos are clean again — use the flight recovery control above to try again.
             </p>
           ) : (
             <>
