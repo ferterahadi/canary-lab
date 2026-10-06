@@ -2,6 +2,7 @@ import { benchmarkIndexEntry, type BenchmarkIndexEntry } from '@shared/benchmark
 import type { BenchmarkManifest } from '../api/benchmark-types'
 import {
   createRecordIndex,
+  byStartedDesc,
   type RecordIndexAction,
   type RecordIndexFrame,
   type RecordIndexState,
@@ -17,6 +18,7 @@ import {
 export const benchmarkIndex = createRecordIndex<BenchmarkIndexEntry, BenchmarkManifest, 'benchmarks', 'benchmarkId'>({
   keys: { list: 'benchmarks', id: 'benchmarkId' },
   entryOf: benchmarkIndexEntry,
+  compareEntries: byStartedDesc,
 })
 
 export type BenchmarkStreamFrame = RecordIndexFrame<BenchmarkIndexEntry, BenchmarkManifest, 'benchmarks', 'benchmarkId'>

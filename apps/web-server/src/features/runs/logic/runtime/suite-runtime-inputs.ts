@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -33,7 +34,7 @@ function digest(bytes: Buffer): string {
 
 function snapshotRelativeTarget(ctx: RunContext, targetPath: string): string | null {
   const relative = path.relative(ctx.feature.featureDir, targetPath)
-  if (!relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) return null
+  if (!isPathUnder(targetPath, ctx.feature.featureDir, false)) return null
   return relative.split(path.sep).join('/')
 }
 
@@ -54,7 +55,7 @@ function writeInventory(ctx: RunContext, inventory: RuntimeInputInventory): void
 
 function assertSafeFile(root: string, file: string, label: string): void {
   const relative = path.relative(root, file)
-  if (!relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
+  if (!isPathUnder(file, root, false)) {
     throw new Error(`${label} escapes its owned directory: ${file}`)
   }
   let cursor = root

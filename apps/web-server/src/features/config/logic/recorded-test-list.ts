@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import { readManifest } from '../../runs/logic/runtime/manifest'
@@ -24,7 +25,7 @@ export function recordedTestList(logsDir: string | undefined, feature: string, r
     if (!location || !test.title) return fail('This run’s recorded test locations are unavailable.', 409)
     const file = path.resolve(location[1])
     // The roster is data, not authority to read outside the saved suite.
-    if (dir && (!file.startsWith(`${dir}${path.sep}`) || (fs.existsSync(file) && !fs.realpathSync(file).startsWith(`${dir}${path.sep}`)))) return fail('Recorded test source is outside the saved suite.', 409)
+    if (dir && (!isPathUnder(file, dir, false) || (fs.existsSync(file) && !isPathUnder(fs.realpathSync(file), dir, false)))) return fail('Recorded test source is outside the saved suite.', 409)
     const line = Number(location[2])
     return { file, line, title: test.title, originFile: file, originLine: line }
   })

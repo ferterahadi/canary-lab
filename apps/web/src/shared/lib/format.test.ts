@@ -116,6 +116,12 @@ describe('formatBytes', () => {
   it('formats across units with sensible rounding', () => {
     expect(formatBytes(0)).toBe('0 B')
     expect(formatBytes(-5)).toBe('0 B')
+    expect(formatBytes(NaN)).toBe('0 B')
+    expect(formatBytes(Infinity)).toBe('0 B')
+    expect(formatBytes(1023)).toBe('1023 B')
+    expect(formatBytes(1024)).toBe('1 KB')
+    expect(formatBytes(1024 ** 2)).toBe('1 MB')
+    expect(formatBytes(1024 ** 3)).toBe('1 GB')
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(2048)).toBe('2 KB')
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')

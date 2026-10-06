@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as benchmarkApi from '@/shared/api/benchmark'
 import { ApiError } from '@/shared/api/internal'
-import { BenchmarkDetail } from '../components/BenchmarkDetail'
+import { BenchmarkDetail, clearWorktreesAction } from '../components/BenchmarkDetail'
 import type { BenchmarkManifest } from '../api/benchmark-types'
 import type { BenchmarkIndexEntry } from '@shared/benchmark-index'
 import { BenchmarkProvider, useBenchmark, useBenchmarkDetail, useBenchmarks } from './BenchmarkContext'
@@ -21,6 +21,7 @@ vi.mock('@/shared/api/benchmark', async (importOriginal) => ({
   startBenchmark: vi.fn(),
   abortBenchmark: vi.fn(),
   getBenchmark: vi.fn(),
+  clearBenchmarkWorktrees: vi.fn(),
 }))
 
 class FakeWebSocket {
@@ -457,4 +458,23 @@ it('the actual detail view replaces indefinite loading with failure, missing, an
   vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Synthetic outcome', startedAt: '2026-01-01', arms: [], results: [] }))
   await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
   expect(container.textContent).toContain('Synthetic outcome')
+})
+
+it.each([[0, '0 B'], [1024, '1 KB'], [Number.NaN, '0 B']] as const)('uses shared units when confirming cleanup of %s bytes', async (bytes, expected) => {
+  const confirm = vi.fn(() => false)
+  vi.stubGlobal('confirm', confirm)
+  vi.mocked(benchmarkApi.clearBenchmarkWorktrees).mockResolvedValue({ freedBytes: bytes, alreadyCleared: false } as Awaited<ReturnType<typeof benchmarkApi.clearBenchmarkWorktrees>>)
+  try {
+    await clearWorktreesAction('bm-1')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(`Reclaims ${expected}.`))
+    expect(benchmarkApi.clearBenchmarkWorktrees).toHaveBeenCalledWith('bm-1', false)
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('renders a zero-byte cleanup receipt instead of hiding its size', async () => {
+  vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Fixture', startedAt: '2026-01-01', arms: [], results: [], worktreesCleared: true, worktreesClearedBytes: 0 }))
+  await act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+    <BenchmarkDetail id="bm-1" onClose={vi.fn()} onNew={vi.fn()} />
+  </BenchmarkProvider>) })
+  expect(container.textContent).toContain('reclaimed 0 B')
 })

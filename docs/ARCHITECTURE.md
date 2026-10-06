@@ -269,11 +269,16 @@ also settles the sidebar's Services badge and active-run consumers. Recovery
 stops once the detail settles; no additional index poll is introduced. Later
 stream observations and provider cleanup invalidate outstanding detail reads,
 preventing late responses from reverting newer state or restoring removed runs.
-Runs, Portify, and Benchmark share that per-record request guard in
+Runs, Flight, Portify, and Benchmark share that per-record request guard in
 `apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
-separate. Portify and Benchmark compose these guards with the reconnecting socket
+separate. Flight, Portify, and Benchmark compose these guards with the reconnecting socket
 through `apps/web/src/shared/state/record-stream.ts`, which owns connection labels,
-backoff, frame observation, and teardown. Their reducers and HTTP actions remain
+backoff, frame observation, and teardown. Flight retains its fixed 1.5-second reconnect
+delay and separate detail recovery. These three streams share snapshot, update, and
+removal reduction in `apps/web/src/shared/state/record-index-store.ts`, with domain
+row builders and ordering: Flight uses creation time; Portify and Benchmark use
+start time. Flight's five-second paused-attention reconciliation and local removals
+invalidate older reads through the same guard. Their HTTP actions remain
 feature-owned. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
 Portify and Benchmark detail demand belongs to the provider-owned
@@ -862,10 +867,13 @@ verification probes its services concurrently and retains its own temporary
 process cleanup, dependency/port diagnostics, and solo-baseline triage. The run
 adapter retains manifest events, held boot sessions, and post-readiness monitoring.
 
-Heal-task and test-review waits share subscription and timer ownership through
-`apps/web-server/src/mcp/wait-for-run-condition.ts`. Each caller supplies its
-durable outcome reader and timeout response; test approval still requires a
-receipt, and heal waits retain their claim heartbeat and bounded wait window.
+Coverage freshness, approvals, heal-task and test-review waits share subscription,
+settlement and timer disposal in `apps/web-server/src/shared/wait-for-condition.ts`.
+The run-specific adapter in `apps/web-server/src/mcp/wait-for-run-condition.ts`
+filters run events; approvals subscribe directly to approval records. Each caller
+supplies its outcome reader and timeout response. Coverage retains revision checks
+and shutdown cancellation, test approval still requires a durable receipt, and
+heal waits retain their immediate heartbeat, five-second cadence and bounded window.
 
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator

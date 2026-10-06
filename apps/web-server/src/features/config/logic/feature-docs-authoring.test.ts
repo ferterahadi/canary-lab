@@ -55,6 +55,14 @@ module.exports = { config }
 }
 
 describe('writeFeatureDoc', () => {
+  it('accepts a dot-prefixed descendant without admitting traversal', () => {
+    const dir = writeFeatureConfig('checkout')
+    expect(writeFeatureDoc(ctx(), { feature: 'checkout', relPath: '..cache/notes.md', content: '# Notes' }).ok).toBe(true)
+    expect(fs.readFileSync(path.join(dir, 'docs/..cache/notes.md'), 'utf8')).toBe('# Notes')
+    expect(writeFeatureDoc(ctx(), { feature: 'checkout', relPath: '../outside.md', content: 'outside' }).ok).toBe(false)
+    expect(fs.existsSync(path.join(dir, 'outside.md'))).toBe(false)
+  })
+
   it('writes a markdown doc into the feature docs/ dir and reports the relative path', () => {
     const featureDir = writeFeatureConfig('line_integration')
     const res = writeFeatureDoc(ctx(), {

@@ -2,8 +2,7 @@ import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/
 import type { Approval } from '../../../../shared/approval'
 import { FileBackedTaskStore } from '../../../../shared/lib/file-backed-task-store'
 import type { WorkspaceEventPublisher } from '../shared/workspace-events'
-import { waitForRunCondition } from './wait-for-run-condition'
-import type { RunStoreEvent } from '../features/runs/logic/run-store'
+import { waitForCondition } from '../shared/wait-for-condition'
 import type { TaskStoreEvent } from '../../../../shared/lib/file-backed-task-store'
 
 type Result = CallToolResult | InputRequiredResult
@@ -52,7 +51,6 @@ export class ApprovalStore {
     return this.public(this.get(id)!)
   }
   async wait(id: string, timeoutMs: number): Promise<Result> {
-    const listeners = new Map<(event: RunStoreEvent) => void, (event: TaskStoreEvent) => void>()
     const read = (): Result | null => {
       this.expire()
       const record = this.get(id)
@@ -71,11 +69,12 @@ export class ApprovalStore {
       return record.result ?? (record.status === 'expired' || record.status === 'failed'
         ? { content: [{ type: 'text', text: JSON.stringify(this.public(record)) }] } : null)
     }
-    return waitForRunCondition({ runId: id, timeoutMs, maxWaitMs: 30_000, read,
+    return waitForCondition({ timeoutMs, maxWaitMs: 30_000, read,
       onTimeout: () => read() ?? { content: [{ type: 'text', text: JSON.stringify({ status: 'still_waiting', approvalId: id, next: 'Call wait_for_approval again. Only the human may answer in the chat form or browser.' }) }] },
-      store: {
-        onEvent: (listener) => { const mapped = (event: TaskStoreEvent) => listener({ kind: 'changed', runId: event.id }); listeners.set(listener, mapped); this.records.onEvent(mapped) },
-        offEvent: (listener) => { this.records.offEvent(listeners.get(listener)!); listeners.delete(listener) },
+      subscribe: (notify) => {
+        const listener = (event: TaskStoreEvent): void => { if (event.id === id) notify() }
+        this.records.onEvent(listener)
+        return () => this.records.offEvent(listener)
       },
     })
   }

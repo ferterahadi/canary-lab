@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { resolveRunAgentSessionRef } from '../../agent-sessions/logic/run-agent-session-ref'
 import { proposalRecord } from '../logic/pr/proposal-record'
 // Runs REST — reads: index, detail, verification report, agent session, and the
@@ -142,8 +143,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     const file = req.body?.file
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
     const relative = typeof file === 'string' && path.isAbsolute(file) ? path.relative(runDir, file) : ''
-    const inRun = (rel: string) => Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel)
-    if (!inRun(relative) || !relative.endsWith('.log') || relative.split(path.sep)[0] === READABLE_LOGS_DIR) {
+    if (!relative || !isPathUnder(file!, runDir, false) || !relative.endsWith('.log') || relative.split(path.sep)[0] === READABLE_LOGS_DIR) {
       reply.code(400)
       return { error: 'file must be a raw .log file inside this run' }
     }
@@ -151,7 +151,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     try {
       // The lexical check above names a run file; the real path must agree, so
       // a symlink placed in the run dir cannot read something outside it.
-      if (!inRun(path.relative(fs.realpathSync(runDir), fs.realpathSync(file!)))) {
+      if (!isPathUnder(fs.realpathSync(file!), fs.realpathSync(runDir), false)) {
         reply.code(400)
         return { error: 'file must be a raw .log file inside this run' }
       }
@@ -323,7 +323,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     for (const base of bases) {
       const requested = path.resolve(base, req.params['*'])
       const rel = path.relative(base, requested)
-      if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+      if (!isPathUnder(requested, base, true)) continue
       validRel = rel
       try {
         const stat = fs.statSync(requested)

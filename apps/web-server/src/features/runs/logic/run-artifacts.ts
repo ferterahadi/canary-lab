@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { listFiles as listRegularFiles } from '../../../shared/list-files'
 import fs from 'fs'
 import path from 'path'
@@ -82,7 +83,7 @@ export function indexPlaywrightArtifacts(
   const resolveFile = (filePath: string): { resolved: string; rel: string } | null => {
     const abs = path.resolve(filePath)
     const relCurrent = path.relative(currentDir, abs)
-    if (!relCurrent.startsWith('..') && !path.isAbsolute(relCurrent)) {
+    if (isPathUnder(abs, currentDir, true)) {
       if (hasCurrent && fs.existsSync(abs) && fs.statSync(abs).isFile()) {
         return { resolved: abs, rel: relCurrent }
       }

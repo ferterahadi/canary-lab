@@ -63,7 +63,7 @@ export function classifyWorktreePath(logsDir: string, worktreePath: string): {
   slot: string | null
 } {
   const rel = path.relative(logsDir, worktreePath)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (!isPathUnder(worktreePath, logsDir, true)) {
     return { ownerKind: 'unknown', ownerId: null, slot: null }
   }
   const seg = rel.split(path.sep)

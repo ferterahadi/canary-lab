@@ -1,4 +1,5 @@
 import { useNow } from '@/shared/state/use-now'
+import { formatBytes } from '@/shared/lib/format'
 import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as benchmarkApi from '@/shared/api/benchmark'
@@ -79,7 +80,7 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
             {showReceipt && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: 'var(--text-muted)' }}>
                 <CheckIcon /> Worktrees cleared
-                {m.worktreesClearedBytes ? ` · reclaimed ${formatBytes(m.worktreesClearedBytes)}` : ''}
+                {m.worktreesClearedBytes !== undefined ? ` · reclaimed ${formatBytes(m.worktreesClearedBytes)}` : ''}
               </span>
             )}
             {showFrozen && (
@@ -263,15 +264,6 @@ export async function clearWorktreesAction(id: string): Promise<void> {
   } catch (e) {
     window.alert(e instanceof Error ? e.message : String(e))
   }
-}
-
-// Bytes → a short human size for the confirm + the post-clear receipt.
-export function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return 'no disk'
-  const mb = bytes / 1_000_000
-  if (mb < 1) return '<1 MB'
-  if (mb < 1000) return `~${Math.round(mb)} MB`
-  return `~${(mb / 1000).toFixed(1)} GB`
 }
 
 // A small trash affordance for the "Clear worktrees" button.

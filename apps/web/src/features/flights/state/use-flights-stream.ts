@@ -1,12 +1,14 @@
+import { useRecordStream } from '@/shared/state/record-stream'
+import { createObservedReads } from '@/shared/state/observed-reads'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import { listFlights } from '@/shared/api/flights'
 import { FLIGHT_ATTENTION_RECONCILE_MS } from '@shared/flights/attention'
 import { withUnverifiedAttention } from '../lib/attention-history'
 import {
   EMPTY_FLIGHTS_STREAM,
   flightsStreamReducer,
-  parseFlightsFrame,
+  decodeFlightsFrame,
   type FlightsStreamState,
 } from './flights-stream-state'
 
@@ -33,46 +35,34 @@ export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStr
   const [state, dispatch] = useReducer(flightsStreamReducer, EMPTY_FLIGHTS_STREAM)
   const stateRef = useRef(state)
   stateRef.current = state
-  const observed = useRef(0)
-  const forgetFlight = useCallback((flightId: string) => { observed.current++; dispatch({ type: 'removed', flightId }) }, [])
-  const onReconnectRef = useRef(opts.onReconnect)
-  onReconnectRef.current = opts.onReconnect
-  const { wsBase, WebSocketImpl } = opts
-
-  useEffect(() => {
-    const base = wsBase ?? defaultWsBase()
-    let opened = false
-    let conn: { close(): void } | null = null
-    try {
-      conn = connectReconnectingSocket({
-        url: `${base}/ws/flights`,
-        WebSocketImpl,
-        maxReconnects: Infinity,
-        reconnectDelayMs: 1500,
-        onOpen: () => {
-          if (opened) onReconnectRef.current?.()
-          opened = true
-        },
-        onMessage: (data) => {
-          const frame = parseFlightsFrame(data)
-          if (frame) { observed.current++; dispatch(frame) }
-        },
-      })
-    } catch {
-      // No WebSocket in this environment (a component unit test): the caller's
-      // REST load still fills the list — it just won't update live.
-    }
-    return () => conn?.close()
-  }, [wsBase, WebSocketImpl])
+  const reads = useRef(createObservedReads()).current
+  const apply = useCallback((frame: Parameters<typeof flightsStreamReducer>[1]) => {
+    reads.clear()
+    dispatch(frame)
+  }, [reads])
+  const forgetFlight = useCallback((flightId: string) => apply({ type: 'removed', flightId }), [apply])
+  useRecordStream({
+    url: `${opts.wsBase ?? defaultWsBase()}/ws/flights`,
+    WebSocketImpl: opts.WebSocketImpl,
+    reads,
+    reconnectDelayMs: 1500,
+    onReconnect: opts.onReconnect,
+    allowUnavailableSocket: true,
+    decode: decodeFlightsFrame,
+    recordId: (frame) => frame.type === 'snapshot' ? null : frame.flightId,
+    dispatch: apply,
+    onConnection: () => {},
+  })
 
   useEffect(() => {
     let closed = false
-    let request = 0
     const timer = setInterval(() => {
       if (!stateRef.current.flights.some((f) => f.status === 'paused')) return
-      const version = observed.current
-      const token = ++request
-      const superseded = (): boolean => closed || token !== request || version !== observed.current
+      const key = 'attention'
+      // Each interval supersedes a hung read, just as a push supersedes it.
+      reads.invalidate(key)
+      const token = reads.begin(key)!
+      const superseded = (): boolean => closed || !reads.current(key, token)
       listFlights().then((flights) => {
         if (superseded()) return
         const details = Object.fromEntries(flights.flatMap((entry) => {
@@ -91,10 +81,10 @@ export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStr
           flights: current.flights.map((f) => withUnverifiedAttention(f, RECONNECTING_REASON)),
           details: Object.fromEntries(Object.entries(current.details).map(([id, m]) => [id, withUnverifiedAttention(m, RECONNECTING_REASON)])),
         })
-      })
+      }).finally(() => reads.finish(key, token))
     }, FLIGHT_ATTENTION_RECONCILE_MS)
-    return () => { closed = true; clearInterval(timer) }
-  }, [])
+    return () => { closed = true; reads.clear(); clearInterval(timer) }
+  }, [reads])
 
   return { ...state, forgetFlight }
 }

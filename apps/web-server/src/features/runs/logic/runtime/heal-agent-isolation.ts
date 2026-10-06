@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import type { WorktreeHandle } from './repo-worktree'
@@ -9,13 +10,12 @@ function uniqueResolved(paths: readonly string[]): string[] {
 }
 
 function isSameOrAncestor(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate)
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+  return isPathUnder(candidate, parent, true)
 }
 
 function canonicalLocalPath(handle: WorktreeHandle): string {
   const relative = path.relative(handle.worktreeRoot, handle.localPath)
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (!isPathUnder(handle.localPath, handle.worktreeRoot, true)) {
     throw new Error(`worktree path for "${handle.repoName}" escapes its worktree root`)
   }
   return path.resolve(handle.sourceRoot, relative)

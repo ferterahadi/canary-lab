@@ -94,7 +94,6 @@ describe('frameToAction', () => {
 
   it('maps removed and ignores unknown frames', () => {
     expect(frameToAction({ type: 'removed', workflowId: 'w1' })).toEqual({ type: 'removed', workflowId: 'w1' })
-    // @ts-expect-error — forwards-compat unknown frame
     expect(frameToAction({ type: 'nope' })).toBeNull()
   })
 })

@@ -124,7 +124,6 @@ describe('frameToAction', () => {
       type: 'removed',
       benchmarkId: 'b1',
     })
-    // @ts-expect-error — forwards-compat unknown frame
     expect(frameToAction({ type: 'nope' })).toBeNull()
   })
 })

@@ -83,6 +83,85 @@ afterEach(() => {
 })
 
 describe('useFlightsStream', () => {
+  it('does not poll active flights, and drops detail whose revision no longer matches the index', async () => {
+    vi.useFakeTimers()
+    await act(async () => { root.render(<Probe />) })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(manifest())], details: {} })
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(listFlights).not.toHaveBeenCalled()
+    const paused = manifest({ status: 'paused' })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(paused)], details: { fl_1: paused } })
+    listFlights.mockResolvedValue([flightIndexEntry({ ...paused, updatedAt: 'later' }), flightIndexEntry({ ...paused, flightId: 'fl_2' })])
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(seen.at(-1)?.details).toEqual({})
+    expect(seen.at(-1)?.flights).toHaveLength(2)
+  })
+
+  it('ignores a failed attention read after a newer push or unmount', async () => {
+    vi.useFakeTimers()
+    let fail!: (reason: Error) => void
+    listFlights.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject }))
+    await act(async () => { root.render(<Probe />) })
+    const paused = manifest({ status: 'paused' })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(paused)], details: { fl_1: paused } })
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    await push({ type: 'update', flightId: 'fl_1', manifest: paused })
+    await act(async () => fail(new Error('old request')))
+    expect(seen.at(-1)?.details.fl_1).toEqual(paused)
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    await act(async () => root.render(null))
+    const renders = seen.length
+    await act(async () => fail(new Error('after unmount')))
+    expect(seen).toHaveLength(renders)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a local removal prevents a pending attention read from restoring the flight', async () => {
+    vi.useFakeTimers()
+    const paused = manifest({ status: 'paused' })
+    let finish!: (value: ReturnType<typeof flightIndexEntry>[]) => void
+    listFlights.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    await act(async () => { root.render(<Probe />) })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(paused)], details: { fl_1: paused } })
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    await act(async () => { seen.at(-1)!.forgetFlight('fl_1') })
+    await act(async () => finish([flightIndexEntry(paused)]))
+    expect(rows()).toBe('')
+    expect(seen.at(-1)?.details).toEqual({})
+  })
+
+  it('the next attention check supersedes a hung request', async () => {
+    vi.useFakeTimers()
+    const paused = manifest({ status: 'paused' })
+    let finish!: (value: ReturnType<typeof flightIndexEntry>[]) => void
+    listFlights.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    await act(async () => { root.render(<Probe />) })
+    await push({ type: 'snapshot', flights: [flightIndexEntry(paused)], details: { fl_1: paused } })
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    listFlights.mockResolvedValue([flightIndexEntry(manifest({ status: 'done' }))])
+    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    expect(rows()).toBe('fl_1:done')
+    await act(async () => finish([flightIndexEntry(paused)]))
+    expect(rows()).toBe('fl_1:done')
+  })
+
+  it('uses the latest reconnect callback without reconnecting on render', async () => {
+    vi.useFakeTimers()
+    const first = vi.fn()
+    const latest = vi.fn()
+    await act(async () => { root.render(<Probe onReconnect={first} />) })
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    await act(async () => { root.render(<Probe onReconnect={latest} />) })
+    expect(FakeSocket.opened).toHaveLength(1)
+    await act(async () => { FakeSocket.last?.onclose?.() })
+    await act(async () => vi.advanceTimersByTimeAsync(1499))
+    expect(FakeSocket.opened).toHaveLength(1)
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(FakeSocket.opened).toHaveLength(2)
+    expect(first).not.toHaveBeenCalled()
+    expect(latest).toHaveBeenCalledTimes(1)
+  })
+
   it('recovers missed attention pushes and rejects an older read after a newer push', async () => {
     vi.useFakeTimers()
     const paused = manifest({ status: 'paused', pauseReason: 'stage-failed', attention: {

@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
@@ -24,7 +25,7 @@ function confinedFile(root: string, relative: string): string {
   let parent = target
   while (!fs.existsSync(parent)) parent = path.dirname(parent)
   const realTarget = path.resolve(fs.realpathSync(parent), path.relative(parent, target))
-  if (!realTarget.startsWith(`${realRoot}${path.sep}`)) throw new Error('Test file is outside the suite')
+  if (!isPathUnder(realTarget, realRoot, false)) throw new Error('Test file is outside the suite')
   return realTarget
 }
 

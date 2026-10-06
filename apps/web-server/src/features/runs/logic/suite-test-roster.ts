@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { readSpecSource } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
@@ -11,7 +12,7 @@ export const SUITE_TEST_ROSTER_FILE = '.canary-suite-tests.json'
  * The reporter enriches this inventory; its execution selection never owns it. */
 export function sourceTestRoster(dir: string): PlaywrightListEntry[] {
   return listSpecFiles(dir).flatMap((file) => {
-    if (!fs.realpathSync(file).startsWith(`${fs.realpathSync(dir)}${path.sep}`)) {
+    if (!isPathUnder(fs.realpathSync(file), fs.realpathSync(dir), false)) {
       throw Object.assign(new Error('Test source is outside the suite.'), { statusCode: 409 })
     }
     const source = readSpecSource(file)
@@ -39,8 +40,8 @@ export function savedSuiteTestRoster(dir: string): PlaywrightListEntry[] {
     const file = path.resolve(dir, test.file)
     const originFile = path.resolve(dir, test.originFile)
     for (const candidate of [file, originFile]) {
-      if (!candidate.startsWith(`${dir}${path.sep}`)
-        || (fs.existsSync(candidate) && !fs.realpathSync(candidate).startsWith(`${dir}${path.sep}`))) {
+      if (!isPathUnder(candidate, dir, false)
+        || (fs.existsSync(candidate) && !isPathUnder(fs.realpathSync(candidate), dir, false))) {
         throw Object.assign(new Error('Recorded test source is outside the saved suite.'), { statusCode: 409 })
       }
     }

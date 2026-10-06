@@ -1,3 +1,4 @@
+import { waitForCondition } from '../../../../shared/wait-for-condition'
 import fs from 'fs'
 import path from 'path'
 import { COVERAGE_RECONCILE_MS, type FeatureCoverageChange } from '../../../../../../../shared/coverage/freshness'
@@ -14,7 +15,7 @@ export class CoverageFreshnessMonitor {
   private readonly values = new Map<string, FeatureCoverageChange>()
   private readonly listeners = new Set<(change: FeatureCoverageChange) => void>()
   private readonly watchers = new Map<string, fs.FSWatcher>()
-  private readonly waiting = new Set<() => void>()
+  private readonly shutdown = new AbortController()
   private timer?: ReturnType<typeof setInterval>
   private pending?: ReturnType<typeof setTimeout>
   private unsubscribe?: () => void
@@ -149,26 +150,25 @@ export class CoverageFreshnessMonitor {
   async wait(feature: string, afterRevision: string | undefined, timeoutMs: number): Promise<{ changed: boolean; change: FeatureCoverageChange }> {
     const first = this.read(feature)
     if (!afterRevision || first.freshness.revision !== afterRevision || timeoutMs <= 0) return { changed: first.freshness.revision !== afterRevision, change: first }
-    return new Promise((resolve) => {
-      let settled = false
-      const finish = (change: FeatureCoverageChange): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        this.listeners.delete(listener)
-        this.waiting.delete(cancel)
-        resolve({ changed: change.freshness.revision !== afterRevision, change })
-      }
-      const cancel = (): void => finish({ ...first, freshness: { ...first.freshness, state: 'unavailable', reasons: ['Server is shutting down; reconnect to confirm freshness.'] } })
-      const listener = (change: FeatureCoverageChange): void => {
-        if (change.feature === feature && change.freshness.revision !== afterRevision) finish(change)
-      }
-      const timer = setTimeout(() => finish(this.read(feature)), Math.min(timeoutMs, 30_000))
-      timer.unref()
-      this.listeners.add(listener)
-      this.waiting.add(cancel)
-      const current = this.read(feature)
-      if (current.freshness.revision !== afterRevision) finish(current)
+    const result = (change: FeatureCoverageChange) => ({ changed: change.freshness.revision !== afterRevision, change })
+    let observed: FeatureCoverageChange | undefined
+    return waitForCondition({
+      read: () => {
+        const change = observed ?? this.read(feature)
+        return change.freshness.revision !== afterRevision ? result(change) : null
+      },
+      subscribe: (notify) => {
+        const listener = (change: FeatureCoverageChange): void => {
+          if (change.feature === feature && change.freshness.revision !== afterRevision) { observed = change; notify() }
+        }
+        this.listeners.add(listener)
+        return () => { this.listeners.delete(listener) }
+      },
+      timeoutMs, maxWaitMs: 30_000,
+      onTimeout: () => result(this.read(feature)),
+      cancellation: { signal: this.shutdown.signal, result: () => result({ ...first, freshness: {
+        ...first.freshness, state: 'unavailable', reasons: ['Server is shutting down; reconnect to confirm freshness.'],
+      } }) },
     })
   }
 
@@ -177,7 +177,7 @@ export class CoverageFreshnessMonitor {
     clearInterval(this.timer)
     clearTimeout(this.pending)
     this.unsubscribe?.()
-    for (const cancel of this.waiting) cancel()
+    this.shutdown.abort()
     for (const watcher of this.watchers.values()) watcher.close()
     this.watchers.clear()
     this.snapshots.clear()
