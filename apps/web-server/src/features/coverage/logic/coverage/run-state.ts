@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
 import type { MappingInferenceCache } from './mapping-cache'
 
 // Records the requirements-set hash the coverage engine last ran against. The

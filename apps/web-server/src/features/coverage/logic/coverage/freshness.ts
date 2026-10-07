@@ -1,9 +1,8 @@
 import crypto from 'crypto'
-import fs from 'fs'
 import path from 'path'
 import type { CoverageFreshness, CoverageRecoveryAction } from '../../../../../../../shared/coverage/freshness'
 import type { CoverageLedger, PrdSummary } from '../../../../../../../shared/coverage/types'
-import { docsDirFor, isGeneratedDoc } from './docs-collection'
+import { docsDirFor, documentCandidates, inspectDocumentFile } from './document-files'
 import type { MappingInferenceSnapshot } from './mapping-cache'
 import { mappingInputMatches } from './mapping-validity'
 import type { CoverageRunState } from './run-state'
@@ -14,15 +13,8 @@ export function coverageRevision(value: unknown): string {
 
 export function unreadableSourceDocs(featureDir: string): string[] {
   const dir = docsDirFor(featureDir)
-  if (!fs.existsSync(dir)) return []
-  return fs.readdirSync(dir).filter((name) => {
-    if (!/\.(md|markdown|txt)$/i.test(name) || isGeneratedDoc(name)) return false
-    try {
-      const file = path.join(dir, name)
-      if (fs.statSync(file).isFile()) fs.readFileSync(file)
-      return false
-    } catch { return true /* unreadable inputs cannot certify freshness */ }
-  })
+  return documentCandidates(dir, { includeGenerated: false, order: 'filesystem' })
+    .filter((name) => inspectDocumentFile(path.join(dir, name), true).kind === 'unreadable')
 }
 
 export function deriveCoverageFreshness(args: {

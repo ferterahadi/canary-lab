@@ -1,7 +1,7 @@
 import type { PortifyManifest } from '@/shared/api/portify'
 import type { PortifyStatus } from '@shared/portify-index'
 import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 // Portify-side analog of ExternalDraftAgentPanel / ExternalHealPanel. When a
 // port-ification workflow is driven by an external MCP client (the agent runs
@@ -76,16 +76,7 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
       )}
 
       {m.status === 'failed' && m.error && (
-        <div
-          className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"
-          style={{
-            color: 'var(--danger)',
-            background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
-          }}
-        >
-          {m.error}
-        </div>
+        <ExternalAgentError>{m.error}</ExternalAgentError>
       )}
     </ExternalAgentCard>
   )

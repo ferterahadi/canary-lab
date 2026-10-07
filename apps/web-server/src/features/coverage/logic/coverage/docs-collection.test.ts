@@ -2,12 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import {
-  computeDocsHash,
-  isGeneratedDoc,
-  readDocsCollection,
-  type DocEntry,
-} from './docs-collection'
+import { isGeneratedDoc } from './document-files'
+import { computeDocsHash, readDocsCollection, type DocEntry } from './docs-collection'
 
 let tmpDir: string
 let featureDir: string

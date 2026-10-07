@@ -1,6 +1,6 @@
 import type { DraftRecord, ExternalDraftStage } from '@shared/draft-types'
 import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 interface Props {
   draft: DraftRecord
@@ -39,16 +39,7 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
       )}
     >
       {draft.errorMessage && stage === 'error' && (
-        <div
-          className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"
-          style={{
-            color: 'var(--danger)',
-            background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
-          }}
-        >
-          {draft.errorMessage}
-        </div>
+        <ExternalAgentError>{draft.errorMessage}</ExternalAgentError>
       )}
     </ExternalAgentCard>
   )

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
 
 /** Generated artifact filenames under docs/. */
 export const PRD_SUMMARY_JSON = '_prd-summary.json'

@@ -1,3 +1,4 @@
+import { realpathOrSelf } from '../../../shared/realpath-or-self'
 import type { AgentSessionEvent, AgentSessionMeta } from '../../../../../../shared/agent-session-types'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
@@ -25,7 +26,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { applyAgentSessionMetaLine, parseAgentSessionLine } from './agent-session-parse'
-import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, realpathOrSelf, safeMtimeMs } from './agent-session-paths'
+import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, safeMtimeMs } from './agent-session-paths'
 
 export type AgentKind = 'claude' | 'codex'
 

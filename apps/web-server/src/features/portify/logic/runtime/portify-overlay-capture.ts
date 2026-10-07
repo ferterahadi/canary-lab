@@ -68,10 +68,6 @@ export function readPendingOverlay(p: string): PendingOverlayCapture | null {
   } catch { return null }
 }
 
-export function realpathOrSelf(p: string): string {
-  try { return fs.realpathSync(p) } catch { return p }
-}
-
 export function restoreConfig(state: ActiveWorkflow): void {
   if (state.originalConfig == null) return
   try { fs.writeFileSync(state.configPath, state.originalConfig) } catch { /* best-effort */ }

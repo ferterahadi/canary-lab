@@ -44,6 +44,22 @@ function render(m: PortifyManifest): void {
 }
 
 describe('ExternalPortifyPanel', () => {
+  it('updates failure text while preserving verification feedback and the mounted card', () => {
+    const verification = { ok: false, instances: [], failureDetail: 'Verification feedback' }
+    render(manifest('editing', { verification, error: 'Hidden failure' }))
+    const card = container.querySelector('.cl-card')
+    expect(container.textContent).not.toContain('Hidden failure')
+    render(manifest('failed', { verification, error: 'First failure' }))
+    const error = Array.from(container.querySelectorAll('div')).find((el) => el.textContent === 'First failure')!
+    expect(error.className).toBe('mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4')
+    expect(error.getAttribute('style')).toContain('var(--danger)')
+    render(manifest('failed', { verification, error: 'Next failure' }))
+    expect(error.textContent).toBe('Next failure')
+    render(manifest('failed', { verification }))
+    expect(container.textContent).not.toContain('Next failure')
+    expect(container.textContent).toContain('Verification feedback')
+    expect(container.querySelector('.cl-card')).toBe(card)
+  })
   it('shows the client identity, conversation name, and status pill', () => {
     render(manifest('editing'))
     const text = container.textContent ?? ''

@@ -5,7 +5,7 @@ import { COVERAGE_RECONCILE_MS, type FeatureCoverageChange } from '../../../../.
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { WorkspaceEventBus } from '../../../../shared/workspace-events'
 import { coverageRevision } from './freshness'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
 import { CoverageSnapshotCache } from './snapshot-cache'
 
 /** One process-owned observer backs the UI, inbox, and agent waits. Filesystem

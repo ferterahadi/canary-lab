@@ -1,3 +1,4 @@
+import { realpathOrSelf } from '../../../../shared/realpath-or-self'
 // Validating and setting up one port-ification workflow: git prerequisites,
 // the scratch worktrees, the manifest, and the orchestrator with its injected
 // I/O. Split out of runner.ts, where it was a 280-line closure inside
@@ -44,7 +45,6 @@ import {
   canonicalConfigDiff,
   captureOverlayRepos,
   readFileOrNull,
-  realpathOrSelf,
   restoreConfig,
 } from './portify-overlay-capture'
 

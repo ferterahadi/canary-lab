@@ -336,3 +336,20 @@ it('invalidates cached discovery on nested same-size edits, additions, renames, 
   await listPlaywrightTests(tmpDir, { spawner })
   expect(calls).toBe(5)
 })
+
+it('does not cache discovery when spec contents change during the child process', async () => {
+  const file = path.join(tmpDir, 'e2e', 'changing.spec.ts')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, '// before')
+  const payload = { suites: [{ file, specs: [{ title: 'absolute source', file, line: 1 }] }] }
+  const spawner = vi.fn((cwd: string) => ({
+    command: process.execPath,
+    args: ['-e', `require('fs').writeFileSync(${JSON.stringify(file)}, '// after'); process.stdout.write(${JSON.stringify(JSON.stringify(payload))})`],
+    cwd,
+  }))
+  expect(await listPlaywrightTests(tmpDir, { spawner })).toEqual([{ file, line: 1, title: 'absolute source', originFile: file, originLine: 1 }])
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(spawner).toHaveBeenCalledTimes(2)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(spawner).toHaveBeenCalledTimes(2)
+})

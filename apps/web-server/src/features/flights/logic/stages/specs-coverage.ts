@@ -1,7 +1,7 @@
 import { listSpecFiles } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { captureValidationProcess } from '../../../../shared/capture-validation-process'
 import { createHash } from 'crypto'
 import { computeFeatureCoverage } from '../../../coverage/logic/coverage/service'
 import {
@@ -168,39 +168,20 @@ export function buildSpecsPrompt(args: {
  *  need to exercise the timeout without a real 2-minute wait. */
 export function tscErrorsForFeature(projectRoot: string, featureDir: string, timeoutMs: number = TSC_TIMEOUT_MS): Promise<string | null> {
   if (!fs.existsSync(path.join(projectRoot, 'tsconfig.json'))) return Promise.resolve(null)
-  return new Promise((resolve) => {
-    let out = ''
-    let settled = false
-    const child = spawn('npx', ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'], { cwd: projectRoot })
-    // No `if (settled) return` guard here: the close/error handlers below
-    // both call clearTimeout synchronously as soon as they set `settled`, so
-    // by the time this callback fires, neither has run yet.
-    const timer = setTimeout(() => {
-      settled = true
-      try { child.kill('SIGKILL') } catch { /* ignore */ }
-      resolve(null)
-    }, timeoutMs)
-    child.stdout.on('data', (b) => { out += b.toString() })
-    child.stderr.on('data', (b) => { out += b.toString() })
-    child.on('error', () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(null)
+  return captureValidationProcess({
+    command: 'npx',
+    args: ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'],
+    cwd: projectRoot,
+    timeoutMs,
+  }).then((result) => {
+    if (result.kind !== 'exit' || result.code === 0) return null
+    const lines = result.combined.split('\n').filter((line) => {
+      const m = line.match(/^(.+?)\(\d+,\d+\): error TS/)
+      if (!m) return false
+      const abs = path.resolve(projectRoot, m[1])
+      return abs === featureDir || abs.startsWith(featureDir + path.sep)
     })
-    child.on('close', (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (code === 0) return resolve(null)
-      const lines = out.split('\n').filter((line) => {
-        const m = line.match(/^(.+?)\(\d+,\d+\): error TS/)
-        if (!m) return false
-        const abs = path.resolve(projectRoot, m[1])
-        return abs === featureDir || abs.startsWith(featureDir + path.sep)
-      })
-      resolve(lines.length > 0 ? `tsc --noEmit:\n${lines.join('\n')}` : null)
-    })
+    return lines.length > 0 ? `tsc --noEmit:\n${lines.join('\n')}` : null
   })
 }
 

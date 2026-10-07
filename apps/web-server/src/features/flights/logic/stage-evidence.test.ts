@@ -299,3 +299,8 @@ describe('deriveFeatureEvidence', () => {
     expect(deriveFeatureEvidence(featureDir).coverageMapping).toBe('fresh')
   })
 })
+
+it('does not claim authored specs when the e2e directory is unreadable as a directory', () => {
+  fs.writeFileSync(path.join(featureDir, 'e2e'), 'not a directory')
+  expect(hasAuthoredSpecs(featureDir)).toBe(false)
+})

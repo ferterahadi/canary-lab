@@ -1,3 +1,4 @@
+import { realpathOrSelf } from '../../../shared/realpath-or-self'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
 //
@@ -221,10 +222,6 @@ export function readFirstLine(jsonlPath: string): string | null {
   } finally {
     if (fd !== null) try { fs.closeSync(fd) } catch { /* ignore */ }
   }
-}
-
-export function realpathOrSelf(p: string): string {
-  try { return fs.realpathSync(p) } catch { return p }
 }
 
 // Walk codex's date-bucketed session dirs from the cycle's start date through

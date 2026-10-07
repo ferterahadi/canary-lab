@@ -108,3 +108,18 @@ it('disables reuse if a compiler config cannot be read', () => {
   try { expect(snapshot().tests).toEqual({}) }
   finally { fs.chmodSync(config, 0o600) }
 })
+
+it('tracks a local helper also resolved through a symlinked package', () => {
+  // External package bytes are intentionally excluded; the relative import
+  // makes this helper authored input while the package import exercises realpath.
+  const packageDir = path.join(featureDir, 'linked-package')
+  fs.mkdirSync(packageDir)
+  fs.mkdirSync(path.join(featureDir, 'node_modules'))
+  fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: 'fixture-values', types: 'index.ts' }))
+  fs.writeFileSync(path.join(packageDir, 'index.ts'), 'export const value = 1')
+  fs.symlinkSync(packageDir, path.join(featureDir, 'node_modules', 'fixture-values'))
+  fs.writeFileSync(path.join(featureDir, 'e2e/test.spec.ts'), "import { value } from 'fixture-values'; import '../linked-package'; test('test', () => { expect(value).toBe(1) })")
+  const before = snapshot()
+  fs.writeFileSync(path.join(packageDir, 'index.ts'), 'export const value = 2')
+  expect(snapshot()).not.toEqual(before)
+})
