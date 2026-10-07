@@ -165,7 +165,7 @@ describe('healAgent request-body validation', () => {
     expect(res.json().error).toContain('healAgent.clientKind must be one of')
   })
 
-  it('threads healAgent.clientVersion through to broker.claim on the reuse path', async () => {
+  it.each(['9.9.9', '', ' '] as const)('threads nonempty healAgent.clientVersion %j through to broker.claim on reuse', async (clientVersion) => {
     const dir = path.join(featuresDir, 'foo')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(
@@ -203,12 +203,12 @@ describe('healAgent request-body validation', () => {
       payload: {
         feature: 'foo',
         env: 'local',
-        healAgent: { kind: 'external', sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' },
+        healAgent: { kind: 'external', sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion },
       },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ runId: 'active-cv', reused: true, claimSuppressed: true, claimed: false })
-    expect(claim).toHaveBeenCalledWith('active-cv', { sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' })
+    expect(claim).toHaveBeenCalledWith('active-cv', { sessionId: 'sess-cv', clientKind: 'claude-pty', ...(clientVersion ? { clientVersion } : {}) })
   })
 })
 

@@ -1,3 +1,4 @@
+import { projectExternalHealMetadata } from '../logic/heal/external-heal-session'
 import { runCleanupFailure } from './run-cleanup-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
@@ -118,12 +119,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
             // for a real client. Policy suppression (a PTY kind) still funnels
             // through broker.claim, which rejects with its own reason.
             const claim = healAgent.claimable !== false
-              ? deps.broker?.claim(active.manifest.runId, {
-                  sessionId: healAgent.sessionId,
-                  clientKind: healAgent.clientKind,
-                  ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
-                  ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
-                }) ?? null
+              ? deps.broker?.claim(active.manifest.runId, projectExternalHealMetadata(healAgent, 'nonempty')) ?? null
               : null
             reply.code(200)
             return {

@@ -82,6 +82,24 @@ describe('ExternalHealBroker.claim', () => {
     expect(captured.audit.at(-1)?.entry.action).toBe('claim-reconnect')
   })
 
+  it('keeps omitted metadata on reconnect but clears explicitly empty fields', () => {
+    const { deps, captured } = makeDeps(() => now)
+    const broker = new ExternalHealBroker(deps)
+    const identity = { sessionId: 'sess-A', clientKind: 'claude' as const }
+    broker.claim('run-1', { ...identity, clientVersion: '1', conversationName: 'repair' })
+    broker.bumpCycle('run-1')
+    now += 1000
+    expect(broker.claim('run-1', identity)).toMatchObject({ session: { clientVersion: '1', conversationName: 'repair', cycleCount: 1 } })
+    now += 1000
+    expect(broker.claim('run-1', { ...identity, clientVersion: '', conversationName: '' })).toMatchObject({ session: {
+      clientVersion: '', conversationName: '', cycleCount: 1,
+      claimedAt: '2026-05-18T10:00:00.000Z', lastHeartbeatAt: '2026-05-18T10:00:02.000Z',
+    } })
+    expect(captured.manifestPatches.at(-1)?.externalHealSession).toEqual(broker.getSession('run-1'))
+    expect(captured.events.filter((event) => event.kind === 'external-claim-changed')).toHaveLength(3)
+    expect(captured.audit.map(({ entry }) => entry.action)).toEqual(['claim', 'claim-reconnect', 'claim-reconnect'])
+  })
+
   it('is idempotent when the same sessionId reclaims', () => {
     const { deps, captured } = makeDeps(() => now)
     const broker = new ExternalHealBroker(deps)

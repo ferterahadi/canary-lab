@@ -1,4 +1,4 @@
-import { createExternalHealSession } from './external-heal-session'
+import { createExternalHealSession, type ExternalHealMetadata } from './external-heal-session'
 import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
@@ -47,12 +47,7 @@ export interface ExternalHealAuditEntry {
   result?: Record<string, unknown>
 }
 
-export interface ClaimInput {
-  sessionId: string
-  clientKind: ClientKind
-  clientVersion?: string
-  conversationName?: string
-}
+export type ClaimInput = ExternalHealMetadata
 
 export type ClaimResult =
   | { accepted: true; session: ExternalHealSession }

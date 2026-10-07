@@ -1,3 +1,4 @@
+import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
 import { useNow } from '@/shared/state/use-now'
 import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -8,12 +9,7 @@ import * as portifyApi from '@/shared/api/portify'
 import * as coverageApi from '@/shared/api/coverage'
 import * as flightsApi from '@/shared/api/flights'
 import { isAgentSessionAbsence } from '@/shared/api/agent-sessions'
-import type {
-  AgentSessionAbsence,
-  AgentSessionEvent,
-  AgentSessionResponse,
-  SubagentThread,
-} from '@/shared/api/agent-sessions'
+import type { AgentSessionAbsence, AgentSessionResponse } from '@/shared/api/agent-sessions'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { clientLabel } from './external-client-branding'

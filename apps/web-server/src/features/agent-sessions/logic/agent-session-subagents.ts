@@ -1,3 +1,4 @@
+import type { AgentSessionEvent, SubagentThread } from '../../../../../../shared/agent-session-types'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
 //
@@ -22,7 +23,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { AgentEvent, AgentKind, AgentSessionRef, loadAgentSession } from './agent-session-log'
+import { AgentKind, AgentSessionRef, loadAgentSession } from './agent-session-log'
 import { parseAgentSessionLine } from './agent-session-parse'
 import { readDirNames } from './agent-session-paths'
 
@@ -41,17 +42,6 @@ import { readDirNames } from './agent-session-paths'
 //
 // Codex has no subagent concept; these functions return empty for it, which is
 // why callers can invoke them unconditionally.
-
-export interface SubagentThread {
-  agentId: string
-  /** The parent `tool-call` event's `toolId` this thread hangs under. */
-  parentToolId: string
-  agentType: string
-  description: string
-  spawnDepth: number
-  logPath: string
-  events: AgentEvent[]
-}
 
 /** The `subagents/` dir for a session log, or null if the agent can't have one. */
 export function subagentDirFor(ref: AgentSessionRef): string | null {
@@ -92,7 +82,7 @@ export function loadSubagentThread(jsonlPath: string): SubagentThread | null {
   if (!meta) return null
   let raw: string
   try { raw = fs.readFileSync(jsonlPath, 'utf-8') } catch { return null }
-  const events: AgentEvent[] = []
+  const events: AgentSessionEvent[] = []
   for (const line of raw.split('\n')) {
     // Children of a claude session are always claude-format, regardless of
     // which agent the caller thinks it's reading.
@@ -117,7 +107,7 @@ export function buildAgentSessionResponse(ref: AgentSessionRef): {
   sessionId: string
   model?: string
   effort?: string
-  events: AgentEvent[]
+  events: AgentSessionEvent[]
   subagents: SubagentThread[]
 } {
   const { events, meta } = loadAgentSession(ref)

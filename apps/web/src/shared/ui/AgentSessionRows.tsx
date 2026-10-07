@@ -1,5 +1,6 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 import { Suspense, lazy, memo, type ReactNode } from 'react'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { LOG_KIND_LABEL, type ExternalSessionActivity, type LogLine } from './activity-log'
 import { clientLabel } from './external-client-branding'
 import { useExternalClientAction } from './ExternalAgentCard'

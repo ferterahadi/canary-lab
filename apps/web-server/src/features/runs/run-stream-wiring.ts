@@ -1,5 +1,5 @@
 import { prepareRestartResources } from './logic/restart-preparation'
-import { createExternalHealSession } from './logic/heal/external-heal-session'
+import { createExternalHealSession, projectExternalHealMetadata } from './logic/heal/external-heal-session'
 // Wiring one live run to the workspace: the pane/runner-log/state-sink stream
 // attachment, and the external-heal restart that rebuilds an orchestrator for a
 // terminal run. Split out of index.ts, where both were closures inside
@@ -194,12 +194,7 @@ export function makeRestartExternalRun(
   }
 
   if (canClaim) {
-    externalHealBroker.claim(runId, {
-      sessionId: healAgentReq.sessionId,
-      clientKind: healAgentReq.clientKind,
-      ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-      ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-    })
+    externalHealBroker.claim(runId, projectExternalHealMetadata(healAgentReq, 'nonempty'))
   }
 
   attachRunStreams(orch, runnerLog, feature.name, backups)

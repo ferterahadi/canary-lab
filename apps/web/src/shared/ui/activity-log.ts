@@ -1,4 +1,4 @@
-import type { AgentSessionEvent, SubagentThread } from '@/shared/api/agent-sessions'
+import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import type { CodeLanguage } from './code-highlighter'
 import type { ExternalClientKind } from './external-client-branding'

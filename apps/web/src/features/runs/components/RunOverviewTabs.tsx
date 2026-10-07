@@ -1,3 +1,4 @@
+import { clientLabel } from '@/shared/ui/external-client-branding'
 import { RecordedTestChanges } from './RecordedTestChanges'
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useMemo } from 'react'
@@ -283,7 +284,7 @@ function ServiceFailureEvidence({ runId, failure }: { runId: string; failure: No
 
 export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   if (manifest.healMode === 'external' && manifest.externalHealSession) {
-    return externalHealClientLabel(manifest.externalHealSession.clientKind)
+    return clientLabel(manifest.externalHealSession.clientKind, 'External agent session')
   }
   if (manifest.healAgent === 'claude') return 'Claude'
   if (manifest.healAgent === 'codex') return 'Codex'
@@ -291,16 +292,6 @@ export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   if (manifest.healMode === 'external') return 'External agent session'
   if (manifest.healMode === 'auto') return 'Auto'
   return null
-}
-
-export function externalHealClientLabel(kind: NonNullable<RunManifest['externalHealSession']>['clientKind']): string {
-  switch (kind) {
-    case 'claude': return 'Claude'
-    case 'codex': return 'Codex'
-    case 'claude-pty': return 'Claude (runner)'
-    case 'codex-pty': return 'Codex (runner)'
-    case 'other': return 'External agent session'
-  }
 }
 
 export function VerifyOverviewTab({

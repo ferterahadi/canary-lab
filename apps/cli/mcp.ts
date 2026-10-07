@@ -1,3 +1,4 @@
+import { probeCoverageCommandDiscovery } from './mcp-command-probe'
 import { probeCliHealth } from './health-probe'
 import { Readable, Writable } from 'stream'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -156,17 +157,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
         }
       }
       if (profile === 'compact') {
-        const discovery = await client.callTool({
-          name: 'exec',
-          arguments: {
-            command: 'search_tools',
-            arguments: { query: 'get_feature_coverage' },
-          },
-        })
-        const parsed = JSON.parse(toolResultText(discovery)) as {
-          matches?: Array<{ command?: unknown }>
-        }
-        if (!parsed.matches?.some((match) => match.command === 'get_feature_coverage')) {
+        if (!await probeCoverageCommandDiscovery((request) => client.callTool(request), toolResultText)) {
           throw new Error('exec search_tools could not discover get_feature_coverage')
         }
       }

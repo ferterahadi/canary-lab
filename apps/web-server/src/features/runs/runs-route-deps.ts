@@ -1,7 +1,7 @@
 import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createRestartedOrchestrator } from './logic/restart-orchestrator'
-import { createExternalHealSession } from './logic/heal/external-heal-session'
+import { createExternalHealSession, projectExternalHealMetadata } from './logic/heal/external-heal-session'
 // The dependency object the runs REST surface is registered with: every callback
 // the routes hand back into the run loop. Split out of index.ts, where it was a
 // 430-line object literal inline in `register` — the closures it is built from
@@ -312,12 +312,7 @@ export function buildRunsRouteDeps(
       // by passing it to the orchestrator constructor; this call ensures the
       // in-memory map agrees and the audit log records the claim.
       if (canClaim && healAgentReq) {
-        externalHealBroker.claim(runId, {
-          sessionId: healAgentReq.sessionId,
-          clientKind: healAgentReq.clientKind,
-          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-        })
+        externalHealBroker.claim(runId, projectExternalHealMetadata(healAgentReq, 'nonempty'))
       }
 
       attachRunStreams(orch, runnerLog, feature.name, backups)

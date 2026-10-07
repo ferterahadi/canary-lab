@@ -1,9 +1,10 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { AgentSessionView, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
 import { Markdown } from './AgentSessionRows'
 

@@ -1,3 +1,4 @@
+import type { AgentSessionEvent, AgentSessionMeta } from '../../../../../../shared/agent-session-types'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
 //
@@ -38,27 +39,6 @@ export interface AgentSessionRef {
 export interface AgentSessionRefFile {
   activeAgent?: AgentKind
   sessions: Partial<Record<AgentKind, AgentSessionRef>>
-}
-
-export type AgentEvent =
-  | { kind: 'user-message'; timestamp: string; text: string }
-  // `apiError` marks a turn the CLI synthesized after the model's HTTP stream
-  // dropped mid-response ("Connection closed mid-response"). It is NOT the
-  // agent's own prose — the surrounding text is whatever partial output was
-  // recovered — so the UI renders it as a termination, not a conclusion.
-  | { kind: 'assistant-message'; timestamp: string; text: string; apiError?: boolean }
-  | { kind: 'assistant-thinking'; timestamp: string; text: string }
-  | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
-  | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
-
-// Session-level metadata that doesn't map to a timeline event: which model the
-// agent ran and (codex only) its reasoning effort. Both agents record this in
-// their JSONL but in different lines — codex in a `turn_context` record,
-// claude in each assistant message's `message.model`. Claude has no notion of
-// reasoning effort, so `effort` stays undefined for it.
-export interface AgentSessionMeta {
-  model?: string
-  effort?: string
 }
 
 export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | null {
@@ -205,10 +185,10 @@ export function locateMostRecentAgentSessionRef(
 // events and the session-level metadata (model/effort). Prefer this over
 // calling `loadAgentSessionLog` + `loadAgentSessionMeta` separately so the file
 // is only read and parsed once.
-export function loadAgentSession(ref: AgentSessionRef): { events: AgentEvent[]; meta: AgentSessionMeta } {
+export function loadAgentSession(ref: AgentSessionRef): { events: AgentSessionEvent[]; meta: AgentSessionMeta } {
   let raw: string
   try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return { events: [], meta: {} } }
-  const events: AgentEvent[] = []
+  const events: AgentSessionEvent[] = []
   const meta: AgentSessionMeta = {}
   for (const line of raw.split('\n')) {
     for (const ev of parseAgentSessionLine(ref.agent, line)) events.push(ev)
@@ -217,7 +197,7 @@ export function loadAgentSession(ref: AgentSessionRef): { events: AgentEvent[]; 
   return { events, meta }
 }
 
-export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
+export function loadAgentSessionLog(ref: AgentSessionRef): AgentSessionEvent[] {
   return loadAgentSession(ref).events
 }
 

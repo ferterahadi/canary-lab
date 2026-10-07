@@ -1,3 +1,4 @@
+import type { AgentSessionEvent, AgentSessionMeta, SubagentThread } from '@shared/agent-session-types'
 // Parsed agent session transcripts (claude/codex JSONL, normalized).
 // Split out of client.ts; see that barrel for the shared surface.
 
@@ -7,34 +8,9 @@ import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 // into a uniform event stream). 404 on the API maps to an `AgentSessionAbsence`
 // carrying the server's reason so the UI can tell "nothing was ever recorded"
 // from "the log just hasn't landed yet" without try/catch noise.
-export type AgentSessionEvent =
-  | { kind: 'user-message'; timestamp: string; text: string }
-  // `apiError` marks a turn the CLI synthesized when the model's stream dropped
-  // mid-response — the text is recovered partial output, not a conclusion.
-  | { kind: 'assistant-message'; timestamp: string; text: string; apiError?: boolean }
-  | { kind: 'assistant-thinking'; timestamp: string; text: string }
-  | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
-  | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
-
-/** A subagent thread minus its events — the identity carried on live frames. */
-export interface SubagentIdentity {
-  agentId: string
-  /** The parent `tool-call` event's `toolId` this thread hangs under. */
-  parentToolId: string
-  agentType: string
-  description: string
-  spawnDepth: number
-  logPath: string
-}
-
-export type SubagentThread = SubagentIdentity & { events: AgentSessionEvent[] }
-
-export interface AgentSessionResponse {
+export interface AgentSessionResponse extends AgentSessionMeta {
   agent: 'claude' | 'codex'
   sessionId: string
-  // Model the agent ran (both agents) and reasoning effort (codex only).
-  model?: string
-  effort?: string
   events: AgentSessionEvent[]
   // Threads spawned via the `Agent`/`Task` tool. Claude-only; absent on older
   // servers and always empty for codex, so callers default it to [].

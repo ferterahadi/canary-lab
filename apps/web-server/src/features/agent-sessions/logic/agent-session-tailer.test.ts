@@ -1,8 +1,9 @@
+import type { AgentSessionEvent } from '../../../../../../shared/agent-session-types'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentEvent } from './agent-session-log'
+
 import {
   locatorForAgentInDir,
   refForAgentSpawn,
@@ -94,7 +95,7 @@ describe('tailAgentSession', () => {
   it('emits all existing events on attach', async () => {
     const logPath = path.join(tmp, 's.jsonl')
     fs.writeFileSync(logPath, claudeLine('first') + '\n' + claudeLine('second') + '\n', 'utf-8')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: 's', logPath },
       onEvent: (e) => events.push(e),
@@ -107,7 +108,7 @@ describe('tailAgentSession', () => {
   it('emits new events as the file is appended', async () => {
     const logPath = path.join(tmp, 's.jsonl')
     fs.writeFileSync(logPath, claudeLine('one') + '\n', 'utf-8')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: 's', logPath },
       onEvent: (e) => events.push(e),
@@ -122,7 +123,7 @@ describe('tailAgentSession', () => {
   it('does not emit when the file has no newline yet', async () => {
     const logPath = path.join(tmp, 's.jsonl')
     fs.writeFileSync(logPath, claudeLine('partial'), 'utf-8') // no trailing \n
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: 's', logPath },
       onEvent: (e) => events.push(e),
@@ -135,7 +136,7 @@ describe('tailAgentSession', () => {
   it('handles a partial trailing line by re-reading once it is terminated', async () => {
     const logPath = path.join(tmp, 's.jsonl')
     fs.writeFileSync(logPath, claudeLine('a') + '\n', 'utf-8')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: 's', logPath },
       onEvent: (e) => events.push(e),
@@ -152,7 +153,7 @@ describe('tailAgentSession', () => {
 
   it('uses discoverRef when the initial logPath does not exist', async () => {
     const realPath = path.join(tmp, 'real.jsonl')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     let discovered = false
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: '', logPath: '' },
@@ -174,7 +175,7 @@ describe('tailAgentSession', () => {
 
   it('close() stops the watcher and discovery loop', async () => {
     const logPath = path.join(tmp, 'never.jsonl')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: '', logPath },
       onEvent: (e) => events.push(e),
@@ -187,7 +188,7 @@ describe('tailAgentSession', () => {
   })
 
   it('reports a give-up error after pollMaxAttempts discovery failures', async () => {
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const errors: string[] = []
     const handle = tailAgentSession({
       ref: { agent: 'codex', sessionId: '', logPath: path.join(tmp, 'missing.jsonl') },
@@ -298,7 +299,7 @@ describe('tailAgentSession', () => {
 
   it('does not read the file if onReady closes the tailer before the first flush', async () => {
     const logPath = path.join(tmp, 's.jsonl')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     let handle: ReturnType<typeof tailAgentSession> | undefined
     let readyCalled = false
     handle = tailAgentSession({
@@ -323,7 +324,7 @@ describe('tailAgentSession', () => {
   it('is a no-op when the extra post-ready flush finds no new bytes', async () => {
     const logPath = path.join(tmp, 's.jsonl')
     fs.writeFileSync(logPath, claudeLine('only') + '\n', 'utf-8')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     const handle = tailAgentSession({
       ref: { agent: 'claude', sessionId: 's', logPath },
       onEvent: (e) => events.push(e),
@@ -340,7 +341,7 @@ describe('tailAgentSession', () => {
     const missingPath = path.join(tmp, 'missing.jsonl')
     const realPath = path.join(tmp, 'real.jsonl')
     fs.writeFileSync(realPath, claudeLine('hi') + '\n', 'utf-8')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     let handle: ReturnType<typeof tailAgentSession> | undefined
     let discoverCalls = 0
     handle = tailAgentSession({
@@ -366,7 +367,7 @@ describe('tailAgentSession', () => {
 
   it('a stale poll scheduled just before close() is a no-op once it fires', async () => {
     const missingPath = path.join(tmp, 'missing.jsonl')
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     let handle: ReturnType<typeof tailAgentSession> | undefined
     let discoverCalls = 0
     handle = tailAgentSession({

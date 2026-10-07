@@ -25,6 +25,7 @@ const REPO = path.resolve(import.meta.dirname, '..')
 // them is the one declaration of that name; an app file that declares the same
 // name is a mirror.
 const WIRE_HOMES = [
+  'shared/agent-session-types.ts',
   'shared/workspace-events.ts',
   'shared/getting-started.ts',
   'shared/run-manifest.ts',

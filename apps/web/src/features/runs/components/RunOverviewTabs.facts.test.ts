@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunManifest } from '@shared/run-manifest'
-import { runFacts } from './RunOverviewTabs'
+import { healAgentOverviewLabel, runFacts } from './RunOverviewTabs'
 
 function manifest(overrides: Partial<RunManifest> = {}): RunManifest {
   return {
@@ -49,5 +49,28 @@ describe('runFacts', () => {
     const queued = runFacts(manifest({ status: 'queued' }), null)
     expect(queued.find((f) => f.label === 'Duration')?.value).toBe('Not started')
     expect(queued.map((f) => f.label)).toContain('Queued at')
+  })
+})
+
+
+describe('healAgentOverviewLabel', () => {
+  it.each([
+    ['claude', 'Claude'], ['codex', 'Codex'], ['claude-pty', 'Claude (runner)'],
+    ['codex-pty', 'Codex (runner)'], ['other', 'External agent session'],
+  ] as const)('prefers an external %s session over the configured agent', (clientKind, label) => {
+    const value = manifest({ healMode: 'external', healAgent: 'claude', externalHealSession: { clientKind } as RunManifest['externalHealSession'] })
+    expect(healAgentOverviewLabel(value)).toBe(label)
+    expect(runFacts(value, null).find((fact) => fact.label === 'Heal')?.value).toBe(label)
+  })
+
+  it.each([
+    [{ healAgent: 'claude', healMode: 'manual' }, 'Claude'],
+    [{ healAgent: 'codex', healMode: 'auto' }, 'Codex'],
+    [{ healMode: 'manual' }, 'Manual'],
+    [{ healMode: 'external' }, 'External agent session'],
+    [{ healMode: 'auto' }, 'Auto'],
+    [{}, null],
+  ] as const)('retains agent and mode fallbacks for %j', (overrides, label) => {
+    expect(healAgentOverviewLabel(manifest(overrides))).toBe(label)
   })
 })

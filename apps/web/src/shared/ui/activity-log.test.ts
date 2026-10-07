@@ -1,5 +1,6 @@
+import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
 import { describe, expect, it } from 'vitest'
-import type { AgentSessionEvent, SubagentThread } from '@/shared/api/agent-sessions'
+
 import {
   describeEvent,
   eventSpan,

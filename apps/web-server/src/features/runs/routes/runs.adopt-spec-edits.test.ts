@@ -397,3 +397,35 @@ describe('terminal review idempotency and validation', () => {
     expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
   })
 })
+
+it.each(['accepted', 'restored'] as const)('returns the active orchestrator’s recorded %s receipt and publishes the suite change', async (decision) => {
+  const events: WorkspaceEvent[] = []
+  const { app, registry, store } = await build(events)
+  const seeded = terminalReview('passed')
+  const receipt = {
+    decision, review_revision: seeded.revision, files: ['e2e/a.spec.ts'], at: 'recorded-time',
+    git: { status: 'not-requested' as const }, execution: { status: 'none' as const },
+  }
+  const recordReceipt = () => store.patchManifest('terminal', {
+    specEdits: { checkedAt: 'recorded-time', pending: [], adopted: [], reviewDecisions: [
+      { at: 'older', revision: 'old-revision', decision: 'restored' },
+      { at: 'recorded-time', revision: seeded.revision, decision: decision === 'accepted' ? 'adopted' : 'restored', receipt },
+    ] },
+  })
+  registry.set('terminal', {
+    ...stub(async () => {
+      recordReceipt()
+      return { ok: true, adopted: receipt.files, rerun: 'signalled' }
+    }),
+    restoreSpecEdits: () => {
+      recordReceipt()
+      return { ok: true, restored: receipt.files }
+    },
+  })
+  const action = decision === 'accepted' ? 'accept-test-review' : 'restore-spec-edits'
+  const response = await app.inject({ method: 'POST', url: `/api/runs/terminal/${action}`, payload: { expectedRevision: seeded.revision } })
+  expect(response.statusCode).toBe(decision === 'accepted' ? 202 : 200)
+  expect(response.json()).toEqual(receipt)
+  expect(events).toContainEqual({ type: 'tests-changed', feature: 'demo' })
+  await app.close()
+})

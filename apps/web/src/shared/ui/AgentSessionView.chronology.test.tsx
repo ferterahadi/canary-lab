@@ -1,9 +1,10 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectAgentSessionOptions } from '@/shared/api/agent-session-socket'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { AgentSessionView } from './AgentSessionView'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), connect: vi.fn((_options: ConnectAgentSessionOptions) => ({ close: vi.fn() })) }))

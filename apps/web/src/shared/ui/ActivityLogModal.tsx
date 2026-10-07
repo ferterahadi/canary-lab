@@ -1,6 +1,7 @@
+import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
 import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useState, type ReactNode } from 'react'
-import type { AgentSessionEvent, SubagentThread } from '@/shared/api/agent-sessions'
+
 import {
   LOG_KIND_LABEL,
   describeEvent,
