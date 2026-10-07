@@ -1,9 +1,10 @@
+import { shortSourceLocation } from '../../../../../../../shared/lib/source-location'
 import path from 'path'
 import { codeToHtml } from 'shiki'
 import { formatCodeForDisplay } from '../../../../../../../shared/code-display-format'
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../../shared/coverage/types'
 import { qualitySummaryForAudience } from './assertions'
-import { displayCaseTitle, shortLocation, specFileLabel } from './audience'
+import { displayCaseTitle, specFileLabel } from './audience'
 import { createFlowcharts } from './flowchart'
 import { renderEnglishSource } from './english'
 import { statusBucket, testStatusCounts } from './packet'
@@ -84,7 +85,7 @@ export async function renderHtml(
           <dl class="facts">
             ${cov ? `<div><dt>Coverage strength</dt><dd>${renderCoverageStrength(cov)}</dd></div>` : ''}
             <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
-            ${test.location ? `<div><dt>Declared at</dt><dd><code>${escapeHtml(shortLocation(test.location))}</code></dd></div>` : ''}
+            ${test.location ? `<div><dt>Declared at</dt><dd><code>${escapeHtml(shortSourceLocation(test.location))}</code></dd></div>` : ''}
           </dl>
           <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
           ${bucket === 'notRun' ? NEVER_RAN_CALLOUT : ''}

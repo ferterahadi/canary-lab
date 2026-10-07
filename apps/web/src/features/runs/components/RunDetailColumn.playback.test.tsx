@@ -24,6 +24,13 @@ afterEach(() => {
 })
 
 describe('PlaywrightPlayback', () => {
+  it('shortens Windows locations while retaining the full tooltip', () => {
+    const location = 'C:\\repo\\e2e\\checkout.spec.ts:12:3'
+    renderPlayback({ events: [{ type: 'test-end', time: '2026-01-01T00:00:01.000Z', test: { name: 'checkout', title: 'checkout', location }, status: 'passed', passed: true, durationMs: 10, retry: 0 }] })
+    const label = [...container.querySelectorAll('[title]')].find((node) => node.getAttribute('title') === location)
+    expect(label?.textContent).toBe('e2e/checkout.spec.ts:12:3')
+  })
+
   it('renders trace at the end of the evidence bar and keeps evidence collapsed', () => {
     renderPlayback()
 

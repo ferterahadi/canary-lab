@@ -88,6 +88,21 @@ async function buildApp(deps: {
 }
 
 describe('benchmarkRoutes', () => {
+  it.each([
+    ['min', 'min'], ['med', 'med'], ['max', 'max'],
+    [undefined, 'med'], [null, 'med'], ['MAX', 'med'], [1, 'med'], ['unknown', 'med'],
+  ])('forwards normalized request level %j', async (level, expected) => {
+    const startBenchmark = vi.fn(async () => ({ benchmarkId: 'fixture' }))
+    const app = await buildApp({ startBenchmark })
+    try {
+      const res = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { feature: 'shop', skill: 'fixture', level } })
+      expect(res.statusCode).toBe(200)
+      expect(startBenchmark).toHaveBeenCalledWith(expect.objectContaining({ level: expected }))
+    } finally {
+      await app.close()
+    }
+  })
+
   it('POST /api/benchmarks starts a benchmark and returns its id', async () => {
     let received: StartBenchmarkInput | undefined
     const app = await buildApp({

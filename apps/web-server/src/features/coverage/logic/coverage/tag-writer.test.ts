@@ -378,3 +378,12 @@ describe('shared declaration recognition', () => {
     expect(stripCoverageTags(tagged)).toBe(source)
   })
 })
+
+
+describe('literal-only tag matching', () => {
+  it.each(['`hello ${name}`', 'title'])('does not mutate a dynamic title %s', (title) => {
+    const source = `test(${title}, async () => { expect(true).toBe(true) })`
+    const name = title.startsWith('`') ? title.slice(1, -1) : title
+    expect(writeCoversTag(source, name, { requirements: ['R1'] })).toBe(source)
+  })
+})

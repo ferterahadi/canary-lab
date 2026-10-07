@@ -40,6 +40,14 @@ function writeSkill(name: string, meta: Record<string, unknown>, md: string = MD
 }
 
 describe('loadSabotageSkills', () => {
+  it.each([
+    ['min', 'min'], ['med', 'med'], ['max', 'max'],
+    [undefined, 'med'], [null, 'med'], ['MAX', 'med'], [1, 'med'], ['unknown', 'med'],
+  ])('normalizes metadata level %j', (level, expected) => {
+    writeSkill('fixture', { level })
+    expect(loadSabotageSkills(root)[0].level).toBe(expected)
+  })
+
   it('parses each skill folder: meta fields, picker description, and agent recipe', () => {
     writeSkill('broken-delete-contract', {
       name: 'broken-delete-contract',

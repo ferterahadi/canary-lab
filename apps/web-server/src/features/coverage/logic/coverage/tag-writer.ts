@@ -1,3 +1,4 @@
+import { readLiteralTestTitle } from '../../../../shared/test-title'
 import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import { isTestCall } from '../../../../shared/test-declaration'
 import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from '../../../../shared/test-tags'
@@ -33,12 +34,6 @@ export function coversTagTokens(tag: CoversTag, file = 'spec.ts'): string[] {
   return tokens
 }
 
-function getStringArg(node: ts.CallExpression): string | null {
-  const arg = node.arguments[0]
-  if (arg && ts.isStringLiteralLike(arg)) return arg.text
-  return null
-}
-
 interface TagEdit {
   /** Splice [start, end) out of the source and replace with `text`. */
   start: number
@@ -63,7 +58,7 @@ function planTagEdit(source: string, testName: string, tag: CoversTag, file: str
   let edit: TagEdit | null = null
   const visit = (node: ts.Node): void => {
     if (edit) return
-    if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) === testName) {
+    if (ts.isCallExpression(node) && isTestCall(node) && readLiteralTestTitle(node) === testName) {
       const detail = findTestDetails(node)
       if (detail) {
         edit = planMergeIntoDetail(source, detail, wanted)
@@ -84,7 +79,7 @@ function planInsertDetail(
   call: ts.CallExpression,
   tokens: string[],
 ): TagEdit {
-  // planInsertDetail is only called after getStringArg confirmed arguments[0]
+  // planInsertDetail is only called after readLiteralTestTitle confirmed arguments[0]
   // is a string literal, so arguments[0] is always defined here.
   const insertAt = call.arguments[0].getEnd()
   return {
@@ -210,7 +205,7 @@ export function stripCoverageTags(source: string, file = 'spec.ts'): string {
   const src = parseSource(file, source).sourceFile
   const edits: TagEdit[] = []
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) !== null) {
+    if (ts.isCallExpression(node) && isTestCall(node) && readLiteralTestTitle(node) !== null) {
       const detail = findTestDetails(node)
       if (detail) {
         const edit = planStripEdit(source, node, detail)

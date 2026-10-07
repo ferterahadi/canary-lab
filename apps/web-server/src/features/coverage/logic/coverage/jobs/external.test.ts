@@ -1,11 +1,13 @@
+import * as coverageEngine from '../coverage-engine'
+import * as featureDocs from '../feature-docs'
 import type { WorkspaceEvent } from '../../../../../../../../shared/workspace-events'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { startExternalCoverage, submitExternalCoverage, startExternalSummary, submitExternalSummary } from './external'
 import { readPrdSummary } from '../prd-summary-render'
-import { CoverageJobConflictError } from './runner'
+import { CoverageJobConflictError } from './creation'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../feature-docs'
 import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
@@ -28,6 +30,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
@@ -572,5 +575,72 @@ describe('external coverage — the answer must account for every test', () => {
     )
 
     expect(manifest.status).toBe('done')
+  })
+})
+
+
+describe('external creation ordering', () => {
+  it.each(['coverage', 'summary'] as const)('saves one complete %s record with injected identity and time', async (kind) => {
+    writeFeature('checkout')
+    if (kind === 'coverage') await seedSummary('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const save = vi.spyOn(store, 'save')
+    const args = { featuresDir, logsDir, feature: 'checkout', sessionId: 'session', clientKind: 'codex', conversationName: 'Fixture', sessionUrl: 'https://example.test/session', now: vi.fn(() => 'fixed-time'), newJobId: vi.fn(() => 'fixed-id') }
+    const result = kind === 'coverage' ? startExternalCoverage(args, { store }) : startExternalSummary(args, { store })
+    expect(result.kind).toBe('started')
+    if (result.kind !== 'started') throw new Error('expected started')
+    expect(save).toHaveBeenCalledExactlyOnceWith(result.manifest)
+    expect(args.now).toHaveBeenCalledTimes(1)
+    expect(args.newJobId).toHaveBeenCalledTimes(1)
+    expect(result.manifest).toMatchObject({ jobId: 'fixed-id', startedAt: 'fixed-time', kind, status: 'running', producer: 'external', externalClientKind: 'codex', externalSessionId: 'session', externalConversationName: 'Fixture', externalSessionUrl: 'https://example.test/session' })
+    if ('tests' in result.context) {
+      expect(result.manifest.externalTestRoster).toEqual(result.context.tests.map((test) => test.testName))
+      expect(result.manifest.inferenceSnapshot).toEqual(result.context.inferenceSnapshot)
+    } else {
+      expect(result.manifest.inputRevision).toBe(result.context.docsHash)
+    }
+  })
+
+  it.each(['coverage', 'summary'] as const)('rejects occupied %s without consuming ID, clock or save', async (kind) => {
+    writeFeature('checkout')
+    if (kind === 'coverage') await seedSummary('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    store.save({ jobId: 'internal', feature: 'checkout', kind, status: 'running', startedAt: 'then', log: '' })
+    const save = vi.spyOn(store, 'save')
+    const args = { featuresDir, logsDir, feature: 'checkout', sessionId: 'session', now: vi.fn(), newJobId: vi.fn() }
+    expect(() => kind === 'coverage' ? startExternalCoverage(args, { store }) : startExternalSummary(args, { store })).toThrow(CoverageJobConflictError)
+    expect(args.now).not.toHaveBeenCalled()
+    expect(args.newJobId).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it.each(['coverage', 'summary'] as const)('checks %s prerequisites before admission', (kind) => {
+    const dir = writeFeature('checkout')
+    if (kind === 'summary') fs.rmSync(path.join(dir, 'docs'), { recursive: true })
+    const store = new CoverageJobRunStore(logsDir)
+    const activeFor = vi.spyOn(store, 'activeFor').mockImplementation(() => { throw new Error('must not check') })
+    const args = { featuresDir, logsDir, feature: 'checkout', sessionId: 'session', newJobId: vi.fn() }
+    const result = kind === 'coverage' ? startExternalCoverage(args, { store }) : startExternalSummary(args, { store })
+    expect(result.kind).toBe(kind === 'coverage' ? 'needs-summary' : 'needs-docs')
+    expect(activeFor).not.toHaveBeenCalled()
+    expect(args.newJobId).not.toHaveBeenCalled()
+    expect(store.list()).toEqual([])
+  })
+
+  it.each(['coverage', 'summary'] as const)('preserves %s context failure ordering', async (kind) => {
+    writeFeature('checkout')
+    if (kind === 'coverage') await seedSummary('checkout')
+    const store = new CoverageJobRunStore(logsDir)
+    const activeFor = vi.spyOn(store, 'activeFor')
+    const save = vi.spyOn(store, 'save')
+    const failure = new Error('context unavailable')
+    if (kind === 'coverage') vi.spyOn(coverageEngine, 'buildCoverageMappingContext').mockImplementation(() => { throw failure })
+    else vi.spyOn(featureDocs, 'buildSummaryAuthoringContext').mockImplementation(() => { throw failure })
+    const args = { featuresDir, logsDir, feature: 'checkout', sessionId: 'session', now: vi.fn(), newJobId: vi.fn() }
+    expect(() => kind === 'coverage' ? startExternalCoverage(args, { store }) : startExternalSummary(args, { store })).toThrow(failure)
+    expect(activeFor).toHaveBeenCalledTimes(kind === 'coverage' ? 1 : 0)
+    expect(save).not.toHaveBeenCalled()
+    expect(args.now).not.toHaveBeenCalled()
+    expect(args.newJobId).not.toHaveBeenCalled()
   })
 })

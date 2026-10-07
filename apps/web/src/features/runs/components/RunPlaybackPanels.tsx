@@ -1,3 +1,4 @@
+import { shortSourceLocation } from '@shared/lib/source-location'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
@@ -390,7 +391,7 @@ export function PlaybackTitle({ test, current }: { test: PlaybackTest; current: 
 /** Where and when, the body's first line: the spec location, the start time,
  *  and a retry when there was one. The duration sits on the title strip. */
 export function PlaybackMeta({ test }: { test: PlaybackTest }) {
-  const location = test.location ? shortLocation(test.location) : null
+  const location = test.location ? shortSourceLocation(test.location) : null
   const parts: ReactNode[] = []
   if (location) parts.push(<span key="loc" className="min-w-0 truncate" title={test.location}>{location}</span>)
   if (test.startedAt) parts.push(<span key="at">{formatLifecycleTime(test.startedAt)}</span>)
@@ -536,10 +537,6 @@ export function formatSummaryTestName(name: string): string {
   return name.replace(/^test-case-/, '').replace(/-/g, ' ')
 }
 
-export function shortLocation(location: string): string {
-  const parts = location.split('/')
-  return parts.slice(-2).join('/')
-}
 
 /** The one section-label voice in the run panes: the system rubric (mono caps,
  *  `styles.css`). Field labels inside the panes use the same class, so a pane

@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore } from './store'
-import { startCoverageJob, CoverageJobConflictError } from './runner'
+import { CoverageJobConflictError } from './creation'
+import { startCoverageJob } from './runner'
 import type { CoverageJobStore } from './store'
 
 let tmpDir: string
@@ -261,5 +262,39 @@ describe('startCoverageJob — onAgentSession + chain-conflict path', () => {
     // Clean up the blocker.
     releaseCoverage()
     await blocker.completion
+  })
+})
+
+
+describe('internal creation contract', () => {
+  it('rejects an external job before allocating or starting work', () => {
+    store.save({ jobId: 'external', feature: 'checkout', kind: 'coverage', producer: 'external', status: 'running', startedAt: 'then', log: '' })
+    const save = vi.spyOn(store, 'save')
+    const newJobId = vi.fn()
+    const clock = vi.fn()
+    const runEngine = vi.fn()
+    expect(() => startCoverageJob({ featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'coverage' }, { store, now: clock, newJobId, runEngine })).toThrow(CoverageJobConflictError)
+    expect(save).not.toHaveBeenCalled()
+    expect(newJobId).not.toHaveBeenCalled()
+    expect(clock).not.toHaveBeenCalled()
+    expect(runEngine).not.toHaveBeenCalled()
+  })
+
+  it('saves the complete initial manifest before work and preserves independent slots', async () => {
+    store.save({ jobId: 'other-feature', feature: 'other', kind: 'coverage', status: 'running', startedAt: 'then', log: '' })
+    store.save({ jobId: 'other-kind', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'then', log: '' })
+    const save = vi.spyOn(store, 'save')
+    const models = { mapping: { claude: { model: 'fixture-model', effort: 'high' } } }
+    const expected = { jobId: 'job-1', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: now(), log: '', chainedFromJobId: 'parent', models }
+    const result = startCoverageJob({ featuresDir: 'f', logsDir: tmpDir, feature: 'checkout', kind: 'coverage', chainedFromJobId: 'parent', models }, {
+      store, now, newJobId: ids,
+      runEngine: async () => {
+        expect(save).toHaveBeenCalledExactlyOnceWith(expected)
+        return { feature: 'checkout', applied: [], orphanTestsBefore: [], ledger: {} as never }
+      },
+    })
+    expect(result.manifest).toEqual(expected)
+    await result.completion
+    expect(store.get('job-1')?.status).toBe('done')
   })
 })

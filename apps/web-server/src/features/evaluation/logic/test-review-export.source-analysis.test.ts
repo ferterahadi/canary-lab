@@ -438,3 +438,17 @@ it('associates supported declarations with source without treating hooks or chai
   expect(packet.tests).toHaveLength(1)
   expect(packet.tests[0].testBody).toContain('toHaveURL')
 })
+
+
+describe('source title display', () => {
+  it('preserves interpolated titles and keeps empty and unresolved titles excluded', () => {
+    const featureDir = path.join(tmpDir, 'feature')
+    fs.mkdirSync(featureDir)
+    fs.writeFileSync(path.join(featureDir, 'fixture.spec.ts'), [
+      "test(`hello ${name}`, async () => { expect(true).toBe(true) })",
+      "test('', async () => {})",
+      "test(dynamicTitle, async () => {})",
+    ].join('\n'))
+    expect([...loadSourceTests(featureDir).values()].map((test) => test.title)).toEqual(['hello ${name}'])
+  })
+})

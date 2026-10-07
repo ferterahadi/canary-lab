@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
 import type { BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
-import type { SabotageLevel } from '../../../../../../shared/benchmark-index'
+import { normalizeSabotageLevel } from '../logic/sabotage-level'
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
@@ -46,14 +46,6 @@ interface StartBody {
   level?: string
   iterations?: number
   agent?: string
-}
-
-const LEVELS: ReadonlySet<SabotageLevel> = new Set<SabotageLevel>(['min', 'med', 'max'])
-
-function normalizeLevel(value: unknown): SabotageLevel {
-  return typeof value === 'string' && LEVELS.has(value as SabotageLevel)
-    ? (value as SabotageLevel)
-    : 'med'
 }
 
 export async function benchmarkRoutes(
@@ -240,7 +232,7 @@ export async function benchmarkRoutes(
       typeof body.skill === 'string' && body.skill.trim() ? body.skill.trim() : 'default'
     const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
     try {
-      return await deps.startBenchmark({ feature, skill, level: normalizeLevel(body.level), iterations, agent })
+      return await deps.startBenchmark({ feature, skill, level: normalizeSabotageLevel(body.level), iterations, agent })
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode ?? 500
       reply.code(statusCode)

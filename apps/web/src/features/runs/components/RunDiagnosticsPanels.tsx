@@ -1,3 +1,4 @@
+import { shortSourceLocation } from '@shared/lib/source-location'
 import { formatLocalDateTime } from '@/shared/lib/format'
 import { useNow } from '@/shared/state/use-now'
 import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
@@ -8,7 +9,7 @@ import { isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timelin
 import { PaneTerminal } from './PaneTerminal'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
-import { PlaywrightPlayback, PlaywrightView, SegmentButton, formatSummaryTestName, isPlaywrightLifecyclePhase, shortLocation } from './RunPlaybackPanels'
+import { PlaywrightPlayback, PlaywrightView, SegmentButton, formatSummaryTestName, isPlaywrightLifecyclePhase } from './RunPlaybackPanels'
 
 export function PlaywrightPanel({
   runId,
@@ -104,7 +105,7 @@ export function VerificationDiagnosticsPanel({ diagnostics }: { diagnostics: Ver
             <div key={`${test.name}:${test.location ?? ''}`} className="rounded-md border p-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
               <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{test.name}</div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                {test.testFile && <span>{shortLocation(test.testFile)}</span>}
+                {test.testFile && <span>{shortSourceLocation(test.testFile)}</span>}
                 {test.targetUrl && <span>{test.targetUrl}</span>}
                 {test.endpoint && <span>{test.endpoint}</span>}
                 {typeof test.httpStatus === 'number' && <span>HTTP {test.httpStatus}</span>}
@@ -210,9 +211,9 @@ export function RecoveryTimeline({
                   <span className="mt-0.5 block break-words" style={{ color: 'var(--text-muted)' }}>
                     Now running: {formatSummaryTestName(summary.running.name)}
                     {summary.running.step?.location
-                      ? ` · ${shortLocation(summary.running.step.location)}`
+                      ? ` · ${shortSourceLocation(summary.running.step.location)}`
                       : summary.running.location
-                        ? ` · ${shortLocation(summary.running.location)}`
+                        ? ` · ${shortSourceLocation(summary.running.location)}`
                         : ''}
                   </span>
                 )}

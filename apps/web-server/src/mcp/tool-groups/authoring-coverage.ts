@@ -6,7 +6,7 @@ import { resolveDocuments } from '../document-resolution'
 import { documentResolutionInput } from '../../features/coverage/logic/coverage/document-resolution'
 import { FeatureNotFoundError } from '../../features/coverage/logic/coverage/service'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
-import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/runner'
+import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/creation'
 import {
   startExternalCoverage,
   submitExternalCoverage,

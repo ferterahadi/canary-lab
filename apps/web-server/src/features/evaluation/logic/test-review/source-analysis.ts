@@ -1,10 +1,11 @@
+import { readDisplayTestTitle } from '../../../../shared/test-title'
 import { scanSpecFiles } from '../../../../../../../shared/spec-files'
 import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import fs from 'fs'
 import ts from 'typescript'
 import { formatCodeForDisplay, formatSourceSnippetForDisplay } from '../../../../../../../shared/code-display-format'
 import { assertionFor, collectDirectAssertions, dedupeAssertions, helperAssertion, isNoiseHelper } from './assertions'
-import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead, stringArg } from './ast'
+import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead } from './ast'
 import { cleanSnippet, dedupe } from './text'
 import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion } from './types'
 
@@ -29,7 +30,7 @@ export function loadSourceTests(featureDir: string | undefined): Map<string, Sou
 
     function visit(node: ts.Node): void {
       if (ts.isCallExpression(node) && isPlaywrightTestCall(node)) {
-        const title = stringArg(node, src)
+        const title = readDisplayTestTitle(node, src)
         const body = functionBody(node)
         if (title && body) {
           const review = reviewTestBody(body, src, helperFor)

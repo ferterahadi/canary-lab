@@ -22,6 +22,21 @@ afterEach(() => {
 })
 
 describe('test review export', () => {
+  it('renders an empty run without invalid verdict percentages', async () => {
+    const run = detail({ featureDir: tmpDir })
+    run.playbackEvents = []
+    run.summary = { complete: true, total: 0, passed: 0, passedNames: [], failed: [] }
+    const html = await createEvaluationHtml(run)
+    expect(html).toContain('Evaluation Report')
+    expect(html).not.toContain('NaN')
+    expect(html).not.toContain('Infinity')
+  })
+
+  it.each(['/repo/e2e/checkout.spec.ts:12:3', 'C:\\repo\\e2e\\checkout.spec.ts:12:3'])('retains compact report locations for %s', async (eventLocation) => {
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir, eventLocation, title: 'passes checkout' }))
+    expect(html).toContain('<code>e2e/checkout.spec.ts:12:3</code>')
+  })
+
   it('leads with coverage strength + a Semantic Coverage section when a ledger is provided (A)', async () => {
     const html = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
       coverage: coverageLedgerFor('passes checkout'),

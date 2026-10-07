@@ -1,3 +1,4 @@
+import { shortSourceLocation } from '@shared/lib/source-location'
 import type { RunSummary, RunSummaryFailedEntry } from '@shared/run-detail'
 import { HERO_ROW } from './stage-meta'
 
@@ -217,7 +218,7 @@ export function parseFailure(
     entry,
     title: title || entry.name,
     tags,
-    shortLoc: shortLocation(loc),
+    shortLoc: shortSourceLocation(loc ?? ''),
     ...(loc ? { fullLoc: loc } : {}),
   }
 }
@@ -250,13 +251,6 @@ function deslug(name: string): string {
     rest = rest.slice(m[0].length)
   }
   return [...tags, rest.replace(/-/g, ' ')].join(' ').trim()
-}
-
-/** The readable tail of a test location — the last two path segments plus any
- *  `:line[:col]` suffix (`/Users/…/e2e/foo.spec.ts:199` → `e2e/foo.spec.ts:199`). */
-export function shortLocation(loc: string | undefined): string {
-  if (!loc) return ''
-  return loc.split('/').slice(-2).join('/')
 }
 
 function formatMs(ms: number): string {

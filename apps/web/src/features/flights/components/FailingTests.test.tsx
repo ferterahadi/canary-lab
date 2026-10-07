@@ -38,6 +38,14 @@ const render = (entries: RunSummaryFailedEntry[], knownTests?: RunSummary['known
 }
 
 describe('FailingTests', () => {
+  it('shortens Windows locations without changing the test opened', () => {
+    render([failed({ location: 'C:\\repo\\e2e\\checkout.spec.ts:12:3' })])
+    expect(container.textContent).toContain('e2e/checkout.spec.ts:12:3')
+    expect(container.textContent).not.toContain('C:\\repo')
+    act(() => container.querySelector('button')!.click())
+    expect(onOpenTest).toHaveBeenCalledWith(failed().name)
+  })
+
   it('renders nothing when there is nothing failing', () => {
     render([])
     expect(container.querySelector('[data-testid="run-hero-failing"]')).toBeNull()

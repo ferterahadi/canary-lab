@@ -1,3 +1,4 @@
+import { readDisplayTestTitle } from './test-title'
 import { unwrapExpression } from './unwrap-expression'
 import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from './test-tags'
 import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
@@ -39,25 +40,6 @@ export interface ExtractMetadataResult {
   file: string
   tests: ExtractedTestMetadata[]
   parseError?: string
-}
-
-function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | null {
-  const arg = node.arguments[0]
-  if (!arg) return null
-  // isStringLiteralLike covers both string literals and no-substitution
-  // template literals (`` `plain title` ``).
-  if (ts.isStringLiteralLike(arg)) return arg.text
-  // Template literal with substitutions, e.g. `redeems ${key} voucher`.
-  // Reconstruct the raw template text with `${expr}` placeholders preserved
-  // so loop-generated tests at least surface a recognisable name when the
-  // Playwright `--list` enrichment isn't available.
-  if (ts.isTemplateExpression(arg) && src) {
-    // A template expression's source text is always backtick-delimited;
-    // strip the surrounding backticks, keeping `${...}` segments verbatim.
-    const raw = arg.getText(src)
-    return raw.slice(1, -1)
-  }
-  return null
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {
@@ -106,7 +88,7 @@ export function extractTestMappingContext(file: string, source: string): string 
 }
 
 function getTestNameArg(call: ts.CallExpression, src: ts.SourceFile, body: ts.Node | null): string | null {
-  const staticName = getStringArg(call, src)
+  const staticName = readDisplayTestTitle(call, src)
   if (staticName !== null) return staticName
   const arg = call.arguments[0]
   if (!arg || !body) return null
@@ -336,7 +318,7 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
   const out: ExtractedStep[] = []
   function visit(n: ts.Node, collector: ExtractedStep[]): void {
     if (ts.isCallExpression(n) && isTestStepCall(n)) {
-      const label = getStringArg(n, src)
+      const label = readDisplayTestTitle(n, src)
       if (label !== null) {
         const body = getStepBody(n)
         const step: ExtractedStep = {

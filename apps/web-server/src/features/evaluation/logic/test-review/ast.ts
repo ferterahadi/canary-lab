@@ -51,14 +51,6 @@ export function calledIdentifier(node: ts.CallExpression): string | undefined {
   return undefined
 }
 
-export function stringArg(node: ts.CallExpression, src: ts.SourceFile): string | undefined {
-  const arg = node.arguments[0]
-  if (!arg) return undefined
-  if (ts.isStringLiteralLike(arg)) return arg.text
-  if (ts.isTemplateExpression(arg)) return arg.getText(src).slice(1, -1)
-  return undefined
-}
-
 export function functionBody(node: ts.CallExpression): ts.ConciseBody | undefined {
   // Playwright accepts both test(title, body) and test(title, details, body),
   // where the 3-arg form carries a { tag, annotation } object — exactly what the
