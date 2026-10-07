@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
+import { useMemo, type ReactNode } from 'react'
 import type { Feature } from '../api/types'
 import type { VersionStatus } from '@shared/version-status'
 import type { ExecutionType } from '@shared/verification'
@@ -12,7 +13,7 @@ import {
   type FeatureFlightAction,
 } from '@/features/flights/components/FlightChipState'
 import { presentActivityRunStatus, type FeatureActivity } from '@/features/flights/state/feature-activity'
-import { readGroupOpen, writeGroupOpen } from '@/features/flights/lib/group-open-state'
+import { usePersistedGroupOpen } from '@/shared/state/use-persisted-group-open'
 import { SPEC_TONE, featureTone } from '@/features/runs/utils/spec-integrity'
 import { presentRunStatus } from '@/features/runs/utils/run-presentation'
 import type { RunWaitingState } from '@/features/runs/utils/run-waiting-state'
@@ -144,12 +145,7 @@ export function FeaturesColumn({
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Controlled when App drives it from the route; uncontrolled otherwise.
-  const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
-  const settingsDialogOpen = settingsOpen ?? settingsOpenInternal
-  const setSettingsDialogOpen = useCallback((open: boolean) => {
-    if (onSettingsOpenChange) onSettingsOpenChange(open)
-    else setSettingsOpenInternal(open)
-  }, [onSettingsOpenChange])
+  const [settingsDialogOpen, setSettingsDialogOpen] = useControlledBoolean(settingsOpen, onSettingsOpenChange)
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
   // Workspace events plus bounded reconciliation keep source changes live.
   // Failed reads or an expired freshness lease withdraw the previous badge.
@@ -525,8 +521,7 @@ function FeatureGroupAccordion({
   renderRow: (feature: Feature) => ReactNode
 }) {
   const { group } = section
-  const [open, setOpen] = useState(() => readGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group))
-  const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group, next); return next })
+  const { open, toggle } = usePersistedGroupOpen({ storageKey: FEATURE_GROUPS_OPEN_STORAGE_KEY, group, defaultOpen: true })
   return (
     <section data-testid={`feature-group-${group}`}>
       <button

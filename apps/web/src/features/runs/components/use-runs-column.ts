@@ -1,3 +1,4 @@
+import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
 import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
 // RunsColumn's state: the four pending-confirmation slots, the menu/popover and
 // compact-layout observers, the restart tracker, and the confirm handlers.
@@ -31,12 +32,7 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
   // Controlled when App drives it from the route; uncontrolled otherwise.
-  const [verifyDialogOpenInternal, setVerifyDialogOpenInternal] = useState(false)
-  const verifyDialogOpen = verifyOpen ?? verifyDialogOpenInternal
-  const setVerifyDialogOpen = useCallback((open: boolean) => {
-    if (onVerifyOpenChange) onVerifyOpenChange(open)
-    else setVerifyDialogOpenInternal(open)
-  }, [onVerifyOpenChange])
+  const [verifyDialogOpen, setVerifyDialogOpen] = useControlledBoolean(verifyOpen, onVerifyOpenChange)
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { gatePromo } = useMcpPromo()

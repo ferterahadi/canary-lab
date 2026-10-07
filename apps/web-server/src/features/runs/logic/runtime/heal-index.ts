@@ -1,8 +1,9 @@
+import { buildRunPaths } from './run-paths'
 import fs from 'fs'
 import path from 'path'
 import { DIAGNOSIS_JOURNAL_PATH, HEAL_INDEX_PATH, ROOT, getSummaryPath } from './paths'
 import { readJournalTail, readPreviousFailingSlugsFromJournal } from './heal-journal'
-import { EnrichedSummary, Manifest, healIndexPathForSummary, journalPathForSummary, manifestPathForSummary, readManifest, renderSliceLines, stripAnsi, truncateOneLine } from './log-enrichment'
+import { EnrichedSummary, Manifest, readManifest, renderSliceLines, stripAnsi, truncateOneLine } from './log-enrichment'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 export function normalizeErrorKey(raw: string): string {
@@ -109,14 +110,15 @@ export function writeHealIndex(parsed?: {
     summary = parsed.summary
     manifest = parsed.manifest
     healIndexPath = parsed.healIndexPath ?? healIndexPath
-    journalPath = parsed.journalPath ?? (parsed.summaryPath ? journalPathForSummary(parsed.summaryPath) : journalPath)
+    journalPath = parsed.journalPath ?? (parsed.summaryPath ? buildRunPaths(path.dirname(parsed.summaryPath)).diagnosisJournalPath : journalPath)
   } else {
     const summaryPath = getSummaryPath()
     if (!fs.existsSync(summaryPath)) return
     summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
-    manifest = readManifest(manifestPathForSummary(summaryPath))
-    healIndexPath = healIndexPathForSummary(summaryPath)
-    journalPath = journalPathForSummary(summaryPath)
+    const paths = buildRunPaths(path.dirname(summaryPath))
+    manifest = readManifest(paths.manifestPath)
+    healIndexPath = paths.healIndexPath
+    journalPath = paths.diagnosisJournalPath
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []

@@ -16,7 +16,7 @@ import { Tooltip } from '@/shared/ui/Tooltip'
 import { useLiveCoverageStates } from '@/shared/state/use-live-coverage'
 import { FLIGHT_OVERVIEW, presentStageStatus, stageStatusTone } from './stage-meta'
 import { coverageStageWarning, isCoverageWarningRow, type CoverageStageWarning } from './coverage-stage-warning'
-import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
+import { usePersistedGroupOpen } from '@/shared/state/use-persisted-group-open'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
 import { presentedIndexStages } from '../lib/external-work'
@@ -280,8 +280,7 @@ export function PickerGroupSection({
   onStartFlight: (feature: string) => void
 }) {
   const group = section.group!
-  const [open, setOpen] = useState(() => expandInitially || readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, false))
-  const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
+  const { open, toggle } = usePersistedGroupOpen({ storageKey: GROUPS_OPEN_STORAGE_KEY, group, defaultOpen: false, expandInitially })
   // The worst row drives the section's summary chip (same comparator).
   const worst = section.rows.reduce((acc, r) =>
     featureChipState(r.flight, r.activity, r.derived).rank < featureChipState(acc.flight, acc.activity, acc.derived).rank ? r : acc, section.rows[0])

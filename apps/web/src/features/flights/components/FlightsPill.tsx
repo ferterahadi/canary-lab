@@ -1,5 +1,5 @@
+import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
 import { flightNeedsAttention } from '@shared/flights/attention'
-import { useState } from 'react'
 import type {
   FlightIndexEntry,
   FlightStageKey,
@@ -57,12 +57,7 @@ export function FlightsPill({
   onStartFlight,
   onOpenPreFlight,
 }: FlightsPillProps) {
-  const [internalOpen, setInternalOpen] = useState(false)
-  const open = controlledOpen ?? internalOpen
-  const setOpen = (next: boolean): void => {
-    if (onOpenChange) onOpenChange(next)
-    else setInternalOpen(next)
-  }
+  const [open, setOpen] = useControlledBoolean(controlledOpen, onOpenChange)
   // Defensive: the server list is already scoped to running/done, but a stale
   // frame shouldn't render launched/failed rows.
   const { activeFeatures: attention, preFlightRows, activeCount } = summarizeFlightActivity(flights, preFlights, activity)

@@ -64,7 +64,7 @@ export default defineConfig({
           exclude: [
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
             // Needs real localStorage, not a stub — see the dom project below.
-            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/group-open-state.test.ts',
             'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'node',
@@ -78,7 +78,7 @@ export default defineConfig({
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
-            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/group-open-state.test.ts',
             'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'happy-dom',
