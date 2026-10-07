@@ -1,8 +1,11 @@
-import { useState, type ComponentProps, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { FeatureDoc } from '@shared/coverage/feature-docs'
-import type { DocPill } from './DocPill'
 
-type Disclosure = ComponentProps<typeof DocPill>['disclosure']
+export interface DocDisclosure {
+  expanded: boolean
+  onToggle: () => void
+  sourceCount: number
+}
 
 /** A feature's docs as a tree: the generated summary on top, the source docs
  *  it was distilled from nested under its caret. One home for the coverage rail
@@ -17,7 +20,7 @@ export function DocTree({ docs, nest, defaultOpen = false, renderPill }: {
   nest: boolean
   /** Whether the sources start expanded. */
   defaultOpen?: boolean
-  renderPill: (doc: FeatureDoc, disclosure?: Disclosure) => ReactNode
+  renderPill: (doc: FeatureDoc, disclosure?: DocDisclosure) => ReactNode
 }) {
   const [sourcesOpen, setSourcesOpen] = useState(defaultOpen)
   const sourceDocs = docs.filter((d) => !d.generated)

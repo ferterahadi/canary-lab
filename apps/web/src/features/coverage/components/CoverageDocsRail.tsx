@@ -3,7 +3,7 @@ import * as coverageApi from '@/shared/api/coverage'
 import * as workspaceApi from '@/shared/api/workspace'
 import type { FeatureDoc, FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { DocPill, EmptyDropzone } from './DocPill'
-import { DocTree } from './DocTree'
+import { DocTree } from '@/shared/ui/DocTree'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 

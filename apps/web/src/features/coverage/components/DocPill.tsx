@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { formatBytes } from '@/shared/lib/format'
 import { Tooltip } from '@/shared/ui/Tooltip'
+import type { DocDisclosure } from '@/shared/ui/DocTree'
 import { DocRelink } from './DocRelink'
 
 export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken, onRelink, disclosure }: {
@@ -21,7 +22,7 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
   onRelink?: (targetPath: string) => Promise<void>
   /** Turns the pill into a disclosure over the docs it was generated from: the
    *  caret toggles them, the rest of the pill still opens the file. */
-  disclosure?: { expanded: boolean; onToggle: () => void; sourceCount: number }
+  disclosure?: DocDisclosure
 }) {
   const [hover, setHover] = useState(false)
   return (
