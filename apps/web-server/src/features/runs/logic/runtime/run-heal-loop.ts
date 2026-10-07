@@ -84,10 +84,6 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
           filesChanged,
           fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
           diffContent,
-          runId: ctx.runId,
-          manifestPath: ctx.paths.manifestPath,
-          summaryPath: ctx.paths.summaryPath,
-          journalPath: ctx.paths.diagnosisJournalPath,
         })
       }
     } catch { /* journal is best-effort */ }
@@ -159,10 +155,6 @@ function recordForeignAbortEnd(ctx: RunContext, cycle: number): void {
       signal: 'none',
       hypothesis: `Another process marked this run "${claimed}" mid-cycle. The repair was wound down; any edits the agent had already made are still in the worktree.`,
       fixDescription: 'No fix verified — the cycle never reached a rerun.',
-      runId: ctx.runId,
-      manifestPath: ctx.paths.manifestPath,
-      summaryPath: ctx.paths.summaryPath,
-      journalPath: ctx.paths.diagnosisJournalPath,
     })
   } catch { /* journal write is best-effort */ }
 }
@@ -376,10 +368,6 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
               signal: 'none',
               hypothesis: `${reasonMessage} No code changes detected.`,
               fixDescription: 'No fix applied.',
-              runId: ctx.runId,
-              manifestPath: ctx.paths.manifestPath,
-              summaryPath: ctx.paths.summaryPath,
-              journalPath: ctx.paths.diagnosisJournalPath,
             })
           } catch { /* journal write is best-effort */ }
           emitAgentSystemMessage(ctx, 'No code changes detected — ending the heal loop.')
@@ -441,10 +429,6 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
             filesChanged,
             fixDescription: typeof effectiveSignal.body.fixDescription === 'string' ? effectiveSignal.body.fixDescription : undefined,
             diffContent,
-            runId: ctx.runId,
-            manifestPath: ctx.paths.manifestPath,
-            summaryPath: ctx.paths.summaryPath,
-            journalPath: ctx.paths.diagnosisJournalPath,
           })
         }
       } catch { /* journal write is best-effort */ }

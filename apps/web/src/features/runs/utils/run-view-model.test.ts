@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
-import type { RunStatus, TransientAction } from '@shared/run-state'
+import type { RunActionAvailabilitySet, RunStatus, TransientAction } from '@shared/run-state'
 import { deriveRunViewModel } from './run-view-model'
 
 function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
@@ -20,6 +20,9 @@ function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
 }
 
 describe('deriveRunViewModel', () => {
+  it('uses the shared action contract', () => {
+    expectTypeOf(deriveRunViewModel(null).actions).toEqualTypeOf<RunActionAvailabilitySet>()
+  })
   it('shows a claimed attempt as unverified and disables Restart Heal', () => {
     const vm = deriveRunViewModel(detail({
       status: 'failed',

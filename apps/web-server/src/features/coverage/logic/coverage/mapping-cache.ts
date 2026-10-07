@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { coverageJsonDigest } from './json-digest'
 import fs from 'fs'
 import path from 'path'
 import ts from 'typescript'
@@ -33,10 +33,6 @@ export interface MappingInferenceSnapshot {
   readable?: boolean
 }
 
-function hash(value: unknown): string {
-  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
-}
-
 function portableRelative(featureDir: string, file: string): string {
   return path.relative(featureDir, file).split(path.sep).join('/')
 }
@@ -62,7 +58,7 @@ function sourceContext(featureDir: string, file: string, options: ts.CompilerOpt
     }
   }
   visit(path.resolve(featureDir, file), true)
-  return hash([...files].sort(([a], [b]) => a.localeCompare(b)))
+  return coverageJsonDigest([...files].sort(([a], [b]) => a.localeCompare(b)))
 }
 
 export function mappingInferenceSnapshot(
@@ -73,7 +69,7 @@ export function mappingInferenceSnapshot(
   reads = new CoverageInputReads(),
 ): MappingInferenceSnapshot {
   const requirementHashes = Object.fromEntries(requirements.filter((r) => !r.deprecated)
-    .map((r) => [r.id, hash([fingerprintRequirement(r), variantDimension])]))
+    .map((r) => [r.id, coverageJsonDigest([fingerprintRequirement(r), variantDimension])]))
   try {
     const host = {
       ...ts.sys,
@@ -102,7 +98,7 @@ export function mappingInferenceSnapshot(
         context = sourceContext(featureDir, test.file, options, reads, host)
         contexts.set(test.file, context)
       }
-      fingerprints[test.name] = hash({
+      fingerprints[test.name] = coverageJsonDigest({
         file: portableRelative(featureDir, path.resolve(featureDir, test.file)),
         body: test.bodySource,
         assertions: test.assertions,
@@ -111,7 +107,7 @@ export function mappingInferenceSnapshot(
       })
     }
     const summaryPath = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
-    const sourceRevision = hash([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
+    const sourceRevision = coverageJsonDigest([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
     return { tests: fingerprints, requirements: requirementHashes, sourceRevision, readable: true }
   } catch {
     // Reuse is optional. If any source/config input cannot be read, re-examine

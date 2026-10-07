@@ -53,10 +53,6 @@ export async function interjectHealAgent(ctx: RunContext, text: string): Promise
       signal: '.rerun',
       hypothesis: `User interjected mid-heal: ${truncated}`,
       fixDescription: `Sent text to live REPL stdin.`,
-      runId: ctx.runId,
-      manifestPath: ctx.paths.manifestPath,
-      summaryPath: ctx.paths.summaryPath,
-      journalPath: ctx.paths.diagnosisJournalPath,
     })
   } catch { /* journal append is best-effort */ }
 

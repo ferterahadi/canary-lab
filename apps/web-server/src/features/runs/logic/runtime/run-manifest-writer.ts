@@ -54,8 +54,14 @@ export function recordLifecycle(ctx: RunContext,
   ctx.lastLifecycleEvent = { phase, headline }
 }
 
-export function appendJournalIteration(ctx: RunContext, input: JournalAppendInput): void {
-  appendJournalIterationToFile(input)
+export function appendJournalIteration(ctx: RunContext, input: Omit<JournalAppendInput, 'runId' | 'manifestPath' | 'summaryPath' | 'journalPath'>): void {
+  appendJournalIterationToFile({
+    ...input,
+    runId: ctx.runId,
+    manifestPath: ctx.paths.manifestPath,
+    summaryPath: ctx.paths.summaryPath,
+    journalPath: ctx.paths.diagnosisJournalPath,
+  })
   ctx.stateSink.recordJournalChange(ctx.runId)
 }
 

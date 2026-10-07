@@ -213,6 +213,7 @@ describe('POST /api/runs', () => {
     })
     expect(res.statusCode).toBe(409)
     expect(res.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-live' } })
+    expect(res.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(active).message, active })
     expect(startRun).not.toHaveBeenCalled()
   })
 

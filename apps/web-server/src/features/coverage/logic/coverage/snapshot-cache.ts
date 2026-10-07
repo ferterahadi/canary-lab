@@ -1,3 +1,4 @@
+import { coverageJsonDigest } from './json-digest'
 import path from 'path'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { FEATURE_CONFIG_NAMES } from '../../../../shared/config-file'
@@ -7,7 +8,6 @@ import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import { computeFeatureCoverage, FeatureNotFoundError } from './service'
 import { coverageJobStore } from './jobs/store'
-import { coverageRevision } from './freshness'
 import { CoverageInputReads, type InputReadMemo } from './input-reads'
 
 type Paths = { featuresDir: string; logsDir: string }
@@ -45,7 +45,7 @@ export class CoverageSnapshotCache {
 
   private metadata(feature: string, context: Context): string {
     // A different suite's new run/job must not invalidate this suite's ledger.
-    return coverageRevision([
+    return coverageJsonDigest([
       context.runs.filter((run) => run.feature === feature && !isAuxiliaryExecution(run.executionType)),
       context.jobs.filter((job) => job.feature === feature && job.status === 'running'),
     ])
@@ -54,7 +54,7 @@ export class CoverageSnapshotCache {
   get(feature: string, featureDir?: string, context = this.context()): CoverageLedger {
     const dir = featureDir ?? this.features().find((item) => item.name === feature)?.featureDir
     if (!dir) throw new FeatureNotFoundError(feature)
-    const metadata = coverageRevision([dir, this.metadata(feature, context)])
+    const metadata = coverageJsonDigest([dir, this.metadata(feature, context)])
     const previous = this.snapshots.get(feature)
     if (previous?.metadata === metadata && previous.inputs.unchanged(context.memo)) {
       // Renew only after reading authoritative inputs, not merely serving cache.

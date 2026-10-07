@@ -192,6 +192,37 @@ describe('coverage routes', () => {
     expect(res.statusCode).toBe(404)
   })
 
+  it('rejects missing suites and invalid timeouts before waiting for coverage changes', async () => {
+    expect((await app.inject('/api/features/missing/coverage/changes')).statusCode).toBe(404)
+    writeFeature('checkout', SPEC)
+    for (const timeout of ['-1', '30001', 'NaN']) {
+      const response = await app.inject(`/api/features/checkout/coverage/changes?timeoutMs=${timeout}`)
+      expect(response.statusCode).toBe(400)
+      expect(response.json().message).toBe('timeoutMs must be between 0 and 30000')
+    }
+  })
+
+  it('bounds coverage waits when flight attention participates and returns that attention', async () => {
+    writeFeature('checkout', SPEC)
+    const attention = { kind: 'fixture-attention' }
+    const wait = vi.fn(async () => ({ changed: false, change: { feature: 'checkout' } }))
+    const monitored = Fastify()
+    await monitored.register(coverageRoutes, {
+      featuresDir, logsDir, projectRoot: tmpDir,
+      coverageMonitor: { wait } as never,
+      flightStore: { latestForFeature: () => ({ flightId: 'fixture-flight', status: 'paused' }) } as never,
+      flightAttention: { get: () => ({ attention }) } as never,
+    })
+    try {
+      const response = await monitored.inject('/api/features/checkout/coverage/changes?timeoutMs=30000')
+      expect(response.statusCode).toBe(200)
+      expect(wait).toHaveBeenCalledWith('checkout', undefined, 10000)
+      expect(response.json()).toEqual({ changed: false, change: {
+        feature: 'checkout', flightId: 'fixture-flight', flightStatus: 'paused', flightAttention: attention,
+      } })
+    } finally { await monitored.close() }
+  })
+
   it('regenerate (deterministic) → a mapped test makes the requirement covered (run-free)', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nuser adds an item to the cart' })
 

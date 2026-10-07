@@ -123,6 +123,7 @@ describe('Getting Started flight admission', () => {
     })
     expect(response.statusCode).toBe(409)
     expect(response.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(response.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(active).message, active: active })
   })
 
   it('propagates a claim failure that is not the busy conflict', async () => {
@@ -196,6 +197,7 @@ describe('Getting Started flight admission', () => {
 
     expect(resumed.statusCode).toBe(409)
     expect(resumed.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(resumed.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
   })
 
   it('releases the re-claim when the resume itself is refused', async () => {
@@ -299,6 +301,7 @@ describe('Getting Started flight admission', () => {
     const busy = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
     expect(busy.statusCode).toBe(409)
     expect(busy.json()).toMatchObject({ type: 'getting_started_busy' })
+    expect(busy.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
   })
 
   it('matches the demo by repo basename on resume, so a de-conflicted feature name still re-claims', async () => {
@@ -400,6 +403,7 @@ describe('Getting Started flight admission', () => {
     })
     expect(busy.statusCode).toBe(409)
     expect(busy.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(busy.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
 
     const broken = await app.inject({
       method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },

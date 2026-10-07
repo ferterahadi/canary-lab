@@ -1,3 +1,4 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
 import { projectExternalHealMetadata } from '../logic/heal/external-heal-session'
 import { runCleanupFailure } from './run-cleanup-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
@@ -103,8 +104,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
           .claim(requestedDemoWorkflow ?? 'run', req.body.gettingStartedSource).sessionId
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
-        reply.code(409)
-        return { type: err.type, error: err.message, active: err.active }
+        return gettingStartedBusyReply(reply, err)
       }
     }
     let reservedRunId: string | undefined

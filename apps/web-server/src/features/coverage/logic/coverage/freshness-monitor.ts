@@ -1,10 +1,10 @@
+import { coverageJsonDigest } from './json-digest'
 import { waitForCondition } from '../../../../shared/wait-for-condition'
 import fs from 'fs'
 import path from 'path'
 import { COVERAGE_RECONCILE_MS, type FeatureCoverageChange } from '../../../../../../../shared/coverage/freshness'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { WorkspaceEventBus } from '../../../../shared/workspace-events'
-import { coverageRevision } from './freshness'
 import { docsDirFor } from './document-files'
 import { CoverageSnapshotCache } from './snapshot-cache'
 
@@ -42,7 +42,7 @@ export class CoverageFreshnessMonitor {
       change = this.observe(ledger)
     } catch (error) {
       change = { feature, delivery: 'tool-response-and-wait', freshness: {
-        revision: coverageRevision(String(error)), checkedAt: new Date().toISOString(),
+        revision: coverageJsonDigest(String(error)), checkedAt: new Date().toISOString(),
         state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + (error instanceof Error ? error.message : String(error))],
         changedTests: [], latestRunFailed: false,
       } }

@@ -14,7 +14,7 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
   recordLifecycle: h.recordLifecycle,
 }))
 
-const { ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
+const { attemptHttp, ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -47,6 +47,13 @@ function ctxFor(state: Partial<RunContext> = {}) {
 }
 
 describe('waitForHealth', () => {
+  it('forwards the HTTP attempt to the run checker without changing its result', async () => {
+    const healthCheck = vi.fn(async () => false)
+    const { ctx } = ctxFor({ healthCheck })
+    await expect(attemptHttp(ctx, { url: 'http://example.test/health', timeoutMs: 75 })).resolves.toBe(false)
+    expect(healthCheck).toHaveBeenCalledExactlyOnceWith('http://example.test/health', 75)
+  })
+
   it('returns immediately when the feature declares no services', async () => {
     const { ctx } = ctxFor()
     // A feature with no `services:` entry — nothing to probe, so nothing to
@@ -60,6 +67,15 @@ describe('waitForHealth', () => {
 })
 
 describe('dependency preflight', () => {
+  it('does not capture a baseline or spawn services after cancellation', async () => {
+    const afterPreflight = vi.fn(async () => {})
+    const ptyFactory = vi.fn()
+    const { ctx } = ctxFor({ stopped: true, services: [svcSpec()], ptyFactory })
+    await expect(ensureServicesRunning(ctx, afterPreflight)).resolves.toEqual([])
+    expect(afterPreflight).not.toHaveBeenCalled()
+    expect(ptyFactory).not.toHaveBeenCalled()
+  })
+
   it('rechecks and replaces evidence even when rerun keeps every service process warm', async () => {
     fs.mkdirSync(path.join(tmpDir, 'node_modules'))
     fs.writeFileSync(path.join(tmpDir, 'dependencies-ready'), 'ready')

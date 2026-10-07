@@ -328,7 +328,7 @@ export async function waitForServiceReady(ctx: RunContext, svc: ServiceSpec): Pr
     return
   }
 
-  const readiness = readinessProbe(probe, ctx.healthCheck)
+  const readiness = readinessProbe(probe, ctx.healthCheck, svc.name)
   await pollUntilReady(ctx, svc, readiness.transport, readiness.attempt)
 }
 
@@ -349,7 +349,7 @@ export async function pollUntilReady(ctx: RunContext,
 ): Promise<void> {
   const probe = svc.healthProbe!
   const result = await waitForServiceReadiness({
-    probe, attempt,
+    probe, attempt, serviceName: svc.name,
     pollIntervalMs: ctx.healthPollIntervalMs,
     deadlineMs: ctx.healthDeadlineMs,
     delay: ctx.delay,
@@ -373,7 +373,7 @@ export async function pollUntilReady(ctx: RunContext,
   const failureReason = result.status === 'service-failed' ? 'process-exited' : 'health-timeout'
   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'timeout')
   ctx.emit('health-check', { service: svc, healthy: false, transport })
-  const probeTarget = readinessProbe(probe).target
+  const probeTarget = readinessProbe(probe, undefined, svc.name).target
   const detail = failureReason === 'process-exited'
     ? `Service process exited before ${transport.toUpperCase()} readiness (${probeTarget}).`
     : `Timed out waiting for ${transport.toUpperCase()} readiness (${probeTarget}).`

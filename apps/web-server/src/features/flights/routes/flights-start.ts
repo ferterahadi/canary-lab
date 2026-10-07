@@ -1,3 +1,4 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner, GettingStartedWorkflow } from '../../../../../../shared/getting-started'
 // Flights REST — starting a flight and the plan-features task surface.
@@ -178,8 +179,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
         gettingStartedSession = deps.gettingStarted.claim(claimWorkflowFor(body.gettingStartedWorkflow), body.gettingStartedSource).sessionId
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
-        reply.code(409)
-        return { type: err.type, error: err.message, active: err.active }
+        return gettingStartedBusyReply(reply, err)
       }
     } else if (hasMode && deps.gettingStarted) {
       // A mode-carrying start (continue/redo/jump) re-enters an existing record,
@@ -195,8 +195,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
         )
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
-        reply.code(409)
-        return { type: err.type, error: err.message, active: err.active }
+        return gettingStartedBusyReply(reply, err)
       }
     }
 

@@ -1,3 +1,4 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
 import type { FlightAttentionReader } from '../../flights/logic/attention'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
@@ -405,8 +406,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           gettingStartedSession = deps.gettingStarted.claim('coverage', req.body.gettingStartedSource).sessionId
         } catch (err) {
           if (!(err instanceof GettingStartedBusyError)) throw err
-          reply.code(409)
-          return { type: err.type, error: err.message, active: err.active }
+          return gettingStartedBusyReply(reply, err)
         }
       }
       try {

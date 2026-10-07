@@ -1,3 +1,4 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 // Flights REST — checkpoint answers and the pause/resume/autopilot/redo/delete
 // lifecycle. Split out of flights.ts; handler bodies are unchanged.
@@ -135,8 +136,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
       })
     } catch (err) {
       if (err instanceof GettingStartedBusyError) {
-        reply.code(409)
-        return { type: err.type, error: err.message, active: err.active }
+        return gettingStartedBusyReply(reply, err)
       }
       const message = err instanceof Error ? err.message : String(err)
       reply.code(message.includes('not found') ? 404 : 409)
@@ -221,8 +221,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
         })
       } catch (err) {
         if (err instanceof GettingStartedBusyError) {
-          reply.code(409)
-          return { type: err.type, error: err.message, active: err.active }
+          return gettingStartedBusyReply(reply, err)
         }
         if (err instanceof FlightStageEntryError) {
           reply.code(400)

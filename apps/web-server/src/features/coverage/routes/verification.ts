@@ -1,3 +1,4 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
 import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
@@ -135,8 +136,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
           gettingStartedSession = deps.gettingStarted.claim('verify', gettingStartedSource).sessionId
         } catch (err) {
           if (!(err instanceof GettingStartedBusyError)) throw err
-          reply.code(409)
-          return { type: err.type, error: err.message, active: err.active }
+          return gettingStartedBusyReply(reply, err)
         }
       }
       try {

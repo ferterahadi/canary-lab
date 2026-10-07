@@ -55,6 +55,21 @@ function httpSpec(name: string, url: string): ServiceSpec {
 }
 
 describe('bootAndProbe', () => {
+  it('tears down every started service when an unknown probe throws', async () => {
+    const { factory, spawned, killed } = fakeFactory()
+    const invalid = httpSpec('api', 'http://localhost:5000/')
+    // This simulates corruption after configuration validation, not an accepted config shape.
+    invalid.healthProbe = { weird: true } as unknown as NonNullable<ServiceSpec['healthProbe']>
+    const healthCheck = vi.fn(async () => true)
+    await expect(bootAndProbe({
+      specs: [{ repoName: 'r', name: 'worker', safeName: 'worker', command: 'run worker', cwd: '/tmp' }, invalid],
+      ptyFactory: factory, healthCheck,
+    })).rejects.toThrow('Unknown probe shape for api')
+    expect(spawned).toHaveLength(2)
+    expect(killed).toEqual([201, 202])
+    expect(healthCheck).not.toHaveBeenCalled()
+  })
+
   it('resolves ok when every service becomes healthy', async () => {
     const { factory, spawned } = fakeFactory()
     const res = await bootAndProbe({

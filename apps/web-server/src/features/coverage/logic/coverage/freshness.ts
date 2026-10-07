@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { coverageJsonDigest } from './json-digest'
 import path from 'path'
 import type { CoverageFreshness, CoverageRecoveryAction } from '../../../../../../../shared/coverage/freshness'
 import type { CoverageLedger, PrdSummary } from '../../../../../../../shared/coverage/types'
@@ -6,10 +6,6 @@ import { docsDirFor, documentCandidates, inspectDocumentFile } from './document-
 import type { MappingInferenceSnapshot } from './mapping-cache'
 import { mappingInputMatches } from './mapping-validity'
 import type { CoverageRunState } from './run-state'
-
-export function coverageRevision(value: unknown): string {
-  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
-}
 
 export function unreadableSourceDocs(featureDir: string): string[] {
   const dir = docsDirFor(featureDir)
@@ -71,7 +67,7 @@ export function deriveCoverageFreshness(args: {
   if (args.latestRun && !ledger.provenRunId) reasons.push(`Latest run ${args.latestRun.runId} is ${args.latestRun.status}; no readable test results for this attempt.`)
   if (state === 'current' && latestRunFailed) nextAction = action('run', 'Review failures', 'start_run')
   return {
-    revision: coverageRevision([args.docsHash, summary, snapshot, runState, ledger.state, ledger.tests.map((test) => [test.name, test.lastRun]), ledger.enforcement, args.unreadable, args.latestRun]),
+    revision: coverageJsonDigest([args.docsHash, summary, snapshot, runState, ledger.state, ledger.tests.map((test) => [test.name, test.lastRun]), ledger.enforcement, args.unreadable, args.latestRun]),
     checkedAt: new Date().toISOString(), state, reasons, changedTests, latestRunFailed,
     ...(nextAction ? { nextAction } : {}),
     ...(args.latestRun ? { latestRunId: args.latestRun.runId, latestRunStatus: args.latestRun.status } : {}),

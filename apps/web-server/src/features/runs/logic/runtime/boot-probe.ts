@@ -169,7 +169,7 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
     const fullLog = rawLog ? (writeCleanBootLog(rawLog) ?? rawLog) : undefined
     failure = {
       ok: false, failedService: svc.name,
-      ...(svc.healthProbe ? { transport: readinessProbe(svc.healthProbe).transport } : {}),
+      ...(svc.healthProbe ? { transport: readinessProbe(svc.healthProbe, undefined, svc.name).transport } : {}),
       detail: message + (evidence ? `\nProcess output:\n${evidence}` : '')
         + (fullLog ? `\nFull boot log: ${fullLog}` : ''),
       kind, teardown,
@@ -209,9 +209,10 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
   try {
     await Promise.all(opts.specs.map(async (svc) => {
       if (!svc.healthProbe) return // Preserve the existing no-probe policy.
-      const probe = readinessProbe(svc.healthProbe)
+      const probe = readinessProbe(svc.healthProbe, undefined, svc.name)
       const result = await waitForServiceReadiness({
         probe: svc.healthProbe,
+        serviceName: svc.name,
         healthCheck: opts.healthCheck,
         pollIntervalMs: opts.healthPollIntervalMs,
         deadlineMs: opts.healthDeadlineMs,

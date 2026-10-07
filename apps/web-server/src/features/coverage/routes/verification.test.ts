@@ -426,6 +426,7 @@ describe('verification routes', () => {
       const store = new RunStore(logsDir, createRegistry())
       const gettingStarted = sessionStore()
       gettingStarted.claim('run', 'external')
+      const activeBeforeConflict = gettingStarted.read().active
       const startVerification = vi.fn()
       const app = Fastify()
       await app.register(verificationRoutes, { featuresDir, store, startVerification, gettingStarted })
@@ -440,6 +441,8 @@ describe('verification routes', () => {
       const body = res.json() as { type: string; error: string; active: GettingStartedActiveSession }
       expect(body.type).toBe('getting_started_busy')
       expect(body.active.workflow).toBe('run')
+      expect(body).toEqual({ type: 'getting_started_busy', error: 'Getting Started is already running run from external.', active: activeBeforeConflict })
+      expect(gettingStarted.read().active).toEqual(activeBeforeConflict)
       // Bounced before any verification started.
       expect(startVerification).not.toHaveBeenCalled()
     })

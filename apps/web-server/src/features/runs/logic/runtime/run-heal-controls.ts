@@ -108,10 +108,6 @@ export async function cancelHeal(ctx: RunContext, host: RunLoopHost): Promise<Ca
       signal: '.rerun',
       hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
       fixDescription: 'Cancelled by user — no changes were made.',
-      runId: ctx.runId,
-      manifestPath: ctx.paths.manifestPath,
-      summaryPath: ctx.paths.summaryPath,
-      journalPath: ctx.paths.diagnosisJournalPath,
     })
   } catch { /* journal append is best-effort */ }
 

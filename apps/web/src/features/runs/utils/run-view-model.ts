@@ -11,7 +11,7 @@ import {
   type TransientAction,
 } from '@shared/run-state'
 import { runWaitingState, type RunWaitingState } from './run-waiting-state'
-import type { RunActionAvailability } from '@shared/run-state'
+import type { RunActionAvailabilitySet } from '@shared/run-state'
 
 export interface RunViewModel {
   waiting?: RunWaitingState
@@ -19,13 +19,7 @@ export interface RunViewModel {
   headline: string
   subtext?: string
   primaryAlert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
-  actions: {
-    pauseHeal: RunActionAvailability
-    stop: RunActionAvailability
-    cancelHeal: RunActionAvailability
-    delete: RunActionAvailability
-    restartHeal: RunActionAvailability
-  }
+  actions: RunActionAvailabilitySet
   recoveryTimeline: RunLifecycleEvent[]
 }
 

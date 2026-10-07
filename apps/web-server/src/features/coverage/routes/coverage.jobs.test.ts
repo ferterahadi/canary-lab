@@ -362,6 +362,8 @@ describe('coverage routes', () => {
       target: { kind: 'coverage-job', id: jobId, feature: 'checkout' },
     })
 
+    const activeBeforeConflict = gettingStarted.read().active
+    const jobsBeforeConflict = (await app.inject('/api/coverage/jobs')).json<Array<{ jobId: string }>>().map((job) => job.jobId)
     // While that demo holds the workspace, a second sourced start bounces.
     const busy = await app.inject({
       method: 'POST',
@@ -373,6 +375,9 @@ describe('coverage routes', () => {
     expect(busyBody.type).toBe('getting_started_busy')
     expect(busyBody.active.workflow).toBe('coverage')
     expect(typeof busyBody.error).toBe('string')
+    expect(busyBody).toEqual({ type: 'getting_started_busy', error: 'Getting Started is already running coverage from external.', active: activeBeforeConflict })
+    expect(gettingStarted.read().active).toEqual(activeBeforeConflict)
+    expect((await app.inject('/api/coverage/jobs')).json<Array<{ jobId: string }>>().map((job) => job.jobId)).toEqual(jobsBeforeConflict)
   })
 
   it('getting-started: a start without a source never claims; a job conflict releases a made claim', async () => {

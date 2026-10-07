@@ -31,6 +31,12 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 }
 
 describe('writeInitialManifest', () => {
+  it('persists the launch diagnosis policy and resolved model plan', () => {
+    const models = { heal: { model: 'fixture-heal', effort: null }, commit: { model: null, effort: null } }
+    const { ctx, sink } = ctxFor({ autoHeal: { agent: 'codex', diagnosisPolicy: 'parent-only' }, models })
+    writeInitialManifest(ctx, 'starting')
+    expect(sink.bootstrap).toHaveBeenCalledWith(expect.objectContaining({ diagnosisPolicy: 'parent-only', models }))
+  })
   it('retains the diagnosis policy through the owning state sink when resuming a run', () => {
     const { ctx, sink } = ctxFor({ autoHeal: { agent: 'codex', diagnosisPolicy: 'parent-only' } })
     writeInitialManifest(ctx, 'starting', { diagnosisPolicy: 'adaptive' } as RunManifest)

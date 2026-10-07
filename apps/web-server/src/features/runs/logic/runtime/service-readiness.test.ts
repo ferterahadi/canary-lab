@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
-import { waitForServiceReadiness, type ReadinessInterruption } from './service-readiness'
+import type { HealthProbe } from '../../../../../../../shared/launcher/types'
+import { readinessProbe, waitForServiceReadiness, type ReadinessInterruption } from './service-readiness'
 
 vi.mock('../../../../shared/launcher-startup', async (original) => ({
   ...await original<typeof import('../../../../shared/launcher-startup')>(),
@@ -18,6 +19,35 @@ function clock() {
 const http = { http: { url: 'http://example.test/health', timeoutMs: 25 } }
 
 describe('service readiness', () => {
+  it.each([undefined, 'api'])('rejects an unknown transport before polling (service: %s)', async (serviceName) => {
+    // Bypass the config validator to pin the runtime diagnostic for corrupted internal input.
+    const probe = { weird: true } as unknown as HealthProbe
+    const attempt = vi.fn(async () => true)
+    const delay = vi.fn(async () => {})
+    const interruption = vi.fn(() => null)
+    const message = serviceName === undefined ? 'Unknown probe shape' : 'Unknown probe shape for api'
+    expect(() => readinessProbe(probe, undefined, serviceName)).toThrow(message)
+    await expect(waitForServiceReadiness({ probe, serviceName, attempt, delay, interruption })).rejects.toThrow(message)
+    expect(isHealthy).not.toHaveBeenCalled()
+    expect(isTcpListening).not.toHaveBeenCalled()
+    expect(attempt).not.toHaveBeenCalled()
+    expect(delay).not.toHaveBeenCalled()
+    expect(interruption).not.toHaveBeenCalled()
+  })
+
+  it('preserves HTTP precedence when internal input contains both transports', async () => {
+    const probe = { ...http, tcp: { port: 3000 } }
+    await expect(waitForServiceReadiness({ probe, interruption: () => null })).resolves.toEqual({ status: 'ready' })
+    expect(isHealthy).toHaveBeenCalledWith(http.http.url, 25)
+    expect(isTcpListening).not.toHaveBeenCalled()
+  })
+
+  it('propagates the original health checker failure', async () => {
+    const failure = new Error('checker failed')
+    await expect(waitForServiceReadiness({ probe: http, serviceName: 'api',
+      healthCheck: async () => { throw failure }, interruption: () => null })).rejects.toBe(failure)
+  })
+
   it('dispatches HTTP and TCP probes with their configured targets and timeouts', async () => {
     await expect(waitForServiceReadiness({ probe: http, interruption: () => null })).resolves.toEqual({ status: 'ready' })
     expect(isHealthy).toHaveBeenCalledWith(http.http.url, 25)
