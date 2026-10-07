@@ -1,3 +1,4 @@
+import { requestCliJson } from './request-json'
 import { banner, section, ok, fail, info, dim, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { getProjectRoot } from '../../shared/runtime/project-root'
@@ -25,19 +26,12 @@ function usage(): void {
 }
 
 async function postJson(url: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-  let resp: Response
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    return await requestCliJson('POST', url, body)
   } catch {
     fail(`Could not reach the Canary Lab server at ${SERVER}. Start it with \`npx canary-lab ui\`, then retry.`)
     process.exit(1)
   }
-  const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>
-  return { status: resp.status, json }
 }
 
 async function boot(feature: string, env?: string): Promise<void> {

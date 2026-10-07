@@ -1,6 +1,6 @@
 import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useState } from 'react'
-import * as workspaceApi from '@/shared/api/workspace'
+import { useOpenAgentApp } from '@/shared/state/use-open-agent-app'
 import * as runsApi from '@/shared/api/runs'
 
 interface Props {
@@ -10,25 +10,12 @@ interface Props {
 
 export function ManualHealBanner({ runId, signalPaths }: Props) {
   const { copy, copiedKey: copied } = useClipboardCopy()
-  const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
+  const { opening, error: err, setError: setErr, open: onOpen } = useOpenAgentApp()
   const [cancelling, setCancelling] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
 
   const onCopy = async (which: 'rerun' | 'restart'): Promise<void> => {
     const value = which === 'rerun' ? signalPaths.rerun : signalPaths.restart
     if (!await copy(value, which)) setErr('Could not copy to clipboard')
-  }
-
-  const onOpen = async (agent: 'claude' | 'codex'): Promise<void> => {
-    setOpening(agent)
-    setErr(null)
-    try {
-      await workspaceApi.openAgentApp(agent)
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : `Could not open ${agent}`)
-    } finally {
-      setOpening(null)
-    }
   }
 
   const onCancel = async (): Promise<void> => {

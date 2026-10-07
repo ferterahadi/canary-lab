@@ -2,7 +2,7 @@ import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../../.
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { launchSystemTarget } from '../../../shared/system-launch'
 import { launchEditor, launchEditorDir } from '../../../shared/editor-launch'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import {
@@ -146,15 +146,8 @@ export async function projectConfigRoutes(
       reply.code(400)
       return { error: 'agent must be "claude" or "codex"' }
     }
-    const appName = agent === 'claude' ? 'Claude' : 'Codex'
     try {
-      if (process.platform === 'darwin') {
-        spawn('open', ['-a', appName], { stdio: 'ignore', detached: true }).unref()
-      } else if (process.platform === 'win32') {
-        spawn('cmd', ['/c', 'start', '', appName], { stdio: 'ignore', detached: true }).unref()
-      } else {
-        spawn(appName.toLowerCase(), [], { stdio: 'ignore', detached: true }).unref()
-      }
+      launchSystemTarget({ kind: 'application', agent })
       return { opened: true }
     } catch (err) {
       reply.code(500)

@@ -7,12 +7,10 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 // agent. Split out of index.ts, where it was a closure inside `register`; both
 // the runs route (agent-input → restartHeal) and the external-heal handoff call
 // it, so it always needed to be shared.
-import path from 'path'
 import type { ServerContext } from '../../server-context'
 import { findFeature } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
-import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
-import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
+import { createAutoHealConfig } from './logic/runtime/auto-heal-config'
 import { reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { RunnerLog } from './logic/runtime/runner-log'
@@ -87,19 +85,11 @@ export function makeRestartLocalHeal(
       }
       let autoHeal: AutoHealConfig
       try {
-        autoHeal = {
-          agent: agentChoice,
-          buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-            mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-            models: models.heal,
-          }),
-          buildCyclePrompt: buildOrchestratorHealPrompt({
-            agent: agentChoice,
-            projectRoot,
-            runDir,
-            personalWikiPath: projectConfig.personalWikiPath,
-          }),
-        }
+        autoHeal = createAutoHealConfig({
+          agent: agentChoice, projectRoot, runDir,
+          models: models.heal,
+          personalWikiPath: projectConfig.personalWikiPath,
+        })
       } catch (err) {
         // Local healing cannot launch without its prompt; retesting can still
         // proceed without auto-heal, so this policy stays with the caller.

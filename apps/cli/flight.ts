@@ -1,3 +1,4 @@
+import { requestCliJson } from './request-json'
 import fs from 'fs'
 import path from 'path'
 import readline from 'readline'
@@ -200,20 +201,12 @@ async function requestJson(
   url: string,
   body?: unknown,
 ): Promise<{ status: number; json: Record<string, unknown> }> {
-  let resp: Response
   try {
-    resp = await fetch(url, {
-      method,
-      ...(body !== undefined
-        ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
-        : {}),
-    })
+    return await requestCliJson(method, url, body)
   } catch {
     fail(`Lost the Canary Lab server mid-flight (${url}). Restart it with \`npx canary-lab ui\`, then \`flight\` again — the flight resumes where it stopped.`)
     process.exit(1)
   }
-  const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>
-  return { status: resp.status, json }
 }
 
 function latestForRepos(flights: FlightIndexEntry[], repoPaths: string[]): FlightIndexEntry | null {

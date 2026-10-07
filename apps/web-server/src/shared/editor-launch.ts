@@ -1,5 +1,6 @@
 import type { EditorChoice } from '../../../../shared/project-config'
-import { spawn, spawnSync } from 'child_process'
+import { spawnSync } from 'child_process'
+import { launchDetached, launchSystemTarget } from './system-launch'
 
 
 export type EditorTarget =
@@ -15,18 +16,12 @@ function launchCli(command: 'code' | 'cursor', target: EditorTarget): EditorChoi
   const args = target.kind === 'file'
     ? ['-g', `${target.path}:${target.line}:${target.column}`]
     : [target.path]
-  spawn(command, args, { stdio: 'ignore', detached: true }).unref()
+  launchDetached({ command, args })
   return command === 'code' ? 'vscode' : 'cursor'
 }
 
 function launchSystem(dir: string): 'system' {
-  if (process.platform === 'darwin') {
-    spawn('open', [dir], { stdio: 'ignore', detached: true }).unref()
-  } else if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '', dir], { stdio: 'ignore', detached: true }).unref()
-  } else {
-    spawn('xdg-open', [dir], { stdio: 'ignore', detached: true }).unref()
-  }
+  launchSystemTarget({ kind: 'path', path: dir })
   return 'system'
 }
 

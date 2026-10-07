@@ -26,8 +26,7 @@ import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-co
 import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
 import { addWorktree, hydrateWorkingTreeDiff, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
-import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
-import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
+import { createAutoHealConfig } from './logic/runtime/auto-heal-config'
 import { resolveAgentBinary } from '../agent-sessions/logic/agent-binary'
 import { resolveRunModelPlan, reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import type { RunModelPlan } from '../../../../../shared/run-manifest'
@@ -227,20 +226,12 @@ export function buildRunsRouteDeps(
         // a restricted PATH (e.g. a Desktop-launched UI server).
         const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
         try {
-          autoHeal = {
-            agent: agentChoice,
-            buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              binaryPath: agentBinary,
-              models: models.heal,
-            }),
-            buildCyclePrompt: buildOrchestratorHealPrompt({
-              agent: agentChoice,
-              projectRoot: projectRoot,
-              runDir,
-              personalWikiPath: projectConfig.personalWikiPath,
-            }),
-          }
+          autoHeal = createAutoHealConfig({
+            agent: agentChoice, projectRoot, runDir,
+            binaryPath: agentBinary,
+            models: models.heal,
+            personalWikiPath: projectConfig.personalWikiPath,
+          })
         } catch (err) {
           runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
         }
@@ -418,20 +409,12 @@ export function buildRunsRouteDeps(
           models = reuseRunModelPlan(agentChoice, manifest, projectConfig.agentModels)
           const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
           try {
-            autoHeal = {
-              agent: agentChoice,
-              buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-                mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-                binaryPath: agentBinary,
-                models: models.heal,
-              }),
-              buildCyclePrompt: buildOrchestratorHealPrompt({
-                agent: agentChoice,
-                projectRoot: projectRoot,
-                runDir,
-                personalWikiPath: projectConfig.personalWikiPath,
-              }),
-            }
+            autoHeal = createAutoHealConfig({
+              agent: agentChoice, projectRoot, runDir,
+              binaryPath: agentBinary,
+              models: models.heal,
+              personalWikiPath: projectConfig.personalWikiPath,
+            })
           } catch (err) {
             runnerLog.warn(`Auto-heal disabled for run restart: ${(err as Error).message}`)
           }

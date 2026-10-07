@@ -1,6 +1,6 @@
 import path from 'path'
 import type { FeatureConfig, PortSlot } from '../../../../../../../shared/launcher/types'
-import { enabledForEnv, normalizeStartCommand, resolveHealthProbe, resolvePath } from '../../../../shared/launcher-startup'
+import { enabledRepoCommands, resolveHealthProbe, resolvePath } from '../../../../shared/launcher-startup'
 import { buildRunPaths } from './run-paths'
 import type { ServiceManifestEntry } from '../../../../../../../shared/run-manifest'
 import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
@@ -26,12 +26,8 @@ export function resolvePortEnv(
  *  orchestrator (buildServiceSpecs runs synchronously in the constructor). */
 export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot[] {
   const slots = new Map<string, PortSlot>()
-  for (const repo of feature.repos ?? []) {
-    if (!enabledForEnv(repo.envs, env)) continue
-    const commands = repo.startCommands ?? []
-    for (let i = 0; i < commands.length; i++) {
-      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
-      if (!enabledForEnv(normalized.envs, env)) continue
+  for (const { commands } of enabledRepoCommands(feature, env)) {
+    for (const normalized of commands) {
       for (const slot of normalized.ports ?? []) {
         if (!slots.has(slot.name)) slots.set(slot.name, slot)
       }
@@ -43,9 +39,10 @@ export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot
 /** Whether any start command boots in `env` — the same filters buildServiceSpecs
  *  applies, without resolving tokens or paths. */
 export function bootsServicesForEnv(feature: FeatureConfig, env?: string): boolean {
-  return (feature.repos ?? []).some((repo) => enabledForEnv(repo.envs, env)
-    && (repo.startCommands ?? []).some((command, i) =>
-      enabledForEnv(normalizeStartCommand(command, `${repo.name}-cmd-${i + 1}`).envs, env)))
+  for (const { commands } of enabledRepoCommands(feature, env)) {
+    if (commands.length > 0) return true
+  }
+  return false
 }
 
 export function buildServiceSpecs(
@@ -66,19 +63,15 @@ export function buildServiceSpecs(
   }
   const tokenCache = makeTokenCache()
   const interp = <T,>(node: T): T => interpolateConfigTokens(node, tokenCtx, tokenCache)
-  for (const repo of feature.repos ?? []) {
-    if (!enabledForEnv(repo.envs, env)) continue
+  for (const { repo, commands } of enabledRepoCommands(feature, env)) {
     const dir = opts.repoPathOverrides?.[repo.name] ?? resolvePath(repo.localPath)
-    const commands = repo.startCommands ?? []
-    for (let i = 0; i < commands.length; i++) {
-      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
-      if (!enabledForEnv(normalized.envs, env)) continue
-      const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+    for (const normalized of commands) {
+      const safeName = normalized.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
       const probe = resolveHealthProbe(normalized.healthCheck, env)
       const { env: portEnv, allocatedPorts } = resolvePortEnv(normalized.ports, opts.portMap)
       out.push({
         repoName: repo.name,
-        name: normalized.name!,
+        name: normalized.name,
         safeName,
         command: interp(normalized.command),
         cwd: dir,
