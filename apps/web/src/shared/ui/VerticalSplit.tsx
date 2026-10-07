@@ -1,3 +1,4 @@
+import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface Props {
@@ -15,9 +16,7 @@ interface Props {
 export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBottomPx, top, bottom, collapsible = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [topHeight, setTopHeight] = useState<number | null>(null)
-  const [dragging, setDragging] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const dragStartRef = useRef<{ y: number; startTop: number } | null>(null)
   const resizedRef = useRef(false)
 
   // Initialize from localStorage or default percent of container height after mount
@@ -37,6 +36,19 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
     setTopHeight(initial)
   }, [storageKey, defaultTopPercent, minTopPx, minBottomPx])
 
+  const { origin: drag, start } = useMouseDrag<{ y: number; startTop: number }>((ctx, e) => {
+    const el = containerRef.current
+    if (!el) return
+    const totalH = el.clientHeight
+    const dy = e.clientY - ctx.y
+    let next = ctx.startTop + dy
+    if (next < minTopPx) next = minTopPx
+    if (next > totalH - minBottomPx) next = totalH - minBottomPx
+    resizedRef.current = true
+    setTopHeight(next)
+  })
+  const dragging = drag !== null
+
   // Storage writes block the drag path, so persist only after release.
   useEffect(() => {
     if (dragging || !resizedRef.current || topHeight == null) return
@@ -47,34 +59,8 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     if (topHeight == null) return
-    dragStartRef.current = { y: e.clientY, startTop: topHeight }
-    setDragging(true)
-  }, [topHeight])
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent): void => {
-      const ctx = dragStartRef.current
-      const el = containerRef.current
-      if (!ctx || !el) return
-      const totalH = el.clientHeight
-      const dy = e.clientY - ctx.y
-      let next = ctx.startTop + dy
-      if (next < minTopPx) next = minTopPx
-      if (next > totalH - minBottomPx) next = totalH - minBottomPx
-      resizedRef.current = true
-      setTopHeight(next)
-    }
-    const onMouseUp = (): void => {
-      dragStartRef.current = null
-      setDragging(false)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [minTopPx, minBottomPx])
+    start({ y: e.clientY, startTop: topHeight })
+  }, [topHeight, start])
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col">

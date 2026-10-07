@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { probeCliHealth } from './health-probe'
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
@@ -79,9 +80,9 @@ export async function checkHealth(
   fetchFn: typeof fetch,
 ): Promise<{ ok: true; projectRoot?: string } | { ok: false; error: string }> {
   try {
-    const health = await fetchFn(healthUrlFor(url))
+    const health = await probeCliHealth(healthUrlFor(url), { fetchImpl: fetchFn, decode: 'optional' })
     if (!health.ok) return { ok: false, error: `/mcp/health returned ${health.status}` }
-    const body = await health.json().catch(() => null) as { projectRoot?: unknown } | null
+    const body = health.body as { projectRoot?: unknown } | null
     return {
       ok: true,
       ...(typeof body?.projectRoot === 'string' ? { projectRoot: body.projectRoot } : {}),

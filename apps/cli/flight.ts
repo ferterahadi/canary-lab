@@ -1,3 +1,4 @@
+import { probeCliHealth } from './health-probe'
 import { requestCliJson } from './request-json'
 import fs from 'fs'
 import path from 'path'
@@ -177,7 +178,7 @@ function serverBase(workspaceRoot: string): string {
 
 async function serverIsUp(base: string): Promise<boolean> {
   try {
-    const resp = await fetch(`${base}/mcp/health`, { signal: AbortSignal.timeout(2000) })
+    const resp = await probeCliHealth(`${base}/mcp/health`, { decode: 'none', signal: AbortSignal.timeout(2000) })
     return resp.ok
   } catch {
     return false

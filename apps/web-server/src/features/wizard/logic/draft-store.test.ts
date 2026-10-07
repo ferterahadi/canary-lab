@@ -1,8 +1,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
+import type { DraftRecord } from '../../../../../../shared/draft-types'
 import {
+  type CreateDraftInput,
+  type TransitionPatch,
   canTransition,
   createDraft,
   deleteDraft,
@@ -243,4 +246,11 @@ describe('renameDraftFeature', () => {
     expect(renameDraftFeature(tmp, 'absent', 'new_name')).toBe(0)
     expect(readDraft(tmp, 'd1')?.featureName).toBe('kept')
   })
+})
+
+it('derives external metadata without widening transition authority', () => {
+  type MetadataKeys = 'producer' | 'externalStage' | 'externalClientKind' | 'externalSessionId' | 'externalConversationName' | 'externalSessionUrl'
+  expectTypeOf<Pick<CreateDraftInput, MetadataKeys>>().toEqualTypeOf<Pick<DraftRecord, MetadataKeys>>()
+  expectTypeOf<Pick<TransitionPatch, MetadataKeys>>().toEqualTypeOf<Pick<DraftRecord, MetadataKeys>>()
+  expectTypeOf<Extract<keyof TransitionPatch, 'draftId' | 'status' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<never>()
 })

@@ -1,3 +1,4 @@
+import { probeCliHealth } from './health-probe'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -104,9 +105,9 @@ export async function verifySavedMcpRegistration(
   try {
     const healthUrl = new URL(url)
     healthUrl.pathname = `${healthUrl.pathname.replace(/\/$/, '')}/health`
-    const response = await (opts.fetch ?? fetch)(healthUrl, { signal: AbortSignal.timeout(timeout) })
+    const response = await probeCliHealth(healthUrl, { fetchImpl: opts.fetch, decode: 'required', signal: AbortSignal.timeout(timeout) })
     if (!response.ok) throw new Error(`MCP health returned ${response.status}`)
-    const health = await response.json() as { projectRoot?: string }
+    const health = response.body as { projectRoot?: string }
     if (!health.projectRoot || realPath(health.projectRoot) !== realPath(opts.workspace)) {
       throw new Error(`MCP serves ${health.projectRoot ?? 'an unknown workspace'}, expected ${opts.workspace}`)
     }

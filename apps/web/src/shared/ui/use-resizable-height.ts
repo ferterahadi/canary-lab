@@ -1,3 +1,4 @@
+import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useState } from 'react'
 
 /** Drag-to-resize height for a panel that must NOT size to its content, where
@@ -22,9 +23,8 @@ import { useCallback, useEffect, useState } from 'react'
  *  the whole app, while "not on this screen" belongs to the screen. The height
  *  survives collapse, so reopening restores the size the reader had picked.
  *
- *  The drag mirrors `VerticalSplit`'s (same document-level listeners, same
- *  localStorage persistence) minus the split: this panel has one movable edge
- *  and a fixed ceiling, where the splitter has two panes negotiating one total.
+ *  The shared mouse-drag hook also serves the splitters. This panel has one
+ *  movable edge and a fixed ceiling; a splitter negotiates two panes' sizes.
  *
  *  `maxPx` is the ceiling in pixels. A panel whose real ceiling is the room its
  *  container has passes `ceilingPx` too: a drag or key step then stops at that
@@ -87,58 +87,29 @@ export function useResizableHeight({
     } catch { /* a blocked storage is not a reason to render nothing */ }
     return clamp(defaultPx)
   })
-  // The drag origin IS the dragging flag: the pointer's y and the height the
-  // edge started from, or null when no drag is in flight. One field rather than
-  // a boolean beside a ref, so "dragging with no origin" cannot be represented —
-  // the move handler then needs no null guard, and there is no unreachable arm
-  // to explain to the coverage gate. Deltas are measured from this origin rather
-  // than accumulated per move, so a fast drag that outruns a repaint still
-  // lands where the pointer is.
-  const [drag, setDrag] = useState<{ y: number; startHeight: number } | null>(null)
-
   useEffect(() => {
     try { localStorage.setItem(storageKey, String(height)) } catch { /* ignore */ }
   }, [storageKey, height])
 
-  useEffect(() => {
-    if (drag === null) return
-    // The handle is the panel's TOP edge, so dragging UP (a falling clientY)
-    // makes the panel taller — hence the subtraction.
-    const onMove = (e: MouseEvent): void => {
-      // No button held means the mouseup never reached us — it landed before
-      // this listener existed (a fast click releases inside the same frame React
-      // needs to commit `drag`), or outside the window. Without this the handle
-      // stays grabbed and the panel would follow a pointer that isn't dragging.
-      if (e.buttons === 0) { setDrag(null); return }
-      // Where the reader is asking the edge to be, BEFORE any clamp — the clamp
-      // would hide the overshoot that the fold reads.
-      const wanted = drag.startHeight - (e.clientY - drag.y)
-      if (collapsed) {
-        // Folded: nothing to resize until the pull clears the floor again. The
-        // origin was captured at `collapsePx`, so that is a `minPx - collapsePx`
-        // pull — the same distance the fold cost.
-        if (wanted >= minPx) { onCollapsedChange(false); setHeight(clamp(wanted)) }
-        return
-      }
-      if (wanted <= collapsePx) { onCollapsedChange(true); return }
-      setHeight(clamp(wanted))
+  const { origin: drag, start } = useMouseDrag<{ y: number; startHeight: number }>((origin, e) => {
+    // The handle is the TOP edge: moving up increases height. Read the raw
+    // overshoot before clamping so the fold/reopen hysteresis stays intact.
+    const wanted = origin.startHeight - (e.clientY - origin.y)
+    if (collapsed) {
+      if (wanted >= minPx) { onCollapsedChange(false); setHeight(clamp(wanted)) }
+      return
     }
-    const onUp = (): void => { setDrag(null) }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    return () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-  }, [drag, clamp, collapsed, collapsePx, minPx, onCollapsedChange])
+    if (wanted <= collapsePx) { onCollapsedChange(true); return }
+    setHeight(clamp(wanted))
+  })
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     // A folded panel has no height to start from, so the origin is the fold
     // point: the edge then behaves as if it were parked just under the floor,
     // and one short pull brings it back.
-    setDrag({ y: e.clientY, startHeight: collapsed ? collapsePx : clamp(height) })
-  }, [clamp, collapsed, collapsePx, height])
+    start({ y: e.clientY, startHeight: collapsed ? collapsePx : clamp(height) })
+  }, [clamp, collapsed, collapsePx, height, start])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     const step = e.shiftKey ? stepPx * 3 : stepPx

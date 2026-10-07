@@ -1,5 +1,5 @@
 import { unifiedDiffLines } from '../../../../shared/lib/unified-diff'
-import { compareActiveRuns } from '../features/runs/logic/active-run-order'
+import { selectRunForFeature } from '../features/runs/logic/active-run-selection'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -103,16 +103,11 @@ export function findContinuingRunForFeature(
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
-  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
-  for (const entry of deps.store.list({ feature })) {
-    if (!isActiveRunStatus(entry.status)) continue
-    const detail = deps.store.get(entry.runId)
-    if (!detail || detail.manifest.executionType === 'boot') continue
-    if (env && detail.manifest.env !== env) continue
-    candidates.push({ detail, startedAt: entry.startedAt })
-  }
-  candidates.sort(compareActiveRuns)
-  return candidates[0]?.detail ?? null
+  return selectRunForFeature(
+    deps.store, feature, env,
+    (entry) => isActiveRunStatus(entry.status),
+    (detail) => detail.manifest.executionType !== 'boot',
+  )
 }
 
 export type RunRefResolution =

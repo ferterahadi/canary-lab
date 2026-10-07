@@ -506,3 +506,14 @@ describe('ensureExternalClaimForMcpCall', () => {
     expect(broker.touch).not.toHaveBeenCalled()
   })
 })
+
+describe('continuation and restart eligibility', () => {
+  it('continues a running test run while excluding a healing boot session', () => {
+    const boot = runDetail({ runId: 'boot', executionType: 'boot' })
+    const running = runDetail({ runId: 'running', status: 'running' })
+    const deps = asDeps({ store: fakeStore([
+      indexRow({ runId: 'boot' }), indexRow({ runId: 'running', status: 'running' }),
+    ], [boot, running]) })
+    expect(findContinuingRunForFeature(deps, 'checkout', '')).toBe(running)
+  })
+})

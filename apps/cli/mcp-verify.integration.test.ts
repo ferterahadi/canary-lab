@@ -71,6 +71,19 @@ describe('saved MCP launch verification', () => {
     expect(result.message).toContain('expected')
   })
 
+  it.each([
+    ['{}', 200, 'an unknown workspace'],
+    ['invalid JSON', 200, 'JSON'],
+    ['unavailable', 503, 'MCP health returned 503'],
+  ] as const)('rejects invalid health %s before launching the bridge', async (body, status, message) => {
+    const opts = options()
+    opts.fetch.mockResolvedValue(new Response(body, { status }))
+    const result = await verifySavedMcpRegistration({ command: '/missing/command', args: [] }, opts)
+    expect(result.status).toBe('broken')
+    expect(result.message).toContain(message)
+    expect(opts.fetch).toHaveBeenCalledWith(new URL('http://127.0.0.1:12345/mcp/health'), { signal: expect.any(AbortSignal) })
+  })
+
   it('reports an offline UI without launching a bridge or fetching health', async () => {
     const opts = options()
     opts.run.mockReturnValue({ exitCode: 1, output: 'Canary Lab MCP is not reachable at http://127.0.0.1:12345/mcp' })
