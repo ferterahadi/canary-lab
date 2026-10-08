@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { useEscapeToClose, useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import { usePopoverDismiss } from '@/shared/ui/Overlays'
 
 /** One row of a model plan: which spawn, and the knobs it was pinned to. */
 export interface ModelPlanRow {
@@ -38,8 +38,7 @@ export function ModelPlanPopover({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
-  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
-  useEscapeToClose(() => setOpen(false), open)
+  usePopoverDismiss(() => setOpen(false), open, [ref])
 
   return (
     // A flex wrapper avoids the inline trigger's baseline/descender gap, which

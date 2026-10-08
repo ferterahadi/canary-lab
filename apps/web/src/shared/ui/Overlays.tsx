@@ -97,6 +97,17 @@ export function useDismissOnOutsideMousedown(
   }, [enabled, ...refs])
 }
 
+/** Menus share both dismissal paths so Escape stays within the innermost layer. */
+export function usePopoverDismiss(
+  onDismiss: () => void,
+  open: boolean,
+  refs: ReadonlyArray<RefObject<HTMLElement | null>>,
+  isInside?: (target: EventTarget | null) => boolean,
+): void {
+  useDismissOnOutsideMousedown(onDismiss, open, refs, isInside)
+  useEscapeToClose(onDismiss, open)
+}
+
 const focusLayers: HTMLElement[] = []
 let bodyOverflow = ''
 
@@ -165,6 +176,7 @@ export function Modal({
   footer,
   stableScrollGutter,
   portal = false,
+  position = 'fixed',
   bodyClassName,
   children,
 }: {
@@ -220,6 +232,8 @@ export function Modal({
   stableScrollGutter?: boolean
   /** Escape transformed/overflow-hidden status-bar ancestors. */
   portal?: boolean
+  /** Preserve a confirmation overlay anchored to its containing panel. */
+  position?: 'fixed' | 'absolute'
   /** Pane layouts own their scroll regions instead of the default body. */
   bodyClassName?: string
   children?: ReactNode
@@ -231,7 +245,7 @@ export function Modal({
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
   const node = (
     <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
+      className={`cl-modal-backdrop ${position === 'absolute' ? 'absolute' : 'fixed'} inset-0 z-50 flex items-center justify-center px-4`}
       style={{ paddingBlock: `${viewportInset}vh` }}
       onClick={onClose}
     >
@@ -329,26 +343,30 @@ export function ConfirmModal({
   busy = false,
   confirmDisabled = false,
   portal = false,
+  position,
 }: {
   open: boolean
   title: string
   message: ReactNode
   confirmLabel?: string
   cancelLabel?: string
-  variant?: 'default' | 'danger'
+  variant?: 'default' | 'danger' | 'warning'
   onConfirm: () => void
   onCancel: () => void
   busy?: boolean
   confirmDisabled?: boolean
   portal?: boolean
+  position?: 'fixed' | 'absolute'
 }) {
+  const accent = variant === 'default' ? undefined : `var(--${variant})`
   return (
     <Modal
       open={open}
       portal={portal}
+      position={position}
       onClose={onCancel}
       title={title}
-      status={variant === 'danger' ? 'failed' : undefined}
+      status={variant === 'danger' ? 'failed' : variant === 'warning' ? 'warning' : undefined}
       width={440}
     >
       <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-primary)' }}>
@@ -372,11 +390,9 @@ export function ConfirmModal({
           disabled={busy || confirmDisabled}
           className="rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors"
           style={{
-            color: variant === 'danger' ? 'var(--on-accent)' : 'var(--text-primary)',
-            background: variant === 'danger' ? 'var(--danger)' : 'transparent',
-            border: variant === 'danger'
-              ? '1px solid var(--danger)'
-              : '1px solid var(--border-default)',
+            color: accent ? 'var(--on-accent)' : 'var(--text-primary)',
+            background: accent ?? 'transparent',
+            border: `1px solid ${accent ?? 'var(--border-default)'}`,
             opacity: busy || confirmDisabled ? 0.45 : 1,
             cursor: busy || confirmDisabled ? 'not-allowed' : 'pointer',
           }}

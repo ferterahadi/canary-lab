@@ -1,3 +1,4 @@
+import { deriveRunCaptureState } from '../../../../../../shared/run-capture-state'
 import { isPathUnder } from '../../../shared/path-containment'
 import { resolveRunAgentSessionRef } from '../../agent-sessions/logic/run-agent-session-ref'
 import { proposalRecord } from '../logic/pr/proposal-record'
@@ -8,7 +9,6 @@ import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
 import { updateManifest } from '../logic/runtime/manifest'
-import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { applyFixCapture, buildApplyPreflight } from '../logic/apply-fixes'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -23,15 +23,11 @@ import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { readableTerminalLog } from '../logic/runtime/log-enrichment'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
-import { isTerminalRunStatus, type RunProposedPr } from '../../../../../../shared/run-state'
+import { type RunProposedPr } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 import { notFound } from '../../../shared/http-error'
 
 const READABLE_LOGS_DIR = 'readable-logs'
-
-function captureIsFinal(manifest: RunManifest): boolean {
-  return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
-}
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
@@ -65,7 +61,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes to apply' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before applying its changes' }
     }
@@ -93,7 +89,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before applying its changes' }
     }
@@ -204,7 +200,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before opening a pull request' }
     }
@@ -223,7 +219,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before opening a pull request' }
     }

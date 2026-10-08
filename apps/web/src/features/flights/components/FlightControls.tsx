@@ -3,7 +3,7 @@ import type { ProjectConfigResponse } from '@shared/project-config'
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import * as flightsApi from '@/shared/api/flights'
 import * as configApi from '@/shared/api/config'
-import { Modal, useEscapeToClose, useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import { Modal, usePopoverDismiss } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { DeleteSuiteConfirm } from '@/features/config/components/DeleteSuiteConfirm'
@@ -144,10 +144,7 @@ export function ContinueMenu({
       })
   }
 
-  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
-  // Escape closes the open dropdown first, above the flight page's own
-  // Escape-to-exit — one press dismisses the menu, not the whole page.
-  useEscapeToClose(() => setOpen(false), open)
+  usePopoverDismiss(() => setOpen(false), open, [ref])
 
   const resume = (): void => {
     setOpen(false)
@@ -520,10 +517,7 @@ export function FlightMenu({
   useEffect(() => {
     if (!open) setArmed(null)
   }, [open])
-  useDismissOnOutsideMousedown(() => setOpen(false), open, [ref])
-  // Escape closes the open ⋯ menu first, above the flight page's own
-  // Escape-to-exit — one press dismisses the menu, not the whole page.
-  useEscapeToClose(() => setOpen(false), open)
+  usePopoverDismiss(() => setOpen(false), open, [ref])
 
   const active = isActiveFlightStatus(flight.status)
 

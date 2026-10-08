@@ -3,7 +3,7 @@ import { act, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { Modal, useDismissOnOutsideMousedown } from './Overlays'
+import { ConfirmModal, Modal, usePopoverDismiss } from './Overlays'
 
 let container: HTMLDivElement
 let root: Root
@@ -70,7 +70,7 @@ it('ignores mousedown inside any owned element — trigger or portalled surface 
   function Dropdown({ open }: { open: boolean }) {
     const trigger = useRef<HTMLButtonElement>(null)
     const menu = useRef<HTMLDivElement>(null)
-    useDismissOnOutsideMousedown(dismiss, open, [trigger, menu])
+    usePopoverDismiss(dismiss, open, [trigger, menu])
     return <>
       <button id="trigger" ref={trigger}>Menu</button>
       {open && createPortal(<div id="menu" ref={menu}><button id="item">Item</button></div>, document.body)}
@@ -95,7 +95,7 @@ it('honors selector-owned portals and uses the latest inside predicate and dismi
   const first = vi.fn()
   const latest = vi.fn()
   function Dropdown({ dismiss, selector }: { dismiss: () => void; selector: string }) {
-    useDismissOnOutsideMousedown(dismiss, true, [], (target) =>
+    usePopoverDismiss(dismiss, true, [], (target) =>
       target instanceof Element && Boolean(target.closest(selector)))
     return <><div data-owned><button id="owned-item">Item</button></div><button id="outside">Outside</button></>
   }
@@ -114,4 +114,30 @@ it('honors selector-owned portals and uses the latest inside predicate and dismi
   act(() => root.render(null))
   document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   expect(latest).toHaveBeenCalledTimes(1)
+})
+
+
+it.each(['warning', 'danger'] as const)('keeps panel confirmation placement and shared focus, Escape, and actions (%s)', (variant) => {
+  const cancel = vi.fn()
+  const confirm = vi.fn()
+  const opener = document.createElement('button')
+  document.body.append(opener)
+  opener.focus()
+  act(() => root.render(<ConfirmModal open position="absolute" title="Confirm run action" message="Recorded results remain available."
+    variant={variant} confirmLabel="Continue" onCancel={cancel} onConfirm={confirm} />))
+  const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+  expect(dialog.getAttribute('aria-modal')).toBe('true')
+  expect(dialog.parentElement!.classList.contains('absolute')).toBe(true)
+  expect(dialog.parentElement!.classList.contains('fixed')).toBe(false)
+  expect(document.activeElement).toBe(dialog)
+  const buttons = [...dialog.querySelectorAll('button')]
+  const accept = buttons.find((button) => button.textContent === 'Continue')!
+  expect(accept.style.background).toBe(`var(--${variant})`)
+  act(() => accept.click())
+  expect(confirm).toHaveBeenCalledTimes(1)
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(cancel).toHaveBeenCalledTimes(1)
+  act(() => root.render(null))
+  expect(document.activeElement).toBe(opener)
+  opener.remove()
 })

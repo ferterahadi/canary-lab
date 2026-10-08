@@ -1,3 +1,4 @@
+import { deriveRunCaptureState, type RunCaptureInput } from '@shared/run-capture-state'
 import { useEffect, useState } from 'react'
 import type { RepoBranchSnapshot } from '@shared/run-manifest'
 import type { RunFixCapture, RunPrAttempt, RunProposedPr } from '@shared/run-state'
@@ -27,7 +28,7 @@ export function ChangesTab({
   repoBranches,
   worktrees,
   healCycles = 0,
-  runStopped = true,
+  run,
 }: {
   runId: string
   fixCapture?: RunFixCapture
@@ -45,13 +46,14 @@ export function ChangesTab({
    *  nothing needed repairing — a different fact from "the agent ran and
    *  changed nothing", and the empty state says which. */
   healCycles?: number
-  /** True after teardown has finalized the patch and ended the run. */
-  runStopped?: boolean
+  /** Authoritative lifecycle evidence used to gate final captured changes. */
+  run: Pick<RunCaptureInput, 'status' | 'endedAt'>
 }) {
+  const { runStopped, finalCapture } = deriveRunCaptureState({ ...run, fixCapture })
   const [prOpen, setPrOpen] = useState(false)
   useEffect(() => {
-    if (!runStopped) setPrOpen(false)
-  }, [runStopped])
+    if (!finalCapture) setPrOpen(false)
+  }, [finalCapture])
   const repos = fixCapture?.repos ?? []
   const changed = new Map(repos.map((r) => [r.repoName, r]))
   const prByRepo = new Map((proposedPrs ?? []).map((p) => [p.repoName, p]))
@@ -59,7 +61,7 @@ export function ChangesTab({
     (prAttempt?.results ?? []).filter((r) => !r.ok && r.reason).map((r) => [r.repoName, r.reason!]),
   )
   const provisional = fixCapture?.provisional === true
-  const opener = useRepoOpener(runId, repos.length > 0 && runStopped, provisional)
+  const opener = useRepoOpener(runId, repos.length > 0 && finalCapture, provisional)
 
   if (repos.length === 0) {
     return (
@@ -83,7 +85,7 @@ export function ChangesTab({
             auto={prAttempt?.auto === true}
             provisional={provisional}
             liveWorktreeRoot={worktrees?.[repoName]}
-            runStopped={runStopped}
+            canUseFinalCapture={finalCapture}
             onProposeClick={() => setPrOpen(true)}
           />
         ))}

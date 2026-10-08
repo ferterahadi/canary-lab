@@ -1,3 +1,4 @@
+import { runCaptureCases } from '../../../../../../shared/__fixtures__/run-capture-state'
 import { createRepositoryObserver } from '../../../shared/repository-observer'
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -567,4 +568,23 @@ it('reads apply-preflight through the workspace repository observer when provide
     observer.dispose()
     await app.close()
   }
+})
+
+
+it.each(runCaptureCases)('shares final-capture eligibility with browser controls: $name', async ({ run, finalCapture }) => {
+  writeManifestWithCapture('matrix', undefined, { status: run.status, endedAt: run.endedAt })
+  const file = path.join(runDirFor(logsDir, 'matrix'), 'manifest.json')
+  const manifest = readManifest(file)!
+  writeManifest(file, { ...manifest, fixCapture: { ...manifest.fixCapture!, ...run.fixCapture } })
+  prMocks.buildPrPreflight.mockResolvedValue(PREFLIGHT_PUSHABLE)
+  const { app } = await build()
+  try {
+    const response = await app.inject({ method: 'GET', url: '/api/runs/matrix/pr-preflight' })
+    expect(response.statusCode).toBe(finalCapture ? 200 : 409)
+    if (!finalCapture) {
+      for (const action of ['apply-fixes', 'propose-pr']) {
+        expect((await app.inject({ method: 'POST', url: `/api/runs/matrix/${action}` })).statusCode).toBe(409)
+      }
+    }
+  } finally { await app.close() }
 })

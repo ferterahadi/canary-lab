@@ -1,5 +1,5 @@
 import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
-import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import { usePopoverDismiss } from '@/shared/ui/Overlays'
 // RunsColumn's state: the four pending-confirmation slots, the menu/popover and
 // compact-layout observers, the restart tracker, and the confirm handlers.
 // Lifted out of the component verbatim so the column file is its markup; every
@@ -101,8 +101,8 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
     return () => obs.disconnect()
   }, [])
 
-  useDismissOnOutsideMousedown(() => setOpenMenuRunId(null), Boolean(openMenuRunId), [], (target) => isMenuTarget(target, '[data-run-menu]'))
-  useDismissOnOutsideMousedown(() => setRunPopoverOpen(false), runPopoverOpen, [], (target) => isMenuTarget(target, '[data-run-launch-menu]'))
+  usePopoverDismiss(() => setOpenMenuRunId(null), Boolean(openMenuRunId), [], (target) => isMenuTarget(target, '[data-run-menu]'))
+  usePopoverDismiss(() => setRunPopoverOpen(false), runPopoverOpen, [], (target) => isMenuTarget(target, '[data-run-launch-menu]'))
 
   // Close the popover automatically when leaving compact mode.
   useEffect(() => {

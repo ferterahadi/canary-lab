@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../../shared/lib/atomic-write'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -13,8 +14,7 @@ export function write(file: string, value: string): void {
   fs.writeFileSync(file, value)
 }
 export function json(file: string, value: unknown): void {
-  write(`${file}.tmp`, `${JSON.stringify(value, null, 2)}\n`)
-  fs.renameSync(`${file}.tmp`, file)
+  atomicWriteJson(file, value, undefined, { uniqueTemporary: true })
 }
 export function readJson<T>(file: string): T { return JSON.parse(fs.readFileSync(file, 'utf8')) as T }
 export function inside(parent: string, child: string): boolean {

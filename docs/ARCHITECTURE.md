@@ -1109,6 +1109,9 @@ overlay + envset + WIP hydration. A worktree watcher publishes provisional diffs
 a periodic scan recovers missed file events. `captureFixes` writes the final diff before the
 worktree goes away. Changes shows provisional files immediately, but applying them to the
 source checkout or opening a PR waits until the run has stopped and finalized its patch.
+`shared/run-capture-state.ts` derives that finality for both HTTP guards and browser
+controls: terminal status, a recorded end time, and a non-provisional capture.
+Provisional worktree opening remains a separate read path.
 On this path, the heal agent does not mutate the source checkout;
 its edits reach the user as a patch file and, on a green healed run, may become a draft
 pull request (see [End-of-run pull request](#end-of-run-pull-request)). Non-portified

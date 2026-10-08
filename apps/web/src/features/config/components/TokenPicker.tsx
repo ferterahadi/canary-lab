@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useDismissOnOutsideMousedown, useEscapeToClose } from '@/shared/ui/Overlays'
+import { usePopoverDismiss } from '@/shared/ui/Overlays'
 import { createPortal } from 'react-dom'
 import { useTokenPickerOptions } from './use-token-picker-options'
 import type { TokenNamespace } from './TemplatedInput'
@@ -44,8 +44,7 @@ export function TokenPicker({
     if (slot && options.slotRemoved) setSlot(null)
   }, [slot, options.slotRemoved])
 
-  useDismissOnOutsideMousedown(onClose, true, [popRef])
-  useEscapeToClose(onClose)
+  usePopoverDismiss(onClose, true, [popRef])
 
   return createPortal(
     <div

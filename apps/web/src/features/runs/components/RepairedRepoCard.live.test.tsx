@@ -1,3 +1,4 @@
+import { deriveRunCaptureState } from '@shared/run-capture-state'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -14,9 +15,10 @@ const reply = () => new Response(JSON.stringify({ targets: [{ repoName: 'app', r
 const fetcher = vi.fn<typeof fetch>()
 const repo = { repoName: 'app', repoRoot: '/repo', patchFile: 'app.patch', patchPath: '/patch', files: 1, fileNames: ['app.ts'], baseSha: 'base' }
 function Reader({ runId, enabled = true, provisional = false }: { runId: string; enabled?: boolean; provisional?: boolean }) {
-  reader = useRepoOpener(runId, enabled, provisional)
+  const { finalCapture } = deriveRunCaptureState({ status: 'failed', endedAt: enabled ? 'recorded' : undefined, fixCapture: { provisional } })
+  reader = useRepoOpener(runId, finalCapture, provisional)
   invalidate = useInvalidation().invalidate
-  return <>{reader.confirm}<RepairedRepoCard {...reader.cardProps('app')} repoName="app" repo={repo} auto={false} provisional={provisional} onProposeClick={() => {}} /></>
+  return <>{reader.confirm}<RepairedRepoCard {...reader.cardProps('app')} repoName="app" repo={repo} auto={false} provisional={provisional} canUseFinalCapture={finalCapture} onProposeClick={() => {}} /></>
 }
 const render = (runId = 'one', enabled = true, provisional = false) => act(async () => { root.render(<InvalidationProvider><Reader runId={runId} enabled={enabled} provisional={provisional} /></InvalidationProvider>) })
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
