@@ -537,6 +537,30 @@ describe('start_run: starting fresh', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('sends the caller back to get_flight when the owning Flight could not be verified', async () => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    const flightAttention = { state: 'unavailable', stage: 'specs-coverage', title: 'Flight paused: Coverage failed',
+      reason: 'Could not verify current state: disk unavailable', checkedAt: '2026-01-01T00:00:00Z', revision: 'a' }
+    const { raw } = harness({
+      startRun,
+      coverageRequest: coverageRequest(coverageChange('stale', 'coverage-flight-unverified', { flightId: 'flight-1', flightStatus: 'paused', flightAttention })),
+    }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Update coverage first' },
+    }))
+
+    const result = JSON.parse(toolResultText(answered))
+    expect(result).toMatchObject({
+      type: 'coverage_update_required', runStarted: false, flightId: 'flight-1', flightStatus: 'paused',
+      message: 'Run not started. Could not verify current Flight state. Read get_flight again before choosing a recovery action.',
+      nextSteps: ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'],
+    })
+    // The coverage reply carries only the attention facts an agent acts on.
+    expect(result.flightAttention).toEqual({ state: 'unavailable', reason: flightAttention.reason })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it.each(['decline', 'cancel'])('starts nothing when the client answers %s on the stale-coverage question', async (action) => {
     const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)

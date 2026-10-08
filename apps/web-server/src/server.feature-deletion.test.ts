@@ -27,6 +27,16 @@ async function connect() {
   await connected.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=full', address)))
   return connected
 }
+type AgentFlight = { attention: { checkedAt: string } } & Record<string, unknown>
+/** Attention is assessed at read time: `revision` identifies the assessment and
+ * `checkedAt` records when this read made it, as coverage freshness does. Two
+ * reads of unchanged state must agree on everything else and never go back in time. */
+function expectSameAgentFlights(after: AgentFlight[], before: AgentFlight[]) {
+  const split = (flights: AgentFlight[]) => flights.map(({ attention: { checkedAt, ...attention }, ...flight }) => ({ checkedAt, flight: { ...flight, attention } }))
+  const [was, now] = [split(before), split(after)]
+  expect(now.map((entry) => entry.flight)).toEqual(was.map((entry) => entry.flight))
+  now.forEach(({ checkedAt }, i) => expect(Date.parse(checkedAt)).toBeGreaterThanOrEqual(Date.parse(was[i]!.checkedAt)))
+}
 async function remove(transport: 'REST' | 'MCP', feature: string, confirmName = feature) {
   if (transport === 'MCP') {
     const result = await client.callTool({ name: 'delete_feature', arguments: { feature, confirmName } })
@@ -93,7 +103,7 @@ it.each(['REST', 'MCP'] as const)('%s refuses invalid targets and active Flights
     expect(fs.existsSync(outside)).toBe(true)
     expect(events.filter((event) => ['feature-deleted', 'flights-changed'].includes(event.type))).toEqual([])
     const agentFlights = JSON.parse(text(await client.callTool({ name: 'get_flight', arguments: {} }))).flights
-    expect(agentFlights).toEqual(agentBefore)
+    expectSameAgentFlights(agentFlights, agentBefore)
   } finally { socket.close() }
 })
 
@@ -124,7 +134,7 @@ it.each(['REST', 'MCP'] as const)('%s deletes through production stores and upda
     expect(agentFlights.map((entry: { feature: string }) => entry.feature).sort()).toEqual(['busy', 'linked'])
     await client.close()
     client = await connect()
-    expect(JSON.parse(text(await client.callTool({ name: 'get_flight', arguments: {} }))).flights).toEqual(agentFlights)
+    expectSameAgentFlights(JSON.parse(text(await client.callTool({ name: 'get_flight', arguments: {} }))).flights, agentFlights)
     expect(ptyFactory).not.toHaveBeenCalled()
   } finally { workspace.close(); flights.close() }
 })

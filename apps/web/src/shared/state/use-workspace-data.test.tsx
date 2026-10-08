@@ -560,6 +560,9 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'notifications-changed' })
     expect(harness.invalidated).toContainEqual(['notifications', undefined])
     harness.invalidated = []
+    await fire({ type: 'approvals-changed' })
+    expect(harness.invalidated).toEqual([['approvals', undefined]])
+    harness.invalidated = []
     await fire({ type: 'flights-changed' })
 
     expect(harness.invalidated).toEqual([['flights', undefined]])

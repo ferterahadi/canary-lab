@@ -10,6 +10,8 @@ import { registerApprovalRoutes } from './approval-routes'
 import { requestUserInput } from './elicitation'
 import { asJsonResult, errorResult } from './tool-support'
 import type { CanaryLabMcpDeps } from './tool-schemas'
+import { registerApprovalTools } from './tool-groups/approvals'
+import { captureTools } from './tool-groups/__fixtures__/tool-group-harness'
 
 const temp = trackTempDirs('approvals-')
 const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'client-1', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
@@ -181,6 +183,42 @@ describe('shared browser and MCP approvals', () => {
     await expect(h.store.answer('unknown', {})).rejects.toThrow('not found')
     h.store.update('unknown', { status: 'expired' })
     expect(h.store.list()).toHaveLength(1)
+  })
+
+  it('expires an unanswered approval on its own clock and tells open views', async () => {
+    vi.useFakeTimers()
+    const h = setup(); await h.invoke({}, context()); const [{ id }] = h.store.list()
+    h.events.publish.mockClear()
+    const stop = h.store.startExpiry()
+    // The last tick before the 30-minute deadline leaves it pending; the next one expires it.
+    await vi.advanceTimersByTimeAsync(30 * 60_000 - 1)
+    expect(h.store.get(id)?.status).toBe('pending')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.store.get(id)).toMatchObject({ status: 'expired', error: expect.stringContaining('expired') })
+    expect(h.events.publish).toHaveBeenCalledWith({ type: 'approvals-changed' })
+    stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps a wait open through another approval\'s change and settles on its own answer', async () => {
+    const h = setup(); await h.invoke({}, context()); const [own] = h.store.list()
+    let settled = false
+    const wait = h.store.wait(own.id, 30_000).then((result) => { settled = true; return result })
+    h.store.open({ ...own, id: '00000000-0000-4000-8000-000000000000' }, async () => asJsonResult({}))
+    await vi.waitFor(() => expect(h.store.list()).toHaveLength(2))
+    expect(settled).toBe(false)
+    await h.store.answer(own.id, { choice: 'Update coverage first' })
+    expect(await wait).toEqual(asJsonResult({ chosen: 'Update coverage first' }))
+  })
+
+  it('serves wait_for_approval from the shared store and refuses it on a server without one', async () => {
+    const h = setup(); await h.invoke({}, context()); const [{ id }] = h.store.list()
+    await h.store.answer(id, { choice: 'Run now with stale coverage' })
+    const args = { approvalId: id, timeout_ms: 0 }
+    expect(await captureTools(registerApprovalTools, { approvals: h.store }).raw('wait_for_approval', args))
+      .toEqual(asJsonResult({ chosen: 'Run now with stale coverage' }))
+    expect(await captureTools(registerApprovalTools, {}).raw('wait_for_approval', args))
+      .toEqual(errorResult('Browser approvals are unavailable on this server.'))
   })
 
   it.each(['url-state', undefined])('hands later domain-owned browser checkpoints back to the original command (%j)', async (requestState) => {

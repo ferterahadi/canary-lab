@@ -73,9 +73,8 @@ export async function registerMcpRoutes(
   // Fastify boot. Keyed by the session id the transport mints on init.
   const approvals = new ApprovalStore(deps.store.logsDir, deps.workspaceEvents)
   registerApprovalRoutes(app, approvals)
-  const expiry = setInterval(() => approvals.expire(), 10_000)
-  expiry.unref()
-  app.addHook('onClose', async () => clearInterval(expiry))
+  const stopExpiry = approvals.startExpiry()
+  app.addHook('onClose', async () => stopExpiry())
   const transports = new Map<string, NodeStreamableHTTPServerTransport>()
 
   // The session's McpServer, kept alongside its transport. Previously it was

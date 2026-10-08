@@ -61,6 +61,17 @@ it('starts reconciliation explicitly and settles the inbox from a Flight store e
   expect(publish).toHaveBeenCalledWith({ type: 'notifications-changed' })
 })
 
+it('re-reads Flights when a Flight notice is refreshed after its store event was missed', async () => {
+  runtime.start()
+  const [active] = runtime.store.list()
+  await flush()
+  const settled = flights.list().map((entry) => ({ ...entry, status: 'done' as const, pauseReason: undefined }))
+  vi.spyOn(flights, 'list').mockReturnValue(settled)
+  expect(runtime.store.list()[0].resolvedAt).toBeUndefined()
+  await runtime.refreshAction(active.id)
+  expect(runtime.store.list()).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
+})
+
 it('reconciles run and dirty-store events but ignores its own workspace events', async () => {
   runtime.start()
   await flush()

@@ -3,6 +3,7 @@ import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
 import { flightNeedsAttention } from '../../../../../../shared/flights/attention'
+import { flightCheckpointTitle } from '../../../../../../shared/flights/checkpoint-labels'
 import type { FlightWorkspaceEvidence } from '../../../../../../shared/flights/continuation'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
@@ -57,6 +58,24 @@ describe('one attention assessment', () => {
     current['specs-coverage']!.freshnessState = 'unavailable'
     expect(assessFlightAttention(flight(), () => current).state).toBe('unavailable')
   })
+  it('titles an open checkpoint by its kind and a waiting flight without one by its stage', () => {
+    const waiting = (checkpoint?: FlightManifest['stages'][number]['checkpoint']) => flight({
+      status: 'waiting-for-approval', pauseReason: undefined, currentStage: 'docs',
+      stages: flight().stages.map((s) => s.key === 'docs' ? { key: 'docs', status: 'waiting-for-approval', checkpoint } : s),
+    })
+    expect(assessFlightAttention(waiting({ kind: 'prd-source', message: 'Add requirements' }), evidence)).toMatchObject({
+      state: 'actionable', stage: 'docs', title: flightCheckpointTitle('prd-source'), reason: 'Answer the open checkpoint to continue.',
+    })
+    expect(assessFlightAttention(waiting(), evidence).title).toBe('Doc collection needs your input')
+  })
+  it('keeps a plain stage failure title and reports when nothing remains after it', () => {
+    const plain = flight({ stages: flight().stages.map((s) => s.key === 'specs-coverage' ? { ...s, error: 'mapping timed out' } : s) })
+    expect(assessFlightAttention(plain, () => evidence(45)).title).toBe('Flight paused: Tests & coverage failed')
+    const complete = { ...evidence(), 'evaluation-export': { reports: 1 }, portify: { saved: true } }
+    const attention = assessFlightAttention(plain, () => complete)
+    expect(attention).toMatchObject({ state: 'resolved', reason: 'Current workspace evidence satisfies Tests & coverage. No remaining steps were found. Nothing has been started.' })
+    expect(attention).not.toHaveProperty('remainingStage')
+  })
   it('preserves ownership, deliberate pauses, and failures without completion proof', () => {
     const read = vi.fn(evidence)
     for (const record of [flight({ pauseReason: 'user' }), flight({ pauseReason: 'queued' }), flight({ opts: { ...flight().opts, stageProducer: 'external' } })]) {
@@ -97,6 +116,21 @@ it('publishes resolution, missed-event recovery and new failures without modifyi
     expect(reader.get('fl_shop')).toBeNull()
     expect(onEvent).not.toHaveBeenCalled()
   } finally { reader.close() }
+})
+
+it('keeps listing a flight whose record cannot be read, without inventing attention for it', () => {
+  const root = tempDir()
+  const store = new FlightRunStore(root)
+  store.save(flight())
+  fs.rmSync(path.join(store.flightDir('fl_shop'), 'flight.json'))
+  const reader = new FlightAttentionReader(store, { featuresDir: root, logsDir: root }, new WorkspaceEventBus(), () => evidence())
+  const changed = vi.fn()
+  reader.onEvent(changed)
+  expect(reader.list()).toEqual(store.list())
+  expect(reader.list()[0]).toMatchObject({ flightId: 'fl_shop' })
+  expect(reader.list()[0]).not.toHaveProperty('attention')
+  reader.reconcile(); reader.reconcile()
+  expect(changed.mock.calls).toEqual([[{ kind: 'changed', flightId: 'fl_shop' }]])
 })
 
 it('checks real workspace files and invalidates a resolution after a linked document edit', async () => {

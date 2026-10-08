@@ -332,6 +332,14 @@ describe('docs stage', () => {
     expect((parked.checkpoint.data as { lastAttempt?: unknown }).lastAttempt).toBeUndefined()
   })
 
+  it('counts every ready requirement document in the checkpoint', async () => {
+    for (const name of ['checkout.md', 'refunds.md']) fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', name), '# Requirement\n')
+    const { ctx } = ctxFor(manifest())
+    const parked = await docsStage(deps()).run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect(parked.checkpoint.message).toContain('2 requirement documents ready for "checkout".')
+  })
+
   it('checkpoint response: description-only settles immediately', async () => {
     const adapter = docsStage(deps())
     const { ctx, setStage } = ctxFor(manifest())

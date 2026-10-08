@@ -38,6 +38,13 @@ export class ApprovalStore {
       this.continuations.delete(row.id)
     }
   }
+  /** Expire unanswered approvals on the server's clock, so open views see the
+   * change without anyone reading the list. Returns the stop function. */
+  startExpiry(intervalMs = 10_000): () => void {
+    const timer = setInterval(() => this.expire(), intervalMs)
+    timer.unref()
+    return () => clearInterval(timer)
+  }
   async answer(id: string, answer: Record<string, unknown>): Promise<Approval> {
     this.expire()
     const record = this.get(id)

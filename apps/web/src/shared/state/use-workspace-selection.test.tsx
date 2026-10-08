@@ -243,12 +243,15 @@ describe('workspace selection through navigation, data, and run streams', () => 
     const callbacks = [selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]
     const entry = run('first')
     await index([entry], { first: detail(entry) })
+    // Opening a run takes the observer's one recovery read; the pushed update
+    // and the following five seconds must add none.
+    expect(api.getRunDetail.mock.calls).toEqual([['first']])
     await frame({ type: 'update', runId: entry.runId, detail: detail({ ...entry, status: 'failed' }) })
     await act(async () => vi.advanceTimersByTimeAsync(5000))
     expect([selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]).toEqual(callbacks)
     expect(workspace.connect).toHaveBeenCalledTimes(1)
     expect(workspace.close).not.toHaveBeenCalled()
-    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(api.getRunDetail.mock.calls).toEqual([['first']])
     expect(api.listFeatures).toHaveBeenCalledTimes(1)
     expect(selection.selectedRunEvidence.status).toBe('failed')
     expect(JSON.parse(container.textContent!)).toMatchObject({ run: 'first', evidence: 'first', status: 'failed' })

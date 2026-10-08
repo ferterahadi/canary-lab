@@ -80,6 +80,14 @@ describe('validateGeneratedFeatureFiles', () => {
     if (!r.ok) expect(r.error).toContain('stale envsets shape')
   })
 
+  it('rejects a spec outside e2e/ even when the scaffold has one in place', () => {
+    const files = buildFeatureScaffold({ featureName: 'demo_login' })
+    const spec = files.find((file) => file.path.startsWith('e2e/') && file.path.endsWith('.spec.ts'))!
+    files.push({ path: 'tests/stray.spec.ts', content: spec.content })
+    expect(validateGeneratedFeatureFiles('demo_login', files))
+      .toEqual({ ok: false, error: 'spec file "tests/stray.spec.ts" must live under e2e/' })
+  })
+
   it('rejects specs that do not use the log marker fixture', () => {
     const files = buildFeatureScaffold({ featureName: 'demo_login' }).map((file) => (
       file.path.endsWith('.spec.ts')
