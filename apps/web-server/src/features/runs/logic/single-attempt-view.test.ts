@@ -1,15 +1,16 @@
 import { runManifest } from './__fixtures__/run-manifest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
 import type { RunDetail } from '../../../../../../shared/run-detail'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from './single-attempt-view'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-single-attempt-view-')
 
 let root: string
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-single-attempt-view-')) })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+beforeEach(() => { root = tempDir() })
 
 it('keeps the list and detail in sync when an older run claims its receipt', () => {
   const featuresDir = path.join(root, 'features')

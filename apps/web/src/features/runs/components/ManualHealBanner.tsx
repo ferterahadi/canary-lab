@@ -1,7 +1,8 @@
-import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useState } from 'react'
 import { useOpenAgentApp } from '@/shared/state/use-open-agent-app'
 import * as runsApi from '@/shared/api/runs'
+import { displayError } from '@/shared/api/error-message'
+import { CopyField } from '@/shared/ui/CopyField'
 
 interface Props {
   runId: string
@@ -9,14 +10,10 @@ interface Props {
 }
 
 export function ManualHealBanner({ runId, signalPaths }: Props) {
-  const { copy, copiedKey: copied } = useClipboardCopy()
   const { opening, error: err, setError: setErr, open: onOpen } = useOpenAgentApp()
   const [cancelling, setCancelling] = useState(false)
 
-  const onCopy = async (which: 'rerun' | 'restart'): Promise<void> => {
-    const value = which === 'rerun' ? signalPaths.rerun : signalPaths.restart
-    if (!await copy(value, which)) setErr('Could not copy to clipboard')
-  }
+  const onCopyFailed = (): void => setErr('Could not copy to clipboard')
 
   const onCancel = async (): Promise<void> => {
     setCancelling(true)
@@ -24,7 +21,7 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
     try {
       await runsApi.cancelHealRun(runId)
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Cancel failed')
+      setErr(displayError(e, 'Cancel failed'))
     } finally {
       setCancelling(false)
     }
@@ -84,53 +81,20 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
         </button>
       </div>
       <div className="mt-2.5 flex flex-col gap-1">
-        <SignalRow
+        <CopyField
           label="Rerun (test/config-only fix)"
+          labelPlacement="inline"
           value={signalPaths.rerun}
-          copied={copied === 'rerun'}
-          onCopy={() => onCopy('rerun')}
+          onCopyFailed={onCopyFailed}
         />
-        <SignalRow
+        <CopyField
           label="Restart (service/app fix)"
+          labelPlacement="inline"
           value={signalPaths.restart}
-          copied={copied === 'restart'}
-          onCopy={() => onCopy('restart')}
+          onCopyFailed={onCopyFailed}
         />
       </div>
       {err && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{err}</div>}
-    </div>
-  )
-}
-
-function SignalRow({
-  label,
-  value,
-  copied,
-  onCopy,
-}: {
-  label: string
-  value: string
-  copied: boolean
-  onCopy: () => void
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{label}:</span>
-      <code
-        className="flex-1 truncate text-[11px]"
-        style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-        title={value}
-      >
-        {value}
-      </code>
-      <button
-        type="button"
-        onClick={onCopy}
-        className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
-        style={{ color: copied ? 'var(--success)' : 'var(--text-muted)', border: '1px solid var(--border-default)' }}
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
     </div>
   )
 }

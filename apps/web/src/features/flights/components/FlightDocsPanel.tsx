@@ -12,6 +12,7 @@ import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { displayError } from '@/shared/api/error-message'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
 // While the flight is parked on the prd-source checkpoint the FORK owns the
@@ -43,7 +44,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
     if (!owned) return
     coverageApi.listFeatureDocs(feature)
       .then((data) => { setFetched(data); if (!keepError) setError(null) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
   }, [feature, owned])
   useEffect(() => { load() }, [load, refreshKey])
   const relinkDoc = useDocRelink(feature, () => { load(); onChanged?.() })
@@ -57,7 +58,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
         const base64 = await readAsBase64(file)
         await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
       } catch (e: unknown) {
-        failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+        failures.push(`${file.name} (${displayError(e)})`)
       }
     }
     if (failures.length > 0) setError(`import failed: ${failures.join(', ')}`)
@@ -70,7 +71,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
     setBusy(true)
     coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onChanged?.() })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
       .finally(() => setBusy(false))
   }, [feature, load, onChanged])
 

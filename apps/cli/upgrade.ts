@@ -15,6 +15,7 @@ import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 import { refreshCanaryLabMcp, findStaleCanaryLabMcp } from './mcp-refresh'
 import { main as installPlaywrightBrowsers } from './install-browsers'
 import { SCAFFOLD_POSTINSTALL } from './scaffold-scripts'
+import { errorMessage } from '../../shared/lib/error-message'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -348,7 +349,7 @@ export async function main(
   } catch (err) {
     // Best-effort, but never silent: this runs as the workspace postinstall, so
     // swallowing the reason leaves a broken MCP entry and no way to find out.
-    console.warn(`  Canary Lab: MCP client refresh failed — ${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`  Canary Lab: MCP client refresh failed — ${errorMessage(err)}`)
   }
 
   // Deliberately console.warn, not log(): `--silent` is the postinstall's normal

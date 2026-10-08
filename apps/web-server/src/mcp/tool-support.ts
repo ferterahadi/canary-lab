@@ -18,6 +18,7 @@ import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive, McpStartRunOutcome } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 /** The feature-authoring context an MCP tool passes to a shared writer. Built
  *  in one place because it carries `workspaceEvents` — the writers announce
@@ -310,7 +311,7 @@ export function repoCollisionResult(outcome: Extract<McpStartRunOutcome, { kind:
  * covered once instead of nowhere.
  */
 export function failureResult(err: unknown): CallToolResult {
-  return errorResult(err instanceof Error ? err.message : String(err))
+  return errorResult(errorMessage(err))
 }
 
 export function hasText(value: unknown): value is string {

@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
@@ -10,6 +9,9 @@ import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
 import type { PortifyManifest } from './types'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-it-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -59,13 +61,6 @@ const fakePtyFactory: PtyFactory = (): PtyHandle => ({
   write: () => {},
   resize: () => {},
   kill: () => {},
-})
-
-const roots: string[] = []
-
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
 })
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
@@ -144,8 +139,7 @@ const TERMINAL = ['ready-to-save', 'failed', 'aborted']
 
 // Single-repo fixture (the common case).
 async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; appRepo: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-it-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'myfeat')
   const appRepo = path.join(root, 'app')
@@ -169,8 +163,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   it('retries with resume after a failed verify, then succeeds (and diffs the config)', async () => {
     // Config starts WITHOUT port slots → attempt 1 verify fails ("no slots").
     // The agent adds the slot to the (git-tracked) config on attempt 2 → passes.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-retry-'))
-    roots.push(root)
+    const root = tempDir('portify-retry-')
     const featuresDir = path.join(root, 'features')
     const featureDir = path.join(featuresDir, 'myfeat')
     const appRepo = path.join(root, 'app')
@@ -212,8 +205,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   })
 
   it('skips the config snapshot/restore when there is no .cjs config (feature.config.js)', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-js-'))
-    roots.push(root)
+    const root = tempDir('portify-js-')
     const featuresDir = path.join(root, 'features')
     const featureDir = path.join(featuresDir, 'myfeat')
     const appRepo = path.join(root, 'app')
@@ -230,8 +222,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   })
 
   it('save 409s when the manifest is ready but the active state is gone', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nostate-'))
-    roots.push(logsDir)
+    const logsDir = tempDir('portify-nostate-')
     const { store, runner } = makeRunner('x', logsDir)
     store.save(readyManifest({ workflowId: 'w' }))
     await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
@@ -240,8 +231,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   it('save returns idempotently when the workflow is already saved (line 341 TRUE branch)', async () => {
     // Line 341: `if (m.status === 'saved') return m` — double-save guard.
     // If the workflow was already saved (e.g. a race) it is returned unchanged.
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-saved2-'))
-    roots.push(logsDir)
+    const logsDir = tempDir('portify-saved2-')
     const { store, runner } = makeRunner('x', logsDir)
     const saved = readyManifest({ workflowId: 'w', status: 'saved', endedAt: 'now' })
     store.save(saved)
@@ -251,8 +241,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   })
 
   it('cancel marks a stateless workflow aborted, and returns a saved one untouched', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cancel2-'))
-    roots.push(logsDir)
+    const logsDir = tempDir('portify-cancel2-')
     const { store, runner } = makeRunner('x', logsDir)
     // No active state, no endedAt → aborted with now().
     store.save(readyManifest({ workflowId: 'a', status: 'editing' }))
@@ -263,8 +252,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   })
 
   it('handles a repo whose localPath IS its git root (empty edit subpath)', async () => {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'portify-root-')))
-    roots.push(root)
+    const root = tempDir('portify-root-')
     const featuresDir = path.join(root, 'features')
     const featureDir = path.join(featuresDir, 'myfeat')
     const appRepo = path.join(root, 'app')
@@ -283,8 +271,7 @@ describe('createPortifyRunner (branch coverage)', () => {
   })
 
   it('flags a modified test file (checkTestsUntouched) and fails', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-testedit-'))
-    roots.push(root)
+    const root = tempDir('portify-testedit-')
     const featuresDir = path.join(root, 'features')
     const featureDir = path.join(featuresDir, 'myfeat')
     const appRepo = path.join(root, 'app')

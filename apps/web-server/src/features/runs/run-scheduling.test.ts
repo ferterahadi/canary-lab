@@ -1,7 +1,6 @@
 import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { buildRunScheduling } from './run-scheduling'
 import { RunStore } from './logic/run-store'
@@ -15,6 +14,9 @@ import type { PtyFactory } from './logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
 
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-runsched-')
 
 let tmpDir: string
 let logsDir: string
@@ -32,7 +34,7 @@ const inertPtyFactory: PtyFactory = () => ({
 })
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-runsched-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

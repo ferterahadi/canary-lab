@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
-
-import os from 'os'
 
 import path from 'path'
 
@@ -33,17 +31,16 @@ import { envCaptureStage } from './env-capture'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -54,7 +51,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -63,26 +60,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -103,34 +86,13 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('env-capture stage', () => {
-  const bootInject = (calls: InjectCall[] = []): FlightInject =>
-    makeInject((call) => {
+  const bootInject = (calls: FlightInjectCall[] = []): FlightInject =>
+    fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/runs/boot-1')) {
         return { statusCode: 200, body: { manifest: { status: 'running', services: [{ name: 'app', status: 'ready' }] } } }
@@ -150,7 +112,7 @@ describe('env-capture stage', () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const envFile = path.join(repoDir, '.env')
     fs.writeFileSync(envFile, 'API_KEY=secret\n')
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const publish = vi.fn()
     const outcome = await envCaptureStage(deps({ inject: bootInject(calls), workspaceEvents: { publish } })).run(ctxFor(withScout(manifest(), [envFile])).ctx)
     expect(publish.mock.calls).toEqual([[{ type: 'envsets-changed', feature: 'checkout' }], [{ type: 'features-changed' }]])
@@ -164,7 +126,7 @@ describe('env-capture stage', () => {
     fs.writeFileSync(source, 'TOKEN=synthetic\n')
     const publish = vi.fn()
     const outcome = await envCaptureStage(deps({ workspaceEvents: { publish },
-      inject: makeInject(() => ({ statusCode: 400, body: { error: 'boot refused' } })),
+      inject: fakeFlightInject(() => ({ statusCode: 400, body: { error: 'boot refused' } })),
     })).run(ctxFor(withScout(manifest(), [source])).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: 'boot request rejected (400): boot refused' })
     expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'envsets', 'local', 'app.env'), 'utf8')).toBe('TOKEN=synthetic\n')
@@ -175,7 +137,7 @@ describe('env-capture stage', () => {
     const source = path.join(repoDir, 'app.env')
     fs.writeFileSync(source, 'TOKEN=synthetic\n')
     const publish = vi.fn()
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const outcome = await envCaptureStage(deps({ inject: bootInject(calls), workspaceEvents: { publish } }))
       .run(ctxFor(withScout(manifest(), [source])).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: 'feature not found' })
@@ -195,7 +157,7 @@ describe('env-capture stage', () => {
 
   it('pins the runId before the poll, so a boot that FAILS still leaves it reachable', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         return { statusCode: 200, body: { manifest: { status: 'failed', services: [{ name: 'app', status: 'timeout' }] } } }
@@ -213,8 +175,8 @@ describe('env-capture stage', () => {
   it('teardown stops the boot run named by the pin', async () => {
     // The payoff of the pin: a pause landing mid-boot reaches the run through the
     // record, not through a stack frame that is already unwinding.
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running' } } }
       return { statusCode: 204, body: {} }
     }, calls)
@@ -262,7 +224,7 @@ describe('env-capture stage', () => {
 
   it('fails the stage when the boot verify fails — verdict + structured errorDetail', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         return {
@@ -290,7 +252,7 @@ describe('env-capture stage', () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const logPath = path.join(tmpDir, 'svc-app.log')
     fs.writeFileSync(logPath, "Starting daemon\nUnrecognized VM option 'MaxPermSize=512m'\nError: Could not create the Java Virtual Machine.\n")
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         return {
@@ -329,8 +291,8 @@ describe('env-capture stage', () => {
 
   it('queues behind a repo collision and still boots', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') {
         const payload = call.payload as Record<string, unknown>
         if (payload.isolation === 'queue') return { statusCode: 201, body: { runId: 'boot-1' } }
@@ -347,7 +309,7 @@ describe('env-capture stage', () => {
 
   it('fails when the boot request itself is rejected', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 400, body: { error: 'bad request' } }
       return undefined
     })
@@ -357,7 +319,7 @@ describe('env-capture stage', () => {
 
   it('fails with "unknown" when the boot rejection carries no error field', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 400, body: {} }
       return undefined
     })
@@ -368,7 +330,7 @@ describe('env-capture stage', () => {
   it('boots cleanly when a queued run has not yet materialized any services', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     let polls = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         polls += 1
@@ -387,7 +349,7 @@ describe('env-capture stage', () => {
   it('keeps polling past a transient response with no manifest at all', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     let polls = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         polls += 1
@@ -404,7 +366,7 @@ describe('env-capture stage', () => {
 
   it('a bootFailure with no logPath still yields the verdict, with empty log evidence', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') {
         return {
@@ -430,7 +392,7 @@ describe('env-capture stage', () => {
 
   it('boots cleanly when the feature has nothing to boot (remote-URL, zero services)', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running', services: [] } } }
       if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
@@ -442,7 +404,7 @@ describe('env-capture stage', () => {
 
   it('fails with a generic message when the run ends aborted with no bootFailure or timed-out service', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'aborted', services: [] } } }
       if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
@@ -474,7 +436,7 @@ describe('env-capture stage', () => {
 
   it('fails with a health-check message when a service times out with no bootFailure detail', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running', services: [{ name: 'app', status: 'timeout' }] } } }
       if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
@@ -498,7 +460,7 @@ describe('env-capture stage', () => {
 
   it('tolerates a manifest with no services field at all (not just an empty array)', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running' } } } // no services key
       if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }

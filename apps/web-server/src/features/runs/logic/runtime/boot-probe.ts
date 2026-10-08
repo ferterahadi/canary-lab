@@ -10,6 +10,8 @@ import { compressLogByTemplate } from './log-template'
 // grandchildren survive and keep the port bound. The shared helper carries the
 // pgid sanity guard (a pid ≤ 1 must never be negated into a broadcast kill).
 import { killTree } from './run-spawn'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
+import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 
 // Standalone adapter for port verification's two concurrent stacks. Service
 // readiness shares the run engine; this adapter owns temporary processes and
@@ -63,9 +65,8 @@ export interface BootProbeOptions {
 const DIAG_BUFFER_CAP = 16_384
 const DIAG_EVIDENCE_LINES = 12
 
-// ANSI colour/cursor escapes, and the `concurrently` `[3]` stream prefix —
-// stripped so identical lines from interleaved processes dedupe cleanly.
-const ANSI = /\[[0-9;?]*[A-Za-z]/g
+// The `concurrently` `[3]` stream prefix, stripped (with terminal escapes) so
+// identical lines from interleaved processes dedupe cleanly.
 const STREAM_PREFIX = /^\s*\[\d+\]\s?/
 
 // A downstream/dependency failure (DB, queue, host) is an ENVIRONMENT problem,
@@ -91,8 +92,7 @@ const PORT_CONFLICT_MARKERS = [/EADDRINUSE/i, /address already in use/i]
 // Strip ANSI/cursor escapes and the `concurrently` `[N]` stream prefix, drop
 // blank lines. Shared by the diagnostic snippet and the clean full-log writer.
 function cleanBootLines(raw: string): string[] {
-  return raw
-    .replace(ANSI, '')
+  return stripTerminalEscapes(raw, 'classifier')
     .split('\n')
     .map((l) => l.replace(STREAM_PREFIX, '').trimEnd())
     .filter((l) => l.trim().length > 0)
@@ -200,7 +200,7 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
         fail(svc, `Service process exited during readiness (code ${exitCode}${signal == null ? '' : `, signal ${signal}`}).`)
       }))
     } catch (error) {
-      fail(svc, `Canary could not spawn the service process: ${redactDiagnosticText(error instanceof Error ? error.message : String(error))}`)
+      fail(svc, `Canary could not spawn the service process: ${redactDiagnosticText(errorMessage(error))}`)
       teardown()
       return failure!
     }

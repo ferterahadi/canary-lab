@@ -3,10 +3,10 @@
 // flight, and a TCP probe that never comes up.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { RunContext } from './run-context'
 import type { ServiceSpec } from './run-orchestrator-types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({ recordLifecycle: vi.fn() }))
 vi.mock('./run-manifest-writer', async (importOriginal) => ({
@@ -17,16 +17,16 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
 const { attemptHttp, ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-svc-boot-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-svc-boot-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function svcSpec(over: Partial<ServiceSpec> = {}): ServiceSpec {

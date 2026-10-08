@@ -1,5 +1,6 @@
 import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { readStored, writeStored } from '@/shared/state/browser-storage'
 
 interface Props {
   storageKey: string
@@ -25,13 +26,11 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
     if (!el) return
     const totalH = el.clientHeight
     let initial: number | null = null
-    try {
-      const raw = localStorage.getItem(storageKey)
-      if (raw) {
-        const n = Number(raw)
-        if (Number.isFinite(n) && n >= minTopPx && n <= totalH - minBottomPx) initial = n
-      }
-    } catch { /* ignore */ }
+    const raw = readStored(storageKey)
+    if (raw) {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n >= minTopPx && n <= totalH - minBottomPx) initial = n
+    }
     if (initial == null) initial = Math.max(minTopPx, Math.min(totalH - minBottomPx, totalH * (defaultTopPercent / 100)))
     setTopHeight(initial)
   }, [storageKey, defaultTopPercent, minTopPx, minBottomPx])
@@ -53,7 +52,7 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
   useEffect(() => {
     if (dragging || !resizedRef.current || topHeight == null) return
     resizedRef.current = false
-    try { localStorage.setItem(storageKey, String(topHeight)) } catch { /* ignore */ }
+    writeStored(storageKey, String(topHeight))
   }, [dragging, storageKey, topHeight])
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {

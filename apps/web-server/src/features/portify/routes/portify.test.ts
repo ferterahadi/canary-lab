@@ -1,12 +1,14 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { portifyRoutes, type PortifyRouteDeps } from './portify'
 import type { PortifyStore } from '../logic/runtime/store'
 import type { PortifyManifest } from '../logic/runtime/types'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-open-')
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -327,7 +329,7 @@ describe('portifyRoutes', () => {
     })
 
     it('opens the scratch worktree while it exists', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const tmp = tempDir()
       const wt = path.join(tmp, 'wt'); fs.mkdirSync(wt)
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       const m = manifest({ repos: [{ name: 'app', path: repo, worktreePath: wt }] })
@@ -336,11 +338,10 @@ describe('portifyRoutes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: true, paths: [wt], editor: 'vscode' })
       expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', wt)
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('opens the saved overlay folder once the worktree is gone (saved)', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const tmp = tempDir()
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       // Saved: the worktree is discarded and the edits live only in the
       // overlay under the feature dir — open that, not the untouched repo.
@@ -352,11 +353,10 @@ describe('portifyRoutes', () => {
       const overlay = path.join(featureDir, 'portify')
       expect(res.json()).toMatchObject({ opened: true, paths: [overlay] })
       expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', overlay)
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('falls back to the product repo when saved but the overlay was removed', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const tmp = tempDir()
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       // featureDir exists but holds no portify/ dir ("Remove portification").
       const featureDir = path.join(tmp, 'feature'); fs.mkdirSync(featureDir)
@@ -366,7 +366,6 @@ describe('portifyRoutes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: true, paths: [repo] })
       expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', repo)
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('409s when no directory is available to open', async () => {
@@ -377,7 +376,7 @@ describe('portifyRoutes', () => {
     })
 
     it('reports opened:false with the path when the launch throws', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const tmp = tempDir()
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw new Error('no editor') })
       const m = manifest({ repos: [{ name: 'app', path: repo }] })
@@ -385,22 +384,20 @@ describe('portifyRoutes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: false, paths: [repo], error: 'no editor' })
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('uses loadProjectConfig when projectRoot is set (line 86 true branch)', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-root-'))
+      const tmp = tempDir('portify-open-root-')
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       const m = manifest({ repos: [{ name: 'app', path: repo }] })
       const app = await build({ store: fakeStore({ get: () => m }), projectRoot: tmp })
       const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: true, paths: [repo] })
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('uses String(err) when the throw is not an Error instance (line 93 false branch)', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-nonerr-'))
+      const tmp = tempDir('portify-open-nonerr-')
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw 'editor not found' })
@@ -409,7 +406,6 @@ describe('portifyRoutes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ opened: false, paths: [repo], error: 'editor not found' })
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
   })
 })

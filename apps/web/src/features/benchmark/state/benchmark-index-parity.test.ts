@@ -1,7 +1,7 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 import { BenchmarkRunStore } from '../../../../../web-server/src/features/benchmark/logic/runtime/store'
 import type { BenchmarkManifest } from '../../../../../web-server/src/features/benchmark/logic/runtime/types'
 import type { BenchmarkStatus } from '@shared/benchmark-index'
@@ -10,8 +10,8 @@ import { benchmarkIndex } from './benchmark-state'
 const { reducer: benchmarkReducer, initialState: initialBenchmarkState } = benchmarkIndex
 
 let logs: string
-beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-index-parity-')) })
-afterEach(() => { fs.rmSync(logs, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('benchmark-index-parity-')
+beforeEach(() => { logs = tempDir() })
 function manifest(overrides: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'benchmark-1', feature: 'checkout', level: 'med', skill: 'synthetic',

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { useEditableSlice } from './useEditableSlice'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 type Doc = { edited: string; untouched: string }
 const load = vi.fn<() => Promise<Doc>>()
@@ -23,12 +24,7 @@ const remote = async (edited: string, untouched = 'remote') => {
   load.mockResolvedValue({ edited, untouched })
   await act(async () => { invalidate('configuration', 'checkout') })
 }
-function deferred() {
-  let resolve!: (value: Doc) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<Doc>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
@@ -74,7 +70,7 @@ it('saves a preserved draft into the latest document without reverting unrelated
 it('preserves edits typed while saving and retains drafts across background failures and recovery', async () => {
   await act(async () => { render() })
   await act(async () => { editor.setDraft('submitted') })
-  const pending = deferred()
+  const pending = deferred<Doc>()
   save.mockReturnValue(pending.promise)
   let saving!: Promise<void>
   await act(async () => { saving = editor.doSave() })
@@ -96,7 +92,7 @@ it('preserves edits typed while saving and retains drafts across background fail
 it.each(['success', 'failure'])('ignores a late save %s after switching suites', async (result) => {
   await act(async () => { render() })
   await act(async () => { editor.setDraft('old suite draft') })
-  const pending = deferred()
+  const pending = deferred<Doc>()
   save.mockReturnValue(pending.promise)
   let saving!: Promise<void>
   await act(async () => { saving = editor.doSave() })
@@ -116,7 +112,7 @@ it.each(['success', 'failure'])('ignores a late save %s after switching suites',
 })
 
 it('ignores delayed reads for another suite and allows failed saves to be retried', async () => {
-  const pending = deferred()
+  const pending = deferred<Doc>()
   load.mockReturnValueOnce(pending.promise)
   await act(async () => { render() })
   expect(editor.loading).toBe(true)

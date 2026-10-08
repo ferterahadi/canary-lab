@@ -7,6 +7,7 @@ import { Modal } from '@/shared/ui/Overlays'
 import { agentTitle } from './settings-options'
 import { ModelPlanEditor } from './ModelPlanEditor'
 import { toSavedPlans, useModelPlanDraft } from './model-plan-draft'
+import { displayError } from '@/shared/api/error-message'
 
 // The per-agent model matrix (2.2.0 model cockpit): the shared editor over all
 // nine stages, saved as the workspace defaults. Stacked over Project Settings
@@ -40,7 +41,7 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
       onSaved(next)
       onClose()
     } catch (e: unknown) {
-      if (mounted()) setError(e instanceof Error ? e.message : 'Save failed')
+      if (mounted()) setError(displayError(e, 'Save failed'))
     } finally {
       if (mounted()) setSaving(false)
     }

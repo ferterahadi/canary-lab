@@ -25,6 +25,7 @@ import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteRevi
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 export type RestoreReviewedSuiteResult =
   | { ok: true; restored: string[]; revision: string }
@@ -196,7 +197,7 @@ export function restoreSpecEdits(ctx: RunContext, expectedRevision?: string): Re
       restored.push(edit.file)
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     ctx.runnerLog?.warn(`restoring spec edits stopped after ${restored.length}/${pending.length}: ${reason}`)
     recordSpecEdits(ctx)
     return { ok: false, reason: 'restore-failed' }
@@ -312,7 +313,7 @@ export function snapshotSuite(ctx: RunContext): void {
     saveSuiteTestRoster(target)
     ctx.suiteDir = target
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     // A runtime env target may have been the last copied file. Never retain a
     // partial snapshot that can contain that secret after falling back live.
     try { fs.rmSync(target, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
@@ -331,7 +332,7 @@ export function snapshotSuite(ctx: RunContext): void {
   } catch (error) {
     fs.rmSync(target, { recursive: true, force: true })
     ctx.suiteDir = live
-    const reason = error instanceof Error ? error.message : String(error)
+    const reason = errorMessage(error)
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'unavailable', at: new Date().toISOString(), reason },
     })
@@ -384,7 +385,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adopti
         ctx.runnerLog?.warn(`suite rollback failed; original retained at ${scratch}: ${String(rollbackError)}`)
       }
     }
-    ctx.runnerLog?.warn(`reviewed suite snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+    ctx.runnerLog?.warn(`reviewed suite snapshot failed: ${errorMessage(error)}`)
     return { ok: false, reason: 'snapshot-failed' }
   } finally {
     if (scratch && !originalMoved) fs.rmSync(scratch, { recursive: true, force: true })

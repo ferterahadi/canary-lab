@@ -1,66 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { PtyFactory } from './pty-spawner'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
 import type { RunLifecycleEvent } from '../../../../../../../shared/run-state'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -68,7 +19,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -77,26 +28,9 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.runFullCycle', () => {
   function bootForFullCycle(opts: {
-    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakeFactory>['spawned'] }
+    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakePtyFactory>['spawned'] }
     pwExitCodes: number[]
     autoHeal?: boolean
     manualHeal?: boolean
@@ -105,7 +39,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: opts.spawned.factory,
@@ -152,11 +86,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     execFileSync('git', ['add', 'svc.ts'], { cwd: tmpDir })
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -204,10 +138,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     // `waitForHealSignal` also exits when `healAgentPty` is null, so the
     // loop bails out via the "agent exited unexpectedly" branch.
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -248,7 +182,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   }, 10000)
 
   it('breaks when no failed slugs are present (signature empty)', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
     // No summary written → empty failed array → empty signature → no heal.
     const promise = orch.runFullCycle()
@@ -260,7 +194,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('emits agent-output chunks for the live broker', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'x' }] }))
@@ -292,12 +226,12 @@ describe('RunOrchestrator.runFullCycle', () => {
     execFileSync('git', ['add', 'a.ts', 'b.ts'], { cwd: tmpDir })
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     // maxCycles=1 so the loop exits after one heal cycle when pw still fails.
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -362,11 +296,11 @@ describe('RunOrchestrator.runFullCycle', () => {
     // never touches this file; the diff must not include it.
     fs.writeFileSync(path.join(tmpDir, 'a.ts'), '// pre-existing dirty\n')
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -409,7 +343,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     // one file in each repo during a single heal iteration. The journal's
     // fix.file should list both absolute paths, and both services should
     // restart based on the diff matching their service cwds.
-    const repo2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-r2-')))
+    const repo2 = tempDir('cl-orc-r2-')
     for (const dir of [tmpDir, repo2]) {
       execFileSync('git', ['init', '-q'], { cwd: dir })
       execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
@@ -419,11 +353,11 @@ describe('RunOrchestrator.runFullCycle', () => {
       execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
     }
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({
+      feature: demoFeature(tmpDir, {
         repos: [
           {
             name: 'api',

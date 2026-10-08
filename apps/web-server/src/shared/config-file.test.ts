@@ -1,12 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-config-file-')
 
 let dir: string
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-config-file-')) })
-afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+beforeEach(() => { dir = tempDir() })
 
 it('keeps cjs, js, ts precedence and returns null when none exist', () => {
   expect(findExistingConfig(dir, FEATURE_CONFIG_NAMES)).toBeNull()

@@ -21,6 +21,7 @@ import {
   type FlightManifest,
   type FlightStageStatus,
 } from '../../shared/flights/types'
+import { sleep } from '../../shared/lib/sleep'
 
 // `canary-lab flight <repo...> "<what to test>"` — the one-command entry that
 // takes a bare product repo to a green, covered, healed run ending in an
@@ -190,7 +191,7 @@ async function ensureServer(workspaceRoot: string, base: string): Promise<void> 
   info(`Starting the Canary Lab server for ${dim(workspaceRoot)}…`)
   relaunchUiDetached(workspaceRoot)
   for (let i = 0; i < 30; i += 1) {
-    await new Promise((r) => setTimeout(r, 2000))
+    await sleep(2000)
     if (await serverIsUp(base)) return
   }
   fail(`The Canary Lab server did not come up at ${base}. Start it manually with \`npx canary-lab ui\` and retry.`)
@@ -338,7 +339,7 @@ async function watchFlight(base: string, flightId: string): Promise<number> {
       return verdictExitCode(manifest)
     }
 
-    await new Promise((r) => setTimeout(r, 1000))
+    await sleep(1000)
   }
 }
 

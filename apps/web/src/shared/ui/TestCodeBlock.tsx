@@ -13,6 +13,7 @@ import {
   type TestExecutionHighlightKind,
 } from '@/features/runs/utils/test-step-status'
 import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
+import { displayError } from '@/shared/api/error-message'
 
 interface SourceLocation {
   file: string
@@ -174,7 +175,7 @@ export function SourceOpenShell({
     try {
       await workspaceApi.openEditor({ file: sourceLocation.file, line, column: 1 })
     } catch (e: unknown) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
+      setOpenError(displayError(e, 'Failed to open editor'))
     }
   }
   const content = typeof children === 'function' ? children(openAt) : children

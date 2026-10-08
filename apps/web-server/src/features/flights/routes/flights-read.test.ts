@@ -20,18 +20,16 @@ import type { FlightAgentSpawner } from '../logic/stages/context'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
 import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
 let repoDir: string
 
 let app: FastifyInstance
-
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
 
 async function buildApp(
   adapters: StageAdapters,
@@ -51,14 +49,13 @@ async function buildApp(
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -98,7 +95,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
 
   it('accepts a finite target in range and falls malformed targets back to the stored default', async () => {
     writeFeatureConfig('checkout')
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
 
     expect((await entryFor('checkout', '75')).body.prefill.coverageTarget).toBe(75)
     expect((await entryFor('checkout', 'not-a-number')).body.prefill.coverageTarget).toBe(100)
@@ -126,13 +123,13 @@ describe('flight entry options (GET /api/flights/entry)', () => {
       path.join(featureDir, 'feature.config.cjs'),
       `module.exports.config = { name: 'described', description: 'Prove the two services agree on one order.', repos: [{ name: 'app', localPath: '${repoDir}' }] }\n`,
     )
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { body } = await entryFor('described')
     expect(body.prefill.description).toBe('Prove the two services agree on one order.')
   })
 
   it('400s without a feature and 404s a feature with no record and no config', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     expect((await app.inject({ method: 'GET', url: '/api/flights/entry' })).statusCode).toBe(400)
     const missing = await entryFor('ghost')
     expect(missing.status).toBe(404)
@@ -145,7 +142,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
       path.join(featureDir, 'feature.config.cjs'),
       `module.exports.config = { name: 'homey', repos: [{ name: 'app', localPath: '~/some/repo' }] }\n`,
     )
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { body } = await entryFor('homey')
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
   })
@@ -155,7 +152,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     fs.mkdirSync(featureDir, { recursive: true })
     const repos = [{ name: 'a', localPath: '~/synthetic-repo' }, { name: 'b', localPath: path.join(os.homedir(), 'synthetic-repo') + '/' }]
     fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports.config = ${JSON.stringify({ name: 'aliases', repos, featureDir })}`)
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { body } = await entryFor('aliases')
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'synthetic-repo')])
     const evidence = workspaceStageEvidence({ featuresDir: path.join(tmpDir, 'features'), logsDir: path.join(tmpDir, 'logs') }, 'aliases', ['scout'], 'local')
@@ -176,7 +173,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
       + `{ name: 'b', localPath: '${repoDir}/' },`
       + `{ name: 'c', localPath: '${repoDir}' }] }\n`,
     )
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { body } = await entryFor('trio')
     expect(body.prefill.repoPaths).toEqual([repoDir])
   })
@@ -186,7 +183,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
   // the same stage the conductor would have, so it opens the same entry point.
   it('gates a never-flown feature on evidence, not on having a record — R81', async () => {
     writeFeatureConfig('checkout')
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { status, body } = await entryFor('checkout')
     expect(status).toBe(200)
     expect(body.flight).toBeNull()
@@ -225,7 +222,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '// spec\n')
 
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const { body } = await entryFor('checkout')
     // Never flown — the suite was built by standalone/MCP work — yet the whole
     // pipeline up to `run` is enterable, because the artifacts are all there.
@@ -246,7 +243,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '// spec\n')
 
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
     await waitForStatus(flightId, ['done'])
@@ -271,7 +268,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     // graph. Boxing it in an object sidesteps that narrowing.
     const gateBox: { gate: (() => void) | null } = { gate: null }
     let fail = true
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => {
@@ -327,7 +324,7 @@ describe('GET /api/flights collapses to latest-per-feature (R67)', () => {
     store.save(mk('fl-legacy-3', 'first-flight-smoke', '2026-01-03T00:00:00Z'))
     store.save(mk('fl-other', 'other-feature', '2026-01-01T12:00:00Z'))
 
-    app = await buildApp(allDone(), store)
+    app = await buildApp(allDoneAdapters(), store)
     const res = await app.inject({ method: 'GET', url: '/api/flights' })
     const flights = (res.json() as { flights: Array<{ flightId: string; feature: string }> }).flights
     expect(flights).toHaveLength(2)

@@ -7,6 +7,7 @@ import { AddSlotModal } from './AddSlotModal'
 import { CopyFromModal } from './CopyFromModal'
 import { FolderPickerModal } from './FolderPicker'
 import { useFilesystemBrowser } from './use-filesystem-browser'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const api = vi.hoisted(() => ({ browseDir: vi.fn(), listWorkspaceDirs: vi.fn(), readDotenvFile: vi.fn(), getEnvsetSlot: vi.fn(), addEnvsetSlot: vi.fn() }))
 vi.mock('@/shared/api/config', () => ({
@@ -20,12 +21,7 @@ vi.mock('@/shared/api/workspace', () => ({
 }))
 let root: Root
 let container: HTMLDivElement
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 const directory = (dir: string, name = 'current.env') => ({ dir, parent: '/root', entries: [{ name, isDir: false }] })
 const button = (label: string) => [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)!
 function input(value: string) {

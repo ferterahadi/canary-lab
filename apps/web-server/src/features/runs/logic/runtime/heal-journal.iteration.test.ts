@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 import { MAX_JOURNAL_DIFF_BYTES, appendJournalIteration, writeFullDiffPatch } from './heal-journal'
 import { DIAGNOSIS_JOURNAL_PATH as REAL_JOURNAL, LOGS_DIR as REAL_LOGS, MANIFEST_PATH as REAL_MANIFEST, SUMMARY_PATH as REAL_SUMMARY } from './paths'
 
+const tempDir = trackTempDirs('cl-le-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-')))
+  tmpDir = tempDir()
 })
 
 describe('appendJournalIteration', () => {

@@ -37,6 +37,7 @@ import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-sess
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface CoverageRouteDeps {
   flightAttention?: FlightAttentionReader
@@ -166,7 +167,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         text = extracted.text
       } catch (err) {
         reply.code(400)
-        return { error: err instanceof Error ? err.message : String(err) }
+        return { error: errorMessage(err) }
       }
       // Store under a sanitized .md slug (the pipeline is markdown-only).
       const base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'doc'

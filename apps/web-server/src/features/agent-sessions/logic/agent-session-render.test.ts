@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   locateMostRecentAgentSessionRef,
@@ -37,15 +36,14 @@ import {
   subagentDirFor,
 } from './agent-session-subagents'
 import { parseAgentSessionLine } from './agent-session-parse'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-asl-home-')
 
 let homeDir: string
 
 beforeEach(() => {
-  homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-home-')))
-})
-
-afterEach(() => {
-  try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  homeDir = tempDir()
 })
 
 describe('renderAgentSessionContext', () => {

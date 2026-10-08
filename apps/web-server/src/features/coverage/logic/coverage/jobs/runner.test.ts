@@ -1,22 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore } from './store'
 import { CoverageJobConflictError } from './creation'
 import { startCoverageJob } from './runner'
 import type { CoverageJobStore } from './store'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-jobs-')
 
 let tmpDir: string
 let store: CoverageJobRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-jobs-')))
+  tmpDir = tempDir()
   store = new CoverageJobRunStore(tmpDir)
   n = 0
 })
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `job-${++n}`
 const now = () => '2026-01-01T00:00:00Z'

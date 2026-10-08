@@ -1,12 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
-
-import { execFileSync } from 'child_process'
 
 // Transparent pass-through by default — every other test in this file spawns
 // real processes (fake npx/claude binaries on PATH). Only the one test below
@@ -33,19 +29,19 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject } from './__fixtures__/flight-inject'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -56,7 +52,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -65,26 +61,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -105,29 +87,8 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('docs stage', () => {
@@ -137,17 +98,12 @@ describe('docs stage', () => {
   })
 
   function initGitRepoWithDiff(): void {
-    const run = (args: string[]) => execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' })
-    run(['init', '-q', '-b', 'main'])
-    run(['config', 'user.email', 't@t.com'])
-    run(['config', 'user.name', 't'])
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'init'])
-    run(['checkout', '-qb', 'feature'])
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'checkout', '-qb', 'feature')
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\nworld\n'.repeat(5))
-    run(['add', '.'])
-    run(['commit', '-qm', 'change'])
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-qm', 'change')
   }
 
   it('checkpoint response: retry re-runs and re-parks when nothing changed', async () => {

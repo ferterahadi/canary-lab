@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runGit } from '../../../../shared/git-repo'
@@ -9,6 +8,9 @@ import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, writeOverlay } from './overlay'
 import type { PortifyManifest } from './types'
 import { defaultAgentEdit, gitInit, makeRunner, roots, singleFixture, twoFeatureFixture, waitForStatus } from './__fixtures__/runner.part4-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-borrow-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -121,8 +123,7 @@ it('borrows a sibling feature\'s saved overlay for the same app and pre-applies 
       // non-empty overlay saved against the repo's HEAD). Starting portify for
       // feat-b should pre-apply feat-a's patch so feat-b starts from the rewrite
       // — and the borrowed lines flow into feat-b's OWN captured overlay.
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-'))
-      roots.push(root)
+      const root = tempDir()
       const featuresDir = path.join(root, 'features')
       const appRepo = path.join(root, 'app')
       const logsDir = path.join(root, 'logs')
@@ -178,8 +179,7 @@ it('starts the double-boot itself when a borrow leaves the client nothing to dec
       // AND already declares the same env var, so there is no edit for the client
       // to make — canary runs the verification without waiting for a submit. The
       // double-boot is still the only proof; it just begins now.
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-auto-'))
-      roots.push(root)
+      const root = tempDir('portify-borrow-auto-')
       const featuresDir = path.join(root, 'features')
       const appRepo = path.join(root, 'app')
       const logsDir = path.join(root, 'logs')
@@ -227,8 +227,7 @@ it('still hands the client the recorded slot list when it has slots left to decl
       // Same borrow, but feat-b declares NO slots — so the auto-verify must not
       // fire (there is real work to do), and the instructions must carry the
       // exact slots feat-a declared rather than making the client re-derive them.
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-slots-'))
-      roots.push(root)
+      const root = tempDir('portify-borrow-slots-')
       const featuresDir = path.join(root, 'features')
       const appRepo = path.join(root, 'app')
       const logsDir = path.join(root, 'logs')
@@ -508,8 +507,7 @@ it('startExternalPortify includes sessionUrl in the external session record when
     })
 it('startExternalPortify 409s when orchestrator setup fails (startExternal returns non-editing)', async () => {
       // Use an invalid git repo so worktree setup throws
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-bad-'))
-      roots.push(root)
+      const root = tempDir('portify-bad-')
       const featuresDir = path.join(root, 'features')
       const featureDir = path.join(featuresDir, 'badfeature')
       const notAGitRepo = path.join(root, 'not-a-repo')

@@ -10,6 +10,7 @@ import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-sess
 import { attachTail } from '../../agent-sessions/ws/agent-session-stream'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import type { TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
+import { sendFrame } from '../../../shared/ws/record-stream'
 
 export interface DiscoveryRepairRouteDeps {
   projectRoot: string
@@ -60,13 +61,13 @@ export async function discoveryRepairRoutes(app: FastifyInstance, deps: Discover
   })
   app.get<{ Params: { id: string } }>('/ws/discovery-repairs/:id/agent-session', { websocket: true }, (socket, req) => {
     try { attachTail(socket, { ref: resolve(req.params.id), discoverRef: () => resolve(req.params.id) }) }
-    catch (err) { socket.send(JSON.stringify({ type: 'error', error: String(err) })); socket.close() }
+    catch (err) { sendFrame(socket, { type: 'error', error: String(err) }); socket.close() }
   })
   // Subscribe by feature even BEFORE an external agent starts. Every reconnect
   // sends the durable snapshot; workspace fan-out is never the sole trigger.
   app.get<{ Params: { name: string } }>('/ws/features/:name/discovery-repairs', { websocket: true }, (socket, req) => {
     const send = () => {
-      if (socket.readyState === 1) socket.send(JSON.stringify({ repairs: service.list(req.params.name).map((r) => view(r.id)) }))
+      if (socket.readyState === 1) sendFrame(socket, { repairs: service.list(req.params.name).map((r) => view(r.id)) })
     }
     const changed = (event: TaskStoreEvent) => { if (service.store.get(event.id)?.feature === req.params.name) send() }
     service.store.onEvent(changed)

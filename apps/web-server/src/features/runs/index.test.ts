@@ -2,7 +2,6 @@ import { WorkspaceEventBus } from '../../shared/workspace-events'
 import { workspaceStreamRoutes } from '../../shared/ws/workspace-stream'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
@@ -20,6 +19,9 @@ import { externalHealRoutes } from './routes/external-heal'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
 import { register } from './index'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-runs-reg-')
 
 /**
  * The registrar's job is wiring, so every route plugin here is the real one —
@@ -50,7 +52,7 @@ const inertPtyFactory: PtyFactory = () => ({
 })
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-runs-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   journalPath = path.join(tmpDir, 'journal.jsonl')

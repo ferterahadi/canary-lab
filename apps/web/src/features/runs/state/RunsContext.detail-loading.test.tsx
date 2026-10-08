@@ -21,6 +21,8 @@ import {
   type UseRunResult,
   type UseRunsResult,
 } from './RunsContext'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -38,26 +40,6 @@ vi.mock('@/shared/api/verification', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/verification')>()),
   executeVerification: vi.fn(),
 }))
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: unknown }) => void) | null = null
-  onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
-  closed = false
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closed = true
-    this.readyState = 3
-    this.onclose?.()
-  }
-}
 
 let container: HTMLDivElement
 
@@ -169,16 +151,6 @@ function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
       ...overrides,
     },
   }
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (err: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
 }
 
 describe('RunsProvider', () => {

@@ -1,5 +1,7 @@
 import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { readStoredJson, writeStoredJson } from '@/shared/state/browser-storage'
+import { isRecord } from '@shared/lib/is-record'
 
 export interface PanelConfig {
   id: string
@@ -15,25 +17,17 @@ const STORAGE_KEY = 'canary-lab.panel-widths'
 const HANDLE_WIDTH = 4
 
 function loadWidths(panels: readonly PanelConfig[]): number[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const saved = JSON.parse(raw) as Record<string, number>
-      return panels.map((p) => {
-        const w = saved[p.id]
-        return typeof w === 'number' && w >= p.minWidth ? w : p.defaultWidth
-      })
-    }
-  } catch { /* ignore */ }
-  return panels.map((p) => p.defaultWidth)
+  const saved = readStoredJson(STORAGE_KEY)
+  return panels.map((p) => {
+    const w = isRecord(saved) ? saved[p.id] : undefined
+    return typeof w === 'number' && w >= p.minWidth ? w : p.defaultWidth
+  })
 }
 
 function saveWidths(panels: readonly PanelConfig[], widths: number[]): void {
-  try {
-    const obj: Record<string, number> = {}
-    panels.forEach((p, i) => { obj[p.id] = widths[i] })
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj))
-  } catch { /* ignore */ }
+  const obj: Record<string, number> = {}
+  panels.forEach((p, i) => { obj[p.id] = widths[i] })
+  writeStoredJson(STORAGE_KEY, obj)
 }
 
 export function ResizablePanels({ panels, contentByPanel }: {

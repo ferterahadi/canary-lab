@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
 import type { DraftRecord } from '../../../../../../shared/draft-types'
 import {
   type CreateDraftInput,
@@ -20,13 +19,13 @@ import {
   validateFeatureTarget,
   writeDraft,
 } from './draft-store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('draft-store-test-')
 
 let tmp: string
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-store-test-'))
-})
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
+  tmp = tempDir()
 })
 
 const baseInput = {

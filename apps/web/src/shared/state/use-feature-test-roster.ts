@@ -4,6 +4,7 @@ import * as internalApi from '../api/internal'
 import type { FeatureSpecFile } from '../api/types'
 import { useInvalidationKey } from './invalidation'
 import { useLiveResource } from './use-live-resource'
+import { displayError } from '@/shared/api/error-message'
 
 export type TestLoadFailure = { kind: 'discovery' | 'config' | 'removed' | 'request'; message: string }
 type Observation = { specs?: FeatureSpecFile[]; failure?: TestLoadFailure; requestError?: string; attempt: number }
@@ -31,7 +32,7 @@ export function useFeatureTestRoster({ feature, runId, enabled = true, refreshKe
       if (!diagnostic) burst.attempts = 0
       return { specs, attempt, failure: diagnostic ? { kind: 'discovery', message: diagnostic } : undefined }
     } catch (error) {
-      return { attempt, failure: classifyLoadError(error), requestError: error instanceof Error ? error.message : 'Failed to load test source' }
+      return { attempt, failure: classifyLoadError(error), requestError: displayError(error, 'Failed to load test source') }
     }
   }, { retainOnError: true, refreshKey,
     retryDelayMs: (next) => recover && next?.failure && next.failure.kind !== 'removed' && next.attempt < 3 ? 1000 : undefined,

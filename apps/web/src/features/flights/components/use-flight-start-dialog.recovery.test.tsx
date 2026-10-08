@@ -6,6 +6,7 @@ import type { PlanFeaturesTask } from '@shared/flights/types'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useFlightStartDialog } from './use-flight-start-dialog'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const api = vi.hoisted(() => ({ getPlanFeaturesTask: vi.fn(), getProjectConfig: vi.fn(), launchPlannedFeatures: vi.fn(), cancelPlanFeatures: vi.fn(), planFeatures: vi.fn() }))
 vi.mock('@/shared/api/flights', async (importOriginal) => ({
@@ -45,11 +46,7 @@ function proposal(taskId = id): PlanFeaturesTask {
     { name: 'one', description: 'First suite' }, { name: 'two', description: 'Second suite' },
   ] } } as PlanFeaturesTask
 }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()

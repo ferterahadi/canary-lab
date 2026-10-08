@@ -1,11 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { ServiceSpec } from './run-orchestrator-types'
 import { bootAndProbe, fileTee, diagnoseBootOutput, writeCleanBootLog } from './boot-probe'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('boot-probe-')
 
 // Teardown calls process.kill(-pid). Block the REAL process.kill so a fake pty
 // can never signal a real process group; killTree falls back to pty.kill, which
@@ -143,7 +145,7 @@ describe('bootAndProbe', () => {
   })
 
   it('tees service output to a per-instance log file via fileTee', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-tee-'))
+    const dir = tempDir('boot-tee-')
     // A factory whose pty emits one data chunk on subscribe.
     const factory: PtyFactory = (): PtyHandle => {
       const data = new EventEmitter()
@@ -165,7 +167,6 @@ describe('bootAndProbe', () => {
     await new Promise((r) => setTimeout(r, 10))
     res.teardown()
     expect(fs.readFileSync(path.join(dir, 'a-api.log'), 'utf-8')).toContain('hello-log')
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('captures the crash reason and classifies a dependency failure on timeout', async () => {
@@ -210,7 +211,7 @@ describe('bootAndProbe', () => {
   })
 
   it('points the failure detail at a cleaned (ANSI-stripped, deduped) full log when the raw log exists', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-clean-'))
+    const dir = tempDir('boot-clean-')
     const raw =
       '\x1b[32mstarting\x1b[0m\n' +
       'waiting for db\n'.repeat(5) +
@@ -234,7 +235,6 @@ describe('bootAndProbe', () => {
       expect(clean).toContain('starting')
     }
     res.teardown()
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('omits the Full boot log pointer when fullLogPathFor is not provided', async () => {
@@ -293,45 +293,33 @@ describe('writeCleanBootLog', () => {
   })
 
   it('returns null when the raw log is empty (no meaningful lines)', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
-    try {
-      const rawLog = path.join(tmp, 'boot.log')
-      fs.writeFileSync(rawLog, '')
-      expect(writeCleanBootLog(rawLog)).toBeNull()
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir()
+    const rawLog = path.join(tmp, 'boot.log')
+    fs.writeFileSync(rawLog, '')
+    expect(writeCleanBootLog(rawLog)).toBeNull()
   })
 
   it('writes a clean log and returns its path on success', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
-    try {
-      const rawLog = path.join(tmp, 'boot.log')
-      fs.writeFileSync(rawLog, 'server started on port 3000\n')
-      const cleanPath = writeCleanBootLog(rawLog)
-      expect(cleanPath).toBe(path.join(tmp, 'boot.clean.log'))
-      expect(fs.existsSync(cleanPath!)).toBe(true)
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir()
+    const rawLog = path.join(tmp, 'boot.log')
+    fs.writeFileSync(rawLog, 'server started on port 3000\n')
+    const cleanPath = writeCleanBootLog(rawLog)
+    expect(cleanPath).toBe(path.join(tmp, 'boot.clean.log'))
+    expect(fs.existsSync(cleanPath!)).toBe(true)
   })
 
   it('appends .clean.log to paths that do not end in .log (line 125 false branch)', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
-    try {
-      // A path ending in something other than `.log` gets `.clean.log` appended.
-      const rawLog = path.join(tmp, 'boot.txt')
-      fs.writeFileSync(rawLog, 'server started on port 3000\n')
-      const cleanPath = writeCleanBootLog(rawLog)
-      expect(cleanPath).toBe(path.join(tmp, 'boot.txt.clean.log'))
-      expect(fs.existsSync(cleanPath!)).toBe(true)
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir()
+    // A path ending in something other than `.log` gets `.clean.log` appended.
+    const rawLog = path.join(tmp, 'boot.txt')
+    fs.writeFileSync(rawLog, 'server started on port 3000\n')
+    const cleanPath = writeCleanBootLog(rawLog)
+    expect(cleanPath).toBe(path.join(tmp, 'boot.txt.clean.log'))
+    expect(fs.existsSync(cleanPath!)).toBe(true)
   })
 
   it('returns null when writeFileSync throws (line 132 catch branch)', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(os.tmpdir()))
+    const tmp = tempDir()
     try {
       const rawLog = path.join(tmp, 'boot.log')
       fs.writeFileSync(rawLog, 'server started\n')
@@ -339,7 +327,6 @@ describe('writeCleanBootLog', () => {
       expect(writeCleanBootLog(rawLog)).toBeNull()
     } finally {
       vi.restoreAllMocks()
-      fs.rmSync(tmp, { recursive: true, force: true })
     }
   })
 })

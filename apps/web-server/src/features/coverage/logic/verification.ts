@@ -19,6 +19,7 @@ import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
 import { bootsServicesForEnv } from '../../runs/logic/runtime/service-specs'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { readTextOrNull } from '../../../../../../shared/lib/read-file-or'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
@@ -218,7 +219,7 @@ export function buildVerificationDiagnostics(
   runDir: string,
 ): VerificationDiagnostics {
   const targetUrls = detail.manifest.verification?.targetUrls ?? {}
-  const rawPlaywrightOutput = tail(stripAnsi(safeRead(path.join(runDir, 'playwright.log')) ?? ''), 16_000)
+  const rawPlaywrightOutput = tail(stripAnsi(readTextOrNull(path.join(runDir, 'playwright.log')) ?? ''), 16_000)
   const failedTests = (detail.summary?.failed ?? []).map((entry) =>
     diagnosticForFailedTest(entry, detail.playwrightArtifacts, runDir, targetUrls),
   )
@@ -403,7 +404,7 @@ function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefin
   if (!fs.existsSync(setDir)) return {}
   const out: Record<string, string> = {}
   for (const file of listFiles(setDir)) {
-    const raw = safeRead(file)
+    const raw = readTextOrNull(file)
     if (!raw) continue
     for (const { key, value } of parseDotenv(raw).entries) {
       if (!/^https?:\/\//i.test(value)) continue
@@ -417,14 +418,14 @@ function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefin
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
   const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return null
-  return safeRead(path.join(runDir, traceSummaryFile))
+  return readTextOrNull(path.join(runDir, traceSummaryFile))
 }
 
 function readTraceExtractLines(runDir: string, entry: RunSummaryFailedEntry, filename: string): string[] {
   const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return []
   const extractDir = path.join(runDir, path.dirname(traceSummaryFile), 'trace-extract')
-  const raw = safeRead(path.join(extractDir, filename))
+  const raw = readTextOrNull(path.join(extractDir, filename))
   if (!raw) return []
   return raw
     .split(/\r?\n/)
@@ -448,10 +449,6 @@ function targetForEndpoint(endpoint: string | undefined, targetUrls: Record<stri
 function httpStatusFrom(value: string): number | undefined {
   const match = value.match(/\b([1-5]\d\d)\b/)
   return match ? Number(match[1]) : undefined
-}
-
-function safeRead(file: string): string | null {
-  try { return fs.readFileSync(file, 'utf-8') } catch { return null }
 }
 
 function tail(value: string, maxChars: number): string {

@@ -1,5 +1,4 @@
-import { chmodSync, mkdtempSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { chmodSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -8,6 +7,9 @@ import {
   type AgentProbeDeps,
   type ProbeExec,
 } from './agent-probe'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-probe-')
 
 // Deterministic resolver: both CLIs "installed" at fixed paths unless a test
 // drops one. The subprocess is the genuinely un-unit-testable edge here, so
@@ -153,7 +155,7 @@ describe('probeAgents', () => {
   it('default exec runs the real binary: a stub CLI answers auth + version, a crashing one reads as signed out', async () => {
     // No injected exec — the real execFile path against real executables in a
     // tmpdir. The stub speaks both probe dialects (auth status / --version).
-    const dir = mkdtempSync(join(tmpdir(), 'canary-probe-'))
+    const dir = tempDir()
     const good = join(dir, 'claude')
     writeFileSync(good, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "9.9.9"; else echo \'{"loggedIn": true}\'; fi\n')
     chmodSync(good, 0o755)

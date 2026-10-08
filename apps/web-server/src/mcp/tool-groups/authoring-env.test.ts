@@ -1,12 +1,16 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerFeatureEnvTools } from './authoring-env'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { FlightRunStore } from '../../features/flights/logic/store'
 import { removeFlightRecordsForFeature } from '../../features/flights/logic/flight-queue'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+import { initGitRepo, git } from '../../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-mcp-env-')
 
 // Envset capture/inspection, feature deletion, and the repo-branch surface.
 //
@@ -19,18 +23,8 @@ let tmpDir: string
 let featuresDir: string
 let repoDir: string
 
-function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: repoDir, encoding: 'utf8' }).trim()
-}
-
 function writeFeature(name: string, repos: Array<Record<string, unknown>> = []): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: '${name}', description: 'd', envs: ['local'], featureDir: __dirname, repos: ${JSON.stringify(repos)} } }`,
-  )
-  return dir
+  return writeFeatureFixture(featuresDir, name, { envs: ['local'], repos })
 }
 
 function harness(over: Record<string, unknown> = {}) {
@@ -45,14 +39,12 @@ function harness(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-env-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   repoDir = path.join(tmpDir, 'repo-shop')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(repoDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('get_feature_envset_summary', () => {
   it('reports a corrupt envset configuration instead of returning an empty summary', async () => {
@@ -278,13 +270,9 @@ describe('delete_feature', () => {
 
 describe('the feature repo branch surface', () => {
   beforeEach(() => {
-    git('init', '-q', '-b', 'main')
-    git('config', 'user.email', 'test@example.com')
-    git('config', 'user.name', 'Test')
     fs.writeFileSync(path.join(repoDir, 'README.md'), '# shop\n')
-    git('add', '.')
-    git('commit', '-qm', 'init')
-    git('branch', 'feature-x')
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'branch', 'feature-x')
   })
 
   it('refuses both mutations during active work and keeps reads available', async () => {
@@ -294,7 +282,7 @@ describe('the feature repo branch surface', () => {
       expect(await text(tool, { feature: 'checkout', repo: 'shop', branch: 'feature-x', confirm: true })).toBe('repo has an active service run')
     }
     expect(await call('get_feature_repo_status', { feature: 'checkout', repo: 'shop', fetch: false })).toMatchObject({ currentBranch: 'main' })
-    expect(git('branch', '--show-current')).toBe('main')
+    expect(git(repoDir, 'branch', '--show-current')).toBe('main')
     expect(published).toEqual([])
   })
 
@@ -338,7 +326,7 @@ describe('the feature repo branch surface', () => {
     })
 
     expect(out).toMatchObject({ currentBranch: 'feature-x' })
-    expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature-x')
+    expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature-x')
     expect(published).toEqual([{ type: 'features-changed' }])
   })
 
@@ -346,8 +334,8 @@ describe('the feature repo branch surface', () => {
     // A bare origin one commit ahead of the checkout, so the counts are non-zero.
     const originDir = path.join(tmpDir, 'origin.git')
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', originDir])
-    git('remote', 'add', 'origin', originDir)
-    git('push', '-q', '-u', 'origin', 'main')
+    git(repoDir, 'remote', 'add', 'origin', originDir)
+    git(repoDir, 'push', '-q', '-u', 'origin', 'main')
     const seedDir = path.join(tmpDir, 'seed')
     execFileSync('git', ['clone', '-q', originDir, seedDir])
     execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'upstream'], { cwd: seedDir })
@@ -367,7 +355,7 @@ describe('the feature repo branch surface', () => {
       behindUpstream: 0,
       headSha: (updated as { upstreamSha: string }).upstreamSha,
     })
-    expect(git('rev-parse', 'HEAD')).toBe(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim())
+    expect(git(repoDir, 'rev-parse', 'HEAD')).toBe(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim())
     expect(published).toEqual([{ type: 'features-changed' }])
   })
 

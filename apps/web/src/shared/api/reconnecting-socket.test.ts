@@ -1,23 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { connectReconnectingSocket, defaultWsBase } from './reconnecting-socket'
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  url: string
-  readyState = 0 // CONNECTING
-  onmessage?: (ev: { data: string }) => void
-  onopen?: () => void
-  onclose?: () => void
-  onerror?: () => void
-
-  constructor(url: string) {
-    this.url = url
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void { this.readyState = 3 }
-  send(data: string): void { void data }
-}
+import { FakeWebSocket } from '../../../../../tools/test-helpers/fake-websocket'
 
 function reset(): void { FakeWebSocket.instances = [] }
 

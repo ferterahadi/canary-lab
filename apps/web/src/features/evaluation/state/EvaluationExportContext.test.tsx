@@ -7,6 +7,7 @@ import * as evaluationApi from '@/shared/api/evaluation'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExports } from './EvaluationExportContext'
 import { Probe, exportSockets, task, taskSocket, workspaceSocket } from './__fixtures__/evaluation-export-context-fixtures'
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -18,32 +19,6 @@ vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
   downloadEvaluationExportTask: vi.fn(),
   cancelEvaluationExportTask: vi.fn(),
 }))
-
-export class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onmessage: ((event: MessageEvent) => void) | null = null
-  // Never fired by the constructor: the reconnect handler only runs on a
-  // RE-open, so a test has to drive open/close ordering itself.
-  onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: (() => void) | null = null
-  closeCalls = 0
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = 3
-    this.onclose?.()
-  }
-
-  fire(message: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent)
-  }
-}
 
 let container: HTMLDivElement
 

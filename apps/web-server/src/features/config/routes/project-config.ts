@@ -17,6 +17,7 @@ import {
 import { normalizeAgentModels } from '../../../../../../shared/agent-models'
 import { isWithin } from '../logic/path-containment'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -165,7 +166,7 @@ export async function projectConfigRoutes(
       return { opened: true, path: deps.projectRoot, editor: usedEditor }
     } catch (err) {
       reply.code(200)
-      return { opened: false, path: deps.projectRoot, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: deps.projectRoot, error: errorMessage(err) }
     }
   })
 

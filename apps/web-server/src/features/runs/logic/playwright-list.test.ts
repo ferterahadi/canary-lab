@@ -1,18 +1,20 @@
 import { discoveryFailureOutput } from './playwright-list'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   listPlaywrightTests,
   clearPlaywrightListCache,
   type PlaywrightListSpawner,
 } from './playwright-list'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pwl-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pwl-')))
+  tmpDir = tempDir()
   clearPlaywrightListCache()
 })
 

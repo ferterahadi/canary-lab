@@ -1,14 +1,15 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 
 import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-fcfg-')
 
 let tmpDir: string
 
@@ -60,18 +61,17 @@ function buildTrackedRepo(name: string): { repo: string; seed: string } {
   const originDir = path.join(tmpDir, `${name}-origin.git`)
   const seed = buildGitRepo(`${name}-seed`)
   const repo = path.join(tmpDir, name)
-  const git = (cwd: string, args: string[]): void => { execFileSync('git', args, { cwd, stdio: 'ignore' }) }
-  git(tmpDir, ['init', '-q', '--bare', '-b', 'main', originDir])
-  git(seed, ['remote', 'add', 'origin', originDir])
-  git(seed, ['push', '-q', '-u', 'origin', 'main'])
-  git(tmpDir, ['clone', '-q', originDir, repo])
-  git(seed, ['commit', '-q', '--allow-empty', '-m', 'upstream'])
-  git(seed, ['push', '-q', 'origin', 'main'])
+  git(tmpDir, 'init', '-q', '--bare', '-b', 'main', originDir)
+  git(seed, 'remote', 'add', 'origin', originDir)
+  git(seed, 'push', '-q', '-u', 'origin', 'main')
+  git(tmpDir, 'clone', '-q', originDir, repo)
+  git(seed, 'commit', '-q', '--allow-empty', '-m', 'upstream')
+  git(seed, 'push', '-q', 'origin', 'main')
   return { repo, seed }
 }
 
 function headOf(dir: string): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  return git(dir, 'rev-parse', 'HEAD')
 }
 
 async function makeApp(opts: {
@@ -96,13 +96,9 @@ async function makeApp(opts: {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fcfg-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('feature.config endpoints', () => {

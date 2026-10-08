@@ -8,6 +8,7 @@ import { canonicalKindName } from '../apps/web-server/src/shared/controlled-engl
 import { translateReadableSource, translateReadableTestFromAst } from '../apps/web-server/src/shared/readable-tests/translator'
 import type { ReadableStoryItem } from '../shared/readable-tests/types'
 import { englishLines } from '../shared/readable-tests/source-lines'
+import { errorMessage } from '../shared/lib/error-message'
 
 export interface EnglishAuditIssue {
   file: string
@@ -118,7 +119,7 @@ export function auditEnglishSource(file: string, text: string): EnglishSourceAud
       result.represented += audit.represented
       result.issues.push(...audit.issues)
     } catch (error) {
-      result.issues.push({ file, surface, line: 1, column: 1, syntaxKind: 'TranslationError', reason: 'translation-error', message: error instanceof Error ? error.message : String(error) })
+      result.issues.push({ file, surface, line: 1, column: 1, syntaxKind: 'TranslationError', reason: 'translation-error', message: errorMessage(error) })
     }
   }
   inspect('file', source.statements)

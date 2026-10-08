@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore, type FlightStore } from './store'
 import {
@@ -33,17 +32,11 @@ import {
   type FlightOptions,
   type FlightStageKey,
 } from '../../../../../../shared/flights/types'
-import {
-  bankStageActivity,
-  buildStageContext,
-  checkStageEntry,
-  firstOpenStageIndex,
-  resetStagesForRestart,
-  startStageTiming,
-  type StageAdapter,
-  type StageAdapters,
-  type StageOutcome,
-} from './flight-stages'
+import { bankStageActivity, buildStageContext, checkStageEntry, firstOpenStageIndex, resetStagesForRestart, startStageTiming, type StageAdapters, type StageOutcome } from './flight-stages'
+import { allDoneAdapters } from './__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-')
 
 let tmpDir: string
 
@@ -52,30 +45,16 @@ let store: FlightRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 
 const now = () => '2026-01-01T00:00:00Z'
 
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
-
-const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
-  teardown: () => null,
-  run: async (ctx) => {
-    calls?.push(ctx.manifest().currentStage as FlightStageKey)
-    return { kind: 'done' }
-  },
-})
-
-function allDone(calls?: FlightStageKey[]): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((k) => [k, doneAdapter(calls)])) as StageAdapters
-}
 
 function deps(adapters: StageAdapters): FlightConductorDeps {
   return { store, adapters, now, newFlightId: ids }
@@ -120,9 +99,9 @@ describe('stage selection and entry validation', () => {
   })
 
   it('deduplicates immutable activity sessions and merges only supplied flight links', async () => {
-    const started = startFlight(args('/repo/activity'), deps(allDone()))
+    const started = startFlight(args('/repo/activity'), deps(allDoneAdapters()))
     await started.completion
-    const ctx = buildStageContext(started.manifest.flightId, 'docs', new AbortController().signal, deps(allDone()))
+    const ctx = buildStageContext(started.manifest.flightId, 'docs', new AbortController().signal, deps(allDoneAdapters()))
     const session = { sidecar: 'docs-session-001', label: 'Requirements', startedAt: now() }
 
     ctx.addAgentSession(session)
@@ -136,7 +115,7 @@ describe('stage selection and entry validation', () => {
   })
 
   it('resets an incomplete legacy stage list without attempting to read missing session history', async () => {
-    const started = startFlight(args('/repo/legacy-reset'), deps(allDone()))
+    const started = startFlight(args('/repo/legacy-reset'), deps(allDoneAdapters()))
     await started.completion
     const prior = store.get(started.manifest.flightId)!
     const legacy = {
@@ -147,7 +126,7 @@ describe('stage selection and entry validation', () => {
           ? { ...stage, agentSessions: [{ sidecar: 'run-attempt-001', label: 'old run', startedAt: now() }] }
           : stage),
     }
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({ kind: 'done' }),
@@ -162,7 +141,7 @@ describe('stage selection and entry validation', () => {
   })
 
   it('rejects unsupported and unknown entries, while forwarding validated entry links', () => {
-    const plainDeps = deps(allDone())
+    const plainDeps = deps(allDoneAdapters())
     expect(() => checkStageEntry({ ...args(), fromStage: 'not-a-stage' as FlightStageKey }, plainDeps, null)).toThrow('unknown stage')
     expect(checkStageEntry({ ...args(), fromStage: 'similarity' }, plainDeps, null)).toBeUndefined()
     expect(() => checkStageEntry({ ...args(), fromStage: 'docs' }, plainDeps, null)).toThrow('stage entry is not supported')
@@ -181,7 +160,7 @@ describe('stage selection and entry validation', () => {
 describe('jump', () => {
   it('jumps forward without evidence (no evidence field is written)', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     adapters.similarity = {
       teardown: () => null,
       run: async () => {
@@ -199,7 +178,7 @@ describe('jump', () => {
 
   it('skips the stages between a jump and its target (similarity rerun → run)', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     adapters.similarity = {
       teardown: () => null,
       run: async (ctx) => {
@@ -223,7 +202,7 @@ describe('jump', () => {
   })
 
   it('treats a backwards jump as a machine bug and parks the flight', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = { teardown: () => null, run: async () => ({ kind: 'jump', to: 'scout', skipReason: 'nope' }) }
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
@@ -236,7 +215,7 @@ describe('jump', () => {
 describe('rewind outcome', () => {
   it('re-opens the target stage and everything up to the current one, then re-runs from the target', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     let scaffoldRuns = 0
     adapters.scaffold = {
       teardown: () => null,
@@ -257,7 +236,7 @@ describe('rewind outcome', () => {
   })
 
   it('a forward rewind target is illegal and parks the flight failed-stage', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'rewind', to: 'run', reason: 'nope' }),
@@ -276,10 +255,10 @@ describe('rewind outcome', () => {
 
 describe('reopenStages', () => {
   it.each([true, false])('reopens downstream stages with an injected clock: %s', async (injectedClock) => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const before = Date.now()
-    const d = deps(allDone())
+    const d = deps(allDoneAdapters())
     const reopened = reopenStages(manifest.flightId, ['docs', 'prd-summary', 'specs-coverage'], injectedClock ? d : { ...d, now: undefined })!
     if (!injectedClock) {
       expect(Date.parse(reopened.updatedAt)).toBeGreaterThanOrEqual(before)
@@ -298,7 +277,7 @@ describe('reopenStages', () => {
   })
 
   it('chooses the earliest requested stage and clears the run evidence it invalidates', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     store.save({
       ...store.get(manifest.flightId)!,
@@ -306,7 +285,7 @@ describe('reopenStages', () => {
       runVerdict: 'failed',
     })
 
-    const reopened = reopenStages(manifest.flightId, ['run', 'docs'], deps(allDone()))!
+    const reopened = reopenStages(manifest.flightId, ['run', 'docs'], deps(allDoneAdapters()))!
 
     expect(reopened.currentStage).toBe('docs')
     expect(reopened.links).toBeUndefined()
@@ -316,7 +295,7 @@ describe('reopenStages', () => {
   })
 
   it('keeps run evidence when only the evaluation export is reopened', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const saved = store.get(manifest.flightId)!
     store.save({
@@ -325,7 +304,7 @@ describe('reopenStages', () => {
       runVerdict: 'passed',
     })
 
-    const reopened = reopenStages(manifest.flightId, ['evaluation-export'], deps(allDone()))!
+    const reopened = reopenStages(manifest.flightId, ['evaluation-export'], deps(allDoneAdapters()))!
 
     expect(reopened.links).toEqual({ runId: 'run-1' })
     expect(reopened.runVerdict).toBe('passed')
@@ -333,11 +312,11 @@ describe('reopenStages', () => {
     expect(reopened.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
 
     store.save({ ...saved, links: undefined })
-    expect(reopenStages(manifest.flightId, ['evaluation-export'], deps(allDone()))?.links).toBeUndefined()
+    expect(reopenStages(manifest.flightId, ['evaluation-export'], deps(allDoneAdapters()))?.links).toBeUndefined()
   })
 
   it('keeps the run and evaluation export when only portify is reopened', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     store.save({
       ...store.get(manifest.flightId)!,
@@ -345,7 +324,7 @@ describe('reopenStages', () => {
       runVerdict: 'passed',
     })
 
-    const reopened = reopenStages(manifest.flightId, ['portify'], deps(allDone()))!
+    const reopened = reopenStages(manifest.flightId, ['portify'], deps(allDoneAdapters()))!
 
     expect(reopened.links).toEqual({ runId: 'run-1', evaluationTaskId: 'export-1' })
     expect(reopened.runVerdict).toBe('passed')
@@ -354,18 +333,18 @@ describe('reopenStages', () => {
   })
 
   it('is a no-op on an active flight (the running conductor owns it)', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
-    expect(reopenStages(manifest.flightId, ['docs'], deps(allDone()))).toBeNull()
+    expect(reopenStages(manifest.flightId, ['docs'], deps(allDoneAdapters()))).toBeNull()
   })
 
   it('is a no-op on an unknown flight or empty key set', async () => {
-    expect(reopenStages('nope', ['docs'], deps(allDone()))).toBeNull()
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    expect(reopenStages('nope', ['docs'], deps(allDoneAdapters()))).toBeNull()
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
-    expect(reopenStages(manifest.flightId, [], deps(allDone()))).toBeNull()
+    expect(reopenStages(manifest.flightId, [], deps(allDoneAdapters()))).toBeNull()
   })
 })
 
@@ -492,7 +471,7 @@ describe('restart wipe (R78)', () => {
   })
 
   it('a jump preserves the earlier stages\' evidence — not just their status', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.similarity = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { scanned: 2 } }) }
     const d: FlightConductorDeps = { ...deps(adapters), validateStageEntry: () => null }
     const first = startFlight(args(), d)
@@ -509,7 +488,7 @@ describe('restart wipe (R78)', () => {
 
   it('reset reads the PRIOR record — the old links survive into its ctx', async () => {
     let seenRunId: string | undefined
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.run = {
       teardown: () => null,
       run: async () => ({ kind: 'done' }),
@@ -529,7 +508,7 @@ describe('restart wipe (R78)', () => {
   it('gives a reset an inert context — logging, progress, and patches are no-ops', async () => {
     // The wipe runs outside a drive, so a reset that narrates its work must not
     // write to the record it is about to replace.
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     let called = 0
     adapters.docs = {
       teardown: () => null,
@@ -559,10 +538,10 @@ describe('restart wipe (R78)', () => {
   })
 
   it('a redo with feedback but no target stage attaches the note to the first stage', async () => {
-    const first = startFlight(args(), deps(allDone()))
+    const first = startFlight(args(), deps(allDoneAdapters()))
     await first.completion
 
-    const redone = redoFlight(first.manifest.flightId, deps(allDone()), { feedback: '  start over properly  ' })
+    const redone = redoFlight(first.manifest.flightId, deps(allDoneAdapters()), { feedback: '  start over properly  ' })
     await redone.completion
 
     // Both the note target and the ask-here marker default to stage one.
@@ -573,14 +552,14 @@ describe('restart wipe (R78)', () => {
   it('a jump over a stage the prior record never recorded marks it skipped', async () => {
     // Records written before a stage existed lack its row; the jump has to
     // synthesise a stage-entry skip rather than leave a hole in the rail.
-    const first = startFlight(args(), deps(allDone()))
+    const first = startFlight(args(), deps(allDoneAdapters()))
     await first.completion
     const prior = store.get(first.manifest.flightId)!
     store.save({ ...prior, stages: prior.stages.filter((s) => s.key !== 'scaffold') })
 
     const redone = redoFlight(
       first.manifest.flightId,
-      { ...deps(allDone()), validateStageEntry: () => null },
+      { ...deps(allDoneAdapters()), validateStageEntry: () => null },
       { fromStage: 'docs' },
     )
     await redone.completion
@@ -590,21 +569,21 @@ describe('restart wipe (R78)', () => {
   })
 
   it('resume replays nothing when the record has no open stage left', async () => {
-    const first = startFlight(args(), deps(allDone()))
+    const first = startFlight(args(), deps(allDoneAdapters()))
     await first.completion
     // Every stage settled, but parked — there is no stage whose answer could
     // be replayed, so resume must not read one off index -1.
     const done = store.get(first.manifest.flightId)!
     store.save({ ...done, status: 'paused', pauseReason: 'user' })
 
-    const resumed = resumeFlight(first.manifest.flightId, deps(allDone()))
+    const resumed = resumeFlight(first.manifest.flightId, deps(allDoneAdapters()))
     await resumed.completion
 
     expect(store.get(first.manifest.flightId)!.status).toBe('done')
   })
 
   it('a throwing reset never blocks the restart (best-effort, like interrupt)', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({ kind: 'done' }),

@@ -1,16 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { testReviewRoutes } from './test-review'
 import type { TestFileReview } from '../../../../../../shared/test-review'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-full-review-')
 
 let root: string
 let suite: string
 let app: FastifyInstance
-const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe' })
 const before = `import { test, expect } from '@playwright/test'
 const sharedSetup = 'keep this context'
 test('reads own scope', async ({ request }) => {
@@ -25,15 +26,15 @@ test('reads own scope', async ({ request }) => {
 `
 const after = before.replace('toEqual([])', 'toEqual(["unexpected"])')
 beforeEach(async () => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-full-review-')))
+  root = tempDir()
   suite = path.join(root, 'features/alpha'); fs.mkdirSync(path.join(suite, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(suite, 'feature.config.cjs'), `module.exports = { config: { name: 'alpha', featureDir: __dirname, envs: [], repos: [] } }`)
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
-  git('init', '-q'); git('config', 'user.email', 'test@example.test'); git('config', 'user.name', 'Test'); git('add', '.'); git('commit', '-qm', 'baseline')
+  initGitRepo(root)
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), after)
   app = Fastify(); await testReviewRoutes(app, { featuresDir: path.join(root, 'features'), logsDir: path.join(root, 'logs') })
 })
-afterEach(async () => { vi.restoreAllMocks(); await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); await app.close() })
 const get = (query = 'file=e2e/a.spec.ts') => app.inject(`/api/features/alpha/test-review?${query}`)
 it('returns full source and source-linked English from the same committed/current versions', async () => {
   const response = await get(); expect(response.statusCode).toBe(200)
@@ -85,7 +86,7 @@ it('rejects symlink escapes even for missing files below an existing link', asyn
 })
 it('re-reads edits and committed baselines; commit clears the comparison but not snapshot differences', async () => {
   expect((await get()).json<TestFileReview>().patch).not.toBe('')
-  git('add', '.'); git('commit', '-qm', 'accept edits')
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'accept edits')
   expect((await get()).json<TestFileReview>().patch).toBe('')
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
   expect((await get()).json<TestFileReview>().after.source).toBe(before)
@@ -97,7 +98,7 @@ it('summarises which tests changed and how, without the full review context', as
   expect((await get('file=e2e/a.spec.ts&summary=true')).json())
     .toEqual({ changed: true, affectedTests: ['reads own scope'], verdict: 'unclassifiable' })
   expect((await get('file=e2e/a.spec.ts&summary=true')).json()).not.toHaveProperty('patch')
-  git('add', '.'); git('commit', '-qm', 'accept edits')
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'accept edits')
   expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: false })
 })
 it('attributes an edit outside every test body to all tests in the file', async () => {
@@ -128,22 +129,22 @@ it.each([
   { name: 'a suite that is not in a repository at all', init: false },
   { name: 'a repository with nothing committed yet', init: true },
 ])('refuses to invent a committed baseline for $name', async ({ init }) => {
-  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-nobase-')))
+  const bare = tempDir('cl-review-nobase-')
   const dir = path.join(bare, 'features/alpha'); fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'feature.config.cjs'), `module.exports = { config: { name: 'alpha', featureDir: __dirname, envs: [], repos: [] } }`)
   fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), after)
-  if (init) execFileSync('git', ['init', '-q'], { cwd: bare, stdio: 'pipe' })
+  if (init) git(bare, 'init', '-q')
   const bareApp = Fastify()
   await testReviewRoutes(bareApp, { featuresDir: path.join(bare, 'features'), logsDir: path.join(bare, 'logs') })
   try {
     const response = await bareApp.inject('/api/features/alpha/test-review?file=e2e/a.spec.ts')
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toContain('No committed baseline')
-  } finally { await bareApp.close(); fs.rmSync(bare, { recursive: true, force: true }) }
+  } finally { await bareApp.close() }
 })
 it.each([
-  { name: 'the commit’s tree', object: () => git('rev-parse', 'HEAD^{tree}'), message: 'Could not read the committed test tree' },
-  { name: 'the file’s blob', object: () => git('rev-parse', 'HEAD:features/alpha/e2e/a.spec.ts'), message: 'Could not read the committed test file' },
+  { name: 'the commit’s tree', object: () => git(root, 'rev-parse', 'HEAD^{tree}'), message: 'Could not read the committed test tree' },
+  { name: 'the file’s blob', object: () => git(root, 'rev-parse', 'HEAD:features/alpha/e2e/a.spec.ts'), message: 'Could not read the committed test file' },
 ])('fails loudly when git cannot hand back $name, rather than showing the file as newly added', async ({ object, message }) => {
   // A repository missing objects it still references — a partial clone, or a
   // pruned one. Treating git's failure as "no committed version" would render

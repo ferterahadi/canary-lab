@@ -47,6 +47,7 @@ import {
   readFileOrNull,
   restoreConfig,
 } from './portify-overlay-capture'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 export interface PrepareWorkflowContext {
   deps: PortifyRunnerDeps
@@ -326,10 +327,7 @@ export async function prepareWorkflow(
         // Fresh config: the slots recorded alongside the patch must be the ones
         // this port-ification just declared, not the pre-edit set.
         const repos = await captureOverlayRepos(state, deps.loadFeatures().find((f) => f.name === feature.name) ?? feature)
-        fs.writeFileSync(
-          paths.pendingOverlayPath,
-          JSON.stringify({ version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig }, null, 2),
-        )
+        atomicWriteJson(paths.pendingOverlayPath, { version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig })
       } catch { /* best-effort — the live save path never needs the capture */ }
     },
 

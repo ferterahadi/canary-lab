@@ -1,7 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   snapshotFeatureRepos,
@@ -10,6 +9,7 @@ import {
 } from './feature-repo-diff'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The snapshot/diff pair is ground truth for what the heal agent edited — it
 // feeds the journal's fix.file line and the orchestrator's restart planning, so
@@ -17,16 +17,7 @@ import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 // git working trees for that reason: a mocked git would prove nothing about
 // whether the pathspec scoping actually holds.
 
-const dirs: string[] = []
-afterEach(() => {
-  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
-})
-
-function tmp(): string {
-  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-frd-')))
-  dirs.push(d)
-  return d
-}
+const tmp = trackTempDirs('cl-frd-')
 
 const feature = (over: Partial<FeatureConfig>): FeatureConfig =>
   ({ name: 'demo', ...over }) as FeatureConfig

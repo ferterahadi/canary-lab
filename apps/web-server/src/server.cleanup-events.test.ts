@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { expect, it } from 'vitest'
 import { createServer } from './server'
@@ -7,9 +6,12 @@ import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import type { PortifyManifest } from './features/portify/logic/runtime/types'
 import { writeManifest, writeRunsIndex } from './features/runs/logic/runtime/manifest'
 import type { WorkspaceStreamFrame } from '../../../shared/workspace-events'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cleanup-server-')
 
 it('publishes cleanup changes from registered mutations to an already-open workspace socket', async () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-server-'))
+  const projectRoot = tempDir()
   const logsDir = path.join(projectRoot, 'logs')
   const runDir = path.join(logsDir, 'runs', 'example-run')
   fs.mkdirSync(runDir, { recursive: true })
@@ -35,6 +37,5 @@ it('publishes cleanup changes from registered mutations to an already-open works
   } finally {
     socket.terminate()
     await app.close()
-    fs.rmSync(projectRoot, { recursive: true, force: true })
   }
 }, 10_000)

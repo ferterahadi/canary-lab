@@ -1,13 +1,13 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
 const repo = path.resolve(import.meta.dirname, '..')
+const tempDir = trackTempDirs('wire-contract-')
 let temp: string
-beforeEach(() => { temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wire-contract-')) })
-afterEach(() => { fs.rmSync(temp, { recursive: true, force: true }) })
+beforeEach(() => { temp = tempDir() })
 
 // Feed deliberate source drift to the actual checker without modifying the checkout.
 it.each([

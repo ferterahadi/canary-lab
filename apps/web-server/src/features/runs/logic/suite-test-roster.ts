@@ -5,6 +5,7 @@ import path from 'path'
 import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
 import { listSpecFiles } from '../../../shared/feature-loader'
 import type { PlaywrightListEntry } from './playwright-list'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 export const SUITE_TEST_ROSTER_FILE = '.canary-suite-tests.json'
 
@@ -28,7 +29,7 @@ export function saveSuiteTestRoster(dir: string): void {
   const tests = sourceTestRoster(dir).map((test) => ({
     ...test, file: path.relative(dir, test.file), originFile: path.relative(dir, test.originFile),
   }))
-  fs.writeFileSync(path.join(dir, SUITE_TEST_ROSTER_FILE), JSON.stringify(tests))
+  atomicWriteJson(path.join(dir, SUITE_TEST_ROSTER_FILE), tests)
 }
 
 export function savedSuiteTestRoster(dir: string): PlaywrightListEntry[] {

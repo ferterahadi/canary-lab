@@ -9,6 +9,8 @@ import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, WorktreeGlyph } from './CleanupTableParts'
 import { SEVEN_DAYS_MS, WORKTREE_OWNER_LABEL } from './cleanup-rows'
+import { displayError } from '@/shared/api/error-message'
+import { pluralSuffix } from '@shared/lib/plural'
 
 // Self-contained worktree inventory: every git worktree canary-lab created
 // under the logs dir (frozen-bug snapshots, run isolation, benchmark arms, and
@@ -34,7 +36,7 @@ export function WorktreesSection({ now }: { now: number }) {
       // `window.prompt` this replaced was really being used for.
       if (!r.opened) setActionError(`Could not launch your editor. The worktree is at ${wt.path}`)
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
+      setActionError(displayError(e))
     }
   }
   const remove = async (wt: CleanupWorktree): Promise<void> => {
@@ -183,7 +185,7 @@ export function WorktreesSection({ now }: { now: number }) {
         confirmLabel="Remove"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void doRemoveSelected()}
-        message={<>Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{selectedTargets.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.</>}
+        message={<>Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{pluralSuffix(selectedTargets.length)}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.</>}
       />
 
       <ConfirmModal

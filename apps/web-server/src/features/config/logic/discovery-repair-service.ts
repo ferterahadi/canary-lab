@@ -11,6 +11,8 @@ import { envsetProcessEnv } from './envset-process-env'
 import { buildDiscoveryRepairPrompt } from './discovery-repair-prompt'
 import { discoveryRepairStore } from './discovery-repair-store'
 import { runDiscoveryRepairAgent } from './discovery-repair-agent'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 interface Dependencies {
   projectRoot: string
@@ -66,7 +68,7 @@ export class DiscoveryRepairService {
   private detach(repair: DiscoveryRepair, work: () => Promise<void>): void {
     const completion = work().catch((err: unknown) => {
       const current = this.get(repair.id)
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       this.save({ ...current, status: 'failed', endedAt: new Date().toISOString(), diagnostic: message, message, log: [...current.log, `[Canary] ${message}`] })
     })
     this.pending.add(completion)
@@ -171,7 +173,7 @@ export class DiscoveryRepairService {
     const repair = this.get(id)
     const missing = this.checkRoster(repair, tests)
     if (missing) throw new Error(missing)
-    fs.writeFileSync(path.join(this.store.recordDir(id), 'discovered-tests.json'), JSON.stringify(tests, null, 2))
+    atomicWriteJson(path.join(this.store.recordDir(id), 'discovered-tests.json'), tests)
     this.save({ ...repair, status: 'succeeded', endedAt: new Date().toISOString(), discoveredCount: tests.length, message: `${tests.length} tests discovered`, log: [...repair.log, `[Canary] ${tests.length} tests discovered. Test bodies were not executed.`] })
   }
 }

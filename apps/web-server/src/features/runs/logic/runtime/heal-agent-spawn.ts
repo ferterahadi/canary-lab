@@ -4,6 +4,7 @@ import { HEAL_MODELS, effortArgs } from '../../../agent-sessions/logic/agent-mod
 import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
 import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // Heal-agent command builders for the web-server orchestrator. The orchestrator
 // runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter
@@ -54,8 +55,7 @@ export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: strin
       },
     },
   }
-  fs.mkdirSync(path.dirname(configFilePath), { recursive: true })
-  fs.writeFileSync(configFilePath, JSON.stringify(cfg, null, 2))
+  atomicWriteJson(configFilePath, cfg)
   return `--mcp-config ${JSON.stringify(configFilePath)}`
 }
 

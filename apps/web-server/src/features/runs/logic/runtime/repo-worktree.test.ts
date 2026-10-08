@@ -1,26 +1,23 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, listUntracked, removeWorktree, sanitizeRepoFileName } from './repo-worktree'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('wt-')
 let root: string
 let repo: string
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-'))
+  root = tempDir()
   repo = path.join(root, 'app')
   fs.mkdirSync(path.join(repo, 'features', 'foo'), { recursive: true })
   fs.writeFileSync(path.join(repo, 'features', 'foo', 'server.ts'), 'export const x = 1\n')
   initGitRepo(repo, { commit: 'empty' })
   execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'ignore' })
   execFileSync('git', ['commit', '-q', '-m', 'add files'], { cwd: repo, stdio: 'ignore' })
-})
-
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 describe('isGitWorktreeCapable', () => {

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { PaneBroker } from './logic/pane-broker'
 import { RunStore } from './logic/run-store'
@@ -14,6 +13,10 @@ import type { PtyFactory } from './logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
 import type { makeAttachRunStreams } from './run-stream-wiring'
 import { makeRestartLocalHeal } from './restart-local-heal'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-restart-heal-')
 
 // `pickAvailableHealAgent` shells out to look for `claude` / `codex` on PATH,
 // which is the one edge a unit test can't reproduce. Everything ELSE in
@@ -82,7 +85,7 @@ let logsDir: string
 afterEach(() => vi.restoreAllMocks())
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-restart-heal-')))
+  tmpDir = tempDir()
   projectRoot = path.join(tmpDir, 'project')
   featuresDir = path.join(projectRoot, 'features')
   logsDir = path.join(projectRoot, 'logs')
@@ -104,14 +107,7 @@ interface FeatureSpec {
 
 /** Real on-disk feature config — `loadFeatures` requires and re-reads it. */
 function writeFeature(name: string, spec: FeatureSpec = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  const config = { name, description: 'd', ...spec }
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { ...${JSON.stringify(config)}, featureDir: __dirname } }`,
-  )
-  return dir
+  return writeFeatureFixture(featuresDir, name, spec)
 }
 
 function seedRun(runId: string, patch: Partial<RunManifest> = {}): string {

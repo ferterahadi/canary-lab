@@ -1,7 +1,8 @@
 import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
-import { formatElapsedSeconds } from '@/shared/lib/format'
+import { firstLineOf, formatElapsedSeconds, truncateText } from '@/shared/lib/format'
 import type { CodeLanguage } from './code-highlighter'
 import type { ExternalClientKind } from './external-client-branding'
+import { plural } from '@shared/lib/plural'
 
 // What one Activity row says at rest, derived from the entry it stands for.
 // Every row — a conductor line, an agent event, the task prompt, an external
@@ -32,16 +33,6 @@ function showsAll(text: string, summary: string): boolean {
 
 export const LOG_KIND_LABEL: Record<LogKind, string> = { system: 'System', agent: 'Agent', prompt: 'Prompt' }
 
-/** The first non-blank line, trimmed and capped — a row is one line tall. */
-export function firstLineOf(text: string, max = 160): string {
-  const line = text.split('\n').find((l) => l.trim().length > 0)?.trim() ?? ''
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line
-}
-
-export function shortSession(id: string): string {
-  return id.length > 12 ? id.slice(0, 8) : id
-}
-
 /** An MCP tool's full name carries its server (`mcp__canary_lab__get_flight`);
  *  the row has room for the verb only. The modal still shows the full name. */
 export function toolVerb(name: string): string {
@@ -58,10 +49,9 @@ export function summarizeInput(input: unknown): string {
   const obj = input as Record<string, unknown>
   for (const key of TARGET_KEYS) {
     const value = obj[key]
-    if (typeof value === 'string' && value) return value.length > 80 ? `${value.slice(0, 79)}…` : value
+    if (typeof value === 'string' && value) return truncateText(value, 80)
   }
-  const json = JSON.stringify(obj)
-  return json.length > 80 ? `${json.slice(0, 79)}…` : json
+  return truncateText(JSON.stringify(obj), 80)
 }
 
 export function formatJson(value: unknown): string {
@@ -84,17 +74,10 @@ export function eventSpan(events: readonly AgentSessionEvent[]): string {
   return formatElapsedSeconds((Math.max(...stamps) - Math.min(...stamps)) / 1000)
 }
 
-export function isoSpan(startIso: string | undefined, endIso: string | undefined): string | null {
-  const start = Date.parse(startIso ?? '')
-  const end = Date.parse(endIso ?? '')
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null
-  return formatElapsedSeconds((end - start) / 1000)
-}
-
 export function subagentSummary(threads: readonly SubagentThread[]): string {
   const [first] = threads
   const events = first.events.filter(Boolean)
-  const parts = [first.agentType, first.description, `${events.length} event${events.length === 1 ? '' : 's'}`, eventSpan(events)]
+  const parts = [first.agentType, first.description, plural(events.length, 'event'), eventSpan(events)]
   const more = threads.length > 1 ? ` · +${threads.length - 1} more` : ''
   return parts.filter(Boolean).join(' · ') + more
 }

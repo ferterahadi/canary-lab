@@ -1,6 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { RunStore } from '../runs/logic/run-store'
@@ -30,6 +29,9 @@ import { agentProbeRoutes } from './routes/agent-probe'
 import { onboardingRoutes } from './routes/onboarding'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-config-reg-')
 
 let tmpDir: string
 let logsDir: string
@@ -59,7 +61,7 @@ const workspaceEvents: WorkspaceEventPublisher = {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-config-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

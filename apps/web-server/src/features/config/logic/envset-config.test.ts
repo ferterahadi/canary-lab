@@ -1,17 +1,19 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFeatureConfig } from '../../../shared/config-ast'
 import { listEnvFolders, readEnvsetsConfig, syncEnvsInConfig, writeEnvsetsConfig } from './envset-config'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-envset-config-')
 
 let dir: string
 let envsets: string
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-envset-config-'))
+  dir = tempDir()
   envsets = path.join(dir, 'envsets')
 })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(dir, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('treats missing metadata as optional and preserves unknown fields on round trip', () => {
   expect(readEnvsetsConfig(envsets)).toEqual({})

@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assertNoPendingRunReview, pendingRunReview } from './run-review-gate'
@@ -7,13 +6,13 @@ import { suiteReviewRevision } from './suite-review'
 import type { RunStore } from '../run-store'
 import type { RunDetail } from '../../../../../../../shared/run-detail'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('canary-review-gate-')
+afterEach(() => { vi.restoreAllMocks() })
 
 function setup(status: RunManifest['status'] = 'aborted') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-gate-'))
-  roots.push(root)
+  const root = tempDir()
   const live = path.join(root, 'feature')
   const snapshot = path.join(root, 'run', 'suite')
   for (const dir of [live, snapshot]) {

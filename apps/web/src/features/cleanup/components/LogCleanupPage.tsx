@@ -6,12 +6,13 @@ import { useMemo, useState } from 'react'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as runsApi from '@/shared/api/runs'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
-import { PageHeader } from '@/shared/ui/PageHeader'
-import { ConfirmModal, useEscapeToClose } from '@/shared/ui/Overlays'
+import { FullScreenPage, PageHeader } from '@/shared/ui/PageHeader'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph, SortHeader } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
 import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
+import { pluralSuffix } from '@shared/lib/plural'
 
 interface Props {
   onClose: () => void
@@ -29,11 +30,6 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
   const { busy, error: actionError, execute } = useCleanupAction(refresh)
   const [confirm, setConfirm] = useState<{ action: 'trim' | 'delete'; ids: string[]; bytes: number } | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'folder', dir: 'desc' })
-  // The shared layered stack, not a second document listener: `ConfirmModal`
-  // pushes its own layer, so the innermost surface takes Escape and the page
-  // beneath stays put. A private listener here raced that — the reason the
-  // old one had to test `!confirm` by hand.
-  useEscapeToClose(onClose, !confirm)
 
   const rows = useMemo(() => (listing ? listingToRows(listing) : []), [listing])
   const { selected, clear, toggle, selectPreset } = useCleanupSelection(rows, (row) => row.runId, (row) => !row.active, inventory.confirmed)
@@ -97,7 +93,11 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
   const totals = listing?.totals
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
+    // The shared layered stack, not a second document listener: `ConfirmModal`
+    // pushes its own layer, so the innermost surface takes Escape and the page
+    // beneath stays put. A private listener here raced that — the reason the
+    // old one had to test `!confirm` by hand.
+    <FullScreenPage onClose={onClose} closeOnEscape={!confirm}>
       {/* The screen says what it is before it says which slice of it you are
           looking at. The tab strip used to sit alone where the name belongs,
           so cleanup was the one full-screen view with no title — the segmented
@@ -268,9 +268,9 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         onCancel={() => setConfirm(null)}
         onConfirm={() => { const c = confirm; setConfirm(null); if (c) void runAction(c.action, c.ids) }}
         message={confirm?.action === 'trim'
-          ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{confirm.ids.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
-          : <>Permanently delete <strong>{confirm?.ids.length}</strong> run{confirm?.ids.length === 1 ? '' : 's'} and their folders, reclaiming about <strong>{formatBytes(confirm?.bytes ?? 0)}</strong>. This cannot be undone.</>}
+          ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{pluralSuffix(confirm.ids.length)}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
+          : <>Permanently delete <strong>{confirm?.ids.length}</strong> run{pluralSuffix(confirm?.ids.length ?? 0)} and their folders, reclaiming about <strong>{formatBytes(confirm?.bytes ?? 0)}</strong>. This cannot be undone.</>}
       />
-    </div>
+    </FullScreenPage>
   )
 }

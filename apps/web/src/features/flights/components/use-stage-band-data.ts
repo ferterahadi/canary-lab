@@ -11,7 +11,7 @@ import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import type { CoverageLedger } from '@shared/coverage/types'
 import type { RunDetail } from '@shared/run-detail'
-import { asRecord } from './FeatureSetupPanel'
+import { asRecord } from '../lib/as-record'
 import { evidenceOf, portifyWorkflowId, progressOf, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
 

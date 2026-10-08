@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { RepoCard } from './RepoCard'
 import type { RepoSlice } from './repo-slice'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 const api = vi.hoisted(() => ({ getGitRemote: vi.fn(), checkPathExists: vi.fn(), cloneRepository: vi.fn() }))
 const folder = vi.hoisted(() => ({ choose: (_: string) => {}, clone: (_: string) => {} }))
 vi.mock('@/shared/api/workspace', () => ({
@@ -26,12 +27,7 @@ function Host({ cloneUrl }: { cloneUrl?: string }) {
   edit = setRepo
   return <RepoCard feature="suite" repo={repo} repoLookupName="app" rootEnvs={[]} activeRun={false} onChange={setRepo} onRemove={() => {}} />
 }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 const button = (label: string) => [...container.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)!
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

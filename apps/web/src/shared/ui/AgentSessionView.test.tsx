@@ -388,7 +388,7 @@ describe('AgentSessionView external session', () => {
     const header = container.querySelector('[data-testid="external-session-header"]')
     expect(header?.textContent).toContain('External agent session')
     expect(container.querySelector('[data-testid="external-session-client"]')?.textContent).toBe('Claude')
-    expect(container.querySelector('[data-testid="external-session-id"]')?.textContent).toBe('649945f5')
+    expect(container.querySelector('[data-testid="external-session-id"]')?.textContent).toBe('649945…1e88')
     expect(container.querySelector('[data-testid="external-session-id"]')?.getAttribute('title'))
       .toBe('649945f5-79b7-43ae-81c9-be02b0911e88')
     expect(status()).toBe('Live · 1m 42s')

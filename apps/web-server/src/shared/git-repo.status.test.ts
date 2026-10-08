@@ -1,25 +1,21 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { checkoutBranch, getGitStatus, readWorkingTree } from './git-repo'
 import { fastForwardToUpstream } from './git-upstream'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+import { initGitRepo, git } from '../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-status-read-')
 
 let repo: string
-const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim()
 
 beforeEach(() => {
-  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-status-read-'))
-  git('init', '-b', 'main')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Test')
+  repo = tempDir()
   fs.writeFileSync(path.join(repo, 'tracked'), 'original\n')
-  git('add', 'tracked')
-  git('commit', '-m', 'fixture')
-  git('branch', 'other')
+  initGitRepo(repo, { branch: 'main' })
+  git(repo, 'branch', 'other')
 })
-afterEach(() => { fs.rmSync(repo, { recursive: true, force: true }) })
 
 it('does not refresh index metadata while detecting clean, modified and untracked files', async () => {
   const index = path.join(repo, '.git', 'index')
@@ -44,15 +40,15 @@ it('does not refresh index metadata while detecting clean, modified and untracke
 it('rejects unreadable evidence before checkout or upstream update, and recovers after repair', async () => {
   const index = path.join(repo, '.git', 'index')
   const bytes = fs.readFileSync(index)
-  const head = git('rev-parse', 'HEAD')
+  const head = git(repo, 'rev-parse', 'HEAD')
   fs.writeFileSync(index, 'invalid index')
   const events = { publish: (event: unknown) => { announcements.push(event) } }
   const announcements: unknown[] = []
   await expect(getGitStatus(repo)).rejects.toMatchObject({ statusCode: 500, message: expect.stringContaining('status --porcelain') })
   await expect(checkoutBranch(repo, 'other', events)).rejects.toMatchObject({ statusCode: 500 })
   await expect(fastForwardToUpstream(repo)).rejects.toMatchObject({ statusCode: 500 })
-  expect(git('branch', '--show-current')).toBe('main')
-  expect(git('rev-parse', 'HEAD')).toBe(head)
+  expect(git(repo, 'branch', '--show-current')).toBe('main')
+  expect(git(repo, 'rev-parse', 'HEAD')).toBe(head)
   expect(fs.readFileSync(index, 'utf8')).toBe('invalid index')
   expect(fs.readFileSync(path.join(repo, 'tracked'), 'utf8')).toBe('original\n')
   expect(announcements).toEqual([])
@@ -63,11 +59,11 @@ it('rejects unreadable evidence before checkout or upstream update, and recovers
 
 it('preserves porcelain ordering for staged, unstaged, untracked, deleted and renamed files', async () => {
   for (const name of ['deleted', 'renamed', 'staged']) fs.writeFileSync(path.join(repo, name), name)
-  git('add', '.'); git('commit', '-m', 'status variants')
+  git(repo, 'add', '.'); git(repo, 'commit', '-m', 'status variants')
   fs.unlinkSync(path.join(repo, 'deleted'))
-  git('mv', 'renamed', 'renamed-new')
+  git(repo, 'mv', 'renamed', 'renamed-new')
   fs.writeFileSync(path.join(repo, 'staged'), 'staged edit')
-  git('add', 'staged')
+  git(repo, 'add', 'staged')
   fs.writeFileSync(path.join(repo, 'tracked'), 'unstaged edit')
   fs.writeFileSync(path.join(repo, 'untracked'), 'untracked')
   expect(await readWorkingTree(repo, 'repository')).toEqual({
@@ -82,7 +78,7 @@ it('limits directory inspection to its subtree while repository inspection inclu
   fs.mkdirSync(service)
   const file = path.join(service, 'tracked')
   fs.writeFileSync(file, 'service')
-  git('add', '.'); git('commit', '-m', 'nested service')
+  git(repo, 'add', '.'); git(repo, 'commit', '-m', 'nested service')
   const index = path.join(repo, '.git', 'index')
   const bytes = fs.readFileSync(index)
   const modified = fs.statSync(index, { bigint: true }).mtimeNs
@@ -98,16 +94,14 @@ it('limits directory inspection to its subtree while repository inspection inclu
 })
 
 it('reports failed inspections rather than clean evidence for missing paths, non-repositories and corrupt indexes', async () => {
-  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-status-plain-'))
-  try {
-    for (const scope of ['directory', 'repository'] as const) {
-      for (const cwd of [plain, path.join(plain, 'missing')]) {
-        const result = await readWorkingTree(cwd, scope)
-        expect(result).toMatchObject({ ok: false, result: { code: expect.any(Number), stdout: '', stderr: expect.any(String) } })
-        if (!result.ok) expect(result.result.code).not.toBe(0)
-      }
-      fs.writeFileSync(path.join(repo, '.git', 'index'), 'corrupt index')
-      expect(await readWorkingTree(repo, scope)).toMatchObject({ ok: false, result: { code: 128, stderr: expect.stringContaining('index') } })
+  const plain = tempDir('cl-status-plain-')
+  for (const scope of ['directory', 'repository'] as const) {
+    for (const cwd of [plain, path.join(plain, 'missing')]) {
+      const result = await readWorkingTree(cwd, scope)
+      expect(result).toMatchObject({ ok: false, result: { code: expect.any(Number), stdout: '', stderr: expect.any(String) } })
+      if (!result.ok) expect(result.result.code).not.toBe(0)
     }
-  } finally { fs.rmSync(plain, { recursive: true, force: true }) }
+    fs.writeFileSync(path.join(repo, '.git', 'index'), 'corrupt index')
+    expect(await readWorkingTree(repo, scope)).toMatchObject({ ok: false, result: { code: 128, stderr: expect.stringContaining('index') } })
+  }
 })

@@ -1,12 +1,14 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { buildFlightRouteContext } from './flight-route-context'
 
 import type { PlanFeaturesTask, FlightManifest } from '../../../../../../shared/flights/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-ctx-')
 
 // `buildFlightRouteContext` is where BOTH flight stores get attached to the
 // workspace bus. Nothing else does it: the routes, the MCP tools and the
@@ -21,11 +23,7 @@ import type { PlanFeaturesTask, FlightManifest } from '../../../../../../shared/
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-ctx-')))
-})
-
-afterEach(() => {
-  fs.rmSync(logsDir, { recursive: true, force: true })
+  logsDir = tempDir()
 })
 
 async function settle(events: WorkspaceEvent[], type: WorkspaceEvent['type']): Promise<void> {

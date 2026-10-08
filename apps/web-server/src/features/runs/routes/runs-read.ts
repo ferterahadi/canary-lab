@@ -26,6 +26,7 @@ import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
 import { type RunProposedPr } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 const READABLE_LOGS_DIR = 'readable-logs'
 
@@ -125,7 +126,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     try {
       return { opened: true, path: target, editor: launchEditorDir(editor, target) }
     } catch (err) {
-      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: target, error: errorMessage(err) }
     }
   })
 

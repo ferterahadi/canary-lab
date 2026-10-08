@@ -12,6 +12,7 @@ import { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkp
 import { evaluationTaskId } from './StageFacts'
 import { externalMutationTooltip } from '../lib/external-work'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { displayError } from '@/shared/api/error-message'
 
 /** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance
  *  card's kicker line — beside the archive it fetches — and (R71/W1, `primary`)
@@ -103,7 +104,7 @@ export function CheckpointControls({
     setFailure(null)
     call()
       .then(() => onResponded())
-      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setFailure(displayError(err)))
       .finally(() => setBusy(false))
   }
   const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {

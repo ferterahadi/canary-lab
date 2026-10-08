@@ -15,7 +15,7 @@ import type { OrchestratorLike, StartRunOutcome } from './logic/run-registry'
 import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
-import { loadFeatures, findFeature } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
@@ -100,8 +100,7 @@ export function buildRunsRouteDeps(
       options?: StartRunOptions,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
-      const features = loadFeatures(featuresDir)
-      const feature = features.find((f) => f.name === featureName)
+      const feature = findFeature(featuresDir, featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
       if (!isBoot) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
       // A boot brings services up and runs no tests, so it declares no roster

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -10,19 +10,14 @@ import {
   resolveActiveServer,
   unregisterActiveServer,
 } from './active-servers'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-active-')
 function mkHome(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-active-')))
-  tmpDirs.push(dir)
-  return dir
+  return tempDir()
 }
 const alwaysAlive = () => true
 const alwaysDead = () => false
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
 
 describe('active-servers', () => {
   it('registers and reads back a live server', () => {

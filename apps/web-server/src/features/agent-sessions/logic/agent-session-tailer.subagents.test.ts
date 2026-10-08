@@ -1,23 +1,21 @@
 import type { AgentSessionEvent } from '../../../../../../shared/agent-session-types'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   locatorForAgentInDir,
   refForAgentSpawn,
   tailAgentSession,
 } from './agent-session-tailer'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('tailer-test-')
 
 let tmp: string
 
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tailer-test-'))
-})
-
-afterEach(() => {
-  try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+  tmp = tempDir()
 })
 
 // Wait for `predicate()` to return true, polling every `interval` ms.

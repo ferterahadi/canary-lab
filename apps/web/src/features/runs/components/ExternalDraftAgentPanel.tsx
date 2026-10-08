@@ -1,5 +1,6 @@
 import type { DraftRecord, ExternalDraftStage } from '@shared/draft-types'
-import { clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { shortSession } from '@/shared/lib/format'
 import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 interface Props {

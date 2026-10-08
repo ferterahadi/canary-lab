@@ -1,11 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerHealFlowTools } from './heal-flow'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-heal-flow-')
 
 // The external heal-flow tools: claim/release/heartbeat, the blocking wait, the
 // per-cycle signal, and the hand-off back to a local heal mode.
@@ -63,12 +65,10 @@ function harness(over: Record<string, unknown> = {}) {
 const SESSION = { runId: 'run-1', session_id: 'sess-1', client_kind: 'claude' as const }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-heal-flow-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('claim_heal', () => {
   it('reports an unknown run by id', async () => {

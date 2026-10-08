@@ -3,6 +3,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { startPlanFeatures, PlanFeaturesStore } from './plan-features'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('plan-feat-')
 
 // The interesting seam here is the `deps.spawnAgent ?? defaultSpawnAgent`
 // fallback in runPlanAgent: every other caller injects a stub spawner, so the
@@ -14,14 +17,13 @@ describe('plan-features default spawner fallback', () => {
   let prevBin: string | undefined
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-feat-'))
+    tmpDir = tempDir()
     prevBin = process.env.CANARY_LAB_CLAUDE_BIN
   })
 
   afterEach(() => {
     if (prevBin === undefined) delete process.env.CANARY_LAB_CLAUDE_BIN
     else process.env.CANARY_LAB_CLAUDE_BIN = prevBin
-    fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
   it('uses defaultSpawnAgent when deps.spawnAgent is not injected', async () => {
@@ -74,8 +76,7 @@ describe('plan-features default spawner fallback', () => {
 describe('PlanFeaturesStore listener forwarding', () => {
   let dir: string
 
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-feat-ev-')) })
-  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+  beforeEach(() => { dir = tempDir('plan-feat-ev-') })
 
   const task = (taskId: string) => ({
     taskId,

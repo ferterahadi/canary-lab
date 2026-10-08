@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrPreflight } from '@/shared/api/runs'
 import { ProposePrDialog } from './ProposePrDialog'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const mocks = vi.hoisted(() => ({ getRunPrPreflight: vi.fn(), proposeRunPr: vi.fn() }))
 vi.mock('@/shared/api/runs', () => ({
@@ -75,12 +76,6 @@ describe('ProposePrDialog', () => {
   })
 })
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
 const confirm = () => container.querySelector<HTMLButtonElement>('[data-testid="propose-pr-confirm"]')!
 const clickLabel = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!.click()
 

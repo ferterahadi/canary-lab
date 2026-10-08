@@ -7,6 +7,7 @@ import * as configApi from '@/shared/api/config'
 import * as runsApi from '@/shared/api/runs'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { SettingsModal } from './SettingsModal'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -28,7 +29,7 @@ const render = () => act(async () => { root.render(<InvalidationProvider><Captur
 const input = (name: string) => element.querySelector<HTMLInputElement>(`[data-testid="${name}"]`)!
 const save = () => [...element.querySelectorAll('button')].find((b) => b.textContent === 'Save')!
 const codex = () => element.querySelector<HTMLInputElement>('input[name="healAgent"][value="codex"]')!
-function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks()
   element = document.createElement('div'); document.body.appendChild(element); root = createRoot(element)

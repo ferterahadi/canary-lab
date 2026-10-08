@@ -5,7 +5,6 @@
 // repository.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { RunContext } from './run-context'
@@ -13,6 +12,7 @@ import type { RunnerLog } from './runner-log'
 import { readManifest, writeManifest } from './manifest'
 import { FileRunStateSink } from './run-state-sink'
 import { FIX_CAPTURE_MAX_FILE_NAMES } from '../../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   snapshotWorkingTree: vi.fn(),
@@ -42,10 +42,11 @@ vi.mock('../../../portify/logic/runtime/git-ops', async (importOriginal) => ({
 const { captureFixBaseline, captureFixes, reversePortifyOverlay, startLiveFixCapture } = await import('./run-fix-capture')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-fixcap-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fixcap-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   h.listUntracked.mockResolvedValue(new Set<string>())
   h.runGit.mockResolvedValue({ code: 0, stdout: 'abc123\n', stderr: '' })
@@ -56,7 +57,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function fakeRunnerLog(): RunnerLog & { infos: string[]; warnings: string[] } {

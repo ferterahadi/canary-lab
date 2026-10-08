@@ -1,7 +1,6 @@
 import { newestFirst } from '../../../../../../shared/journal-order'
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   splitJournalSections,
@@ -9,6 +8,9 @@ import {
   parseStructured,
   readJournal,
 } from './journal-store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-jrnl-')
 
 const SAMPLE = `# Diagnosis Journal
 
@@ -41,7 +43,7 @@ const SAMPLE = `# Diagnosis Journal
 
 let tmpDir: string
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-jrnl-')))
+  tmpDir = tempDir()
 })
 
 describe('splitJournalSections', () => {

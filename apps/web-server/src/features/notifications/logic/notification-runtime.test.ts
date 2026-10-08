@@ -1,6 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createNotificationRuntime, NOTIFICATION_RECOVERY_MS } from './notification-runtime'
@@ -10,6 +9,9 @@ import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { FlightRunStore } from '../../flights/logic/store'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('notification-runtime-')
 
 let dir: string
 let runtime: ReturnType<typeof createNotificationRuntime>
@@ -21,7 +23,7 @@ let flight: FlightManifest
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 beforeEach(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notification-runtime-')))
+  dir = tempDir()
   const featuresDir = path.join(dir, 'features')
   fs.mkdirSync(featuresDir)
   const logsDir = path.join(dir, 'logs')
@@ -44,7 +46,6 @@ beforeEach(() => {
 afterEach(async () => {
   await runtime.dispose()
   vi.restoreAllMocks()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 it('starts reconciliation explicitly and settles the inbox from a Flight store event without a read request', async () => {

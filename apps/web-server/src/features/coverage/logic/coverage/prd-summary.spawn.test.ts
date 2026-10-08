@@ -1,7 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { summarizePrd, buildPrdSummaryPrompt } from './prd-summary'
 import { renderPrdSummaryMarkdown, readPrdSummary, PRD_SUMMARY_JSON } from './prd-summary-render'
@@ -12,6 +11,9 @@ import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
 import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 import { TEST_COLLECTION, VALID_STDOUT, collection, makeFakeChild } from './__fixtures__/prd-summary.spawn-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-prd-rec-')
 
 // summarizePrd is LLM-only: it never fabricates requirements from headings, so
 // every failure path below must REJECT. Which message it rejects with is the
@@ -181,16 +183,12 @@ describe('defaultResolveAgents — claude adapter (no binary available)', () => 
 
 describe('readPrdSummary — corrupted JSON file', () => {
   it('returns null for a corrupted JSON file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-test-'))
-    try {
-      const docsDir = path.join(tmpDir, 'docs')
-      fs.mkdirSync(docsDir, { recursive: true })
-      fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_JSON), '{ this is not valid JSON !!!')
-      const result = readPrdSummary(tmpDir)
-      expect(result).toBeNull()
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    }
+    const tmpDir = tempDir('canary-prd-test-')
+    const docsDir = path.join(tmpDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_JSON), '{ this is not valid JSON !!!')
+    const result = readPrdSummary(tmpDir)
+    expect(result).toBeNull()
   })
 })
 
@@ -512,7 +510,7 @@ describe('spawnScope', () => {
 
 describe('agentJob descriptor', () => {
   it('forwards a record descriptor so the runner can log the distiller (claude pins its session)', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prd-rec-'))
+    const logsDir = tempDir()
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
     await summarizePrd(
       {
@@ -527,11 +525,10 @@ describe('agentJob descriptor', () => {
     // The pinned session id is what joins the row to the transcript — the runner
     // gets it from the spawn, not from the caller.
     expect(rec.sessionId).toBeTruthy()
-    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 
   it('records a codex distiller too, which pins no session', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prd-rec-codex-'))
+    const logsDir = tempDir('cl-prd-rec-codex-')
     mockSpawn.mockImplementation(() => makeFakeChild({ stdout: '' }))
     await summarizePrd(
       {
@@ -544,14 +541,13 @@ describe('agentJob descriptor', () => {
     const rec = agentJobStore(logsDir).get('fl-1:prd-summary')!
     expect(rec.agent).toBe('codex')
     expect(rec.sessionId).toBeUndefined()
-    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })
 
 
 describe('cancellation waits for the persisted agent job', () => {
   it('keeps the operation and record running until the process closes', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-coverage-close-'))
+    const logsDir = tempDir('cl-coverage-close-')
     const controller = new AbortController()
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(), stderr: new EventEmitter(),
@@ -565,22 +561,18 @@ describe('cancellation waits for the persisted agent job', () => {
     const pending = summarizePrd({ collection: TEST_COLLECTION, signal: controller.signal, agentJob }, { resolveAgents: () => ['codex', 'claude'] })
     const finished = vi.fn()
     const observed = pending.then(finished, finished)
-    try {
-      controller.abort()
-      await Promise.resolve()
-      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
-      expect(finished).not.toHaveBeenCalled()
-      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({ status: 'running' })
-      child.emit('close', null, 'SIGTERM')
-      await expect(pending).rejects.toThrow('prd summary cancelled')
-      await observed
-      expect(finished).toHaveBeenCalledTimes(1)
-      expect(mockSpawn).toHaveBeenCalledTimes(1)
-      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
-        status: 'failed', endedAt: expect.any(String),
-      })
-    } finally {
-      fs.rmSync(logsDir, { recursive: true, force: true })
-    }
+    controller.abort()
+    await Promise.resolve()
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(finished).not.toHaveBeenCalled()
+    expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({ status: 'running' })
+    child.emit('close', null, 'SIGTERM')
+    await expect(pending).rejects.toThrow('prd summary cancelled')
+    await observed
+    expect(finished).toHaveBeenCalledTimes(1)
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
+      status: 'failed', endedAt: expect.any(String),
+    })
   })
 })

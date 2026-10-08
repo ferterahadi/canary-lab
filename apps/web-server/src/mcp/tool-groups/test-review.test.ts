@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { suiteReviewRevision } from '../../features/runs/logic/runtime/suite-review'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { registerTestReviewTools } from './test-review'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-wait-tool-')
 
 const facts = { surface: 'codex' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: true } }
 const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'test-review', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
@@ -106,44 +108,40 @@ describe('test review human gate', () => {
   })
 
   it('keeps an unchanged browser wait tied to its original request', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-wait-tool-'))
-    try {
-      const suite = path.join(root, 'suite')
-      const feature = path.join(root, 'feature')
-      for (const dir of [suite, feature]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-      fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), 'recorded\n')
-      fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'candidate\n')
-      const revision = suiteReviewRevision(suite, feature)
-      const listeners: Array<(event: unknown) => void> = []
-      const store = {
-        get: () => ({ manifest: { status: 'healing', featureDir: feature, suiteSnapshot: { kind: 'taken', dir: suite }, specEdits: { reviewDecisions: [] } } }),
-        onEvent: (listener: (event: unknown) => void) => { listeners.push(listener) },
-        offEvent: (listener: (event: unknown) => void) => { listeners.splice(listeners.indexOf(listener), 1) },
-      }
-      const review = { ...args, review_revision: revision, feature: 'checkout', files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], patchPath: '/review.patch', canAdopt: true }
-      let requestStatus: 'awaiting-review' | 'ready' = 'awaiting-review'
-      const send = vi.fn(async (request: { url: string }) => request.url === '/api/run-requests/request1'
-        ? { statusCode: 200, body: { requestId: 'request1', feature: 'checkout', runId: args.runId, review: { runId: args.runId, revision }, owner: { kind: 'internal' }, status: requestStatus } }
-        : { statusCode: 200, body: review })
-      const tools = captureTools(registerTestReviewTools, { projectRoot: '/project', store, testReviewRequest: send })
-      const opened = await tools.call('get_test_review', { runId: args.runId })
-
-      const waited = value(await tools.raw('review_test_changes', {
-        ...args, review_revision: revision, request_id: 'request1', wait_for_decision: true, browser_wait_token: opened.browser_wait_token, timeout_ms: 1,
-      }))
-      expect(waited).toMatchObject({ status: 'still_waiting', request_id: 'request1' })
-      expect(String(waited.next)).toContain('Carry the original request_id')
-      expect(listeners).toHaveLength(0)
-      fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'different candidate\n')
-      requestStatus = 'ready'
-      const changed = value(await tools.raw('review_test_changes', {
-        ...args, review_revision: revision, request_id: 'request1', wait_for_decision: true, browser_wait_token: opened.browser_wait_token, timeout_ms: 1,
-      }))
-      expect(changed).toMatchObject({ status: 'review-changed', nextSteps: ['get_test_review'] })
-      expect(changed.next).toContain('Stop this watcher')
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true })
+    const root = tempDir()
+    const suite = path.join(root, 'suite')
+    const feature = path.join(root, 'feature')
+    for (const dir of [suite, feature]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), 'recorded\n')
+    fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'candidate\n')
+    const revision = suiteReviewRevision(suite, feature)
+    const listeners: Array<(event: unknown) => void> = []
+    const store = {
+      get: () => ({ manifest: { status: 'healing', featureDir: feature, suiteSnapshot: { kind: 'taken', dir: suite }, specEdits: { reviewDecisions: [] } } }),
+      onEvent: (listener: (event: unknown) => void) => { listeners.push(listener) },
+      offEvent: (listener: (event: unknown) => void) => { listeners.splice(listeners.indexOf(listener), 1) },
     }
+    const review = { ...args, review_revision: revision, feature: 'checkout', files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], patchPath: '/review.patch', canAdopt: true }
+    let requestStatus: 'awaiting-review' | 'ready' = 'awaiting-review'
+    const send = vi.fn(async (request: { url: string }) => request.url === '/api/run-requests/request1'
+      ? { statusCode: 200, body: { requestId: 'request1', feature: 'checkout', runId: args.runId, review: { runId: args.runId, revision }, owner: { kind: 'internal' }, status: requestStatus } }
+      : { statusCode: 200, body: review })
+    const tools = captureTools(registerTestReviewTools, { projectRoot: '/project', store, testReviewRequest: send })
+    const opened = await tools.call('get_test_review', { runId: args.runId })
+
+    const waited = value(await tools.raw('review_test_changes', {
+      ...args, review_revision: revision, request_id: 'request1', wait_for_decision: true, browser_wait_token: opened.browser_wait_token, timeout_ms: 1,
+    }))
+    expect(waited).toMatchObject({ status: 'still_waiting', request_id: 'request1' })
+    expect(String(waited.next)).toContain('Carry the original request_id')
+    expect(listeners).toHaveLength(0)
+    fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'different candidate\n')
+    requestStatus = 'ready'
+    const changed = value(await tools.raw('review_test_changes', {
+      ...args, review_revision: revision, request_id: 'request1', wait_for_decision: true, browser_wait_token: opened.browser_wait_token, timeout_ms: 1,
+    }))
+    expect(changed).toMatchObject({ status: 'review-changed', nextSteps: ['get_test_review'] })
+    expect(changed.next).toContain('Stop this watcher')
   })
   it('returns the exact patch and a deep link without adopting', async () => {
     const { tools, send } = fixture()

@@ -1,8 +1,10 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { prepareRequirementsDraft, readRequirementsDraft, saveRequirementsDraft, clearRequirementsDraft } from './requirements-draft'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-requirements-draft-')
 
 let root: string
 let featureDir: string
@@ -10,13 +12,12 @@ let flightDir: string
 const outName = 'checkout-prd.md'
 const reply = JSON.stringify({ requirements: [{ id: 'R7', title: 'Checkout', text: 'It should check out.', pathTypes: ['happy'] }] })
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-requirements-draft-'))
+  root = tempDir()
   featureDir = path.join(root, 'feature')
   flightDir = path.join(root, 'flight')
   fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
   fs.writeFileSync(path.join(featureDir, 'docs', 'source.md'), 'Checkout is supported.')
 })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 it('keeps all source docs in the prompt and preserves the previous id spine', () => {
   fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), JSON.stringify({ requirements: [{ id: 'R7', title: 'Checkout', text: 'It should check out.', pathTypes: ['happy'] }] }))

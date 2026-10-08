@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { ZodTypeAny } from 'zod'
 import { decode } from '@toon-format/toon'
 import type { RunDetail } from '../../../../../shared/run-detail'
@@ -13,6 +12,9 @@ import {
 import { certificateDigest, registerEvaluationExportTools } from './authoring-export'
 import type { BehaviorCertificate } from '../../../../../shared/verification-strength/certificate'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-export-')
 
 // The externally-authored evaluation export: create a task for a finished run,
 // submit client wording, then read/download/delete the rendered archive.
@@ -69,12 +71,10 @@ async function startTask(detail: RunDetail = runDetail(), args: Record<string, u
 const CASE = { title: 'Shopper pays', whatWasChecked: 'checked', whyItMatters: 'matters', confidence: 'High' }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-export-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('start_external_evaluation_export', () => {
   it('persists an external task and hands back the submission schema', async () => {

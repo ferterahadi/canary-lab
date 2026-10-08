@@ -1,7 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,19 +11,20 @@ import type { RunsRouteDeps } from './runs-route-deps'
 import type { RunStartRequest, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
 
 import { RunStartRequests } from '../logic/run-start-requests'
+import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-run-request-')
 
 const apps: FastifyInstance[] = []
-const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
   vi.useRealTimers()
   for (const app of apps.splice(0)) await app.close()
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 
 async function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-run-request-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
   const logsDir = path.join(root, 'logs')
@@ -34,12 +33,7 @@ async function fixture() {
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports={config:{name:'checkout',description:'test',featureDir:__dirname,envs:['dev']}}")
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'recorded\n')
   fs.cpSync(featureDir, snapshot, { recursive: true })
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' })
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'initial')
+  initGitRepo(featureDir)
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
   const store = new RunStore(logsDir, createRegistry())
   store.bootstrap({ runId: 'source', feature: 'checkout', featureDir, env: 'dev', startedAt: '2026-01-01',

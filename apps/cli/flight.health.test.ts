@@ -1,19 +1,20 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { main } from './flight'
 import { relaunchUiDetached } from './ui-command'
 import { requestCliJson } from './request-json'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 vi.mock('./ui-command', () => ({ relaunchUiDetached: vi.fn() }))
 vi.mock('./request-json', () => ({ requestCliJson: vi.fn() }))
 vi.mock('../../shared/cli-ui/ui', () => ({ banner: vi.fn(), section: vi.fn(), ok: vi.fn(), fail: vi.fn(), info: vi.fn(), dim: (s: string) => s, line: vi.fn() }))
 
+const tempDir = trackTempDirs('flight-health-')
 let root: string
 const reachedFlightRequests = new Error('health complete')
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'flight-health-'))
+  root = tempDir()
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { 'canary-lab': '*' } }))
   vi.spyOn(process, 'cwd').mockReturnValue(root)
   vi.spyOn(process, 'exit').mockImplementation(() => { throw reachedFlightRequests })
@@ -25,7 +26,6 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.clearAllMocks()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it('accepts healthy HTTP without decoding JSON or starting a server', async () => {

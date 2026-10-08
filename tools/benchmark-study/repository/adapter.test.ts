@@ -1,15 +1,14 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { command, sha } from '../files'
 import { prepareRepositoryStudy, subjectPackageName, verifyRepositoryFixture } from './adapter'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('repository-fixture-')
 
 async function fixture(): Promise<string> {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-fixture-'))); roots.push(root)
+  const root = tempDir()
   const files = [
     'prepare.sh', 'host/package.json', 'host/yarn.lock', 'host/fixture.env', 'package-stub/package.json',
     'oracle/playwright.config.ts', 'oracle/e2e/encoding.spec.ts', 'held-out/overlap.patch', 'held-out/independent.patch',
@@ -63,7 +62,7 @@ it('rejects archive links and output placement inside a protected source', async
 })
 
 it('links the host to the subject by its own package name and rejects unsafe names', () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-subject-'))); roots.push(root)
+  const root = tempDir('repository-subject-')
   for (const name of ['@example-org/subject-lib', 'subject-lib']) {
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name }))
     expect(subjectPackageName(root)).toBe(name)

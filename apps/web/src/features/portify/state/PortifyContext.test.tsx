@@ -13,6 +13,7 @@ import {
   usePortifyWorkflow,
   usePortifyDetail,
 } from './PortifyContext'
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -28,28 +29,6 @@ vi.mock('@/shared/api/portify', async (importOriginal) => ({
   cancelPortify: vi.fn(),
 }))
 
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: unknown }) => void) | null = null
-  onclose: (() => void) | null = null
-  closed = false
-  readyState = 0
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closed = true
-    this.readyState = 3
-    this.onclose?.()
-  }
-
-  fire(frame: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(frame) })
-  }
-}
 
 function entry(over: Partial<PortifyIndexEntry> = {}): PortifyIndexEntry {
   return {

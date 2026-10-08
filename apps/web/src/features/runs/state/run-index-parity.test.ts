@@ -1,7 +1,7 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 import { FileRunStateSink } from '../../../../../web-server/src/features/runs/logic/runtime/run-state-sink'
 import {
   readManifest,
@@ -13,8 +13,8 @@ import { initialRunsState, runsReducer } from './runs-state'
 import type { RunDetail } from '@shared/run-detail'
 
 let logs: string
-beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'run-index-parity-')) })
-afterEach(() => { fs.rmSync(logs, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('run-index-parity-')
+beforeEach(() => { logs = tempDir() })
 function browserRow(manifest: RunManifest) {
   return runsReducer(initialRunsState, { type: 'update', runId: manifest.runId, detail: { runId: manifest.runId, manifest } as RunDetail }).runs[0]
 }

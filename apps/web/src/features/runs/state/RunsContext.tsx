@@ -16,8 +16,8 @@ import {
 } from '@shared/run-state'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import { useRecordStream, type ConnectionState } from '@/shared/state/record-stream'
+import { displayError } from '@/shared/api/error-message'
 import {
-  errorMessage,
   frameToAction,
   initialRunsState,
   runsReducer,
@@ -101,7 +101,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
         setIndexError(null)
       }
     } catch (error) {
-      if (reads.current('index', token)) setIndexError(errorMessage(error))
+      if (reads.current('index', token)) setIndexError(displayError(error))
     } finally {
       reads.finish('index', token)
     }
@@ -213,7 +213,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
         // patch state; we only clear the transient here. If WS is down,
         // fall back to an HTTP refresh so the row updates anyway.
       } catch (err) {
-        dispatch({ type: 'error-set', runId, message: errorMessage(err) })
+        dispatch({ type: 'error-set', runId, message: displayError(err) })
       } finally {
         dispatch({ type: 'transient-clear', runId })
         // If the WS isn't live, push state forward via HTTP so the user

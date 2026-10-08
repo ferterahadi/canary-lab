@@ -1,9 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 import { runGit } from '../../../../shared/git-repo'
-
-import os from 'os'
 
 import path from 'path'
 
@@ -34,18 +32,18 @@ import { portifyStage } from './portify'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx } from './__fixtures__/stage-context'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -56,7 +54,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -65,26 +63,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -105,29 +89,8 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('portify stage', () => {
@@ -160,8 +123,8 @@ describe('portify stage', () => {
   it('teardown cancels the workflow named by the progress pin', async () => {
     // The pin is written at START precisely so a pause landing during the long
     // editing phase can still reach the workflow.
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/w-9') return { statusCode: 200, body: { status: 'editing' } }
       return { statusCode: 200, body: {} }
     }, calls)
@@ -182,7 +145,7 @@ describe('portify stage', () => {
 
   it('zero-edit fast path: saves without a checkpoint and verifies the mark', async () => {
     let status = 'verifying'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
@@ -201,7 +164,7 @@ describe('portify stage', () => {
       fs.readFileSync(configPath, 'utf8').replace("name: 'checkout'", `name: '${renamed}'`),
     )
     let status = 'verifying'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(featureDir, renamed); return { statusCode: 200, body: {} } }
@@ -218,7 +181,7 @@ describe('portify stage', () => {
 
   it('proposed edits park on portify-apply; apply saves and verifies', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '--- a/server.js\n+++ b/server.js' } }
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
@@ -235,7 +198,7 @@ describe('portify stage', () => {
   })
 
   it('pins the workflowId as live progress at start — the drill-through works before the stage settles', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/server.js' } }
       return undefined
@@ -248,7 +211,7 @@ describe('portify stage', () => {
   })
 
   it('mirrors the workflow phase (status/attempt) into progress as it polls', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', attempt: 1, maxAttempts: 3, diff: '--- a/server.js' } }
       return undefined
@@ -264,7 +227,7 @@ describe('portify stage', () => {
   it('marks a verifying poll as service-readiness before the workflow reaches review', async () => {
     let reads = 0
     const timingPhases: Array<string | null> = []
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-ready' } }
       if (call.url === '/api/portify/wf-ready') {
@@ -285,7 +248,7 @@ describe('portify stage', () => {
   })
 
   it('fails when the portify start request is rejected', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 400, body: { error: 'no repos' } }
       return undefined
     })
@@ -294,7 +257,7 @@ describe('portify stage', () => {
   })
 
   it('fails with "unknown" when the start rejection carries no error field', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 500, body: {} }
       return undefined
     })
@@ -303,7 +266,7 @@ describe('portify stage', () => {
   })
 
   it('settles directly via saveAndVerify when the workflow is already saved on first poll', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'saved', diff: '--- a/x\n+++ b/x' } }
       if (call.url.endsWith('/save')) { markPortified(); return { statusCode: 200, body: {} } }
@@ -314,8 +277,8 @@ describe('portify stage', () => {
   })
 
   it("the flight's stored portify model choice rides the start payload", async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'saved', diff: '--- a/x\n+++ b/x' } }
       if (call.url.endsWith('/save')) { markPortified(); return { statusCode: 200, body: {} } }
@@ -329,7 +292,7 @@ describe('portify stage', () => {
   })
 
   it('fails when the workflow settles failed with a reason', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'failed', error: 'agent crashed' } }
       return undefined
@@ -339,7 +302,7 @@ describe('portify stage', () => {
   })
 
   it('fails when the workflow is aborted with no error message', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'aborted' } }
       return undefined
@@ -349,7 +312,7 @@ describe('portify stage', () => {
   })
 
   it('fails when the save request itself is rejected — carrying the server\'s reason, not just the code', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '' } }
       if (call.url.endsWith('/save')) return { statusCode: 500, body: { error: 'disk full' } }
@@ -364,7 +327,7 @@ describe('portify stage', () => {
 
   it('yolo bypasses the gate and starts the workflow immediately', async () => {
     let status = 'verifying'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
@@ -376,8 +339,8 @@ describe('portify stage', () => {
   })
 
   it('re-adopts a review parked across a server restart instead of starting a new workflow', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') {
         return { statusCode: 200, body: [{ workflowId: 'wf9', feature: 'checkout', status: 'ready-to-save' }] }
       }
@@ -393,9 +356,9 @@ describe('portify stage', () => {
   })
 
   it.each(['verifying', 'ready-to-save'])('adopts an independent workflow whose first detail read is %s', async (initialStatus) => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let detailReads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') {
         return { statusCode: 200, body: [{ workflowId: 'wf-live', feature: 'checkout', status: 'editing' }] }
       }
@@ -421,9 +384,9 @@ describe('portify stage', () => {
   })
 
   it('adopts the independent workflow when its start wins the same-instant race', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let listReads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') {
         listReads += 1
         return {
@@ -454,8 +417,8 @@ describe('portify stage', () => {
   })
 
   it('preserves a start conflict when there is no workflow to adopt', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => call.method === 'GET'
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => call.method === 'GET'
       ? { statusCode: 200, body: [] }
       : { statusCode: 409, body: { error: 'repo has uncommitted changes' } }, calls)
     const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
@@ -465,7 +428,7 @@ describe('portify stage', () => {
 
   it('settles the save-poll via a "failed" status (not just "saved") and still checks the overlay mark', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'failed'; return { statusCode: 200, body: {} } }
@@ -479,7 +442,7 @@ describe('portify stage', () => {
 
   it('settles the save-poll via an "aborted" status too and still checks the overlay mark', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'aborted'; return { statusCode: 200, body: {} } }
@@ -491,7 +454,7 @@ describe('portify stage', () => {
 
   it('fails when save succeeds but the overlay mark never lands', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
       if (call.url.endsWith('/save')) { status = 'saved'; return { statusCode: 200, body: {} } } // no markPortified()
@@ -503,7 +466,7 @@ describe('portify stage', () => {
 
   it('yolo applies proposed edits without parking on the checkpoint', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '--- a/x\n+++ b/x' } }
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
@@ -532,9 +495,9 @@ describe('portify stage', () => {
   })
 
   it('checkpoint response: cancel SKIPS the stage (flight proceeds without parallel readiness) and calls the cancel endpoint', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '--- a/x\n+++ b/x' } }
       if (call.url.endsWith('/cancel')) return { statusCode: 200, body: {} }
@@ -555,7 +518,7 @@ describe('portify stage', () => {
 
   it('checkpoint response: an unrecognized choice re-parks on the same checkpoint', async () => {
     let status = 'ready-to-save'
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '--- a/x\n+++ b/x' } }
       return undefined
@@ -595,7 +558,7 @@ describe('portify stage', () => {
     fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = process.env.PORT\n')
 
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-ext' } }
       if (call.url === '/api/portify/wf-ext') {
         reads += 1
@@ -627,7 +590,7 @@ describe('portify stage', () => {
     initGitRepo(worktree)
 
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-move' } }
       if (call.url === '/api/portify/wf-move') {
         reads += 1
@@ -668,7 +631,7 @@ describe('portify stage', () => {
     const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...[callback, delay, ...args]: Parameters<typeof setTimeout>) =>
       realTimeout(callback, delay === 3000 ? 0 : delay, ...args)) as typeof setTimeout)
     const minutes = [0, 29, 31, 59]
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST') return { statusCode: 201, body: { workflowId: 'quoted-edit' } }
       if (call.url !== '/api/portify/quoted-edit') return undefined
       clock.mockReturnValue(minutes[reads] * 60_000)
@@ -692,7 +655,7 @@ describe('portify stage', () => {
   })
 
   it('does not fingerprint an INTERNAL editing window — status/attempt already move there', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-int' } }
       if (call.url === '/api/portify/wf-int') {
         return { statusCode: 200, body: { status: 'ready-to-save', attempt: 2, diff: 'd\n', verification: { ok: true } } }
@@ -739,9 +702,9 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('yolo + external starts and follows a server-owned workflow', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') {
         return { statusCode: 201, body: { workflowId: 'wf-1' } }
@@ -765,8 +728,8 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('the gate answered "run" under an external producer starts the server-owned workflow', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') {
         return { statusCode: 201, body: { workflowId: 'wf-1' } }
       }
@@ -781,7 +744,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a submit while the workflow is still editing re-parks the SAME engagement with the live status', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'editing', producer: 'external' } }
       return undefined
     })
@@ -794,7 +757,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a submit at ready-to-save parks the portify-apply review (non-yolo)', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ port' } }
       return undefined
     })
@@ -810,7 +773,7 @@ describe('portify — external Flight compatibility and background ownership', (
     // The consume's read sees ready-to-save with no diff; the save poll that
     // follows sees 'saved' — sequenced on call count.
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
         reads += 1
         return { statusCode: 200, body: reads === 1 ? { status: 'ready-to-save', diff: '' } : { status: 'saved' } }
@@ -823,7 +786,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a workflow the client saved ITSELF settles on the overlay mark alone', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'saved', diff: '+ port' } }
       return undefined
     })
@@ -840,7 +803,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a failed workflow fails the stage', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'failed', error: 'boom' } }
       return undefined
     })
@@ -871,8 +834,8 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('run-internally cancels the external workflow and runs the internal one', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify/wf-1/cancel') return { statusCode: 200, body: {} }
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-2' } }
       if (call.method === 'GET' && call.url === '/api/portify/wf-2') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ p' } }
@@ -890,8 +853,8 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a revise on the review re-opens the EXTERNAL window and re-parks the engagement', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { producer: 'external' } }
       if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: { instructions: 'Revised task — ports only.' } }
       return undefined
@@ -907,8 +870,8 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('an internal workflow stays server-owned when revised from an external Flight', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
         return { statusCode: 200, body: { producer: 'internal', status: 'ready-to-save', diff: '+ revised', verification: { ok: true } } }
       }
@@ -925,7 +888,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a rejected background start fails the stage with the server reason (or "unknown" without one)', async () => {
-    const rejected = makeInject((call) => {
+    const rejected = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 500, body: { error: 'nope' } }
       return undefined
@@ -935,7 +898,7 @@ describe('portify — external Flight compatibility and background ownership', (
       error: 'portify start rejected (500): nope',
     })
 
-    const idless = makeInject((call) => {
+    const idless = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: {} }
       return undefined
@@ -947,8 +910,8 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('run-internally without a recorded workflow id skips the cancel and starts internally', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-2' } }
       if (call.method === 'GET' && call.url === '/api/portify/wf-2') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ p' } }
       return undefined
@@ -975,7 +938,7 @@ describe('portify — external Flight compatibility and background ownership', (
 
   it('a yolo submit at ready-to-save WITH edits saves without the zero-edit log', async () => {
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
         reads += 1
         return { statusCode: 200, body: reads === 1 ? { status: 'ready-to-save', diff: '+ port' } : { status: 'saved' } }
@@ -993,7 +956,7 @@ describe('portify — external Flight compatibility and background ownership', (
 
   it('a client-saved workflow with NO diff settles as a zero-edit save', async () => {
     markPortified()
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'saved' } }
       return undefined
     })
@@ -1006,7 +969,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('an aborted workflow (no error detail) fails the stage plainly', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'aborted' } }
       return undefined
     })
@@ -1019,7 +982,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a submit before the workflow reports any status re-parks as "starting"', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: {} }
       return undefined
     })
@@ -1030,7 +993,7 @@ describe('portify — external Flight compatibility and background ownership', (
   })
 
   it('a revise whose reopen returns no instructions re-parks with the feedback as the task', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { producer: 'external' } }
       if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: {} }
       return undefined

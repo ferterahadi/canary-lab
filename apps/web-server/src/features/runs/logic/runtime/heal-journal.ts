@@ -4,6 +4,7 @@ import { DIAGNOSIS_JOURNAL_PATH, MANIFEST_PATH, ROOT, getSummaryPath } from './p
 import { FailedEntry, truncateOneLine } from './log-enrichment'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
 
@@ -382,11 +383,7 @@ export interface ManifestForJournal {
 }
 
 export function readManifestFrom(file: string): ManifestForJournal {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ManifestForJournal
-  } catch {
-    return {}
-  }
+  return readJsonOr<ManifestForJournal>(file, {})
 }
 
 export function readFeatureNameFromManifest(file: string): string | undefined {

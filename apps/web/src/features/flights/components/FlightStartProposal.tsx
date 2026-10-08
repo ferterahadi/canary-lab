@@ -4,6 +4,7 @@ import type { PlanFeaturesTask, PlannedFeature } from '@shared/flights/types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { Textarea } from '@/shared/ui/FormFields'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
+import { plural } from '@shared/lib/plural'
 
 /** R54: the breakdown agent owns the dialog while it thinks — its timeline is
  *  the content. Closing (the modal's ✕) doesn't stop the agent: the plan runs
@@ -134,7 +135,7 @@ export function ProposalView({
   return (
     <div className="flex flex-col gap-2.5" data-testid="flight-proposal-view">
       <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-        This breaks down into {n} suite{n === 1 ? '' : 's'} — each gets its own flight.
+        This breaks down into {plural(n, 'suite')} — each gets its own flight.
       </div>
 
       {/* R69 follow-up: the shared group applies to EVERY card, so it heads the

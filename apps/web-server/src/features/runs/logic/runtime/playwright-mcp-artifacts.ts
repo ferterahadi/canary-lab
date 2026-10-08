@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // Per-failure capture target for `@playwright/mcp` artifacts.
 //
@@ -151,10 +152,6 @@ export function writeAttribution(args: {
     }
     entries.push({ filename: a.name, testSlug: chosen })
   }
-  fs.mkdirSync(args.dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(args.dir, '_attribution.json'),
-    JSON.stringify(entries, null, 2) + '\n',
-  )
+  atomicWriteJson(path.join(args.dir, '_attribution.json'), entries)
   return entries
 }

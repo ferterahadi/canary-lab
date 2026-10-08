@@ -7,12 +7,12 @@ import type { RunSummary } from '@shared/run-detail'
 import { useExternalAudit } from '../state/use-external-audit'
 import { openRunLog } from '../utils/open-run-log'
 import { BootEvidenceRows, bootEvidenceLabel } from '@/shared/ui/BootEvidence'
-import { formatDuration, durationBetween } from '@/shared/lib/format'
+import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { buildTimelineRows } from '../utils/run-timeline'
 import { branchForService, branchLabel } from '../utils/run-detail-playback'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus, type RunStatus } from '@shared/run-state'
-import { RecoveryTimeline, alertClass, formatLifecycleDate, formatLifecycleTime, useTimelineNow } from './RunDiagnosticsPanels'
+import { RecoveryTimeline, alertClass, formatLifecycleDate, useTimelineNow } from './RunDiagnosticsPanels'
 import { plural } from '@shared/lib/plural'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -210,7 +210,7 @@ export function runFacts(manifest: RunManifest, duration: number | null): RunFac
 }
 
 function timestampFact(label: string, iso: string): RunFact {
-  return { label, value: formatLifecycleTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
+  return { label, value: shortTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
 }
 
 /** A row of the facts list: the rubric label in the left column, the value

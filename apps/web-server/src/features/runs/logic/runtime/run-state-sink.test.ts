@@ -1,17 +1,18 @@
 import { runManifest } from '../__fixtures__/run-manifest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FileRunStateSink } from './run-state-sink'
 import { readManifest, readRunsIndex, writeRunsIndex } from './manifest'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { buildRunPaths, runDirFor } from './run-paths'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-rss-')
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rss-')))
+  logsDir = tempDir()
 })
 
 function manifest(overrides: Partial<RunManifest> = {}): RunManifest {

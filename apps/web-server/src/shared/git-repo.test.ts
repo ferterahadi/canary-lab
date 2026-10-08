@@ -19,9 +19,12 @@ import {
 } from './git-repo'
 import { resolveRepoPath } from './repo-identity'
 import { git, initGitRepo } from '../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-git-')
 
 function tmpRepo(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-')))
+  const dir = tempDir()
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
   initGitRepo(dir, { branch: 'main' })
   git(dir, 'branch', 'feature/demo')
@@ -49,9 +52,9 @@ describe('git-repo helpers', () => {
 
   it('reports empty status for missing, file, and non-git paths', async () => {
     const missing = path.join(os.tmpdir(), 'cl-missing-repo-path')
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-file-')), 'not-dir')
+    const file = path.join(tempDir('cl-file-'), 'not-dir')
     fs.writeFileSync(file, 'x')
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
 
     expect(await getGitStatus(missing)).toMatchObject({ isGitRepo: false })
     expect(await getGitStatus(file)).toMatchObject({ isGitRepo: false })
@@ -74,7 +77,7 @@ describe('git-repo helpers', () => {
   })
 
   it('reports a null HEAD sha on an unborn branch', async () => {
-    const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-unborn-')))
+    const repo = tempDir('cl-git-unborn-')
     execFileSync('git', ['init', '-b', 'main'], { cwd: repo, stdio: 'ignore' })
 
     const status = await getGitStatus(repo)
@@ -105,7 +108,7 @@ describe('git-repo helpers', () => {
   )
 
   it('refuses checkout for non-git paths', async () => {
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
     await expect(checkoutBranch(plainDir, 'main')).rejects.toThrow('path is not a git repository')
   })
 
@@ -182,7 +185,7 @@ describe('git-repo helpers', () => {
 
   it('collects branch snapshots for valid configured repos only', async () => {
     const repo = tmpRepo()
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
 
     await expect(collectRepoBranchSnapshots({
       name: 'demo',
@@ -245,7 +248,7 @@ describe('git-repo helpers', () => {
 
   it('reports non-git and detached configured repo failures', async () => {
     const repo = tmpRepo()
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
     execFileSync('git', ['checkout', '--detach', 'HEAD'], { cwd: repo, stdio: 'ignore' })
 
     await expect(validateConfiguredRepoBranches({
@@ -275,7 +278,7 @@ describe('git-repo helpers', () => {
 
   describe('snapshotWorkingTree + diffNamesSinceSnapshot', () => {
     it('returns null for non-git and missing paths', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-snap-'))
+      const plainDir = tempDir('cl-plain-snap-')
       expect(await snapshotWorkingTree(plainDir)).toBeNull()
       expect(await snapshotWorkingTree(path.join(os.tmpdir(), 'cl-missing-snap-xyz'))).toBeNull()
     })
@@ -283,7 +286,7 @@ describe('git-repo helpers', () => {
     it('returns null when git stash create fails (e.g. zero-commit repo with no HEAD)', async () => {
       // Exercises the `if (stash.code !== 0) return null` arm — stash create
       // needs a HEAD ref, which doesn't exist in a brand-new repo.
-      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-empty-')))
+      const dir = tempDir('cl-git-empty-')
       execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' })
       expect(await snapshotWorkingTree(dir)).toBeNull()
     })
@@ -352,7 +355,7 @@ describe('git-repo helpers', () => {
     })
 
     it('diffNamesSinceSnapshot returns [] on a non-git path', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-'))
+      const plainDir = tempDir('cl-plain-diff-')
       expect(await diffNamesSinceSnapshot(plainDir, 'HEAD')).toEqual([])
     })
   })
@@ -375,7 +378,7 @@ describe('git-repo helpers', () => {
     })
 
     it('returns empty string on a non-git path', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-content-'))
+      const plainDir = tempDir('cl-plain-diff-content-')
       expect(await diffContentSinceSnapshot(plainDir, 'HEAD')).toBe('')
     })
   })
@@ -487,7 +490,7 @@ describe('git-repo helpers', () => {
     })
 
     it('returns null for a non-git directory', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-root-'))
+      const plainDir = tempDir('cl-plain-root-')
       expect(await getGitRoot(plainDir)).toBeNull()
     })
 

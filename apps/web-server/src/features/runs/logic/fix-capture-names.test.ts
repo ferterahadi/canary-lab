@@ -1,17 +1,18 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { normalizeFixCaptureNames } from './fix-capture-names'
 import { readManifest, updateManifest, writeManifest } from './runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCaptureRepo } from '../../../../../../shared/run-state'
+import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-let root: string
+const tempDir = trackTempDirs('capture-names-')
+
 const repo: RunFixCaptureRepo = { repoName: 'app', repoRoot: '/repo', baseSha: 'base', files: 1, patchPath: '/patch', patchFile: 'app.patch' }
-afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }) })
 
 it('keeps old captures without filenames and marked literal filenames intact', () => {
   expect(normalizeFixCaptureNames(repo)).toBe(repo)
@@ -20,12 +21,11 @@ it('keeps old captures without filenames and marked literal filenames intact', (
 })
 
 it('reads real Git names literally and normalizes legacy names once across manifest updates', async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'capture-names-'))
+  const root = tempDir()
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
-  git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.test')
   const names = [' leading and trailing ', 'café.txt', 'tab\tfile', 'line\nfile', 'back\\slash', '"literal"', 'left -> right']
   for (const name of names) fs.writeFileSync(path.join(root, name), 'before')
-  git('add', '.'); git('commit', '-qm', 'initial')
+  initGitRepo(root, { branch: 'main' })
   for (const name of names) fs.writeFileSync(path.join(root, name), 'after')
   const literal = await diffNamesSinceSnapshot(root, 'HEAD')
   expect([...literal].sort()).toEqual([...names].sort())

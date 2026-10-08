@@ -1,8 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -18,19 +17,18 @@ import {
   resolveVerificationRun,
   updateVerificationConfig,
 } from './verification'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-verify-')
 
 let tmpDir: string
 
 let featureDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-verify-')))
+  tmpDir = tempDir()
   featureDir = path.join(tmpDir, 'features', 'checkout')
   fs.mkdirSync(featureDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function feature(): FeatureConfig {

@@ -5,6 +5,7 @@ import type { FeatureAuthoringContext } from './feature-authoring'
 import { findFeature } from '../../../shared/feature-loader'
 import { isWithin } from './path-containment'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 // Docs feed the PRD summary, so every successful docs write announces
 // `coverage-changed` — the Docs rail and the coverage headline both re-read on
@@ -98,7 +99,7 @@ export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
       fs.symlinkSync(real, staged)
       fs.renameSync(staged, dest)
     } catch (error) {
-      return { ok: false, error: `could not relink document: ${error instanceof Error ? error.message : String(error)}` }
+      return { ok: false, error: `could not relink document: ${errorMessage(error)}` }
     } finally {
       fs.rmSync(stagingDir, { recursive: true, force: true })
     }

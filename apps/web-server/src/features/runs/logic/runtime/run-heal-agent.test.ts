@@ -4,7 +4,6 @@
 // only show up when the functions are called on their own.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   agentPtyEnv,
@@ -23,7 +22,9 @@ import { REPO_PATH_OVERRIDES_ENV } from '../../../../../../../shared/e2e-runner/
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-heal-agent-')
 let tmpDir: string
 
 // cleanupHealAgentPty calls the REAL killTree + scheduleSigkillFallback, which
@@ -35,12 +36,11 @@ let tmpDir: string
 // fires after this suite's mocks are restored stays inert.
 beforeEach(() => {
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-agent-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 /** A pty whose exit handler the test can fire on demand. */

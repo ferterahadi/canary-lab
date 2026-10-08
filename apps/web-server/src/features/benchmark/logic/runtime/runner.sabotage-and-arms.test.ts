@@ -1,6 +1,5 @@
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -17,6 +16,9 @@ import { runAgentProcess } from '../../../agent-sessions/logic/agent-process'
 import { createBenchmarkRunner } from './runner'
 
 import { OFF_BY_ONE, feat, flatFixture, gitInit, makeDeps, nestedFixture, pollUntil, roots, waitForStatus } from './__fixtures__/runner-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('bench-a-')
 
 // This runner wires the REAL (tested-elsewhere) BenchmarkOrchestrator/BenchmarkRace/
 // runSabotage control-flow modules to real git plumbing (worktrees, commits) against
@@ -360,7 +362,7 @@ describe('createBenchmarkRunner', () => {
 
   describe('abort', () => {
     it('is a no-op for an unknown benchmarkId', () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-a-')), loadFeatures: () => [] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [] })
       const { abort } = createBenchmarkRunner(deps)
       expect(() => abort('nope')).not.toThrow()
     })

@@ -17,6 +17,7 @@ import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface VerificationRouteDeps {
   featuresDir: string
@@ -78,7 +79,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return created
       } catch (err) {
         reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return { error: errorMessage(err) }
       }
     },
   )
@@ -99,7 +100,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return config
       } catch (err) {
         reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return { error: errorMessage(err) }
       }
     },
   )
@@ -151,7 +152,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         })
       } catch (err) {
         reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return { error: errorMessage(err) }
       }
     },
   )
@@ -222,8 +223,4 @@ function statusCodeOf(err: unknown): number {
   return typeof (err as { statusCode?: unknown })?.statusCode === 'number'
     ? (err as { statusCode: number }).statusCode
     : 500
-}
-
-function errorMessageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

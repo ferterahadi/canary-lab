@@ -5,14 +5,11 @@ import {
   describeEvent,
   eventSpan,
   externalLifecycle,
-  firstLineOf,
   formatJson,
-  isoSpan,
   languageFor,
   numberedLines,
   parseSystemLine,
   promptBody,
-  shortSession,
   summarizeInput,
   systemVerb,
   textKey,
@@ -25,23 +22,7 @@ const thread = (events: AgentSessionEvent[], over: Partial<SubagentThread> = {})
   agentId: 'a', parentToolId: 't1', agentType: 'Explore', description: 'find things', events, ...over,
 } as SubagentThread)
 
-describe('firstLineOf', () => {
-  it('takes the first non-blank line, trimmed', () => {
-    expect(firstLineOf('\n\n  hello world  \nsecond')).toBe('hello world')
-  })
-
-  it('caps a long line with an ellipsis so a row stays one line', () => {
-    expect(firstLineOf('abcdefghij', 5)).toBe('abcd…')
-    expect(firstLineOf('')).toBe('')
-  })
-})
-
-describe('shortSession / toolVerb', () => {
-  it('shortens only a long session id', () => {
-    expect(shortSession('649945f5-79b7-43ae-81c9-be02b0911e88')).toBe('649945f5')
-    expect(shortSession('short-id')).toBe('short-id')
-  })
-
+describe('toolVerb', () => {
   it('drops the MCP server prefix from a tool name', () => {
     expect(toolVerb('mcp__canary_lab__get_flight')).toBe('get_flight')
     expect(toolVerb('mcp__')).toBe('mcp__')
@@ -83,17 +64,11 @@ describe('formatJson / toolFilePath', () => {
   })
 })
 
-describe('eventSpan / isoSpan', () => {
+describe('eventSpan', () => {
   it('spans first to last stamp, and says nothing under two', () => {
     const text = (minute: number): AgentSessionEvent => ({ kind: 'assistant-message', timestamp: at(minute), text: '' })
     expect(eventSpan([text(33), text(31)])).toBe('2m 00s')
     expect(eventSpan([text(31), { ...text(32), timestamp: 'nope' }])).toBe('')
-  })
-
-  it('needs two readable, ordered instants', () => {
-    expect(isoSpan(at(30), at(35))).toBe('5m 00s')
-    expect(isoSpan(at(35), at(30))).toBeNull()
-    expect(isoSpan(undefined, at(30))).toBeNull()
   })
 })
 

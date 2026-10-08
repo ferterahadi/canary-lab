@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   applyFeatureScaffold,
   buildFeatureScaffold,
@@ -11,15 +10,13 @@ import {
   validateGeneratedFeatureFiles,
   validateGeneratedSpecFiles,
 } from './feature-scaffold'
+import { trackTempDirs } from '../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('feature-scaffold-')
 let tmp: string
 
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-scaffold-'))
-})
-
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
+  tmp = tempDir()
 })
 
 describe('buildFeatureScaffold', () => {

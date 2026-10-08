@@ -7,6 +7,7 @@ import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteRuntimeInputTargetsForSnapshot } from '../logic/runtime/suite-runtime-inputs'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { deriveRunReviewCapabilities, type RunTestReview } from '../../../../../../shared/test-review'
+import { notFound } from '../../../shared/http-error'
 
 
 export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
@@ -15,7 +16,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
       return reply.code(400).send({ error: 'Invalid run' })
     }
     const detail = deps.store.get(req.params.runId)
-    if (!detail) return reply.code(404).send({ error: 'Run not found' })
+    if (!detail) return notFound(reply, 'Run')
     const { manifest } = detail
     const snapshot = manifest.suiteSnapshot
     if (snapshot?.kind !== 'taken' || !manifest.featureDir || !fs.existsSync(snapshot.dir)) {

@@ -10,6 +10,7 @@ import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
 import { externalMutationTooltip } from '../lib/external-work'
+import { displayError } from '@/shared/api/error-message'
 
 /** Read the structured outcome of the previous collector attempt off the
  *  parked checkpoint. Absent on a first visit, and on flights parked by an
@@ -109,7 +110,7 @@ export function RequirementsFork({
     setFailure(null)
     flightsApi.respondFlightCheckpoint(flightId, { choice })
       .then(() => onResponded())
-      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setFailure(displayError(err)))
       .finally(() => setBusy(false))
   }
 

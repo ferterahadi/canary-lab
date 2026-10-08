@@ -15,6 +15,7 @@ import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
 // injected BenchmarkStore; the start path delegates to the injected
@@ -154,7 +155,7 @@ export async function benchmarkRoutes(
           dir = await ensureInspectWorktree(deps.logsDir, manifest)
         } catch (err) {
           reply.code(500)
-          return { error: err instanceof Error ? err.message : String(err) }
+          return { error: errorMessage(err) }
         }
       } else {
         const arm = manifest.arms.find((a) => a.arm === target)
@@ -173,7 +174,7 @@ export async function benchmarkRoutes(
       } catch (err) {
         // Best-effort: report the path so the UI can offer a copy-path fallback.
         reply.code(200)
-        return { opened: false, path: dir, error: err instanceof Error ? err.message : String(err) }
+        return { opened: false, path: dir, error: errorMessage(err) }
       }
     },
   )
@@ -236,7 +237,7 @@ export async function benchmarkRoutes(
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode ?? 500
       reply.code(statusCode)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return { error: errorMessage(err) }
     }
   })
 }

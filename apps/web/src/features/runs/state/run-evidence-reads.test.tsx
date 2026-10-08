@@ -9,6 +9,7 @@ import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidati
 import { JournalTab } from '../components/JournalTab'
 import { useExternalAudit } from './use-external-audit'
 import { useRunJournal } from './use-run-journal'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 const api = vi.hoisted(() => ({ listJournal: vi.fn(), getRunAudit: vi.fn(), connection: 'live' }))
 vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
@@ -25,7 +26,7 @@ let invalidate: () => void
 let journal: ReturnType<typeof useRunJournal>
 const entry = (text: string, outcome = 'pending'): JournalSection => ({ iteration: 1, timestamp: '2026-01-01T00:00:00Z', feature: 'synthetic', run: id, outcome, hypothesis: text, body: `- hypothesis: ${text}` })
 const auditEntry = (action: string): AuditEntry => ({ ts: '2026-01-01T00:00:00Z', sessionId: null, clientKind: null, action })
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
+
 function Journal({ runId = id, feature = 'synthetic' }: { runId?: string; feature?: string }) {
   journal = useRunJournal(feature, runId)
   const bus = useInvalidation()

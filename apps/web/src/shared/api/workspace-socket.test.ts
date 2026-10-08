@@ -1,44 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectWorkspaceEvents } from './workspace-socket'
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: (() => void) | null = null
-  closeCalls = 0
-  closeError: Error | null = null
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = 3
-    if (this.closeError) throw this.closeError
-  }
-
-  fire(message: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent)
-  }
-
-  fireRaw(data: unknown): void {
-    this.onmessage?.({ data } as MessageEvent)
-  }
-
-  fireOpen(): void {
-    this.readyState = 1
-    this.onopen?.()
-  }
-
-  fireClose(): void {
-    this.readyState = 3
-    this.onclose?.()
-  }
-}
+import { FakeWebSocket } from '../../../../../tools/test-helpers/fake-websocket'
 
 function reset(): void {
   FakeWebSocket.instances = []

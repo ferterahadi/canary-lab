@@ -1,8 +1,7 @@
 import { ExternalAgentMonitor } from '@/shared/ui/ExternalAgentMonitor'
-import { useNow } from '@/shared/state/use-now'
+import { useElapsed } from '@/shared/state/use-elapsed'
 import { pinnedPlanSummary } from '@shared/agent-models'
 import type { CoverageJobManifest } from '@shared/coverage/types'
-import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
@@ -53,9 +52,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 
   // Elapsed timer — a constant liveness signal even before the agent pins its
   // session and the timeline starts streaming, so the screen never reads frozen.
-  const now = useNow({ resetKey: job.startedAt, refreshOnReset: true })
-  const started = Date.parse(job.startedAt)
-  const elapsed = Number.isFinite(started) ? Math.max(0, Math.round((now - started) / 1000)) : 0
+  const elapsed = useElapsed(job.startedAt)
 
   return (
     <div className="min-h-0 h-full overflow-auto" data-testid="coverage-generating" style={{ scrollbarGutter: 'stable' }}>
@@ -65,7 +62,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--running)' }}>
             Generating
           </span>
-          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {formatElapsedSeconds(elapsed)}</span>
+          {elapsed && <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {elapsed}</span>}
         </div>
         <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
           {job.kind === 'summary' ? 'Summarizing & mapping coverage' : 'Mapping coverage'}

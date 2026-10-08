@@ -11,6 +11,7 @@ import { createFlowcharts } from './flowchart'
 import { buildTestReviewPacket } from './packet'
 import { applyEvaluationTextSlotRewrite, buildEvaluationLlmPrompt, deterministicEvaluationRewrite, evaluationTextSlots, normalizeEvaluationRewrite } from './rewrite'
 import type { AssertionHtmlOptions, EvaluationRewrite, EvaluationRewriteAgentOptions, EvaluationTextSlot } from './types'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 export async function generateEvaluationRewriteWithAgent(
   detail: RunDetail,
@@ -45,7 +46,7 @@ export async function generateEvaluationRewriteWithAgent(
       }
       recordFailure(`unparseable output: ${previewAgentOutput(output)}`)
     } catch (err) {
-      recordFailure(err instanceof Error ? err.message : String(err))
+      recordFailure(errorMessage(err))
     }
   }
   throw new Error(`evaluation rewrite failed with all available agents: ${failures.join(' | ')}`)

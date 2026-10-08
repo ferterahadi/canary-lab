@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -16,26 +14,22 @@ import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-
 import type {
   PlanFeaturesTask,
   PlannedFeature,
   FlightIndexEntry,
   FlightManifest,
 } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
 let repoDir: string
 
 let app: FastifyInstance
-
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
 
 async function buildApp(
   adapters: StageAdapters,
@@ -91,14 +85,13 @@ function saveThrowsStore(thrown: unknown): FlightStore {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -145,7 +138,7 @@ describe('plan-features (R54)', () => {
   }
 
   it('launch creates one running flight + queued siblings that drain sequentially', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'one', description: 'test one' },
       { name: 'two', description: 'test two' },
       { name: 'three', description: 'test three' },
@@ -178,7 +171,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('launch carries the dialog\'s autopilot + agent choice onto every minted flight', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'one', description: 'test one' },
       { name: 'two', description: 'test two' },
     ])))
@@ -201,7 +194,7 @@ describe('plan-features (R54)', () => {
   it('launch inherits the agent from the plan task when the body omits it', async () => {
     // The proposal dialog only re-sends what the user changed, so the task's own
     // agent choice has to be the fallback.
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'one', description: 'test one' },
       { name: 'two', description: 'test two' },
     ])))
@@ -222,7 +215,7 @@ describe('plan-features (R54)', () => {
   it('a single-feature proposal auto-launches with the autopilot + agent it was started with', async () => {
     // The auto-launch path builds its own options off the settled task, so the
     // dialog's choices have to survive that hop too (R71/W4).
-    app = await buildApp(allDone(), undefined, agentReturning(planText([{ name: 'solo', description: 'test the one thing' }])))
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([{ name: 'solo', description: 'test the one thing' }])))
 
     // A single-feature proposal launches itself, so the task settles straight
     // into `launched` rather than waiting for a confirmation.
@@ -246,7 +239,7 @@ describe('plan-features (R54)', () => {
 
   it('launch answers 409 with wait-for-the-proposal copy while planning is still running', async () => {
     const gateBox: { gate: (() => void) | null } = { gate: null }
-    app = await buildApp(allDone(), undefined, async () => {
+    app = await buildApp(allDoneAdapters(), undefined, async () => {
       await new Promise<void>((resolve) => { gateBox.gate = resolve })
       return { text: planText([{ name: 'one', description: 'test one' }, { name: 'two', description: 'test two' }]) }
     })
@@ -282,7 +275,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('launch rejects name collisions with existing features/flights up front', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'checkout', description: 'test checkout' },
       { name: 'fresh-one', description: 'test fresh' },
     ])))
@@ -308,7 +301,7 @@ describe('plan-features (R54)', () => {
     // executePlannedLaunch swallows (FlightConflictError) and parks queued,
     // rather than rethrowing.
     const gateBox: { gate: (() => void) | null } = { gate: null }
-    const busyAdapters = allDone()
+    const busyAdapters = allDoneAdapters()
     busyAdapters.scout = {
       teardown: () => null,
       run: async () => { await new Promise<void>((resolve) => { gateBox.gate = resolve }); return { kind: 'done' as const } },
@@ -344,7 +337,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('a single-feature plan auto-launches server-side (no proposal, no /launch call)', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'solo-feature', description: 'test the whole thing' },
     ])))
     const task = await planAndWait(app)
@@ -356,7 +349,7 @@ describe('plan-features (R54)', () => {
 
   it('cancelling a stale planning frame aborts the flight that won the auto-launch race', async () => {
     let releaseScout: (() => void) | null = null
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => {
@@ -382,7 +375,7 @@ describe('plan-features (R54)', () => {
 
   it('cancels every launched descendant without letting a queued sibling start between aborts', async () => {
     const gateBox: { gate: (() => void) | null } = { gate: null }
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => {
@@ -419,7 +412,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('cancels a checkpointed descendant before its queued sibling can start', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
@@ -452,7 +445,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('a single-feature plan whose name clashes stays done with the conflict recorded', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'checkout', description: 'test checkout' },
     ])))
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
@@ -465,7 +458,7 @@ describe('plan-features (R54)', () => {
 
   describe('launch validation', () => {
     it('404s launch for an unknown task', async () => {
-      app = await buildApp(allDone())
+      app = await buildApp(allDoneAdapters())
       const resp = await app.inject({
         method: 'POST',
         url: '/api/flights/plan-features/fp_nope/launch',
@@ -476,7 +469,7 @@ describe('plan-features (R54)', () => {
     })
 
     it('400s when features is missing or empty (including an undefined body)', async () => {
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -505,7 +498,7 @@ describe('plan-features (R54)', () => {
     })
 
     it('400s when a feature entry has no derivable slug name (name omitted) or no description', async () => {
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -538,7 +531,7 @@ describe('plan-features (R54)', () => {
     })
 
     it('400s duplicate feature names in the launch body', async () => {
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -558,7 +551,7 @@ describe('plan-features (R54)', () => {
     })
 
     it('carries a group through to the launched flight opts', async () => {
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -581,7 +574,7 @@ describe('plan-features (R54)', () => {
     // outer catch's settle() call finds the task no longer `running` and
     // refuses to resurrect it (plan-features.ts's "don't overwrite" guard) —
     // so the task stays `done`, not `failed`.
-    app = await buildApp(allDone(), saveThrowsStore(new Error('disk broken')), agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), saveThrowsStore(new Error('disk broken')), agentReturning(planText([
       { name: 'solo-thing', description: 'test the whole thing' },
     ])))
     const task = await planAndWait(app)

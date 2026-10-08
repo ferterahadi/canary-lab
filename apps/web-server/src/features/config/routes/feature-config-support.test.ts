@@ -12,15 +12,17 @@ import {
   syncEnvsInConfig,
   writeEnvsetsConfig,
 } from '../logic/envset-config'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cfg-support-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cfg-support-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 

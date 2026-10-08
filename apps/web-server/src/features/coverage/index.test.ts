@@ -1,6 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { RunStore } from '../runs/logic/run-store'
@@ -21,6 +20,10 @@ import type { PtyFactory } from '../runs/logic/runtime/pty-spawner'
 import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-coverage-reg-')
 
 /**
  * The orchestrator is this module's process edge: `runVerification` launches
@@ -101,7 +104,7 @@ let runs: RunsFeature
 let app: FastifyInstance
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-coverage-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -189,13 +192,7 @@ const ENVSET_ENV = 'APPLIED=1\nWEB_URL=https://envset.example.com\n'
 
 /** A real on-disk suite config — `loadFeatures` requires and re-reads it. */
 function writeFeature(name: string, cfg: Record<string, unknown> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['staging'], featureDir: __dirname, ...${JSON.stringify(cfg)} } }`,
-  )
-  return dir
+  return writeFeatureFixture(featuresDir, name, { envs: ['staging'], ...cfg })
 }
 
 /** A complete envset tree: a config naming a slot, a target file that already

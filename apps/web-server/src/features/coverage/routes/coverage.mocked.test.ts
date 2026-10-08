@@ -3,7 +3,6 @@
 // because vi.mock is file-scoped and module-hoisted.
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 vi.mock('../logic/prd-document-extractor', async (importOriginal) => {
@@ -47,6 +46,9 @@ import { computeDocsHash } from '../logic/coverage/docs-collection'
 import { writeCoverageRunState } from '../logic/coverage/run-state'
 import { writeFeatureDoc } from '../../config/logic/feature-docs-authoring'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-mocked-route-')
 
 let tmpDir: string
 let featuresDir: string
@@ -54,7 +56,7 @@ let logsDir: string
 let app: FastifyInstance
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-mocked-route-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
@@ -71,7 +73,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('coverage route re-throw branches', () => {

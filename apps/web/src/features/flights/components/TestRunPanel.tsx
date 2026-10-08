@@ -17,6 +17,7 @@ import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skele
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import type { ConnectionState } from '@/shared/state/record-stream'
 import { EmptyState } from '@/shared/ui/EmptyState'
+import { displayError } from '@/shared/api/error-message'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -148,7 +149,7 @@ export function TestRunPanel({
   const active = status === 'running' || status === 'healing'
   const runRef = runId ? shortRunRef(runId) : null
 
-  const report = (err: unknown): void => onError?.(err instanceof Error ? err.message : String(err))
+  const report = (err: unknown): void => onError?.(displayError(err))
 
   return (
     <div className={`flex flex-col gap-3 ${STAGE_COLUMN}`} data-testid="test-run">

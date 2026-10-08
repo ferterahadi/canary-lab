@@ -7,9 +7,9 @@ import { createServer } from '../server'
 import { mcpErrorLogger, mcpRequestUrl, uiUrlFromAddress } from './server'
 
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client } from '@modelcontextprotocol/client'
 import { decode } from '@toon-format/toon'
-import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'
+import { connectSmokeClient, smokeToolText } from './__fixtures__/smoke-harness'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -213,33 +213,6 @@ const LIFECYCLE_TOOLS = uniqueSorted([
 
 const FULL_TOOLS = uniqueSorted([...LIFECYCLE_TOOLS, ...PORTIFY_TOOLS])
 
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp', modern = false): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    {
-      capabilities: {},
-      ...(modern
-        ? { versionNegotiation: { mode: { pin: CANARY_LAB_MCP_PROTOCOL_VERSION } } as const }
-        : {}),
-    },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
-
 describe('MCP HTTP server (smoke)', () => {
   it('normalizes absent modern-request URLs and reports adapter errors through Fastify', () => {
     expect(mcpRequestUrl(undefined)).toBe('/mcp')
@@ -408,7 +381,7 @@ describe('MCP HTTP server (smoke)', () => {
       // The negotiating client deliberately collapses the server's 400 body
       // into its pin-mode failure; the important assertion is that the modern
       // path refuses to negotiate on an invalid profile.
-      await expect(connectClient(address, '/mcp?profile=nope', true))
+      await expect(connectSmokeClient(address, '/mcp?profile=nope', { modern: true }))
         .rejects.toThrow(/Version negotiation failed/)
     } finally {
       await app.close()
@@ -421,7 +394,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address)
 
       const tools = await client.listTools()
       const names = tools.tools.map((t) => t.name).sort()
@@ -433,7 +406,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'exec',
         arguments: { command: 'list_features', arguments: {} },
       })
-      const text = toolText(result)
+      const text = smokeToolText(result)
       const features = decode(text) as Array<{ name: string }>
       expect(features.map((f) => f.name)).toEqual(['storefront-journey', 'workflow-workbench'])
     } finally {
@@ -450,10 +423,10 @@ describe('MCP HTTP server (smoke)', () => {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       // list_portify_status lives in the portify surface, not the lifecycle
       // default — connect with the full profile to exercise it.
-      client = await connectClient(address, '/mcp?profile=full')
+      client = await connectSmokeClient(address, '/mcp?profile=full')
 
       const result = await client.callTool({ name: 'list_portify_status', arguments: {} })
-      const text = toolText(result)
+      const text = smokeToolText(result)
       const parsed = JSON.parse(text) as {
         features: Array<{ feature: string; portified: boolean; injectability: string }>
         summary: { total: number; portified: number; notPortified: number; concurrencyReady: number; needsPortify: number }
@@ -479,7 +452,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=full')
+      client = await connectSmokeClient(address, '/mcp?profile=full')
 
       const tools = await client.listTools()
       expect(tools.tools.map((t) => t.name).sort()).toEqual(FULL_TOOLS)
@@ -496,8 +469,8 @@ describe('MCP HTTP server (smoke)', () => {
     let directClient: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      compactClient = await connectClient(address, '/mcp?profile=compact', true)
-      directClient = await connectClient(address, '/mcp?profile=coverage')
+      compactClient = await connectSmokeClient(address, '/mcp?profile=compact', { modern: true })
+      directClient = await connectSmokeClient(address, '/mcp?profile=coverage')
 
       const tools = await compactClient.listTools()
       expect(tools.tools.map((tool) => tool.name)).toEqual(['exec'])
@@ -507,14 +480,14 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'exec',
         arguments: { command: 'search_tools', arguments: { query: 'get_feature_coverage' } },
       })
-      const searchResult = JSON.parse(toolText(search)) as { matches: Array<{ command: string }> }
+      const searchResult = JSON.parse(smokeToolText(search)) as { matches: Array<{ command: string }> }
       expect(searchResult.matches).toContainEqual(expect.objectContaining({ command: 'get_feature_coverage' }))
 
       const describeResult = await compactClient.callTool({
         name: 'exec',
         arguments: { command: 'describe_tool', arguments: { command: 'get_feature_coverage' } },
       })
-      expect(JSON.parse(toolText(describeResult))).toMatchObject({
+      expect(JSON.parse(smokeToolText(describeResult))).toMatchObject({
         command: 'get_feature_coverage',
         inputSchema: { required: ['feature'] },
       })
@@ -524,20 +497,20 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { command: 'list_features', arguments: {} },
       })
       const directFeatures = await directClient.callTool({ name: 'list_features', arguments: {} })
-      expect(toolText(compactFeatures)).toBe(toolText(directFeatures))
+      expect(smokeToolText(compactFeatures)).toBe(smokeToolText(directFeatures))
 
       const coverage = await compactClient.callTool({
         name: 'exec',
         arguments: { command: 'get_feature_coverage', arguments: { feature: 'workflow-workbench' } },
       })
-      expect(JSON.parse(toolText(coverage))).toMatchObject({ feature: 'workflow-workbench' })
+      expect(JSON.parse(smokeToolText(coverage))).toMatchObject({ feature: 'workflow-workbench' })
 
       const refusedAbort = await compactClient.callTool({
         name: 'exec',
         arguments: { command: 'abort_run', arguments: { runId: 'not-running' } },
       })
       expect((refusedAbort as { isError?: boolean }).isError).toBe(true)
-      expect(toolText(refusedAbort)).toContain('confirm')
+      expect(smokeToolText(refusedAbort)).toContain('confirm')
 
       // The full workflow guide is reachable from the one-tool surface too — the
       // compact initialize text is only the envelope, so this is where a
@@ -546,9 +519,9 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'exec',
         arguments: { command: 'get_workflow_guide', arguments: { workflow: 'flight' } },
       })
-      expect(toolText(guide)).toContain('start_flight')
-      expect(toolText(guide)).toContain('respond_flight_checkpoint')
-      expect(toolText(guide)).not.toContain('<!-- initialize-cut -->')
+      expect(smokeToolText(guide)).toContain('start_flight')
+      expect(smokeToolText(guide)).toContain('respond_flight_checkpoint')
+      expect(smokeToolText(guide)).not.toContain('<!-- initialize-cut -->')
     } finally {
       if (compactClient) await compactClient.close().catch(() => undefined)
       if (directClient) await directClient.close().catch(() => undefined)
@@ -562,7 +535,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=verify')
+      client = await connectSmokeClient(address, '/mcp?profile=verify')
 
       const tools = await client.listTools()
       expect(tools.tools.map((t) => t.name).sort()).toEqual(VERIFY_TOOLS)
@@ -578,7 +551,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=author')
+      client = await connectSmokeClient(address, '/mcp?profile=author')
 
       const tools = await client.listTools()
       expect(tools.tools.map((t) => t.name).sort()).toEqual(AUTHOR_TOOLS)

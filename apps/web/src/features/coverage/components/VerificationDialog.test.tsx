@@ -11,6 +11,7 @@ import {
 } from '@/shared/api/verification'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { VerificationDialog, reseedTargetUrls } from './VerificationDialog'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 vi.mock('@/shared/api/verification', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/verification')>()),
@@ -275,11 +276,7 @@ describe('reseedTargetUrls', () => {
 })
 
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((yes) => { resolve = yes })
-  return { promise, resolve }
-}
+
 const typeInto = async (label: string, value: string) => act(async () => {
   const input = dialog().querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value)

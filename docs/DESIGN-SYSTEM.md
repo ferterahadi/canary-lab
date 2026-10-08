@@ -372,6 +372,8 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`ComparisonTable` / `ComparisonLegend`** | Shared before/after table for test names, assertions, patches, and configuration values. Changed words use red `del` / green `ins` highlights with − / + markers; unchanged text stays neutral. `null` means absent; an empty string stays an empty value. Section rows group related changes. |
 | **`DiffView`** | Adapts captured unified patches to `ComparisonTable`, retaining file/hunk metadata and context. |
 | **`SourceComparisonTable`** | Whole-file aligned source comparison using the cards' `ReadableStoryText` and Shiki source tokens. Source edits use line-level removed/added highlights; `ComparisonTable` keeps its default word comparison for other consumers. |
+| **`Tab`** | The one `.cl-tab` button: `active` adds `.cl-tab-active`, optional `disabled`. Every tab strip renders it rather than hand-writing the class pair. |
+| **`FullScreenPage`** (`PageHeader.tsx`) | The `z-[60]` full-screen shell (Benchmark, Cleanup, Coverage ledger). Closes on Escape through the shared layer stack; `closeOnEscape={false}` while the page is mid-decision. Never `portal` a `ConfirmModal` rendered inside it. |
 | **`TestLanguageSwitch`** | Shared Aa / </> English/Code tabs for test cards and source review, with accessible English and Code labels. |
 | **`Tooltip`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
 

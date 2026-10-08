@@ -1,4 +1,4 @@
-import { useNow } from '@/shared/state/use-now'
+import { useElapsed } from '@/shared/state/use-elapsed'
 import { formatBytes } from '@/shared/lib/format'
 import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -17,6 +17,9 @@ import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
 import { BenchmarkHeader, isTerminal, lifecycleStage } from './BenchmarkHeader'
 import { ReportView } from './BenchmarkReport'
+import { displayError } from '@/shared/api/error-message'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import { CheckIcon, TrashIcon } from '@/shared/ui/Icons'
 
 // ─── Detail (setup / race / report) ─────────────────────────────────────────
 
@@ -26,6 +29,12 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
   const { abortBenchmark } = useBenchmarks()
   const [tab, setTab] = useState<'race' | 'report'>('race')
   const [armFocus, setArmFocus] = useState<BenchmarkArm>('A')
+  // In-app confirmations and notices; these were `window.confirm`/`alert`/
+  // `prompt` — OS sheets the app's tokens and theme never reach.
+  const [confirmStop, setConfirmStop] = useState(false)
+  const [pendingClear, setPendingClear] = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // When the run reaches a terminal state, land on the Report (the payoff) —
   // once, on the transition, so a manual switch back to Race is respected.
@@ -53,6 +62,22 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
   const showClear = terminal && m.status !== 'error' && tab === 'report' && !m.worktreesCleared && !!m.sabotageSha
   const showReceipt = !!m.worktreesCleared && tab === 'report'
   const showTopRow = showFrozen || showClear || showReceipt
+  const openWorktree = (target: 'frozen' | BenchmarkArm): void => {
+    setNotice(null)
+    void openWorktreeAction(m.benchmarkId, target).then(setNotice)
+  }
+  const requestClear = (): void => {
+    setNotice(null)
+    previewWorktreeClear(m.benchmarkId)
+      .then(setPendingClear)
+      .catch((e: unknown) => setNotice(displayError(e)))
+  }
+  const confirmClear = (): void => {
+    setClearing(true)
+    benchmarkApi.clearBenchmarkWorktrees(m.benchmarkId, true)
+      .catch((e: unknown) => setNotice(displayError(e)))
+      .finally(() => { setClearing(false); setPendingClear(null) })
+  }
 
   return (
     <>
@@ -66,15 +91,16 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
         totalIterations={m.iterations}
         onStop={
           m.status === 'sabotaging' || m.status === 'running'
-            ? () => {
-                if (window.confirm('Stop this benchmark? Both arms will be aborted.')) void abortBenchmark(m.benchmarkId)
-              }
+            ? () => setConfirmStop(true)
             : undefined
         }
         onNew={onNew}
         onClose={onClose}
       />
       <div style={{ flex: 1, overflow: 'auto', padding: 18 }}>
+        {notice && (
+          <div role="alert" data-testid="benchmark-notice" style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 12, wordBreak: 'break-all' }}>{notice}</div>
+        )}
         {showTopRow && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             {showReceipt && (
@@ -88,7 +114,7 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
                 type="button"
                 className="cl-button"
                 title="Open a pristine checkout of the frozen (destroyed) code in your editor"
-                onClick={() => void openWorktreeAction(m.benchmarkId, 'frozen')}
+                onClick={() => openWorktree('frozen')}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
               >
                 <OpenEditorIcon /> Open frozen bug
@@ -99,10 +125,10 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
                 type="button"
                 className="cl-button"
                 title="Remove this benchmark's worktrees (staging + both arms) to reclaim disk — afterward the frozen bug and arm checkouts are no longer openable"
-                onClick={() => void clearWorktreesAction(m.benchmarkId)}
+                onClick={requestClear}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', fontSize: 12 }}
               >
-                <TrashIcon /> Clear worktrees
+                <TrashIcon size={13} /> Clear worktrees
               </button>
             )}
           </div>
@@ -131,16 +157,34 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
         ) : tab === 'report' ? (
           <ReportView m={m} />
         ) : (
-          <RaceView m={m} armFocus={armFocus} setArmFocus={setArmFocus} />
+          <RaceView m={m} armFocus={armFocus} setArmFocus={setArmFocus} onOpenWorktree={openWorktree} />
         )}
       </div>
+      <ConfirmModal
+        open={confirmStop}
+        title="Stop benchmark"
+        variant="danger"
+        confirmLabel="Stop"
+        message="Both arms will be aborted."
+        onCancel={() => setConfirmStop(false)}
+        onConfirm={() => { setConfirmStop(false); void abortBenchmark(m.benchmarkId) }}
+      />
+      <ConfirmModal
+        open={pendingClear !== null}
+        title="Clear worktrees"
+        variant="danger"
+        confirmLabel="Clear"
+        busy={clearing}
+        message={<>“Open frozen bug” and the arm checkouts will no longer be available. Reclaims <strong>{pendingClear}</strong>.</>}
+        onCancel={() => setPendingClear(null)}
+        onConfirm={confirmClear}
+      />
     </>
   )
 }
 
 export function SetupView({ m }: { m: BenchmarkManifest }) {
-  const now = useNow({ resetKey: m.startedAt, refreshOnReset: true })
-  const elapsed = Math.max(0, Math.round((now - new Date(m.startedAt).getTime()) / 1000))
+  const elapsed = useElapsed(m.startedAt)
 
   return (
     <div style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 980, display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -148,7 +192,7 @@ export function SetupView({ m }: { m: BenchmarkManifest }) {
         <span className="animate-pulse" style={{ width: 9, height: 9, borderRadius: 9999, background: 'var(--running)', flex: 'none' }} />
         <span>
           Sabotaging <span style={{ fontFamily: 'var(--font-mono)' }}>{m.feature}</span> with the <b>{m.level}</b> skill…{' '}
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{elapsed}s</span>
+          {elapsed && <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{elapsed}</span>}
         </span>
       </div>
       <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.6, marginBottom: 14 }}>
@@ -163,7 +207,12 @@ export function SetupView({ m }: { m: BenchmarkManifest }) {
   )
 }
 
-export function RaceView({ m, armFocus, setArmFocus }: { m: BenchmarkManifest; armFocus: BenchmarkArm; setArmFocus: (a: BenchmarkArm) => void }) {
+export function RaceView({ m, armFocus, setArmFocus, onOpenWorktree }: {
+  m: BenchmarkManifest
+  armFocus: BenchmarkArm
+  setArmFocus: (a: BenchmarkArm) => void
+  onOpenWorktree: (arm: BenchmarkArm) => void
+}) {
   const focusArm = m.arms.find((a) => a.arm === armFocus)
   const armRunId = focusArm?.runIds[focusArm.runIds.length - 1] ?? null
   const isHarness = armFocus === 'A'
@@ -178,7 +227,7 @@ export function RaceView({ m, armFocus, setArmFocus }: { m: BenchmarkManifest; a
           just duplicated the card headers, so it's gone. */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
         {(['A', 'B'] as const).map((arm) => (
-          <ArmCard key={arm} m={m} arm={arm} focused={armFocus === arm} onClick={() => setArmFocus(arm)} />
+          <ArmCard key={arm} m={m} arm={arm} focused={armFocus === arm} onClick={() => setArmFocus(arm)} onOpenWorktree={() => onOpenWorktree(arm)} />
         ))}
       </div>
       <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', height: 460, display: 'flex', flexDirection: 'column' }}>
@@ -234,58 +283,25 @@ export function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; acce
   )
 }
 
-// Open a benchmark worktree in the user's editor. Best-effort: if the editor
-// couldn't be launched, surface the path so it can be opened by hand.
-export async function openWorktreeAction(id: string, target: 'frozen' | 'A' | 'B'): Promise<void> {
+// Open a benchmark worktree in the user's editor. Resolves to the notice to
+// show, or null when the editor opened: if it couldn't be launched, the path is
+// surfaced so it can be opened by hand.
+export async function openWorktreeAction(id: string, target: 'frozen' | BenchmarkArm): Promise<string | null> {
   try {
     const r = await benchmarkApi.openBenchmarkWorktree(id, target)
-    if (!r.opened) {
-      window.prompt('Could not launch your editor automatically — copy this path:', r.path)
-    }
+    return r.opened ? null : `Could not launch your editor. The worktree is at ${r.path}`
   } catch (e) {
-    window.alert(e instanceof Error ? e.message : String(e))
+    return displayError(e)
   }
 }
 
-// Reclaim a finished benchmark's worktrees. Two-phase: a dry run fetches the
-// disk it would free (named in the confirm), then the confirmed call removes
-// them. The manifest update flows back over the benchmark WS, so the buttons
-// hide on their own — nothing to refresh here.
-export async function clearWorktreesAction(id: string): Promise<void> {
-  try {
-    const preview = await benchmarkApi.clearBenchmarkWorktrees(id, false)
-    if (preview.alreadyCleared) return
-    const size = formatBytes(preview.freedBytes)
-    const ok = window.confirm(
-      `Clear all worktrees for this benchmark? "Open frozen bug" and the arm checkouts will no longer be available. Reclaims ${size}.`,
-    )
-    if (!ok) return
-    await benchmarkApi.clearBenchmarkWorktrees(id, true)
-  } catch (e) {
-    window.alert(e instanceof Error ? e.message : String(e))
-  }
-}
-
-// A small trash affordance for the "Clear worktrees" button.
-export function TrashIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M10 11v6" />
-      <path d="M14 11v6" />
-    </svg>
-  )
-}
-
-// A check used by the post-clear receipt line.
-export function CheckIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  )
+// The first phase of reclaiming a finished benchmark's worktrees: a dry run
+// that resolves to the disk it would free (named in the confirm), or null when
+// they are already gone. The confirmed removal's manifest update flows back
+// over the benchmark WS, so the buttons hide on their own.
+export async function previewWorktreeClear(id: string): Promise<string | null> {
+  const preview = await benchmarkApi.clearBenchmarkWorktrees(id, false)
+  return preview.alreadyCleared ? null : formatBytes(preview.freedBytes)
 }
 
 // Small "open in editor" affordance (↗ in a framed box) used on arm cards and
@@ -352,7 +368,13 @@ export function IterationBlock({ iter, state, cycles, seconds, delayMs }: {
   )
 }
 
-export function ArmCard({ m, arm, focused, onClick }: { m: BenchmarkManifest; arm: BenchmarkArm; focused: boolean; onClick: () => void }) {
+export function ArmCard({ m, arm, focused, onClick, onOpenWorktree }: {
+  m: BenchmarkManifest
+  arm: BenchmarkArm
+  focused: boolean
+  onClick: () => void
+  onOpenWorktree: () => void
+}) {
   const isHarness = arm === 'A'
   const accent = isHarness ? 'var(--boot)' : 'var(--accent)'
   const results = m.results.filter((r) => r.arm === arm)
@@ -396,7 +418,7 @@ export function ArmCard({ m, arm, focused, onClick }: { m: BenchmarkManifest; ar
               title={m.status === 'running'
                 ? "Open this arm's worktree in your editor — watch it heal live"
                 : "Open this arm's worktree in your editor — inspect what it changed"}
-              onClick={(e) => { e.stopPropagation(); void openWorktreeAction(m.benchmarkId, arm) }}
+              onClick={(e) => { e.stopPropagation(); onOpenWorktree() }}
               style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, padding: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', background: 'var(--bg-input)', color: 'var(--text-secondary)', cursor: 'pointer' }}
             >
               <OpenEditorIcon />

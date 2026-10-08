@@ -3,7 +3,6 @@
 // fire-and-forget dirty-spec recompute rejecting.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
@@ -11,17 +10,18 @@ import type { RunContext } from './run-context'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import type { ServiceSpec } from './run-orchestrator-types'
 import { detectRepoCollision } from './repo-collision'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-manifest-w-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-manifest-w-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {

@@ -47,6 +47,7 @@ import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
+import { sleep } from '../../../../../../../shared/lib/sleep'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -230,7 +231,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
 
     ptyFactory: opts.ptyFactory,
     healthCheck: opts.healthCheck ?? isHealthy,
-    delay: opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
+    delay: opts.delay ?? sleep,
     playwrightSpawner: opts.playwrightSpawner ?? defaultPlaywrightSpawner,
     runnerLog: opts.runnerLog,
     // Default to a file-only sink so unit tests + the CLI shim don't have to

@@ -1,19 +1,18 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { digest, json } from '../files'
 import { prepareNativeIsolation, privatePathsForAttempt, profile } from '../isolation'
 import { repositoryAdapterDigest, repositoryScenarios, type RepositoryStudyManifest } from './adapter'
 import { probeRepositoryIsolation } from './isolation'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('repository-isolation-')
 
 function fixture(): { root: string; original: string; fixtureRoot: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-isolation-'))); roots.push(root)
-  const original = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-original-'))); roots.push(original)
-  const fixtureRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-private-'))); roots.push(fixtureRoot)
+  const root = tempDir()
+  const original = tempDir('repository-original-')
+  const fixtureRoot = tempDir('repository-private-')
   fs.mkdirSync(path.join(original, '.git'), { recursive: true })
   fs.writeFileSync(path.join(original, '.git/HEAD'), 'ref: refs/heads/main\n')
   fs.writeFileSync(path.join(original, 'package.json'), '{}\n')

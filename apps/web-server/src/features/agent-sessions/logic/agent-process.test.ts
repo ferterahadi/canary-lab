@@ -1,11 +1,12 @@
 import { EventEmitter } from 'events'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAgentProcesses } from './agent-process'
 import { agentJobStore } from './agent-jobs/store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-agentrec-')
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
 const { mockNodeSpawn, mockSpawnSync } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn(), mockSpawnSync: vi.fn() }))
@@ -537,10 +538,8 @@ describe('durable records — how a spawn ends, in the record', () => {
   let logsDir: string
 
   beforeEach(() => {
-    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentrec-')))
+    logsDir = tempDir()
   })
-
-  afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
 
   const ref = { jobId: 'fl-1:scout', flightId: 'fl-1', feature: 'checkout', stage: 'scout', agent: 'claude' as const }
 

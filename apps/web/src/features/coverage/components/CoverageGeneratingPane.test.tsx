@@ -23,7 +23,9 @@ const BASE_JOB: CoverageJobManifest = {
   feature: 'checkout',
   kind: 'coverage',
   status: 'running',
-  startedAt: '2026-01-01T00:00:00Z',
+  // Recent on purpose: the elapsed clock hides a start more than a day old as a
+  // clock disagreement, so a fixed calendar date would stop rendering it.
+  startedAt: new Date(Date.now() - 12_000).toISOString(),
   log: 'booting agent\nmapping coverage',
 }
 
@@ -53,7 +55,7 @@ describe('CoverageGeneratingPane', () => {
     render(BASE_JOB)
     expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="generating-elapsed"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="generating-elapsed"]')?.textContent).toMatch(/^· 1[23]s$/)
   })
 
   it('always mounts the AgentSessionView — no Hide/Show button, no Live/Timeline toggle, no raw log (items 3+4)', () => {

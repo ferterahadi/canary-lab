@@ -6,6 +6,8 @@ import { DocPill, EmptyDropzone } from './DocPill'
 import { DocTree } from '@/shared/ui/DocTree'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { displayError } from '@/shared/api/error-message'
+import { joinNatural } from '@/shared/lib/format'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -106,12 +108,6 @@ interface Props {
   recovery?: { onClick: () => void; disabledReason?: string }
 }
 
-/** Joins names the way a sentence would: "a", "a and b", "a, b and c". */
-function joinNatural(items: string[]): string {
-  if (items.length < 2) return items.join('')
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-}
-
 // CoverageDocsRail — a collapsible LEFT RAIL that owns ONLY source-doc CRUD for a
 // feature (list / import / delete / clear the generated PRD artifact). The parent
 // (CoverageLedgerPage) owns the generation job lifecycle; this rail merely fires
@@ -130,7 +126,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   const load = useCallback((keepError = false) => {
     coverageApi.listFeatureDocs(feature)
       .then((data) => { setListing(data); if (!keepError) setError(null) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
   }, [feature])
 
   // Re-list on mount, on feature change, and whenever the parent bumps reloadKey
@@ -154,7 +150,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
         imported += 1
       } catch (e: unknown) {
-        failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+        failures.push(`${file.name} (${displayError(e)})`)
       }
     }
     if (failures.length > 0) {
@@ -171,7 +167,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setBusy(true)
     coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onDocsChanged() })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
       .finally(() => setBusy(false))
   }, [feature, load, onDocsChanged])
 
@@ -179,7 +175,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // use). Best-effort — surface a failure in the docs error slot.
   const openDoc = useCallback((absPath: string) => {
     workspaceApi.openEditor({ file: absPath })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to open in editor'))
+      .catch((e: unknown) => setError(displayError(e, 'Failed to open in editor')))
   }, [])
 
   // "Redo from the start" — a full reset to a blank slate: drop the generated PRD
@@ -192,10 +188,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setError(null)
     const failures: string[] = []
     try {
-      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
+      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${displayError(e)})`) }
       for (const d of listing?.docs ?? []) {
         if (d.generated) continue // already removed by clearPrdSummary
-        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
+        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${displayError(e)})`) }
       }
     } finally {
       if (failures.length) setError(`Reset incomplete: ${failures.join(', ')}`)

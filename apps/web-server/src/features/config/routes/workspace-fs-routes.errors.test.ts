@@ -1,5 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,6 +8,9 @@ import { featureConfigRoutes } from './feature-config'
 import * as gitRepo from '../../../shared/git-repo'
 
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-fcfg-')
 
 let tmpDir: string
 
@@ -44,13 +47,9 @@ async function makeApp(opts: {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fcfg-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('workspace error branches', () => {

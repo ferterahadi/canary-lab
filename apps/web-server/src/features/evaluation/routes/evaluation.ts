@@ -33,6 +33,8 @@ import type {
 } from '../../../../../../shared/evaluation-export-types'
 import { notFound } from '../../../shared/http-error'
 import { sendFrame } from '../../../shared/ws/record-stream'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 const EVALUATION_REWRITE_FORMAT_VERSION = 6
 
@@ -128,13 +130,11 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       if (task.producer === 'internal') {
         const message = 'evaluation export interrupted; start a new export'
         appendEvaluationExportLog(deps.store.logsDir, task.taskId, `[evaluation] task failed: ${message}\n`)
-        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           status: 'failed',
           downloadReady: false,
           error: message,
         })
-        if (patched) {
-        }
       }
     }
   }
@@ -166,9 +166,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     // Persist the rewrite agent's session ref the moment it's spawned, so the
     // export dialog can swap from the text panel to the live AgentSessionView.
     const onSession = (session: { agent: 'claude' | 'codex'; sessionId: string }): void => {
-      const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, { sessionRef: session })
-      if (patched) {
-      }
+      patchEvaluationExportTask(deps.store.logsDir, task.taskId, { sessionRef: session })
     }
     push(`[evaluation] task ${task.taskId} started\n`)
     void (async () => {
@@ -176,26 +174,22 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
         const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal, onSession, modelsOverride)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         writeEvaluationExportBuild(deps.store.logsDir, task.taskId, built)
-        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
           archive: built.contents,
           status: 'completed',
           downloadReady: true,
         })
-        if (patched) {
-        }
         push('[evaluation] task completed\n')
         active.broker.markExit('export', 0)
       } catch (err) {
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
-        const error = err instanceof Error ? err.message : String(err)
-        const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
+        const error = errorMessage(err)
+        patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           status: 'failed',
           error,
           downloadReady: false,
         })
-        if (patched) {
-        }
         push(`[evaluation] task failed: ${error}\n`)
         active.broker.markExit('export', 1)
       } finally {
@@ -325,17 +319,15 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     recoverStaleEvaluationExports()
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
-      socket.send(JSON.stringify({ type: 'error', error: 'evaluation export task not found' }))
+      sendFrame(socket, { type: 'error', error: 'evaluation export task not found' })
       socket.close()
       return
     }
     const log = readEvaluationExportLog(deps.store.logsDir, task.taskId)
-    if (log.length > 0) {
-      socket.send(JSON.stringify({ type: 'data', chunk: log }))
-    }
+    if (log.length > 0) sendFrame(socket, { type: 'data', chunk: log })
     const active = activeEvaluationExports.get(task.taskId)
     if (!active) {
-      socket.send(JSON.stringify({ type: 'exit', code: task.status === 'completed' ? 0 : 1 }))
+      sendFrame(socket, { type: 'exit', code: task.status === 'completed' ? 0 : 1 })
       socket.close()
       return
     }
@@ -389,7 +381,7 @@ async function loadEvaluationRewrite(
     }
     return generated ?? undefined
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorMessage(err)
     log?.warn(`Evaluation rewrite failed for run ${detail.runId}: ${message}`)
     writeEvaluationRewriteError(runDir, message)
     return undefined
@@ -411,7 +403,7 @@ function readCachedEvaluationRewrite(runDir: string): EvaluationRewrite | undefi
 
 function writeCachedEvaluationRewrite(runDir: string, rewrite: EvaluationRewrite): void {
   try {
-    fs.writeFileSync(path.join(runDir, 'evaluation-rewrite.json'), `${JSON.stringify({ ...rewrite, formatVersion: EVALUATION_REWRITE_FORMAT_VERSION }, null, 2)}\n`)
+    atomicWriteJson(path.join(runDir, 'evaluation-rewrite.json'), { ...rewrite, formatVersion: EVALUATION_REWRITE_FORMAT_VERSION })
   } catch {
     return undefined
   }

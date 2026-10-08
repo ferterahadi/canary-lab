@@ -3,7 +3,6 @@
 // verification run aborted before it starts.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { persistPlaywrightArtifacts, runPlaywright, runVerification, waitForPlaywrightExit } from './run-playwright'
 import { snapshotSuite } from './run-suite-snapshot'
@@ -11,16 +10,17 @@ import type { PlaywrightSpawner } from './run-spawn'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-pw-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pw-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {

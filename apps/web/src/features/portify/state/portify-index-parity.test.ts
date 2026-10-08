@@ -1,7 +1,7 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 import { PortifyRunStore } from '../../../../../web-server/src/features/portify/logic/runtime/store'
 import type { PortifyManifest } from '../../../../../web-server/src/features/portify/logic/runtime/types'
 import { portifyIndex } from './portify-state'
@@ -9,8 +9,8 @@ import { portifyIndex } from './portify-state'
 const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex
 
 let logs: string
-beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-index-parity-')) })
-afterEach(() => { fs.rmSync(logs, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('portify-index-parity-')
+beforeEach(() => { logs = tempDir() })
 
 function manifest(overrides: Partial<PortifyManifest> = {}): PortifyManifest {
   return {

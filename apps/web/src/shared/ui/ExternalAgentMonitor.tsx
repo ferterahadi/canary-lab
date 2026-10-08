@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { clientLabel, shortSession, type ExternalClientKind } from './external-client-branding'
+import { clientLabel, type ExternalClientKind } from './external-client-branding'
+import { shortSession } from '@/shared/lib/format'
 import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, useExternalClientAction } from './ExternalAgentCard'
 
 interface Props {

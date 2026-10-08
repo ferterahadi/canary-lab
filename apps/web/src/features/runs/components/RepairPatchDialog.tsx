@@ -5,6 +5,7 @@ import * as workspaceApi from '@/shared/api/workspace'
 import { Modal } from '@/shared/ui/Overlays'
 import { DiffView } from '@/shared/ui/DiffView'
 import { fileCountLabel } from '../utils/repair-files'
+import { displayError } from '@/shared/api/error-message'
 
 // The whole of one repo's captured repair, for the two moments the card can't
 // answer on its own: a file list too long to print, and a repo that has moved
@@ -43,7 +44,7 @@ export function RepairPatchDialog({
     let live = true
     runsApi.getRunFixPatch(runId, repoName)
       .then((r) => { if (live) setPatch(r) })
-      .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
+      .catch((e: unknown) => { if (live) setError(displayError(e)) })
     return () => { live = false }
   }, [open, runId, repoName, reset])
 

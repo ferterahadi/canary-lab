@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -12,6 +11,9 @@ import { runPortifyAgent } from './agent'
 import { readOverlay, writeOverlay } from './overlay'
 import type { PortifyManifest } from './types'
 import { TERMINAL, defaultAgentEdit, envsetFixture, fakePtyFactory, findWorktreeEnvFiles, gitInit, makeRunner, roots, singleFixture, waitForStatus, writeConfig } from './__fixtures__/runner.part4-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-sibidx-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -87,8 +89,7 @@ it('submitExternalPortify 409s when there is no active orchestrator (server rest
 it('buildSiblingOverlayIndex skips siblings with no overlay, empty patch, missing repos decl, or bad git root; sort comparator is non-zero on SHA-match diff; applyOverlay non-ok is a no-op', async () => {
       // Covers BRDA:126,2,0 (no overlay), 129,3,0 (empty patch), 130,5,1 + 131,6,0 (repos undefined),
       // 134,7,0 (bad git root), 159,12,0 (sort non-zero → SHA-match branch), 314,28,1 (applyOverlay non-ok)
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-sibidx-'))
-      roots.push(root)
+      const root = tempDir()
       const appRepo = path.join(root, 'app')
       const notGit = path.join(root, 'notgit')
       const logsDir = path.join(root, 'logs')
@@ -157,8 +158,7 @@ it('buildSiblingOverlayIndex skips siblings with no overlay, empty patch, missin
     })
 it('pickBorrowable sort comparator falls through to date comparison when all candidate SHAs differ from HEAD', async () => {
       // Covers BRDA:159,12,1: both candidates have the same non-matching SHA → sort left side is 0
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-datesort-'))
-      roots.push(root)
+      const root = tempDir('portify-datesort-')
       const appRepo = path.join(root, 'app')
       const logsDir = path.join(root, 'logs')
       fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })

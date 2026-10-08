@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   applyExternalDraftFiles,
@@ -17,6 +15,10 @@ import {
   updateFeatureRepoBranch,
 } from './feature-authoring'
 import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-feature-authoring-')
 
 it('shows a workspace-owned suite envset with a distinct materialized consumer target', () => {
   expect(envsetSchema('checkout')).toEqual({
@@ -44,14 +46,13 @@ let tmpDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-feature-authoring-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctx() {
@@ -77,15 +78,11 @@ module.exports = { config }
   return featureDir
 }
 
-function initGitRepo(dir: string): void {
+function initRepoWithTopic(dir: string): void {
   fs.mkdirSync(dir, { recursive: true })
-  execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' })
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
-  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: dir })
   fs.writeFileSync(path.join(dir, 'README.md'), 'repo\n', 'utf8')
-  execFileSync('git', ['add', 'README.md'], { cwd: dir })
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
-  execFileSync('git', ['branch', 'topic'], { cwd: dir })
+  initGitRepo(dir, { branch: 'main' })
+  git(dir, 'branch', 'topic')
 }
 
 describe('feature-authoring', () => {
@@ -256,7 +253,7 @@ module.exports = { config }
 
   it('returns repo status and checks out configured repo branches', async () => {
     const repoDir = path.join(tmpDir, 'repo')
-    initGitRepo(repoDir)
+    initRepoWithTopic(repoDir)
     writeFeatureConfig('checkout', '', `[{ name: 'app', localPath: ${JSON.stringify(repoDir)}, branch: 'topic' }]`)
 
     await expect(getFeatureRepoStatus(ctx(), 'missing', 'app')).resolves.toBeNull()
@@ -315,14 +312,14 @@ module.exports = { config }
     const originDir = path.join(tmpDir, 'origin.git')
     const repoDir = path.join(tmpDir, 'repo')
     const seedDir = path.join(tmpDir, 'seed')
-    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', originDir])
-    initGitRepo(seedDir)
-    execFileSync('git', ['remote', 'add', 'origin', originDir], { cwd: seedDir })
-    execFileSync('git', ['push', '-q', '-u', 'origin', 'main'], { cwd: seedDir })
-    execFileSync('git', ['clone', '-q', originDir, repoDir])
-    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'upstream'], { cwd: seedDir })
-    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: seedDir })
-    const tip = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim()
+    git(tmpDir, 'init', '-q', '--bare', '-b', 'main', originDir)
+    initRepoWithTopic(seedDir)
+    git(seedDir, 'remote', 'add', 'origin', originDir)
+    git(seedDir, 'push', '-q', '-u', 'origin', 'main')
+    git(tmpDir, 'clone', '-q', originDir, repoDir)
+    git(seedDir, 'commit', '-q', '--allow-empty', '-m', 'upstream')
+    git(seedDir, 'push', '-q', 'origin', 'main')
+    const tip = git(seedDir, 'rev-parse', 'HEAD')
     writeFeatureConfig('checkout', '', `[{ name: 'app', localPath: ${JSON.stringify(repoDir)}, branch: 'main' }]`)
     const published: unknown[] = []
     const withEvents = { ...ctx(), workspaceEvents: { publish: (e: unknown) => published.push(e) } }

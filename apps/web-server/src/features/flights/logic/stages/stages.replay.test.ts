@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
 // Transparent pass-through by default — every other test in this file spawns
@@ -41,23 +39,22 @@ import { runStage, healStage } from './run'
 
 import { evaluationExportStage } from './evaluation-export'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 
 import { writeEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -68,7 +65,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -77,26 +74,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -117,29 +100,8 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 function configCjs(name: string, repoLocalPath: string, description = 'existing feature'): string {
@@ -161,8 +123,8 @@ const VALID_CONFIG = (name = 'checkout') => configCjs(name, '/tmp/x', 'checkout 
 describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
   it("run 'rerun' re-attaches to a still-active rerun instead of double-starting into its own repo lock", async () => {
     let reads = 0
-    const calls: InjectCall[] = []
-    const inject = makeInject((c) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((c) => {
       if (c.method === 'GET' && c.url === '/api/runs/r2') {
         reads += 1
         // First read (the replay guard) sees it live; the verdict poll then
@@ -180,8 +142,8 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
   })
 
   it("run 'rerun' still force-starts a new run when the linked run is terminal", async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((c) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((c) => {
       if (c.method === 'GET' && c.url === '/api/runs/r-old') {
         return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 1 } } }
       }
@@ -202,8 +164,8 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
   })
 
   it("run 'rerun' force-starts without any lookup when the flight has no linked run", async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((c) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((c) => {
       if (c.method === 'POST' && c.url === '/api/runs') return { statusCode: 201, body: { runId: 'r-new' } }
       if (c.method === 'GET' && c.url === '/api/runs/r-new') {
         return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
@@ -235,9 +197,9 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
     const exportDir = path.join(logsDir, 'evaluation-exports', 'eval-live')
     fs.mkdirSync(exportDir, { recursive: true })
     fs.writeFileSync(path.join(exportDir, 'export.zip'), 'zip')
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
 
-    const outcome = await evaluationExportStage(deps({ inject: makeInject(() => undefined, calls) })).onCheckpointResponse!(
+    const outcome = await evaluationExportStage(deps({ inject: fakeFlightInject(() => undefined, calls) })).onCheckpointResponse!(
       ctx,
       { choice: 'raw' },
     )
@@ -260,8 +222,8 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
         ...prior,
       } as never)
 
-      const calls: InjectCall[] = []
-      const inject = makeInject((call) => {
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
           writeEvaluationExportTask(logsDir, {
             taskId: 'eval-fresh', runId: 'r1', feature: 'checkout', mode: 'raw', status: 'completed',

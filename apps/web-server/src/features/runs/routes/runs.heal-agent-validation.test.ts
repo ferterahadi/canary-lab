@@ -1,7 +1,6 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
@@ -20,6 +19,10 @@ import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
 
 import type { ExecutionType } from '../../../../../../shared/verification'
+import { writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rroutes-')
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -39,7 +42,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -58,12 +61,7 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
 }
 
 function writeFeature(name: string): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: [] })
 }
 
 async function build(opts: {

@@ -14,6 +14,7 @@ import {
   type CanaryLabWorkspaceRegistry,
 } from '../../shared/runtime/workspace-registry'
 import { McpCommandOptions, isDefaultLocalMcpUrl, stripProfile } from './mcp'
+import { sleep } from '../../shared/lib/sleep'
 
 export const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 
@@ -165,10 +166,6 @@ export function resolveCliPath(): string {
   const siblingCli = path.join(__dirname, 'cli.js')
   if (fs.existsSync(siblingCli)) return siblingCli
   return process.argv[1] ?? siblingCli
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function healthUrlFor(url: string): string {

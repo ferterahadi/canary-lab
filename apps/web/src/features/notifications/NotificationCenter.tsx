@@ -10,6 +10,7 @@ import { StatusPill } from '@/shared/ui/StatusPill'
 import { IconButton, StatusDot } from '@/shared/ui/atoms'
 import { Modal } from '@/shared/ui/Overlays'
 import { useNotifications } from './use-notifications'
+import { Tab } from '@/shared/ui/Tab'
 
 function needsAttention(item: WorkspaceNotification): boolean {
   // Retained test-review messages may predate the warning severity mapping.
@@ -136,8 +137,8 @@ export function NotificationCenter({ open, onOpenChange, onNavigate, approvals, 
         stableScrollGutter
         subheader={
           <nav className="flex gap-5 border-b border-line px-5 pt-2" aria-label="Notification filter">
-            <button className={`cl-tab ${!showHistory ? 'cl-tab-active' : ''}`} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length + approvalCount}</span></button>
-            <button className={`cl-tab ${showHistory ? 'cl-tab-active' : ''}`} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length}</span></button>
+            <Tab active={!showHistory} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length + approvalCount}</span></Tab>
+            <Tab active={showHistory} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length}</span></Tab>
           </nav>
         }
       >

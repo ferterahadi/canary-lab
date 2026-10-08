@@ -99,7 +99,7 @@ export async function paneStreamRoutes(
 
       // Fallback: replay the on-disk log file for finished/historical runs.
       if (!replayLogFile(socket, deps.logsDir, runId, paneId)) {
-        socket.send(JSON.stringify({ type: 'error', error: 'unknown pane' }))
+        sendFrame(socket, { type: 'error', error: 'unknown pane' })
         socket.close()
       }
     },
@@ -119,7 +119,7 @@ export function shouldPreferLogReplay(
   return !hasActiveOrchestrator && shouldReplayLogFile(logsDir, runId)
 }
 
-function replayLogFile(
+export function replayLogFile(
   socket: { send: (message: string) => void; close: () => void },
   logsDir: string,
   runId: string,
@@ -127,14 +127,14 @@ function replayLogFile(
 ): boolean {
   const filePath = resolveLogPath(logsDir, runId, paneId)
   if (!filePath) return false
+  // Sends go through `sendFrame` so only the file read can reach the catch: a
+  // socket that closed mid-replay must not trigger a second send that throws.
   try {
     const chunk = formatHistoricalPaneReplay(paneId, fs.readFileSync(filePath, 'utf-8'))
-    if (chunk.length > 0) {
-      socket.send(JSON.stringify({ type: 'data', chunk }))
-    }
-    socket.send(JSON.stringify({ type: 'exit', code: 0 }))
+    if (chunk.length > 0) sendFrame(socket, { type: 'data', chunk })
+    sendFrame(socket, { type: 'exit', code: 0 })
   } catch {
-    socket.send(JSON.stringify({ type: 'error', error: 'log not available' }))
+    sendFrame(socket, { type: 'error', error: 'log not available' })
   } finally {
     socket.close()
   }

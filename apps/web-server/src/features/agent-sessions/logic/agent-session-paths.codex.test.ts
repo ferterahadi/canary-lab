@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   listCodexSessionLogs,
@@ -38,15 +37,14 @@ import {
   subagentDirFor,
 } from './agent-session-subagents'
 import { parseAgentSessionLine } from './agent-session-parse'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-asl-home-')
 
 let homeDir: string
 
 beforeEach(() => {
-  homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-home-')))
-})
-
-afterEach(() => {
-  try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  homeDir = tempDir()
 })
 
 describe('locateCodexSessionLog', () => {
@@ -79,7 +77,7 @@ describe('locateCodexSessionLog', () => {
   })
 
   it('finds the session whose cwd + timestamp match', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const expected = writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -90,8 +88,6 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-aaaa', logPath: expected })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('reads session_meta even when the first JSONL line is larger than 64 KB', () => {
@@ -99,7 +95,7 @@ describe('locateCodexSessionLog', () => {
     // session_meta payload; the first line can run into hundreds of KB. The
     // previous 8 KB buffer truncated the JSON and made every real run look
     // like "no session".
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const padding = 'x'.repeat(150_000)
     const dir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
     fs.mkdirSync(dir, { recursive: true })
@@ -118,12 +114,10 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-bigprompt', logPath: file })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('reads Codex session metadata when the first line has no trailing newline', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const dir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, 'rollout-2026-05-11T01-23-45-nonewline.jsonl')
@@ -137,12 +131,10 @@ describe('locateCodexSessionLog', () => {
       sessionId: 'sess-nonewline',
       logPath: file,
     })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('skips sessions started before cycleStartedAt', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -153,12 +145,10 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T02:00:00.000Z', homeDir)
     expect(ref).toBeNull()
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('skips sessions whose cwd does not match the runDir', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -169,12 +159,10 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)
     expect(ref).toBeNull()
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('ignores malformed Codex session metadata while selecting the newest valid match', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -204,12 +192,10 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-newest', logPath: expected })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('keeps the newest Codex session when an older match is scanned later', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const expected = writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -227,12 +213,10 @@ describe('locateCodexSessionLog', () => {
 
     const ref = locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-newer', logPath: expected })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('ignores close errors while reading Codex session metadata', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const expected = writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -248,18 +232,16 @@ describe('locateCodexSessionLog', () => {
       expect(ref).toEqual({ agent: 'codex', sessionId: 'sess-close-error', logPath: expected })
     } finally {
       closeSpy.mockRestore()
-      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
     }
   })
 
   it('returns null when the Codex sessions root is missing', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     expect(locateCodexSessionLog(runDir, '2026-05-11T01:00:00.000Z', homeDir)).toBeNull()
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('crosses UTC date boundaries (scans next day too)', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const expected = writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -271,8 +253,6 @@ describe('locateCodexSessionLog', () => {
     // Cycle started late on the 11th; session ended up in the 12th's bucket.
     const ref = locateCodexSessionLog(runDir, '2026-05-11T23:50:00.000Z', homeDir)
     expect(ref?.logPath).toBe(expected)
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('returns null when cycleStartedAt is unparseable', () => {
@@ -280,7 +260,7 @@ describe('locateCodexSessionLog', () => {
   })
 
   it('finds the newest matching Codex session without a cycle timestamp', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     writeCodexSession({
       yyyy: '2026',
       mm: '05',
@@ -308,12 +288,10 @@ describe('locateCodexSessionLog', () => {
       sessionId: 'sess-newest',
       logPath: expected,
     })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('skips invalid latest Codex entries while scanning newest-first buckets', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const dir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'zz-not-jsonl.txt'), 'ignore')
@@ -335,19 +313,15 @@ describe('locateCodexSessionLog', () => {
       sessionId: 'sess-valid',
       logPath: expected,
     })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('returns null when Codex metadata files are empty or cannot be opened', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const dir = path.join(homeDir, '.codex', 'sessions', '2026', '05', '11')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'empty.jsonl'), '')
     fs.symlinkSync(path.join(dir, 'missing-target.jsonl'), path.join(dir, 'dangling.jsonl'))
 
     expect(locateLatestCodexSessionLog(runDir, homeDir)).toBeNull()
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 })

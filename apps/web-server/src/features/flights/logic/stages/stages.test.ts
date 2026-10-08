@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
 // Transparent pass-through by default — every other test in this file spawns
@@ -32,6 +30,9 @@ vi.mock('child_process', async (importOriginal) => {
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
 import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -42,7 +43,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -50,8 +51,6 @@ beforeEach(() => {
   fs.mkdirSync(logsDir, { recursive: true })
   fs.mkdirSync(repoDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('context helpers', () => {
   function fakeAgentScript(body: string): string {

@@ -1,7 +1,7 @@
 import { isPathUnder } from '../../../../shared/path-containment'
-import fs from 'fs'
 import path from 'path'
 import type { WorktreeHandle } from './repo-worktree'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 export const HEAL_AGENT_ISOLATION_SETTINGS = 'heal-agent-isolation.settings.json'
 
@@ -88,7 +88,6 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
       },
     },
   }
-  fs.mkdirSync(args.runDir, { recursive: true })
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+  atomicWriteJson(settingsPath, settings)
   return settingsPath
 }

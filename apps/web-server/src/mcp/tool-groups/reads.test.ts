@@ -1,13 +1,16 @@
 import { RunStore } from '../../features/runs/logic/run-store'
 import { createRegistry } from '../../features/runs/logic/run-registry'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decode } from '@toon-format/toon'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerReadTools } from './reads'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-reads-')
 
 // The read tools: the feature/run listings, the three run reads, and the Verify
 // config CRUD.
@@ -23,13 +26,7 @@ let featuresDir: string
 let logsDir: string
 
 function writeFeature(name: string, extra: Record<string, unknown> = {}): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  const cfg = { name, description: 'd', envs: ['local'], repos: [], ...extra }
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { ...${JSON.stringify(cfg)}, featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: ['local'], repos: [], ...extra })
 }
 
 function runDetail(over: Record<string, unknown> = {}, manifest: Record<string, unknown> = {}): RunDetail {
@@ -63,14 +60,12 @@ function harness(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-reads-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('list_features', () => {
   it('packs envs and repos into one flat row per feature', async () => {

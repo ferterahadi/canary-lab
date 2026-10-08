@@ -27,6 +27,7 @@ import os from 'os'
 import path from 'path'
 import { applyAgentSessionMetaLine, parseAgentSessionLine } from './agent-session-parse'
 import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, safeMtimeMs } from './agent-session-paths'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 export type AgentKind = 'claude' | 'codex'
 
@@ -131,10 +132,9 @@ function persistWorkflowAgentRef(
   build: () => AgentSessionRefFile | { activeAgent: 'codex'; codexDiscovery: { cwd: string; spawnedAt: string } },
 ): void {
   try {
-    const file = build()
-    // Flight stages and Portify callers may not have created their sidecar dir.
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'agent-session.json'), JSON.stringify(file, null, 2))
+    // Flight stages and Portify callers may not have created their sidecar dir;
+    // the write creates it.
+    atomicWriteJson(path.join(dir, 'agent-session.json'), build())
   } catch {
     /* best-effort — the surface falls back to its empty state */
   }

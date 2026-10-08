@@ -2,6 +2,7 @@ import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-e
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { createObservedReads } from './observed-reads'
+import { displayError } from '@/shared/api/error-message'
 
 export interface RecordSyncState {
   loading: boolean
@@ -126,7 +127,7 @@ export function useWorkspaceRecords<T>(options: WorkspaceRecordsOptions<T>) {
         if (conflicted) retry = setTimeout(() => { if (visible()) schedule() }, 2500)
       }).catch((error: unknown) => {
         if (disposed || request !== requested) return
-        setSync({ loading: false, stale: true, error: error instanceof Error ? error.message : String(error) })
+        setSync({ loading: false, stale: true, error: displayError(error) })
         retry = setTimeout(() => { if (visible()) schedule() }, 2500)
       })
     }

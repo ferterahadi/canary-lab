@@ -1,14 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { readPlaywrightPlaybackEvents } from './run-detail'
 import { indexPlaywrightArtifacts } from './run-artifacts'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {

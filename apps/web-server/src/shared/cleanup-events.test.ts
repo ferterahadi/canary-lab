@@ -1,22 +1,21 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
 import { bridgeCleanupEvents, CLEANUP_EVENT_COALESCE_MS } from './cleanup-events'
 import { WorkspaceEventBus } from './workspace-events'
 import type { WorkspaceEvent } from '../../../../shared/workspace-events'
 import { PortifyRunStore } from '../features/portify/logic/runtime/store'
 import type { PortifyManifest } from '../features/portify/logic/runtime/types'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cleanup-events-')
 
 let directory: string | undefined
 afterEach(() => {
   vi.useRealTimers()
-  if (directory) fs.rmSync(directory, { recursive: true, force: true })
 })
 
 it('coalesces real store writes and deletions into scoped inventory notifications', () => {
   vi.useFakeTimers()
-  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-events-'))
+  directory = tempDir()
   const store = new PortifyRunStore(directory)
   const bus = new WorkspaceEventBus()
   const events: WorkspaceEvent[] = []

@@ -13,6 +13,7 @@ import { deriveFeatureSlug, isTerminalFlightStatus, type PlannedFeature, type Pl
 import { cancelPlanFeatures, startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { executePlannedLaunch, resolveFlightModels } from './flight-route-support'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerFlightPlanRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -117,7 +118,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
         for (const flight of descendants) await abortFlight(flight.flightId, conductorDeps)
         return planStore.get(req.params.taskId) ?? task
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         const statusCode = err instanceof Error && 'statusCode' in err
           ? Number((err as Error & { statusCode: number }).statusCode)
           : 500
@@ -245,7 +246,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
     try {
       return await abortFlight(req.params.id, conductorDeps)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }
     }

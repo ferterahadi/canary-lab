@@ -1,15 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
-import path from 'path'
 import { BenchmarkRunStore, type BenchmarkStoreEvent } from './store'
 import { benchmarksIndexPath } from './paths'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { BenchmarkManifest } from './types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-bench-')
 
 let logsDir: string
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-bench-')))
+  logsDir = tempDir()
 })
 
 function makeManifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {

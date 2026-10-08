@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   deriveFeatureEvidence,
@@ -11,13 +10,16 @@ import {
 } from './stage-evidence'
 import { runDirFor, runsIndexPath } from '../../runs/logic/runtime/run-paths'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-evidence-')
 
 let featureDir: string
 let logsDir: string
 
 beforeEach(() => {
-  featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-evidence-'))
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-evidence-logs-'))
+  featureDir = tempDir()
+  logsDir = tempDir('cl-evidence-logs-')
 })
 
 /** Write one run into the index plus its manifest, the way the run store does. */

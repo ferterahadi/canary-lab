@@ -1,11 +1,13 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
 import type { FlightManifest } from '../../../shared/flights/types'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-delete-server-')
 
 let root: string
 let suite: string
@@ -36,7 +38,7 @@ async function remove(transport: 'REST' | 'MCP', feature: string, confirmName = 
 
 beforeEach(async () => {
   ptyFactory.mockClear()
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-delete-server-')))
+  root = tempDir()
   const projectRoot = path.join(root, 'workspace')
   const featuresDir = path.join(projectRoot, 'features')
   const logsDir = path.join(root, 'logs')
@@ -65,7 +67,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close()
   await app?.close()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each(['REST', 'MCP'] as const)('%s refuses invalid targets and active Flights without changing saved history', async (transport) => {

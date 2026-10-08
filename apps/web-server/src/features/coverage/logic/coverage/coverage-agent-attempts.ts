@@ -1,6 +1,7 @@
 import type { PerAgentStageChoices, StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 /** Pinned at spawn so coverage consumers can follow the agent's session. */
 export interface CoverageAgentSession {
@@ -63,7 +64,7 @@ export async function runCoverageAgentAttempts<T>(options: AttemptOptions<T>): P
       if (answer.failure !== undefined) lastFailure = answer.failure
     } catch (error) {
       checkCancellation()
-      lastFailure = error instanceof Error ? error.message : String(error)
+      lastFailure = errorMessage(error)
       options.onOutput?.(`[agent:${agent}] failed: ${lastFailure}\n`)
     }
   }

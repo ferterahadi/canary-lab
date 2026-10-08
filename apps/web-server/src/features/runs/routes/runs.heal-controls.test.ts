@@ -1,7 +1,6 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
@@ -14,6 +13,9 @@ import {
   type RestartRunResult,
 } from '../logic/run-registry'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rroutes-')
 
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
@@ -34,7 +36,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

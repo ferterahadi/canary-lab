@@ -10,6 +10,7 @@ import { fileCountLabel, groupByDirectory, isTestPath } from '../utils/repair-fi
 import { prBlockedLine } from '../utils/pr-blocked-copy'
 import { CopyIconButton } from './RunServicePanels'
 import { RepairPatchDialog } from './RepairPatchDialog'
+import { displayError } from '@/shared/api/error-message'
 
 // One repo of a run's repair, as a card — the unit both the Changes tab and the
 // flight's Test Run stage render, so the two surfaces can't drift apart again
@@ -87,7 +88,7 @@ export function useRepoOpener(runId: string, finalCapture: boolean, provisional 
         ? { kind: 'done', ...(opened.editor ? { editor: opened.editor } : {}) }
         : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })
     } catch (err) {
-      update({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) })
+      update({ kind: 'failed', reason: displayError(err) })
     } finally {
       if (alive() && !provisional) refreshPreflight()
     }

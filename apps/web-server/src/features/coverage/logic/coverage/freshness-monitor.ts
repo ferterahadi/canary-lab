@@ -7,13 +7,15 @@ import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { WorkspaceEventBus } from '../../../../shared/workspace-events'
 import { docsDirFor } from './document-files'
 import { CoverageSnapshotCache } from './snapshot-cache'
+import { TaskListeners } from '../../../../../../../shared/lib/file-backed-task-store'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 /** One process-owned observer backs the UI, inbox, and agent waits. Filesystem
  * events are hints; content reconciliation also follows links and catches
  * changes made while the process or a socket was disconnected. */
 export class CoverageFreshnessMonitor {
   private readonly values = new Map<string, FeatureCoverageChange>()
-  private readonly listeners = new Set<(change: FeatureCoverageChange) => void>()
+  private readonly listeners = new TaskListeners<FeatureCoverageChange>()
   private readonly watchers = new Map<string, fs.FSWatcher>()
   private readonly shutdown = new AbortController()
   private timer?: ReturnType<typeof setInterval>
@@ -43,7 +45,7 @@ export class CoverageFreshnessMonitor {
     } catch (error) {
       change = { feature, delivery: 'tool-response-and-wait', freshness: {
         revision: coverageJsonDigest(String(error)), checkedAt: new Date().toISOString(),
-        state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + (error instanceof Error ? error.message : String(error))],
+        state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + errorMessage(error)],
         changedTests: [], latestRunFailed: false,
       } }
       this.accept(change)
@@ -62,7 +64,7 @@ export class CoverageFreshnessMonitor {
     const previous = this.values.get(change.feature)
     this.values.set(change.feature, change)
     if (previous?.freshness.revision === change.freshness.revision) return
-    for (const listener of this.listeners) listener(change)
+    this.listeners.emit(change)
     this.events.publish({ type: 'coverage-changed', feature: change.feature, revision: change.freshness.revision })
   }
 

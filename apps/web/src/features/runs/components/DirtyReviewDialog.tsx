@@ -30,6 +30,7 @@ import { featureTone, pendingFileScope, specTone } from '../utils/spec-integrity
 import { SpecToneChip } from './SpecToneChip'
 import { FullTestReview } from './FullTestReview'
 import type { ReviewFocus } from '../../../shared/lib/workspace-view-state'
+import { displayError } from '@/shared/api/error-message'
 
 interface Props {
   features: Feature[]
@@ -96,7 +97,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const act = async (action: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
     setError(null)
-    try { await action() } catch (err) { setError(err instanceof Error ? err.message : 'Action failed') }
+    try { await action() } catch (err) { setError(displayError(err, 'Action failed')) }
     finally { setBusy(false) }
   }
   const choose = (feature: string, file: string): void => {

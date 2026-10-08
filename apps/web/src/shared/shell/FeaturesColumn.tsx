@@ -26,6 +26,7 @@ import { shortDateTime } from '../lib/format'
 import { Tooltip } from '../ui/Tooltip'
 import { useLiveCoverageStates } from '../state/use-live-coverage'
 import type { ModelsAgent } from '../lib/workspace-view-state'
+import { plural } from '@shared/lib/plural'
 
 interface Props {
   features: Feature[]
@@ -489,7 +490,7 @@ function LastRunDot({ feature, run }: { feature: string; run?: RunIndexEntry }) 
     )
   }
   const cycles = run.status === 'passed' ? run.healCycles ?? 0 : 0
-  const outcome = cycles > 0 ? `passed after ${cycles} repair cycle${cycles === 1 ? '' : 's'}` : run.status
+  const outcome = cycles > 0 ? `passed after ${plural(cycles, 'repair cycle')}` : run.status
   const label = [`Last run ${outcome}`, shortDateTime(run.endedAt ?? run.startedAt), run.env].filter(Boolean).join(' · ')
   return (
     <Tooltip label={label}>

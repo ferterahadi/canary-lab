@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('apply-fix-reason-')
 
 // Real git always writes *something* to stderr when `apply` fails, so the
 // stdout fallback and the generic last resort can only be pinned with a faked
@@ -19,7 +21,7 @@ let root: string
 let patchPath: string
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'apply-fix-reason-')))
+  root = tempDir()
   patchPath = path.join(root, 'repo.patch')
   fs.writeFileSync(patchPath, 'diff --git a/x b/x\n')
   gitMocks.runGit.mockReset()

@@ -9,7 +9,7 @@ import { applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import type { RunsFeature } from '../runs/index'
 
-import { loadFeatures } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { generateRunId } from '../runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
 import { RunOrchestrator } from '../runs/logic/runtime/orchestrator'
@@ -50,8 +50,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
     input: ResolveVerificationInput,
     options?: { cleanupBootRunId: string },
   ): Promise<OrchestratorLike> => {
-    const features = loadFeatures(featuresDir)
-    const feature = features.find((f) => f.name === featureName)
+    const feature = findFeature(featuresDir, featureName)
     if (!feature) throw Object.assign(new Error(`feature not found: ${featureName}`), { statusCode: 404 })
 
     const resolved = resolveVerificationRun(feature, input)

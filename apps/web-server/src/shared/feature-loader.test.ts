@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { loadFeatures, listSpecFiles, suiteAvailability } from './feature-loader'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-fl-')
 
 let tmpDir: string
 
@@ -14,10 +16,9 @@ function writeFeature(name: string, body: string): string {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fl-')))
+  tmpDir = tempDir()
 })
 
-afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }) })
 
 describe('loadFeatures', () => {
   it('reloads each selected extension in precedence order and refuses a malformed first candidate', () => {

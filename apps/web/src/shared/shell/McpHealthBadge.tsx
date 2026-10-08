@@ -4,10 +4,13 @@ import { useAnchoredPosition } from '@/shared/ui/use-anchored-position'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as configApi from '../api/config'
-import { capitalizeFirst } from '@/shared/lib/format'
+import { capitalizeFirst, shortTime } from '@/shared/lib/format'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { CopyField } from '@/shared/ui/CopyField'
 import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { displayError } from '@/shared/api/error-message'
+import { usePersistedFlag } from '@/shared/state/browser-storage'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 const MCP_PROFILE = 'compact'
 
@@ -33,7 +36,7 @@ export function McpHealthBadge() {
     setCheckMessage(null)
     try {
       const result = await configApi.getMcpHealth()
-      const checkedAt = formatCheckedAt(new Date())
+      const checkedAt = shortTime(new Date().toISOString())
       setHealth({
         state: 'ready',
         projectRoot: result.projectRoot,
@@ -41,7 +44,7 @@ export function McpHealthBadge() {
       setLastCheckedLabel(checkedAt)
       setCheckMessage(`Health OK at ${checkedAt}`)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'MCP health check failed'
+      const message = displayError(err, 'MCP health check failed')
       setHealth({
         state: 'failed',
         error: message,
@@ -58,7 +61,7 @@ export function McpHealthBadge() {
     const rect = buttonRef.current?.getBoundingClientRect()
     if (!rect) return
     const width = Math.min(360, Math.max(304, window.innerWidth - 16))
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8))
+    const left = clampToViewport(rect, width, 'start', window.innerWidth)
     setMenuPosition({ top: rect.bottom + 8, left, width })
   }, [])
 
@@ -170,25 +173,9 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
 // endpoint derives from the live origin (UI + MCP share one configured port)
 // and keeps compact explicit so the copied URL documents the intended surface.
 function McpConnectGuide({ healthy }: { healthy: boolean }) {
-  const [open, setOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('cl-mcp-connect-open') === 'true'
-    } catch {
-      return false
-    }
-  })
+  const [open, setOpen] = usePersistedFlag('cl-mcp-connect-open', false)
   const endpoint = `${window.location.origin}/mcp?profile=${MCP_PROFILE}`
-  const toggle = (): void => {
-    setOpen((current) => {
-      const next = !current
-      try {
-        localStorage.setItem('cl-mcp-connect-open', String(next))
-      } catch {
-        /* storage unavailable — non-fatal */
-      }
-      return next
-    })
-  }
+  const toggle = (): void => setOpen((current) => !current)
   return (
     <div className="shrink-0">
       <button
@@ -270,12 +257,4 @@ function PlugIcon() {
       <path d="M12 17v5" />
     </svg>
   )
-}
-
-function formatCheckedAt(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date)
 }

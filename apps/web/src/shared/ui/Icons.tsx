@@ -11,6 +11,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 export function CloseIcon({ size = 13 }: { size?: number } = {}) {
   return (
@@ -59,12 +60,8 @@ export function HintIcon({ hint, icon, label }: { hint: string; icon?: ReactNode
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
-    const tooltipWidth = 256
-    const margin = 8
-    let left = rect.left + rect.width / 2 - tooltipWidth / 2
-    left = Math.max(margin, Math.min(left, window.innerWidth - tooltipWidth - margin))
-    const top = rect.bottom + 6
-    setPos({ top, left })
+    // 256 = the tip's fixed `w-64`.
+    setPos({ top: rect.bottom + 6, left: clampToViewport(rect, 256, 'center', window.innerWidth) })
   }, [open])
 
   return (
@@ -216,9 +213,9 @@ export function PencilIcon({ size = 12 }: { size?: number } = {}) {
   )
 }
 
-export function TrashIcon() {
+export function TrashIcon({ size = 12 }: { size?: number } = {}) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
       <path d="M10 11v6" />
@@ -246,9 +243,9 @@ export function CheckIcon({ size = 13 }: { size?: number } = {}) {
   )
 }
 
-export function ChevronRightIcon() {
+export function ChevronRightIcon({ size = 12, className }: { size?: number; className?: string } = {}) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="9 18 15 12 9 6" />
     </svg>
   )

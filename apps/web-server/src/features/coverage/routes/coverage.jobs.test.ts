@@ -4,7 +4,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -40,6 +39,10 @@ import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent 
 
 import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-paths'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-route-')
 
 let tmpDir: string
 
@@ -52,7 +55,7 @@ let app: FastifyInstance
 let events: WorkspaceEvent[]
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-route-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
@@ -66,24 +69,10 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs()
   await app.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeFeature(name: string, spec: string, docs: Record<string, string> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), spec)
-  if (Object.keys(docs).length) {
-    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-    for (const [rel, content] of Object.entries(docs)) {
-      fs.writeFileSync(path.join(dir, 'docs', rel), content)
-    }
-  }
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, { specs: { 'a.spec.ts': spec }, docs })
 }
 
 const SPEC = `
@@ -490,7 +479,7 @@ describe('resolveCoverageJobModels', () => {
   const savedEnv: Record<string, string | undefined> = {}
 
   beforeEach(() => {
-    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-cov-models-'))
+    projectRoot = tempDir('canary-cov-models-')
     fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({ agentModels: AGENT_MODELS }))
     for (const key of ['CANARY_LAB_HEAL_AGENT', 'CANARY_LAB_CLAUDE_BIN', 'CANARY_LAB_CODEX_BIN']) {
       savedEnv[key] = process.env[key]
@@ -499,7 +488,6 @@ describe('resolveCoverageJobModels', () => {
   })
 
   afterEach(() => {
-    fs.rmSync(projectRoot, { recursive: true, force: true })
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value

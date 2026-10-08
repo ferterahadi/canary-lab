@@ -3,7 +3,6 @@ import * as featureDocs from '../feature-docs'
 import type { WorkspaceEvent } from '../../../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { startExternalCoverage, submitExternalCoverage, startExternalSummary, submitExternalSummary } from './external'
 import { readPrdSummary } from '../prd-summary-render'
@@ -12,6 +11,10 @@ import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../feature-docs'
 import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
 import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-ext-')
 
 // Coverage generation is LLM-only; inject the fake summarizer via the dep seam.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
@@ -22,7 +25,7 @@ let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-ext-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
@@ -31,7 +34,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 // One untagged test whose name overlaps the "Create todo" requirement (R1).
@@ -43,16 +45,10 @@ const SPEC = `
 `
 
 function writeFeature(name: string): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item')
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, {
+    specs: { 'a.spec.ts': SPEC },
+    docs: { 'spec.md': '# Create todo\na user can create a new todo item' },
+  })
 }
 
 async function seedSummary(name: string) {

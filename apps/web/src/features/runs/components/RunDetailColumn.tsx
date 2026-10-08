@@ -19,7 +19,8 @@ import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
 import { RunPane } from './RunPane'
 import type { PlaywrightView } from './RunPlaybackPanels'
-import { ServiceTabButton, TabButton } from './RunServicePanels'
+import { ServiceTabButton } from './RunServicePanels'
+import { Tab } from '@/shared/ui/Tab'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
@@ -198,20 +199,20 @@ export function RunDetailColumn({
           <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={() => onOpenSpecReview(m.feature, m.runId)} />
         )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
-          <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
-          {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}
-          {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
-          {!isBootRun && <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>}
-          {!isVerify && !isBootRun && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
+          <Tab active={tab === 'overview'} onClick={() => setTab('overview')} className="shrink-0 whitespace-nowrap">Overview</Tab>
+          {!isVerify && <Tab active={tab === 'run-logs'} onClick={() => setTab('run-logs')} className="shrink-0 whitespace-nowrap">Run Logs</Tab>}
+          {!isVerify && <Tab active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0} className="shrink-0 whitespace-nowrap">Services</Tab>}
+          {!isBootRun && <Tab active={tab === 'playwright'} onClick={() => setTab('playwright')} className="shrink-0 whitespace-nowrap">Playwright</Tab>}
+          {!isVerify && !isBootRun && <Tab active={tab === 'agent'} onClick={() => setTab('agent')} className="shrink-0 whitespace-nowrap">Heal agent</Tab>}
           {/* What the repair actually changed. Always openable, like Journal: a
               run that changed nothing is a fact worth reading, and the tab's
               own empty state says which kind of nothing it was. */}
           {!isVerify && !isBootRun && (
-            <TabButton active={tab === 'changes'} onClick={() => setTab('changes')}>
+            <Tab active={tab === 'changes'} onClick={() => setTab('changes')} className="shrink-0 whitespace-nowrap">
               Changes
-            </TabButton>
+            </Tab>
           )}
-          {!isVerify && !isBootRun && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
+          {!isVerify && !isBootRun && <Tab active={tab === 'journal'} onClick={() => setTab('journal')} className="shrink-0 whitespace-nowrap">Journal</Tab>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">

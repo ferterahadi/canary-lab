@@ -26,10 +26,11 @@ import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../sha
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
   const statusCode = (error as { statusCode?: number }).statusCode ?? 500
-  return reply.code(statusCode).send({ error: error instanceof Error ? error.message : fallback })
+  return reply.code(statusCode).send({ error: errorMessage(error, fallback) })
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
@@ -191,8 +192,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   app.get<{ Params: { name: string }; Querystring: { file?: string } }>(
     '/api/features/:name/dirty-diff',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
+      const feature = findFeature(deps.featuresDir, req.params.name)
       if (!feature || !feature.featureDir) return notFound(reply, 'feature')
       const rel = req.query.file
       if (!rel) {
@@ -228,8 +228,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   )
 
   app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
+    const feature = findFeature(deps.featuresDir, req.params.name)
     if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     const config = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
     if (config) {
@@ -272,7 +271,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
       }),
     }).catch((err: unknown) => {
-      discoveryDiagnostics = err instanceof Error ? err.message : String(err)
+      discoveryDiagnostics = errorMessage(err)
       app.log.warn({ err, feature: feature.name }, 'test discovery failed')
       return null
     })

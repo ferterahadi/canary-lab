@@ -1,9 +1,11 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { DirtySpecStore } from '../../../runs/logic/dirty-specs/store'
 import { historyForTests, readFeatureRunHistory } from './requirement-history'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rh-')
 
 // The time axis reads run EVIDENCE, never a stored opinion: which run last saw a
 // set of tests all pass (provenAt), and which spec-edit classifications touched
@@ -15,12 +17,8 @@ import { historyForTests, readFeatureRunHistory } from './requirement-history'
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rh-')))
+  logsDir = tempDir()
   fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(logsDir, { recursive: true, force: true })
 })
 
 function seedIndex(entries: Array<Record<string, unknown>>): void {
@@ -174,7 +172,7 @@ describe('readFeatureRunHistory + historyForTests — test changes', () => {
   it('a dirty-specs record (an edit between runs) counts from when the feature went dirty', async () => {
     seedIndex([])
     const store = new DirtySpecStore(logsDir, () => '2026-09-06T12:00:00Z')
-    const featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rh-feat-'))
+    const featureDir = tempDir('cl-rh-feat-')
     fs.mkdirSync(path.join(featureDir, 'e2e'))
     fs.writeFileSync(path.join(featureDir, 'e2e', 'totals.spec.ts'), 'test("totals add up", async () => {})\n')
     // Baseline the clean suite, then edit the spec and recompute → dirty.
@@ -187,7 +185,6 @@ describe('readFeatureRunHistory + historyForTests — test changes', () => {
     expect(changes).toHaveLength(1)
     expect(changes[0]).toMatchObject({ at: '2026-09-06T12:00:00Z', tests: ['totals add up'] })
     expect(changes[0].runId).toBeUndefined()
-    fs.rmSync(featureDir, { recursive: true, force: true })
   })
 
   it('a file-level adoption touches only the mapped tests it can place in a file', () => {

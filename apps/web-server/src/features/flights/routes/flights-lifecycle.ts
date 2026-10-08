@@ -28,6 +28,7 @@ import { allowsCheckpointInput } from '../logic/checkpoint-input'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import type { FlightCheckpointResponse, FlightStageKey } from '../../../../../../shared/flights/types'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -68,7 +69,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
             requestedAt: err.requestedAt,
           }
         }
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message }
       }
@@ -82,7 +83,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
     try {
       return requestFlightTakeover(req.params.id, conductorDeps)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message, type: 'flight_takeover_unavailable' }
     }
@@ -102,7 +103,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
         const { manifest } = forceFlightTakeover(req.params.id, conductorDeps)
         return manifest
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message, type: 'flight_takeover_unavailable' }
       }
@@ -138,7 +139,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
       if (err instanceof GettingStartedBusyError) {
         return gettingStartedBusyReply(reply, err)
       }
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }
     }
@@ -155,7 +156,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
     try {
       return await pauseFlight(req.params.id, conductorDeps)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }
     }
@@ -176,7 +177,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
       try {
         return setFlightAutopilot(req.params.id, req.body.autopilot, conductorDeps)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message }
       }
@@ -227,7 +228,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
           reply.code(400)
           return { error: err.message, type: 'stage_entry_rejected' }
         }
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message }
       }
@@ -242,7 +243,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
       deleteFlight(req.params.id, conductorDeps)
       return { deleted: true }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }
     }

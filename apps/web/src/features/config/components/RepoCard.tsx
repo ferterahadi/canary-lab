@@ -12,6 +12,7 @@ import type { RepoEdit } from './repo-editor-rows'
 import { BranchControl } from './RepoBranchControl'
 import { HealthEditor } from './RepoProbeEditors'
 import { CommandSlice, Health, Probe, RepoSlice, deriveRepoName, nextRepoName, summarizeRepo } from './repo-slice'
+import { displayError } from '@/shared/api/error-message'
 
 // ─── layout primitives ─────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ export function RepoCard({
       probe.existence.refresh()
       setCloneTargetOpen(false)
     } catch (e) {
-      if (current()) setCloneError(e instanceof Error ? e.message : 'clone failed')
+      if (current()) setCloneError(displayError(e, 'clone failed'))
     } finally {
       pendingClone.current = false
       if (mounted()) setCloning(false)

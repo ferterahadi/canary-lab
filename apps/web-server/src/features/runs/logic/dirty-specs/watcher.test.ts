@@ -1,12 +1,14 @@
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startDirtySpecWatcher, type DirtySpecWatcher } from './watcher'
 import type { DirtySpecStore } from './store'
 import * as gitRepo from '../../../../shared/git-repo'
-import { git } from '../../../../../../../tools/test-helpers/git-repo'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-watcher-')
 
 let tmpDir: string
 let featuresDir: string
@@ -22,12 +24,8 @@ function writeFeature(name: string, opts: { withE2eDir?: boolean; withGit?: bool
     fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   }
   if (opts.withGit) {
-    git(dir, 'init', '-q')
-    git(dir, 'config', 'user.email', 't@t.dev')
-    git(dir, 'config', 'user.name', 'test')
     fs.writeFileSync(path.join(dir, 'README.md'), 'x')
-    git(dir, 'add', '.')
-    git(dir, 'commit', '-q', '-m', 'init')
+    initGitRepo(dir)
   }
   return dir
 }
@@ -98,7 +96,7 @@ function startWatcher(deps: Omit<WatcherDeps, 'watchPath'>): DirtySpecWatcher {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-watcher-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
   watchControl = createFakeWatchControl()
@@ -107,7 +105,6 @@ beforeEach(() => {
 afterEach(() => {
   watcher?.close()
   watcher = undefined
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('startDirtySpecWatcher', () => {
@@ -239,12 +236,8 @@ describe('startDirtySpecWatcher', () => {
     // Two features living inside the same git repo (nested dirs under one root).
     const repoRoot = path.join(featuresDir, 'repo')
     fs.mkdirSync(repoRoot, { recursive: true })
-    git(repoRoot, 'init', '-q')
-    git(repoRoot, 'config', 'user.email', 't@t.dev')
-    git(repoRoot, 'config', 'user.name', 'test')
     fs.writeFileSync(path.join(repoRoot, 'README.md'), 'x')
-    git(repoRoot, 'add', '.')
-    git(repoRoot, 'commit', '-q', '-m', 'init')
+    initGitRepo(repoRoot)
 
     const aDir = path.join(repoRoot, 'a')
     const bDir = path.join(repoRoot, 'b')

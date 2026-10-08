@@ -1,14 +1,14 @@
 import { useNow } from '@/shared/state/use-now'
 import type { FlightManifest, FlightStageKey } from '@shared/flights/types'
-import { capitalizeFirst } from '@/shared/lib/format'
+import { capitalizeFirst, formatSpan } from '@/shared/lib/format'
 import { MODEL_STAGE_KEYS, pinnedPlanChoices, type PinnedStageChoice } from '@shared/agent-models'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { num, specsCoverageProgress, stageStatusTone } from './stage-meta'
-import { formatDuration } from './StageStatusLines'
 import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import type { StageFact } from './StageFacts'
-import { asRecord } from './StageDetail'
+import { asRecord } from '../lib/as-record'
+import { plural } from '@shared/lib/plural'
 
 /** The header's summary strip (R61, R71/W5): the flight's headline numbers —
  *  elapsed wall-clock (live 1s tick while running), coverage %, run verdict,
@@ -54,7 +54,7 @@ export function FlightSummaryStrip({
   // `startedAt` is when work began: a queued flight is created long before it
   // starts, and a redo re-stamps it — `createdAt` alone reported the siblings'
   // whole runtime (or a week-old original start) as this flight's ELAPSED.
-  const elapsed = formatDuration(flight.startedAt ?? flight.createdAt, flight.endedAt ?? (live ? new Date(now).toISOString() : flight.updatedAt))
+  const elapsed = formatSpan(flight.startedAt ?? flight.createdAt, flight.endedAt ?? (live ? new Date(now).toISOString() : flight.updatedAt))
   if (elapsed) {
     // One label in both states: the switch to 'Elapsed so far' resized the
     // six-item strip every time a flight settled.
@@ -87,7 +87,7 @@ export function FlightSummaryStrip({
         label: 'Models',
         value: `${plan.length} tuned`,
         plan,
-        title: `${plan.length} step${plan.length === 1 ? '' : 's'} pinned to a model when this flight started — every other step runs on the agent default`,
+        title: `${plural(plan.length, 'step')} pinned to a model when this flight started — every other step runs on the agent default`,
       })
     }
   }
@@ -330,7 +330,7 @@ export function configDigestFacts(config: unknown, playwright: unknown): StageFa
   if (pw) {
     const use = asRecord(pw.use)
     const bits = [
-      typeof pw.workers === 'number' ? `${pw.workers} worker${pw.workers === 1 ? '' : 's'}` : null,
+      typeof pw.workers === 'number' ? plural(pw.workers, 'worker') : null,
       typeof pw.retries === 'number' ? `${pw.retries} retr${pw.retries === 1 ? 'y' : 'ies'}` : null,
       typeof use?.video === 'string' ? `video ${use.video}` : null,
       typeof use?.trace === 'string' ? `trace ${use.trace}` : null,

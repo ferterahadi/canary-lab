@@ -11,6 +11,7 @@ import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph } from './CleanupTableParts'
 import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
+import { pluralSuffix } from '@shared/lib/plural'
 
 // Self-contained port-ification record inventory: every workflow under
 // <logs>/portify/<id> with its disk size. This is the home for pruning stale
@@ -143,13 +144,13 @@ export function PortifySection({ now, onNavigateToPortify }: {
           action bar. */}
       <ConfirmModal
         open={confirmTargets !== null}
-        title={`Delete Portify record${confirmTargets?.length === 1 ? '' : 's'}`}
+        title={`Delete Portify record${pluralSuffix(confirmTargets?.length ?? 0)}`}
         variant="danger"
         busy={bulkBusy}
         confirmLabel="Delete"
         onCancel={() => setConfirmTargets(null)}
         onConfirm={() => { if (confirmTargets) void doRemove(confirmTargets) }}
-        message={<>Remove <strong>{confirmTargets?.length ?? 0}</strong> port-ification record{confirmTargets?.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes((confirmTargets ?? []).reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.</>}
+        message={<>Remove <strong>{confirmTargets?.length ?? 0}</strong> port-ification record{pluralSuffix(confirmTargets?.length ?? 0)} from history, reclaiming about <strong>{formatBytes((confirmTargets ?? []).reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.</>}
       />
     </>
   )

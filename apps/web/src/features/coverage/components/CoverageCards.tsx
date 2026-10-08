@@ -15,6 +15,8 @@ import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
+import { pluralSuffix } from '@shared/lib/plural'
+import { joinNatural } from '@/shared/lib/format'
 
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
 // `untested` (no test maps to it) is the gap; `path-incomplete` (some declared
@@ -214,12 +216,6 @@ export function verdictView(rc: RequirementCoverage, e: RequirementEnforcement):
       : `${run} no longer covers the current tests. Rerun to re-prove.`,
     color: 'var(--warning)',
   }
-}
-
-/** "a", "a and b", "a, b and c" — a list the way a sentence writes one. */
-function joinNatural(items: string[]): string {
-  if (items.length < 2) return items.join('')
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 // The dot has no words of its own, so the tooltip leads with the verdict.
@@ -708,7 +704,7 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
   // path kinds and has no column to name them in. The reveal spells them out.
   const pathWord = paths.length === 1 ? paths[0] : `${paths.length} paths`
   const pathGloss = paths.map((p) => PATH_DESC[p] ?? p).join(', ')
-  const pathTitle = `Exercises the ${pathGloss} path${paths.length === 1 ? '' : 's'}`
+  const pathTitle = `Exercises the ${pathGloss} path${pluralSuffix(paths.length)}`
   // Only a cell that is actually hiding something earns a reveal.
   const folded = hiddenReqs.length > 0 || paths.length > 1
   const toggle = () => {
@@ -772,7 +768,7 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
             )}
           </span>
           {folded && (
-            <span className="clcov-facts-pop" data-testid={`facts-full-${cardName}`} role="group" aria-label={`Claims ${test.requirements.join(', ')} on the ${pathGloss} path${paths.length === 1 ? '' : 's'}`}>
+            <span className="clcov-facts-pop" data-testid={`facts-full-${cardName}`} role="group" aria-label={`Claims ${test.requirements.join(', ')} on the ${pathGloss} path${pluralSuffix(paths.length)}`}>
               {test.requirements.map((id, i) => (
                 <span key={id} className="clcov-rowfact">
                   {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}

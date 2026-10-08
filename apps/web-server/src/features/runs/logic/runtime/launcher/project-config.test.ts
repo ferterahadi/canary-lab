@@ -1,5 +1,5 @@
 import type { ProjectConfig } from '../../../../../../../../shared/project-config'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -13,14 +13,9 @@ import {
   resolveProjectPort,
   saveProjectConfig,
 } from './project-config'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-
-function mkProject(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-project-config-')))
-  tmpDirs.push(dir)
-  return dir
-}
+const mkProject = trackTempDirs('cl-project-config-')
 
 // The shipped defaults, spread into per-test variants so a new config field
 // changes exactly one place.
@@ -33,12 +28,6 @@ const DEFAULTS: ProjectConfig = {
   autoProposePr: true,
   showDemo: true,
 }
-
-afterEach(() => {
-  while (tmpDirs.length) {
-    fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-  }
-})
 
 describe('project config', () => {
   it('returns defaults when the config file is missing or unreadable JSON', () => {

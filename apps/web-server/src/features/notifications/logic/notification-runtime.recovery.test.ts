@@ -1,6 +1,5 @@
 import { runManifest as makeRunManifest } from '../../runs/logic/__fixtures__/run-manifest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -12,6 +11,9 @@ import { WorkspaceEventBus } from '../../../shared/workspace-events'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import type { RunStore } from '../../runs/logic/run-store'
 import type { WorkspaceNotification } from '../../../../../../shared/notifications/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('notification-recovery-')
 
 let dir: string
 let app: FastifyInstance
@@ -27,7 +29,7 @@ const persisted = (): WorkspaceNotification[] => JSON.parse(fs.readFileSync(path
 
 beforeEach(async () => {
   runManifest = undefined
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notification-recovery-'))
+  dir = tempDir()
   const featuresDir = path.join(dir, 'features')
   const configDir = path.join(featuresDir, 'shop')
   // The configured suite lives outside the feature discovery folder. Recovery
@@ -70,7 +72,6 @@ afterEach(async () => {
   await runtime.dispose()
   await app.close()
   vi.restoreAllMocks()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 it('repairs a missed direct-file event without a browser request and publishes the settlement', async () => {
@@ -224,7 +225,6 @@ it('settles a removed linked suite without a browser request, then creates a fre
     expect(current?.title).toBe('shop: possible test weakening')
   })
 })
-
 
 it('keeps a real linked-suite review actionable when only its discovery folder and saved snapshot contain configuration', async () => {
   const snapshot = path.join(dir, 'snapshot')

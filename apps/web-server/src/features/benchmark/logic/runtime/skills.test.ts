@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   loadSabotageSkills,
@@ -9,10 +8,13 @@ import {
   sabotageSkillsForFeature,
   type SabotageSkill,
 } from './skills'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-skills-')
 
 let root: string
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-skills-')))
+  root = tempDir()
 })
 
 const MD = `# Broken delete contract

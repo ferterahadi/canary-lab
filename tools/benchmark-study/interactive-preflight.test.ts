@@ -1,9 +1,11 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import type { PtyHandle } from '../../apps/web-server/src/features/runs/logic/runtime/pty-spawner'
 import { hasProbeResult, hasPinnedProbeResult, pinnedProbeOutcome, probeOutcome, waitForPinnedProbe } from './interactive-preflight'
+import { trackTempDirs } from '../test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('probe-')
 
 it('requires a successful native tool result rather than a completion claim or echoed prompt', () => {
   const row = (type: string, block: unknown): string => JSON.stringify({ type, message: { content: [block] } })
@@ -40,7 +42,7 @@ it('stops on any failed result for the exact probe call', () => {
 
 it.each(['poll', 'exit'] as const)('records a native denial before the %s path can report timeout or exit', async (finish) => {
   vi.useFakeTimers()
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-denial-'))
+  const root = tempDir('probe-denial-')
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'config'))
   try {
     const cwd = path.join(root, 'run')
@@ -68,14 +70,13 @@ it.each(['poll', 'exit'] as const)('records a native denial before the %s path c
   } finally {
     vi.useRealTimers()
     vi.unstubAllEnvs()
-    fs.rmSync(root, { recursive: true, force: true })
   }
 })
 
 
 it('finds a probe written later under an opaque native project slug and captures its usage', async () => {
   const { pinnedClaudeSessionRef, captureAttemptSessions } = await import('./agents')
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-session-'))
+  const root = tempDir('probe-session-')
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'config'))
   try {
     const cwd = path.join(root, 'long-nested-run')
@@ -94,5 +95,5 @@ it('finds a probe written later under an opaque native project slug and captures
     const ref = pinnedClaudeSessionRef(cwd, 'pinned')
     expect(ref.logPath).toBe(logPath)
     expect(captureAttemptSessions('claude', cwd, '2026-01-01T00:00:00Z', path.join(root, 'evidence'), { model: 'fixture', effort: 'high' }, ref)).toMatchObject({ input: 10, output: 2 })
-  } finally { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }) }
+  } finally { vi.unstubAllEnvs() }
 })

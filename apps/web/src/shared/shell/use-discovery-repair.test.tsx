@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import type { DiscoveryRepairView } from '../api/discovery-repair'
 import type { connectReconnectingSocket } from '../api/reconnecting-socket'
+import { deferred } from '../../../../../tools/test-helpers/deferred'
 const api = vi.hoisted(() => ({ listDiscoveryRepairs: vi.fn(), startDiscoveryRepair: vi.fn() }))
 const socket = vi.hoisted(() => ({ connect: vi.fn() }))
 vi.mock('../api/discovery-repair', () => api)
@@ -14,12 +15,7 @@ let container: HTMLDivElement
 let current: ReturnType<typeof useDiscoveryRepair>
 let connections: { options: Parameters<typeof connectReconnectingSocket>[0]; close: ReturnType<typeof vi.fn> }[]
 function Host({ feature }: { feature: string | null }) { current = useDiscoveryRepair(feature); return null }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 function repair(feature: string, updatedAt = '1', status: DiscoveryRepairView['status'] = 'repairing'): DiscoveryRepairView {
   return { id: feature, feature, updatedAt, status, featureDir: '/workspace/features/suite', owner: { kind: 'internal', agent: 'codex' }, createdAt: '1', heartbeatAt: '1', message: '', diagnostic: '', log: [], promptPath: '/workspace/prompt.md', promptReady: true }
 }

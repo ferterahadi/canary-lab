@@ -55,8 +55,10 @@ import {
   EvaluationDeliverablePanel,
   OverlayPanel,
 } from './StageEvidencePanels'
-import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
+import { SpecsPassTimeline, StageActivityRail } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
+import { plural } from '@shared/lib/plural'
+import { asRecord } from '../lib/as-record'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -99,7 +101,7 @@ export function externalSessionActivity(
   const client = clientLabel(clientKind, 'external agent')
   const owner = clientKind === 'other' ? 'your external agent session' : `your ${client} session`
   const fileCount = trace.itemCount != null
-    ? ` · ${trace.itemCount} file${trace.itemCount === 1 ? '' : 's'} applied`
+    ? ` · ${plural(trace.itemCount, 'file')} applied`
     : ''
   let message: string
   if (trace.status === 'running') {
@@ -580,7 +582,7 @@ export function StageDetail({
                       fontWeight={400}
                       onClick={toggle}
                       expanded={open}
-                      title={`${modelChips.length} model choice${modelChips.length === 1 ? '' : 's'} this step's agents were pinned to when this flight started — click for which agent runs on what`}
+                      title={`${plural(modelChips.length, 'model choice')} this step's agents were pinned to when this flight started — click for which agent runs on what`}
                       label={(
                         <span className="inline-flex items-baseline gap-1.5">
                           <span className="cl-rubric">models</span>
@@ -944,8 +946,4 @@ export function StageDetail({
       )}
     </div>
   )
-}
-
-export function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }

@@ -12,6 +12,7 @@ import type {
   EvaluationExportTaskRecord,
   EvaluationExportTaskView,
 } from '../../../../../../shared/evaluation-export-types'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string
@@ -207,7 +208,7 @@ export function writeEvaluationExportBuild(
   writeEvaluationExportZip(logsDir, taskId, built.zip)
   // Non-null: writeEvaluationExportZip has just thrown on an unsafe id.
   const p = evaluationExportTaskPaths(logsDir, taskId)!
-  fs.writeFileSync(p.certificatePath, JSON.stringify(built.certificate, null, 2), 'utf8')
+  atomicWriteJson(p.certificatePath, built.certificate)
 }
 
 /** The stored certificate, or null when the task has none — an export built

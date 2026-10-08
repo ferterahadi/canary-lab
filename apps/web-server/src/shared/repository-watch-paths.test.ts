@@ -1,28 +1,29 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as git from './git-repo'
 import { repositoryWatchPaths } from './repository-watch-paths'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+import { git as command } from '../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-watch-paths-')
 
 let root: string
 let repo: string
-const command = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim()
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-watch-paths-')))
+  root = tempDir()
   repo = path.join(root, 'repo'); fs.mkdirSync(repo)
-  command('init', '-b', 'main'); command('config', 'user.email', 'test@example.com'); command('config', 'user.name', 'Test')
+  command(repo, 'init', '-b', 'main'); command(repo, 'config', 'user.email', 'test@example.com'); command(repo, 'config', 'user.name', 'Test')
   fs.mkdirSync(path.join(repo, 'service')); fs.mkdirSync(path.join(repo, 'ignored'))
   fs.writeFileSync(path.join(repo, '.gitignore'), 'ignored/\ncache/\n*.log\n')
   fs.writeFileSync(path.join(repo, 'service', 'tracked'), 'original')
   fs.writeFileSync(path.join(repo, 'ignored', 'tracked'), 'tracked exception')
-  command('add', '.'); command('add', '-f', 'ignored/tracked'); command('commit', '-m', 'fixture')
+  command(repo, 'add', '.'); command(repo, 'add', '-f', 'ignored/tracked'); command(repo, 'commit', '-m', 'fixture')
   fs.writeFileSync(path.join(repo, 'ignored', 'noise'), 'ignored')
   fs.writeFileSync(path.join(repo, 'debug.log'), 'ignored file')
   fs.mkdirSync(path.join(repo, 'cache')); fs.writeFileSync(path.join(repo, 'cache', 'noise'), 'ignored tree')
 })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('uses Git ignores while retaining tracked exceptions and directory replacement hints', async () => {
   const run = vi.spyOn(git, 'runGit')
@@ -51,9 +52,9 @@ it('keeps directory scope and resolves symlink aliases only for watch identity',
 
 it('watches linked worktree metadata and shared references, including a refs directory created later', async () => {
   const worktree = path.join(root, 'worktree')
-  command('worktree', 'add', '-b', 'linked', worktree)
+  command(repo, 'worktree', 'add', '-b', 'linked', worktree)
   const watches = await repositoryWatchPaths(worktree, 'repository')
-  const gitDir = command('-C', worktree, 'rev-parse', '--absolute-git-dir')
+  const gitDir = command(repo, '-C', worktree, 'rev-parse', '--absolute-git-dir')
   expect(watches.map((watch) => watch.path)).toContain(gitDir)
   expect(watches.map((watch) => watch.path)).toContain(path.join(repo, '.git'))
   expect(watches.find((watch) => watch.path === gitDir)!.accepts('refs')).toBe(true)
@@ -77,8 +78,8 @@ it.each(['--ignored', '--cached'])('observes conservatively when %s discovery fa
 
 it('observes shared refs when a linked worktree has no private refs directory', async () => {
   const worktree = path.join(root, 'worktree')
-  command('worktree', 'add', '-b', 'linked', worktree)
-  const gitDir = command('-C', worktree, 'rev-parse', '--absolute-git-dir')
+  command(repo, 'worktree', 'add', '-b', 'linked', worktree)
+  const gitDir = command(repo, '-C', worktree, 'rev-parse', '--absolute-git-dir')
   fs.rmSync(path.join(gitDir, 'refs'), { recursive: true, force: true })
   const watches = await repositoryWatchPaths(worktree, 'repository')
   expect(watches.some((watch) => watch.path === path.join(gitDir, 'refs'))).toBe(false)

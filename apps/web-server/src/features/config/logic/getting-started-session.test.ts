@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -8,6 +7,9 @@ import {
   isGettingStartedRunActive,
   type GettingStartedStatusResolver,
 } from './getting-started-session'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-getting-started-')
 
 let logsDir: string
 let runStatus: string | null
@@ -34,7 +36,7 @@ function store(setTimer?: (fn: () => void, ms: number) => void): GettingStartedS
 }
 
 beforeEach(() => {
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-getting-started-'))
+  logsDir = tempDir()
   runStatus = null
   flightStatus = null
   changes = 0
@@ -42,7 +44,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  fs.rmSync(logsDir, { recursive: true, force: true })
 })
 
 const sessionFile = (): string => path.join(logsDir, 'getting-started', 'session.json')

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 
@@ -33,17 +33,16 @@ import { similarityStage } from './similarity'
 
 import { scoutStage } from './scout'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -54,7 +53,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -63,26 +62,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -103,29 +88,8 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 function configCjs(name: string, repoLocalPath: string, description = 'existing feature'): string {
@@ -465,7 +429,6 @@ describe('scout stage', () => {
     })
   })
 })
-
 
 it('matches a symlink to the first existing suite while keeping sibling directories distinct', async () => {
   const alias = path.join(tmpDir, 'alias')

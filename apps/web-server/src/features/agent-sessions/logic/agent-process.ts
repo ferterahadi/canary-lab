@@ -7,6 +7,7 @@ import { internalAgentContextArgs } from './agent-context-policy'
 import { agentJobStore } from './agent-jobs/store'
 import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 import { processGroupAlive, signalProcessTree } from '../../../shared/process-tree'
+import { sleep } from '../../../../../../shared/lib/sleep'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -219,9 +220,7 @@ async function terminate(entry: LiveAgentProcess, graceMs: number, by: 'user' | 
       const descendantsAlive = entry.detachedProcessGroup
         && processGroupAlive(entry.child.pid)
       if (parentDone && !descendantsAlive) return
-      const tick = new Promise<void>((resolve) =>
-        setTimeout(resolve, Math.min(25, Math.max(0, deadline - Date.now()))),
-      )
+      const tick = sleep(Math.min(25, Math.max(0, deadline - Date.now())))
       if (parentDone) await tick
       else await Promise.race([done, tick])
     }

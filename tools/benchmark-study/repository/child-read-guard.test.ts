@@ -2,17 +2,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { json, readJson, write } from '../files'
 import type { Attempt, PolicyAdherence, StudyManifest } from '../types'
 import { childReadGuard, freezeChildReadGuard, installClaudeChildReadGuard, reviewChildReadGuard } from './child-read-guard'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('child-read-guard-')
 
 function setup(agent: 'claude' | 'codex' = 'codex') {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'child-read-guard-')))
-  roots.push(root)
+  const root = tempDir()
   const attempt = { id: 'synthetic-attempt', agent } as Attempt
   const manifest = { root } as StudyManifest
   const directory = path.join(root, 'attempts', attempt.id)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dayTime, formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { dayTime, formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, formatSpan, firstLineOf, truncateText, shortSession, joinNatural, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
 import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
@@ -69,6 +69,58 @@ describe('durationBetween', () => {
   })
   it('returns null when timestamps are unparseable', () => {
     expect(durationBetween('not-a-date', 'also-bad')).toBeNull()
+  })
+})
+
+describe('formatSpan', () => {
+  const at = (sec: number): string => new Date(Date.UTC(2026, 0, 1, 0, 0, sec)).toISOString()
+  it('prints the span between two stamps as a compact clock', () => {
+    expect(formatSpan(at(0), at(4))).toBe('4s')
+    expect(formatSpan(at(0), at(134))).toBe('2m 14s')
+  })
+  it('rounds to the nearest second', () => {
+    expect(formatSpan('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:59.600Z')).toBe('1m 00s')
+    expect(formatSpan('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:04.400Z')).toBe('4s')
+  })
+  it('is null for a missing, unparseable or reversed pair', () => {
+    expect(formatSpan(undefined, at(4))).toBeNull()
+    expect(formatSpan(at(0), undefined)).toBeNull()
+    expect(formatSpan('nope', at(4))).toBeNull()
+    expect(formatSpan(at(4), at(0))).toBeNull()
+  })
+})
+
+describe('truncateText / firstLineOf', () => {
+  it('caps text with a trailing ellipsis only when it was cut', () => {
+    expect(truncateText('abcdefghij', 5)).toBe('abcd…')
+    expect(truncateText('abcde', 5)).toBe('abcde')
+  })
+  it('takes the first non-blank line, trimmed', () => {
+    expect(firstLineOf('\n\n  hello world  \nsecond')).toBe('hello world')
+  })
+  it('caps the line with an ellipsis', () => {
+    expect(firstLineOf('abcdefghij', 5)).toBe('abcd…')
+    expect(firstLineOf('x'.repeat(200))).toHaveLength(160)
+    expect(firstLineOf('')).toBe('')
+  })
+})
+
+describe('joinNatural', () => {
+  it('writes a list the way a sentence does', () => {
+    expect(joinNatural([])).toBe('')
+    expect(joinNatural(['a'])).toBe('a')
+    expect(joinNatural(['a', 'b'])).toBe('a and b')
+    expect(joinNatural(['a', 'b', 'c'])).toBe('a, b and c')
+  })
+})
+
+describe('shortSession', () => {
+  it('keeps the head and tail of a long id', () => {
+    expect(shortSession('649945f5-79b7-43ae-81c9-be02b0911e88')).toBe('649945…1e88')
+  })
+  it('leaves an id of 12 characters or fewer alone', () => {
+    expect(shortSession('short-id')).toBe('short-id')
+    expect(shortSession('abcdefghijkl')).toBe('abcdefghijkl')
   })
 })
 

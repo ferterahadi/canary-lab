@@ -1,5 +1,6 @@
 import type { HealthProbe } from '../../../../../../../shared/launcher/types'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
+import { sleep } from '../../../../../../../shared/lib/sleep'
 
 export const DEFAULT_HEALTH_POLL_MS = 1000
 export const DEFAULT_HEALTH_DEADLINE_MS = 60_000
@@ -38,7 +39,7 @@ export async function waitForServiceReadiness(options: ReadinessOptions): Promis
   const probe = readinessProbe(options.probe, options.healthCheck, options.serviceName)
   const attempt = options.attempt ?? probe.attempt
   const now = options.now ?? Date.now
-  const delay = options.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const delay = options.delay ?? sleep
   const deadline = now() + (probe.deadlineMs ?? options.deadlineMs ?? DEFAULT_HEALTH_DEADLINE_MS)
   const cap = Math.max(1, options.pollIntervalMs ?? DEFAULT_HEALTH_POLL_MS)
   let interval = Math.min(100, cap)

@@ -1,21 +1,19 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { createAssertionHtml } from './test-review-export'
 import { loadSourceTests } from './test-review/source-analysis'
 import { buildTestReviewPacket } from './test-review/packet'
 import { detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-')))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 describe('test review export', () => {

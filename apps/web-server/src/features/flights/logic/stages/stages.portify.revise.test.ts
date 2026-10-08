@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
-
-import os from 'os'
 
 import path from 'path'
 
@@ -33,17 +31,16 @@ import { portifyStage } from './portify'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -54,7 +51,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -63,26 +60,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -103,29 +86,8 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('portify stage', () => {
@@ -154,8 +116,8 @@ describe('portify stage', () => {
 
   it('revise posts the feedback and re-parks the checkpoint with the NEW diff', async () => {
     let diff = 'old-diff'
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff } }
       if (call.url.endsWith('/revise')) { diff = 'revised-diff'; return { statusCode: 200, body: {} } }
@@ -178,8 +140,8 @@ describe('portify stage', () => {
   })
 
   it('revise without feedback text re-parks asking for it — no revise request fires', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
       return undefined
@@ -196,7 +158,7 @@ describe('portify stage', () => {
   })
 
   it('a rejected revise (e.g. post-restart, worktree gone) re-parks with the reason — the verified diff stays saveable', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
       if (call.url.endsWith('/revise')) return { statusCode: 409, body: { error: 'worktree is no longer available — the server may have restarted; start a new workflow' } }
@@ -217,7 +179,7 @@ describe('portify stage', () => {
 
   it('a revise whose re-verify FAILED re-parks with the verdict up front (save is blocked server-side)', async () => {
     let revised = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) {
         return revised
@@ -244,7 +206,7 @@ describe('portify stage', () => {
     // Both a reasonless JSON body and a body that is not JSON at all must still
     // produce a clean message rather than "rejected (500): undefined".
     for (const body of [{}, 'not json at all']) {
-      const inject = makeInject((call) => {
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
         if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '' } }
         if (call.url.endsWith('/save')) return { statusCode: 500, body }
@@ -256,7 +218,7 @@ describe('portify stage', () => {
   })
 
   it('a rejected revise with no reason still re-parks on save-or-discard', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
       if (call.url.endsWith('/revise')) return { statusCode: 409, body: {} }
@@ -278,7 +240,7 @@ describe('portify stage', () => {
 
   it('a failed re-verify with no failure detail still leads with the verdict', async () => {
     let revised = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) {
         return revised
@@ -316,7 +278,7 @@ describe('portify stage', () => {
     ]
     let i = 0
     let saved = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.url.endsWith('/save')) { saved = true; markPortified(); return { statusCode: 200, body: {} } }
       // The parked-review scan hits the LIST endpoint — it must not consume a phase.
@@ -368,8 +330,8 @@ describe('portify stage', () => {
     // Resume replays the stored checkpointResponse; when the stored answer
     // targets a workflow a restart aborted (pre-capture records), the save can
     // never succeed — the stage must re-run, not re-fail on every resume.
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.url === '/api/portify/wf-dead/save') {
         return { statusCode: 409, body: { error: 'cannot save a workflow in status "aborted"' } }
       }
@@ -396,8 +358,8 @@ describe('portify stage', () => {
   })
 
   it('portify-gate: parks BEFORE any workflow cost; skip settles the stage serial with zero requests', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject(() => undefined, calls)
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject(() => undefined, calls)
     const adapter = portifyStage(deps({ inject }))
     const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
     const gate = await adapter.run!(ctx)
@@ -413,7 +375,7 @@ describe('portify stage', () => {
   })
 
   it('portify-gate: a stale replayed choice from an older park re-asks instead of acting', async () => {
-    const adapter = portifyStage(deps({ inject: makeInject(() => undefined) }))
+    const adapter = portifyStage(deps({ inject: fakeFlightInject(() => undefined) }))
     const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
     const gate = await adapter.run!(ctx)
     if (gate.kind !== 'checkpoint') throw new Error('unreachable')

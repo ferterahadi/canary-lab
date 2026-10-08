@@ -1,24 +1,19 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { StageAdapters } from '../logic/flight-stages'
 import { flightsRoutes } from './flights'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-demo-')
 
 let tmpDir: string
 let repoDir: string
 
-function allDone(): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((key) => [key, {
-    run: async () => ({ kind: 'done' as const }),
-    teardown: () => null,
-  }])) as StageAdapters
-}
-
-async function appWith(gettingStarted: GettingStartedSessionStore, adapters: StageAdapters = allDone()) {
+async function appWith(gettingStarted: GettingStartedSessionStore, adapters: StageAdapters = allDoneAdapters()) {
   const app = Fastify({ logger: false })
   await app.register(flightsRoutes, {
     featuresDir: path.join(tmpDir, 'features'),
@@ -33,7 +28,7 @@ async function appWith(gettingStarted: GettingStartedSessionStore, adapters: Sta
 /** Adapters whose first stage parks a checkpoint, so the flight stays active
  *  (waiting-for-approval) long enough to be paused and resumed. */
 function parking(): StageAdapters {
-  const adapters = allDone()
+  const adapters = allDoneAdapters()
   adapters.scout = {
     run: async () => ({ kind: 'checkpoint' as const, checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     onCheckpointResponse: async () => ({ kind: 'done' as const }),
@@ -81,12 +76,10 @@ const startParkedDemoFlight = (app: Awaited<ReturnType<typeof appWith>>) =>
   startParkedFlight(app, { feature: 'flight-app', repoPath: repoDir, gettingStartedSource: 'internal' })
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-demo-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'flight-app')
   fs.mkdirSync(repoDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('Getting Started flight admission', () => {
   it('claims and links the flight before returning its owner page id', async () => {

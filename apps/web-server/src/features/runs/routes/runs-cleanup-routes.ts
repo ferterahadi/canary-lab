@@ -15,6 +15,7 @@ import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { ExternalHealAgentRequest } from './runs-route-support'
 import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get('/api/cleanup/runs', async () => {
@@ -58,7 +59,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
       return { opened: true, path: target, editor: usedEditor }
     } catch (err) {
       reply.code(200)
-      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: target, error: errorMessage(err) }
     }
   })
 

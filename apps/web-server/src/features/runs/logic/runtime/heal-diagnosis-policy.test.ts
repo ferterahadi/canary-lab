@@ -1,13 +1,12 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { buildOrchestratorHealPrompt } from './auto-heal'
 import { renderDiagnosisPolicy } from './heal-diagnosis-policy'
 import { diagnosisPolicy, DIAGNOSIS_POLICIES } from '../../../../../../../shared/diagnosis-policy'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('heal-policy-test-')
 
 it('defaults to parent-only, keeps per-failure selectable and rejects unsupported policies', () => {
   expect(diagnosisPolicy(undefined)).toBe('parent-only')
@@ -20,7 +19,7 @@ it('defaults to parent-only, keeps per-failure selectable and rejects unsupporte
 })
 
 it('renders each policy through the real loader, preserves service guardrails and recovers the recorded policy after resume', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'heal-policy-test-')); roots.push(root)
+  const root = tempDir()
   for (const policy of DIAGNOSIS_POLICIES) {
     const runDir = path.join(root, policy); fs.mkdirSync(runDir)
     const manifest = { repoPaths: [path.join(root, 'app')], diagnosisPolicy: policy }

@@ -1,7 +1,6 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { evaluationRoutes } from './evaluation'
@@ -12,6 +11,9 @@ import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 
 import { resolveManifestSessionRef, loadAgentSession } from '../../agent-sessions/logic/agent-session-log'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-evalroutes-')
 
 vi.mock('../logic/evaluation-export-store', async (importOriginal) => {
   const original = await importOriginal<typeof import('../logic/evaluation-export-store')>()
@@ -44,7 +46,7 @@ beforeEach(() => {
   vi.mocked(writeEvaluationExportZip).mockClear()
   vi.mocked(resolveManifestSessionRef).mockClear()
   vi.mocked(loadAgentSession).mockClear()
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-evalroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

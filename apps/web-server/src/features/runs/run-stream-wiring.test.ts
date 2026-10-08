@@ -2,7 +2,6 @@ import type { RunFileWatcher } from './logic/run-file-watcher'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { RunStore } from './logic/run-store'
 import { createRegistry, type OrchestratorRegistry } from './logic/run-registry'
@@ -21,6 +20,10 @@ import type {
 } from './logic/summary-change-watcher'
 import type { ServerContext } from '../../server-context'
 import type { ClientKind } from '../../../../../shared/run-mode'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-streamwire-')
 
 /**
  * The orchestrator is this module's process-spawning edge: constructing one is
@@ -82,7 +85,7 @@ let activeEnvsets: Map<string, BackupRecord[]>
 let claims: Array<{ runId: string; input: Record<string, unknown> }>
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-streamwire-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -150,13 +153,7 @@ function replay(broker: PaneBroker, pane: string): PaneMessage[] {
 }
 
 function writeFeature(name: string, cfg: Record<string, unknown> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], featureDir: __dirname, ...${JSON.stringify(cfg)} } }`,
-  )
-  return dir
+  return writeFeatureFixture(featuresDir, name, { envs: [], ...cfg })
 }
 
 /** An envsets tree whose `<set>/.env` overwrites `targetPath`. The target must

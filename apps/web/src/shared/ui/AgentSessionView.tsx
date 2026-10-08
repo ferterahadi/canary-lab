@@ -1,5 +1,5 @@
 import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
-import { useNow } from '@/shared/state/use-now'
+import { useElapsed } from '@/shared/state/use-elapsed'
 import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as discoveryRepairApi from '@/shared/api/discovery-repair'
@@ -11,17 +11,19 @@ import * as flightsApi from '@/shared/api/flights'
 import { isAgentSessionAbsence } from '@/shared/api/agent-sessions'
 import type { AgentSessionAbsence, AgentSessionResponse } from '@/shared/api/agent-sessions'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
-import { formatElapsedSeconds } from '@/shared/lib/format'
+import { firstLineOf, formatSpan, shortSession } from '@/shared/lib/format'
 import { clientLabel } from './external-client-branding'
 import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
 import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
 import {
-  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, systemLogId, type ExternalSessionActivity, type LogLine,
+  describeEvent, eventSpan, externalLifecycle, parseSystemLine, systemVerb, systemLogId, type ExternalSessionActivity, type LogLine,
 } from './activity-log'
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
 import { chronologicalActivity, activityDate, type ActivityIdentity } from './agent-activity-timeline'
 import { TIMELINE_CSS } from './agent-session-css'
+import { displayError } from '@/shared/api/error-message'
+import { plural } from '@shared/lib/plural'
 
 // Single agent viewer for every agent surface. Renders the agent CLI's JSONL as
 // one chronological rail of single-line rows (`LogRow`) under a divider per
@@ -275,7 +277,7 @@ function useAgentSession(source: AgentSessionSource): LoadedSession {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(displayError(err))
         setLoading(false)
       })
 
@@ -631,7 +633,7 @@ function SessionDivider({ state, live, label, startedAt, sticky, showProvenance 
         {showProvenance && state.model && <span className="agentts-model">{state.model}</span>}
         {showProvenance && state.effort && <span>{state.effort}</span>}
         <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
-        <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
+        <span className="agentts-count">{plural(state.events.length, 'event')}</span>
       </span>
       <span className="agentts-divspace" />
       <span className="agentts-divchip" data-tone={tone} data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">{status}</span>
@@ -644,7 +646,7 @@ function SessionDivider({ state, live, label, startedAt, sticky, showProvenance 
 function ExternalSessionDivider({ session, sticky }: { session: ExternalSessionActivity; sticky: boolean }) {
   const running = session.status === 'running'
   const elapsed = useElapsed(running ? session.startedAt : undefined)
-  const duration = isoSpan(session.startedAt, session.endedAt)
+  const duration = formatSpan(session.startedAt, session.endedAt)
   const status = running ? `Live${elapsed ? ` · ${elapsed}` : ''}` : `${externalLifecycle(session.status, 'end')}${duration ? ` · ${duration}` : ''}`
   const tone = running ? 'live' : session.status === 'failed' ? 'danger' : session.status === 'aborted' ? 'settled' : 'success'
   return (
@@ -712,25 +714,6 @@ export function pendingWork(events: AgentSessionEvent[]): { label: string; since
     if (!settled) return { label: `Running ${last.name}`, since }
   }
   return { label: 'Working', since }
-}
-
-/** Seconds since `iso`, re-rendered once a second. The elapsed clock is the one
- *  liveness signal that survives reduced motion (where the node's sweep and the
- *  dot wave both hold still), and it's what separates a 3-second gap from a
- *  stall — the question a user actually has when they see a pending row. */
-function useElapsed(iso: string | undefined): string | null {
-  const startedAt = useMemo(() => {
-    if (!iso) return null
-    const t = Date.parse(iso)
-    return Number.isFinite(t) ? t : null
-  }, [iso])
-  const now = useNow({ enabled: startedAt !== null, resetKey: startedAt, refreshOnReset: startedAt !== null })
-  if (startedAt === null) return null
-  const ms = now - startedAt
-  // A negative or absurd delta means the transcript's clock disagrees with the
-  // browser's — no figure beats a wrong one.
-  if (ms < 0 || ms > 86_400_000) return null
-  return formatElapsedSeconds(ms / 1000)
 }
 
 function LiveTail({ label, since }: { label: string; since?: string }) {

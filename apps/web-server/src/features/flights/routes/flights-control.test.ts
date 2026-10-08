@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -16,23 +14,20 @@ import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import { issueCheckpointInput } from '../logic/checkpoint-input'
 
 import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
 let repoDir: string
 
 let app: FastifyInstance
-
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
 
 async function buildApp(
   adapters: StageAdapters,
@@ -86,14 +81,13 @@ function throwingStore(thrown: unknown): FlightStore {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -116,7 +110,7 @@ async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3
 
 describe('flights routes', () => {
   it('allows a URL-invited human response only for the reviewed external checkpoint', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'missing-env', message: 'Provide environment', options: ['retry'] } }),
@@ -139,7 +133,7 @@ describe('flights routes', () => {
   })
 
   it('releases a checkpoint via respond and refuses one when nothing waits', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
@@ -174,7 +168,7 @@ describe('flights routes', () => {
     // was doing the work. A bare message reads as "retry"; `type` + `pauseReason`
     // are what let it discard instead, and there is no other channel to tell it —
     // nothing can interrupt that client mid-turn.
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
@@ -196,7 +190,7 @@ describe('flights routes', () => {
   })
 
   it('R78: POST /autopilot flips the preference on a settled flight; a non-boolean body is a 400', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
     await waitForStatus(flightId, ['done'])
@@ -214,7 +208,7 @@ describe('flights routes', () => {
 
   it('resumes a paused flight and aborts an active one', async () => {
     let fail = true
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => (fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }),
@@ -243,7 +237,7 @@ describe('flights routes', () => {
     fs.writeFileSync(path.join(repoDir, 'f.txt'), 'changed') // now dirty
 
     let fail = true
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.portify = {
       teardown: () => null,
       run: async () =>
@@ -278,7 +272,7 @@ describe('flights routes', () => {
   })
 
   it('remedy: null for a non-matching failure and 409 on apply', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'no docs' }) }
     app = await buildApp(adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
@@ -292,7 +286,7 @@ describe('flights routes', () => {
   })
 
   it('404s respond and abort for an unknown flight (real "not found" Error)', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const respond = await app.inject({
       method: 'POST',
       url: '/api/flights/fl_nope/respond',
@@ -307,7 +301,7 @@ describe('flights routes', () => {
   })
 
   it('falls back to String(err) when respond/resume/abort throw a non-Error', async () => {
-    app = await buildApp(allDone(), throwingStore('boom'))
+    app = await buildApp(allDoneAdapters(), throwingStore('boom'))
 
     const respond = await app.inject({
       method: 'POST',
@@ -352,7 +346,7 @@ describe('flights routes', () => {
       stages: [{ key: 'scout', status: 'failed', error: 'repo has uncommitted changes' }],
     } as unknown as FlightManifest
     const store: FlightStore = { ...throwingStore('unused'), get: () => manifest, save: () => { throw 'resume exploded' } }
-    app = await buildApp(allDone(), store)
+    app = await buildApp(allDoneAdapters(), store)
 
     const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_x/remedy', body: { action: 'stash' } })
 
@@ -361,7 +355,7 @@ describe('flights routes', () => {
   })
 
   it('404s a redo for an unknown flight (real "not found" Error)', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/redo' })
     expect(resp.statusCode).toBe(404)
     expect(resp.json()).toMatchObject({ error: 'flight not found: fl_nope' })
@@ -370,7 +364,7 @@ describe('flights routes', () => {
   it('400s a redo that jumps to a stage whose prerequisite is missing', async () => {
     // The jump is rejected by the same validator the start route uses, and the
     // dialog switches on `type` to show the prerequisite instead of a raw error.
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
     await waitForStatus(flightId, ['done'])
@@ -384,7 +378,7 @@ describe('flights routes', () => {
 
   describe('agent-session', () => {
     it('400s when the stage query is missing or malformed', async () => {
-      app = await buildApp(allDone())
+      app = await buildApp(allDoneAdapters())
       const missing = await app.inject({ method: 'GET', url: '/api/flights/fl_x/agent-session' })
       expect(missing.statusCode).toBe(400)
 
@@ -396,7 +390,7 @@ describe('flights routes', () => {
     })
 
     it('404s when no agent-session ref exists for the stage', async () => {
-      app = await buildApp(allDone())
+      app = await buildApp(allDoneAdapters())
       const resp = await app.inject({ method: 'GET', url: '/api/flights/fl_x/agent-session?stage=scout' })
       expect(resp.statusCode).toBe(404)
       expect(resp.json()).toEqual({ reason: 'no-session' })
@@ -404,7 +398,7 @@ describe('flights routes', () => {
 
     it('returns the agent session when a ref is on disk', async () => {
       const store = new FlightRunStore(tmpDir)
-      app = await buildApp(allDone(), store)
+      app = await buildApp(allDoneAdapters(), store)
       const stageDir = path.join(store.flightDir('fl_x'), 'scout')
       fs.mkdirSync(stageDir, { recursive: true })
       const logPath = path.join(stageDir, 'session.jsonl')
@@ -454,14 +448,14 @@ describe('flights routes', () => {
       ['autopilot', { method: 'POST' as const, url: '/api/flights/fl_x/autopilot', body: { autopilot: false } }],
       ['redo', { method: 'POST' as const, url: '/api/flights/fl_x/redo' }],
     ])('409s a browser %s', async (_name, req) => {
-      app = await buildApp(allDone(), external())
+      app = await buildApp(allDoneAdapters(), external())
       const resp = await app.inject(req)
       expect(resp.statusCode).toBe(409)
       expect(resp.json()).toMatchObject({ type: 'flight_externally_driven' })
     })
 
     it('lets the MCP client resume the same flight', async () => {
-      app = await buildApp(allDone(), external())
+      app = await buildApp(allDoneAdapters(), external())
       const resp = await app.inject({
         method: 'POST',
         url: '/api/flights/fl_x/resume',
@@ -473,13 +467,13 @@ describe('flights routes', () => {
     // Abort is the escape hatch when the driving client has gone away, and the
     // read routes were never in question — a viewer has to be able to view.
     it('leaves abort and the read routes open to the browser', async () => {
-      app = await buildApp(allDone(), external())
+      app = await buildApp(allDoneAdapters(), external())
       expect((await app.inject({ method: 'GET', url: '/api/flights/fl_x' })).statusCode).toBe(200)
       expect((await app.inject({ method: 'POST', url: '/api/flights/fl_x/abort' })).statusCode).toBe(200)
     })
 
     function handOffAdapters(): StageAdapters {
-      const adapters = allDone()
+      const adapters = allDoneAdapters()
       adapters.scout = {
         teardown: () => null,
         run: async () => ({
@@ -591,7 +585,7 @@ describe('flights routes', () => {
     })
 
     it('rejects takeover when there is no external work hand-off', async () => {
-      app = await buildApp(allDone())
+      app = await buildApp(allDoneAdapters())
       const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
       const flightId = (started.json() as { flightId: string }).flightId
       await waitForStatus(flightId, ['done'])
@@ -622,7 +616,7 @@ describe('flights routes', () => {
         createdAt: '2026-08-25T00:00:00.000Z',
         updatedAt: '2026-08-25T00:00:00.000Z',
       } as FlightManifest)
-      app = await buildApp(allDone(), store)
+      app = await buildApp(allDoneAdapters(), store)
       const response = await app.inject({
         method: 'POST', url: '/api/flights/fl_malformed/takeover/request',
       })
@@ -631,7 +625,7 @@ describe('flights routes', () => {
     })
 
     it('maps non-Error takeover store failures on both routes', async () => {
-      app = await buildApp(allDone(), throwingStore('takeover store failed'))
+      app = await buildApp(allDoneAdapters(), throwingStore('takeover store failed'))
       const requested = await app.inject({
         method: 'POST', url: '/api/flights/fl_x/takeover/request',
       })

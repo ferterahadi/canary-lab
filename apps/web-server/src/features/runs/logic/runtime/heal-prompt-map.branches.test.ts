@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { buildOrchestratorHealPrompt } from './auto-heal'
 import { buildHealPromptMap } from './heal-prompt-map'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-edge-')
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({
@@ -21,11 +23,7 @@ describe('auto-heal branch edge cases', () => {
   let tmp: string
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-edge-')))
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true })
+    tmp = tempDir()
   })
 
   it('buildHealPromptMap: runDirRel falls back to runDir when projectRoot === runDir', () => {

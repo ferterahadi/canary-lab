@@ -7,6 +7,7 @@ import { MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
 import { compressLogByTemplate } from './log-template'
 import { writeHealIndex } from './heal-index'
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -407,11 +408,7 @@ export interface Manifest {
 }
 
 export function readManifest(file: string = MANIFEST_PATH): Manifest {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Manifest
-  } catch {
-    return {}
-  }
+  return readJsonOr<Manifest>(file, {})
 }
 
 // Matches terminal control sequences: CSI (colors `m`, cursor moves `H`,

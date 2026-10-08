@@ -16,23 +16,19 @@ import type { StageAdapters } from '../logic/flight-stages'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-
 import type { PlanFeaturesTask, PlannedFeature } from '../../../../../../shared/flights/types'
 
 import { PlanFeaturesStore, cancelPlanFeatures, startPlanFeatures, normalizePlanResult } from '../logic/plan-features'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
 let repoDir: string
 
 let app: FastifyInstance
-
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
 
 async function buildApp(
   adapters: StageAdapters,
@@ -54,14 +50,13 @@ async function buildApp(
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -97,7 +92,7 @@ describe('plan-features (R54)', () => {
   }
 
   it('runs the plan agent and settles the proposal (normalized, deduped names)', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'Auth Flow', description: 'test login + signup', scope: 'auth only', group: 'My Shop' },
       { name: 'checkout-flow', description: 'test the checkout', scope: 'cart to payment', group: 'My Shop' },
     ])))
@@ -113,14 +108,14 @@ describe('plan-features (R54)', () => {
   })
 
   it('an unparseable agent answer fails the task with the parse story', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning('I could not decide.'))
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning('I could not decide.'))
     const task = await planAndWait(app)
     expect(task.status).toBe('failed')
     expect(task.error).toMatch(/JSON/)
   })
 
   it('GET plan-features lists running/done tasks and drops launched ones', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning(planText([
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
       { name: 'alpha', description: 'test alpha' },
       { name: 'beta', description: 'test beta' },
     ])))
@@ -144,7 +139,7 @@ describe('plan-features (R54)', () => {
       await new Promise<void>((resolve) => { release = resolve })
       return { text: planText([{ name: 'solo', description: 'test solo' }]) }
     }
-    app = await buildApp(allDone(), undefined, gated)
+    app = await buildApp(allDoneAdapters(), undefined, gated)
     const body = { repoPaths: [repoDir], description: 'test everything in this repo' }
     const first = await app.inject({ method: 'POST', url: '/api/flights/plan-features', body })
     const second = await app.inject({ method: 'POST', url: '/api/flights/plan-features', body })
@@ -159,7 +154,7 @@ describe('plan-features (R54)', () => {
       await new Promise<void>((resolve) => { release = resolve })
       return { text: planText([{ name: 'too-late', description: 'must not launch' }]) }
     }
-    app = await buildApp(allDone(), undefined, gated)
+    app = await buildApp(allDoneAdapters(), undefined, gated)
     const started = await app.inject({
       method: 'POST',
       url: '/api/flights/plan-features',
@@ -182,7 +177,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('is idempotent for an already-cancelled plan and rejects missing or failed tasks', async () => {
-    app = await buildApp(allDone(), undefined, agentReturning('not json'))
+    app = await buildApp(allDoneAdapters(), undefined, agentReturning('not json'))
     const failed = await planAndWait(app)
     const failedCancel = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${failed.taskId}/cancel` })
     expect(failedCancel.statusCode).toBe(409)
@@ -217,7 +212,7 @@ describe('plan-features (R54)', () => {
       removed = true
       fs.rmSync(path.join(planStore.recordDir(taskId), 'plan.json'))
     })
-    app = await buildApp(allDone(), undefined, undefined, planStore)
+    app = await buildApp(allDoneAdapters(), undefined, undefined, planStore)
 
     const response = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${taskId}/cancel` })
 
@@ -235,7 +230,7 @@ describe('plan-features (R54)', () => {
       onEvent: () => {},
       get: () => { throw 'plan storage unavailable' },
     } as unknown as PlanFeaturesStore
-    app = await buildApp(allDone(), undefined, undefined, brokenPlanStore)
+    app = await buildApp(allDoneAdapters(), undefined, undefined, brokenPlanStore)
 
     const response = await app.inject({ method: 'POST', url: '/api/flights/plan-features/fp_broken/cancel' })
 
@@ -244,14 +239,14 @@ describe('plan-features (R54)', () => {
   })
 
   it('defaults an undefined plan-features POST body to {} and 400s on missing repoPaths', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const resp = await app.inject({ method: 'POST', url: '/api/flights/plan-features' })
     expect(resp.statusCode).toBe(400)
     expect(resp.json()).toMatchObject({ error: 'repoPaths (non-empty string array) is required' })
   })
 
   it('validates the plan-features start payload', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     for (const body of [
       {},
       { repoPaths: [], description: 'test everything' },
@@ -265,7 +260,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('400s a repo path that does not exist', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const resp = await app.inject({
       method: 'POST',
       url: '/api/flights/plan-features',
@@ -276,7 +271,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('404s GET plan-features/:taskId for an unknown task', async () => {
-    app = await buildApp(allDone())
+    app = await buildApp(allDoneAdapters())
     const resp = await app.inject({ method: 'GET', url: '/api/flights/plan-features/fp_nope' })
     expect(resp.statusCode).toBe(404)
     expect(resp.json()).toMatchObject({ error: 'plan task not found: fp_nope' })
@@ -284,7 +279,7 @@ describe('plan-features (R54)', () => {
 
   describe('agent-session', () => {
     it('404s when no agent-session ref exists for the plan task', async () => {
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -296,7 +291,7 @@ describe('plan-features (R54)', () => {
 
     it('returns the agent session when a ref is on disk for the plan task', async () => {
       const planStore = new PlanFeaturesStore(tmpDir)
-      app = await buildApp(allDone(), undefined, agentReturning(planText([
+      app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
         { name: 'alpha', description: 'test alpha' },
         { name: 'beta', description: 'test beta' },
       ])))
@@ -319,7 +314,7 @@ describe('plan-features (R54)', () => {
   })
 
   it('a plan agent spawn throwing a non-Error value fails the task via String(err)', async () => {
-    app = await buildApp(allDone(), undefined, async () => {
+    app = await buildApp(allDoneAdapters(), undefined, async () => {
       throw 'agent crashed'
     })
     const task = await planAndWait(app)
@@ -494,7 +489,7 @@ describe('~-relative repo paths (dialog picker parity)', () => {
     const abs = path.join(home, rel)
     fs.mkdirSync(abs, { recursive: true })
     try {
-      app = await buildApp(allDone())
+      app = await buildApp(allDoneAdapters())
       const started = await app.inject({
         method: 'POST',
         url: '/api/flights',
@@ -508,11 +503,10 @@ describe('~-relative repo paths (dialog picker parity)', () => {
   })
 })
 
-
 it.each(['/api/flights', '/api/flights/plan-features'])('resolves aliases in order and preserves duplicate paths through %s', async (url) => {
   const alias = path.join(tmpDir, 'alias')
   fs.symlinkSync(repoDir, alias, 'dir')
-  app = await buildApp(allDone(), undefined, agentReturning(planText([
+  app = await buildApp(allDoneAdapters(), undefined, agentReturning(planText([
     { name: 'first', description: 'one' }, { name: 'second', description: 'two' },
   ])))
   const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [alias, tmpDir, repoDir] }) })
@@ -530,7 +524,7 @@ it.each(['/api/flights', '/api/flights/plan-features'])('retains the unresolved-
   const missing = path.join(tmpDir, 'missing')
   const alias = path.join(tmpDir, 'dangling')
   fs.symlinkSync(missing, alias)
-  app = await buildApp(allDone())
+  app = await buildApp(allDoneAdapters())
   const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [repoDir, alias, missing] }) })
   expect(result.statusCode).toBe(400)
   expect(result.json()).toEqual({ error: `repo path does not exist: ${alias}` })

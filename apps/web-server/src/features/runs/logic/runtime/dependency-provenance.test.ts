@@ -1,37 +1,34 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, removeWorktree } from './repo-worktree'
 import { prepareWorktreeDependencies } from './dependency-provenance'
 import * as gitRepo from '../../../../shared/git-repo'
-import { git } from '../../../../../../../tools/test-helpers/git-repo'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-dependency-provenance-')
 
 let root: string
 let source: string
 
 function initRepo(dir: string, schema = 'model User { id Int @id }'): void {
   fs.mkdirSync(dir, { recursive: true })
-  git(dir, 'init', '-q')
-  git(dir, 'config', 'user.email', 'test@example.com')
-  git(dir, 'config', 'user.name', 'Test')
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ packageManager: 'npm@10.0.0' }))
   fs.writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {} }))
   fs.mkdirSync(path.join(dir, 'prisma'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'prisma', 'schema.prisma'), schema)
-  git(dir, 'add', '-A')
-  git(dir, 'commit', '-q', '-m', 'init')
+  initGitRepo(dir)
 }
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-dependency-provenance-'))
+  root = tempDir()
   source = path.join(root, 'source')
   initRepo(source)
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 describe('prepareWorktreeDependencies', () => {

@@ -21,6 +21,7 @@ import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
 import { repoPathOverrideEnv } from './repo-path-env'
 import { recordSpecEdits } from './run-suite-snapshot'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 // ─── Playwright + heal loop ────────────────────────────────────────────────
 //
@@ -136,7 +137,7 @@ export function persistPlaywrightArtifacts(ctx: RunContext): void {
       // it cannot read, which would take the run down instead of warning.
       copyDirRecursive(srcPath, dstPath)
     } catch (err) {
-      ctx.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${err instanceof Error ? err.message : String(err)}`)
+      ctx.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${errorMessage(err)}`)
     }
   }
 }

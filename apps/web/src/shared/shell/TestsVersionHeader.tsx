@@ -6,6 +6,7 @@ import { TEST_CHANGE_MARKS, TestChangeMark } from '../ui/TestChangeMark'
 import type { useTestVersions } from './use-test-versions'
 import { TEST_CHANGE_KINDS } from '../lib/test-versions'
 import type { TestChangeKind, VersionTest } from '@shared/test-review'
+import { Tab } from '@/shared/ui/Tab'
 
 interface Props {
   currentTests: boolean
@@ -71,15 +72,15 @@ export function TestsVersionHeader({ currentTests, onCurrentTestsChange, current
     <span className="cl-kicker shrink-0">Tests</span>
     {onCurrentTestsChange ? <div role="group" aria-label="Test source" className="cl-tests-tabs">
       <Tooltip label={sourceLabel}>
-        <button type="button" aria-label={sourceName} aria-pressed={currentTests} className={`cl-tab${currentTests ? ' cl-tab-active' : ''}`} onClick={() => onCurrentTestsChange(true)}>
+        <Tab active={currentTests} aria-label={sourceName} aria-pressed={currentTests} onClick={() => onCurrentTestsChange(true)}>
           <FileIcon /><span className="cl-tab-count">{currentTotal ?? '—'}</span>
-        </button>
+        </Tab>
       </Tooltip>
       <Tooltip label={resultLabel}>
-        <button type="button" aria-label={resultName} aria-pressed={!currentTests} className={`cl-tab${!currentTests ? ' cl-tab-active' : ''}`} onClick={() => onCurrentTestsChange(false)}>
+        <Tab active={!currentTests} aria-label={resultName} aria-pressed={!currentTests} onClick={() => onCurrentTestsChange(false)}>
           {runMark}
           <span className="cl-tab-count">{passed ?? '—'}<span className="text-muted">/{recordedTotal ?? '—'}</span></span>
-        </button>
+        </Tab>
       </Tooltip>
     </div> : <div className="flex min-w-0 items-center gap-2">{fallback}</div>}
     {runId && onReviewTest && <div className="cl-test-version-actions">

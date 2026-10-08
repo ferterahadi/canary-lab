@@ -32,6 +32,8 @@ import {
   migrateLegacyHealAgent,
   stagePlanSummary,
 } from './settings-options'
+import { displayError } from '@/shared/api/error-message'
+import { plural } from '@shared/lib/plural'
 
 interface Props {
   onClose: () => void
@@ -228,7 +230,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
       if (!resource.accept(next)) return
       if (editable.acceptSaved(next, draft)) onClose()
     } catch (e: unknown) {
-      if (mounted()) setError(e instanceof Error ? e.message : 'Save failed')
+      if (mounted()) setError(displayError(e, 'Save failed'))
     } finally {
       if (mounted()) setSaving(false)
     }
@@ -262,7 +264,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
         })
       }
     } catch (e: unknown) {
-      if (mounted()) setPortError(e instanceof Error ? e.message : 'Port change failed')
+      if (mounted()) setPortError(displayError(e, 'Port change failed'))
     } finally {
       if (mounted()) setPortBusy(false)
     }
@@ -361,7 +363,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                     }}
                   >
                     <span className="min-w-0 flex-1">
-                      {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.
+                      {plural(pendingConfirm, 'active run')} will be aborted by the restart.
                     </span>
                     <button
                       type="button"

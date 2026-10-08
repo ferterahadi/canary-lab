@@ -7,6 +7,7 @@ import type {
   PlaywrightScreenshotMode,
 } from '@shared/configs/playwright-modes'
 import { parseLocation } from '@/shared/test-numbering'
+import { plural } from '@shared/lib/plural'
 
 export interface PlaybackTest {
   name: string
@@ -212,7 +213,7 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
       // A tally is only finished when every assertion under it is: one still
       // open must not be reported as done.
       ended: pending.every((step) => step.ended),
-      title: `Verified ${pending.length} assertion${pending.length === 1 ? '' : 's'}`,
+      title: `Verified ${plural(pending.length, 'assertion')}`,
     })
     pending.length = 0
   }

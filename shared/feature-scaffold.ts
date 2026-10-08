@@ -2,6 +2,7 @@ import { isSpecFile } from './spec-files'
 import { normalizeEnvironmentNames } from './lib/environment-names'
 import fs from 'fs'
 import path from 'path'
+import { isRecord } from './lib/is-record'
 
 export const CANONICAL_PLAYWRIGHT_CONFIG = 'playwright.config.ts'
 export const LOG_MARKER_FIXTURE_IMPORT = 'canary-lab/feature-support/log-marker-fixture'
@@ -326,10 +327,6 @@ function formatRepos(repos: FeatureScaffoldRepo[]): string {
     return `{\n      ${fields.join(',\n      ')}\n    }`
   })
   return `[\n    ${rendered.join(',\n    ')}\n  ]`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function escapeSingleQuoted(value: string): string {

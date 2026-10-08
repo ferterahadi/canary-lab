@@ -40,13 +40,13 @@ import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail } from './StageDetail'
-import { truncate } from './StageActivity'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { useFlightRecord } from '../state/use-flight-record'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { coverageStageWarning } from './coverage-stage-warning'
 import { activityRowKey as rowKeyForActivity, presentedFlightRows } from './presented-flight-rows'
+import { displayError } from '@/shared/api/error-message'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -252,7 +252,7 @@ export function FlightDetail({
     setActionError(null)
     Promise.resolve().then(call)
       .then(() => { (onSuccess ?? refetch)() })
-      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setActionError(displayError(err)))
       .finally(() => { actionPending.current = false; setActionBusy(false) })
   }, [refetch])
 
@@ -267,7 +267,7 @@ export function FlightDetail({
       // The workspace push is the fast path; this authoritative read makes the
       // header swap and Activity attachment reliable even if that frame drops.
       .then((workflowId) => loadPortify(workflowId))
-      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setActionError(displayError(err)))
       .finally(() => setParallelSetupStarting(false))
   }, [flight, loadPortify, parallelSetupStarting, startPortify])
 

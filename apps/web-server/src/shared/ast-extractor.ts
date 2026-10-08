@@ -18,6 +18,7 @@ import {
 import { parseSource } from './controlled-english/compiler-context'
 import { compileSemanticSource } from './controlled-english/semantic-context'
 import type { ExtractedStep, ExtractedTest } from '../../../../shared/extracted-test'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 export interface ExtractResult {
   file: string
@@ -597,7 +598,7 @@ export function extractTestMetadataFromSource(file: string, source: string, opti
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -718,7 +719,7 @@ export function extractTestPredicatesFromSource(file: string, source: string): E
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -769,7 +770,7 @@ export function extractTestsFromSource(
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -796,6 +797,6 @@ export function extractCoverageTestsFromSource(file: string, source: string): {
       assertions: body ? collectAssertionSnippets(body, sourceFile) : [],
     })) }
   } catch (error) {
-    return { file, tests: [], parseError: error instanceof Error ? error.message : String(error) }
+    return { file, tests: [], parseError: errorMessage(error) }
   }
 }

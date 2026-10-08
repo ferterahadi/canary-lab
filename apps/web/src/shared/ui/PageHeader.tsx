@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEscapeToClose } from './Overlays'
 
 /**
  * The header a full-screen view opens with.
@@ -45,5 +46,33 @@ export function PageHeader({ rubric, title, children, onClose, closeLabel }: {
         Close <span aria-hidden="true">✕</span>
       </button>
     </header>
+  )
+}
+
+/**
+ * The shell a full-screen view sits in: fixed over the whole app at z-60 on
+ * `--bg-base`, a column for `PageHeader` plus the view's panes, and Escape on
+ * the shared layered stack so a dialog open over the page closes alone. A
+ * dialog inside renders in place — never portalled — so it stays above this
+ * stacking context.
+ */
+export function FullScreenPage({ onClose, closeOnEscape = true, className, testId, children }: {
+  onClose: () => void
+  /** Off while the page itself is mid-decision and Escape must not leave it. */
+  closeOnEscape?: boolean
+  /** Extra classes on the shell (a view's CSS scope root). */
+  className?: string
+  testId?: string
+  children: ReactNode
+}) {
+  useEscapeToClose(onClose, closeOnEscape)
+  return (
+    <div
+      className={['fixed inset-0 z-[60] flex flex-col', className].filter(Boolean).join(' ')}
+      style={{ background: 'var(--bg-base)' }}
+      data-testid={testId}
+    >
+      {children}
+    </div>
   )
 }

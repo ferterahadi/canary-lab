@@ -1,6 +1,6 @@
 import type { PlaybackIdentity } from '@shared/playback-identity'
 import { shortSourceLocation } from '@shared/lib/source-location'
-import { formatLocalDateTime } from '@/shared/lib/format'
+import { formatLocalDateTime, shortTime } from '@/shared/lib/format'
 import { useNow } from '@/shared/state/use-now'
 import type { PlaywrightArtifactGroup, PlaywrightPlaybackEvent, RunSummary } from '@shared/run-detail'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
@@ -10,7 +10,8 @@ import { isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timelin
 import { PaneTerminal } from './PaneTerminal'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
-import { PlaywrightPlayback, PlaywrightView, SegmentButton, formatSummaryTestName, isPlaywrightLifecyclePhase } from './RunPlaybackPanels'
+import { PlaywrightPlayback, PlaywrightView, formatSummaryTestName, isPlaywrightLifecyclePhase } from './RunPlaybackPanels'
+import { Tab } from '@/shared/ui/Tab'
 
 export function PlaywrightPanel({
   runId,
@@ -49,8 +50,10 @@ export function PlaywrightPanel({
       scroll={false}
       bar={
         <>
-          <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
-          <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
+          {/* Same face as the run's primary tabs — it is sub-navigation, so it
+              should look like navigation. */}
+          <Tab active={view === 'playback'} onClick={() => onViewChange('playback')} className="shrink-0 whitespace-nowrap">Playback</Tab>
+          <Tab active={view === 'terminal'} onClick={() => onViewChange('terminal')} className="shrink-0 whitespace-nowrap">Terminal</Tab>
           {/* One artifact-policy control for the whole pane. It used to repeat
               on every playback card, which read as a per-test setting — it is
               a per-feature one. */}
@@ -201,7 +204,7 @@ export function RecoveryTimeline({
                 title={formatLocalDateTime(row.ts)}
                 style={{ color: 'var(--text-muted)' }}
               >
-                {formatLifecycleTime(row.ts)}
+                {shortTime(row.ts)}
               </time>
               <span className="min-w-0">
                 <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{row.headline}</span>
@@ -250,17 +253,6 @@ export function useTimelineNow(events: RunLifecycleEvent[]): number {
   const tick = Boolean(lastPhase && !isTerminalLifecyclePhase(lastPhase))
 
   return useNow({ enabled: tick, intervalMs: 30_000, resetKey: lastUpdatedAt, refreshOnReset: true })
-}
-
-export function formatLifecycleTime(iso: string): string {
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return iso
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(time))
 }
 
 export function formatLifecycleDate(iso: string): string {

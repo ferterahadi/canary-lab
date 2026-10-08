@@ -4,9 +4,7 @@ import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 // unrestricted MCP tool wraps it; elicited review passes an exact revision.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { RunStore } from '../logic/run-store'
@@ -15,13 +13,17 @@ import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
 import { writeManifest, readManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteReviewRevision } from '../logic/runtime/suite-review'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-adopt-')
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-adopt-')))
+  tmpDir = tempDir()
   fs.mkdirSync(path.join(tmpDir, 'logs'), { recursive: true })
   fs.mkdirSync(path.join(tmpDir, 'features'), { recursive: true })
 })
@@ -47,12 +49,7 @@ function terminalReview(status: 'passed' | 'failed' | 'aborted' = 'passed') {
   for (const dir of [featureDir, snapshot]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(snapshot, 'e2e/a.spec.ts'), 'recorded\n')
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'recorded\n')
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' })
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'initial')
+  initGitRepo(featureDir)
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
   const revision = suiteReviewRevision(snapshot, featureDir)
   writeManifest(path.join(runDir, 'manifest.json'), {
@@ -226,13 +223,12 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
   it('keeps an already committed deletion in the run review receipt', async () => {
     const { app } = await build()
     const seeded = terminalReview('passed')
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: seeded.featureDir, stdio: 'pipe' }).toString().trim()
     fs.writeFileSync(path.join(seeded.snapshot, 'e2e/subscription.cjs'), 'recorded helper\n')
     fs.writeFileSync(path.join(seeded.featureDir, 'e2e/subscription.cjs'), 'recorded helper\n')
-    git('add', 'e2e/subscription.cjs')
-    git('commit', '-qm', 'record helper')
-    git('rm', 'e2e/subscription.cjs')
-    git('commit', '-qm', 'remove helper from suite')
+    git(seeded.featureDir, 'add', 'e2e/subscription.cjs')
+    git(seeded.featureDir, 'commit', '-qm', 'record helper')
+    git(seeded.featureDir, 'rm', 'e2e/subscription.cjs')
+    git(seeded.featureDir, 'commit', '-qm', 'remove helper from suite')
     const revision = suiteReviewRevision(seeded.snapshot, seeded.featureDir)
 
     const response = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: revision } })
@@ -242,7 +238,7 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
       files: ['e2e/a.spec.ts', 'e2e/subscription.cjs'],
       git: { status: 'committed' }, execution: { status: 'new-run-required' },
     })
-    expect(git('show', '--format=', '--name-only', 'HEAD')).toBe('e2e/a.spec.ts')
+    expect(git(seeded.featureDir, 'show', '--format=', '--name-only', 'HEAD')).toBe('e2e/a.spec.ts')
     expect(readManifest(path.join(seeded.runDir, 'manifest.json'))?.specEdits?.reviewDecisions?.[0]?.receipt?.files).toEqual([
       'e2e/a.spec.ts', 'e2e/subscription.cjs',
     ])

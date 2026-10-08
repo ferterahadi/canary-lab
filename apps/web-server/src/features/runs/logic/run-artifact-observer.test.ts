@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -7,6 +6,9 @@ import { createRunArtifactObserver, type RunArtifactObserver } from './run-artif
 import { RunStore, type RunStoreEvent } from './run-store'
 import { createRegistry } from './run-registry'
 import type { WatchDirectory } from './run-file-watcher'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('run-observer-')
 
 let root: string
 let store: RunStore
@@ -32,13 +34,13 @@ async function changed(name: string | Buffer | null = null, delay = 251) {
 }
 beforeEach(() => {
   vi.useFakeTimers()
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'run-observer-')))
+  root = tempDir()
   store = new RunStore(root, createRegistry())
   events = []; watches = []; log.mockReset()
   store.onEvent(event => events.push(event))
   observer = createRunArtifactObserver({ store, log, watchDirectory: watch })
 })
-afterEach(() => { observer.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { observer.dispose(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 it('seeds fingerprints, filters unrelated writes and shares one leased watch', async () => {
   seed(); observer.observe('run-1'); observer.observe('run-1')

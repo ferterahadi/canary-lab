@@ -1,5 +1,6 @@
 import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useState } from 'react'
+import { readStored, writeStored } from '@/shared/state/browser-storage'
 
 /** Drag-to-resize height for a panel that must NOT size to its content, where
  *  the SAME gesture also collapses it.
@@ -80,15 +81,12 @@ export function useResizableHeight({
     [minPx, maxPx, ceilingPx],
   )
   const [height, setHeight] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey)
-      const n = raw == null ? NaN : Number(raw)
-      if (Number.isFinite(n)) return clamp(n)
-    } catch { /* a blocked storage is not a reason to render nothing */ }
-    return clamp(defaultPx)
+    const raw = readStored(storageKey)
+    const n = raw == null ? NaN : Number(raw)
+    return clamp(Number.isFinite(n) ? n : defaultPx)
   })
   useEffect(() => {
-    try { localStorage.setItem(storageKey, String(height)) } catch { /* ignore */ }
+    writeStored(storageKey, String(height))
   }, [storageKey, height])
 
   const { origin: drag, start } = useMouseDrag<{ y: number; startHeight: number }>((origin, e) => {

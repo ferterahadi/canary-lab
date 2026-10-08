@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import * as workspaceApi from '@/shared/api/workspace'
+import { displayError } from '@/shared/api/error-message'
 
 // Launch the user's Claude/Codex desktop app. Shared by every external panel
 // whose CTA opens the client (heal, coverage) so the busy/error handling has one
@@ -13,7 +14,7 @@ export function useOpenAgentApp() {
     try {
       await workspaceApi.openAgentApp(agent)
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Could not open ${agent}`)
+      setError(displayError(err, `Could not open ${agent}`))
     } finally {
       setOpening(null)
     }

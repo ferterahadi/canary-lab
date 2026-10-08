@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -37,15 +37,14 @@ import {
   subagentDirFor,
 } from './agent-session-subagents'
 import { parseAgentSessionLine } from './agent-session-parse'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-asl-home-')
 
 let homeDir: string
 
 beforeEach(() => {
-  homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-home-')))
-})
-
-afterEach(() => {
-  try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  homeDir = tempDir()
 })
 
 describe('agent session ref file parsing', () => {
@@ -170,7 +169,7 @@ describe('locateMostRecentAgentSessionRef', () => {
   })
 
   it('returns codex when only codex has a log', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const logPath = writeCodexSessionWithMtime(
       runDir,
       '2026',
@@ -184,12 +183,10 @@ describe('locateMostRecentAgentSessionRef', () => {
       sessionId: 'sid-codex',
       logPath,
     })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('returns codex when its log is newer than claude\'s', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-11T00:00:00Z'))
     const codexLog = writeCodexSessionWithMtime(
       runDir,
@@ -202,12 +199,10 @@ describe('locateMostRecentAgentSessionRef', () => {
 
     const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
     expect(ref).toEqual({ agent: 'codex', sessionId: 'sid-codex', logPath: codexLog })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('returns claude when its log is newer than codex\'s', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const claudeLog = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-12T02:00:00Z'))
     writeCodexSessionWithMtime(
       runDir,
@@ -220,12 +215,10 @@ describe('locateMostRecentAgentSessionRef', () => {
 
     const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
     expect(ref).toEqual({ agent: 'claude', sessionId: 'sid-claude', logPath: claudeLog })
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('falls back to codex when the latest Claude file disappears before stat', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const claudeLog = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-12T02:00:00Z'))
     const codexLog = writeCodexSessionWithMtime(
       runDir,
@@ -249,12 +242,11 @@ describe('locateMostRecentAgentSessionRef', () => {
       })
     } finally {
       statSpy.mockRestore()
-      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
     }
   })
 
   it('prefers claude on an mtime tie to keep single-agent runs stable', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const same = new Date('2026-05-11T12:00:00Z')
     const claudeLog = writeClaudeSession(runDir, 'sid-claude', same)
     writeCodexSessionWithMtime(runDir, '2026', '05', '11', 'sid-codex', same)
@@ -262,12 +254,10 @@ describe('locateMostRecentAgentSessionRef', () => {
     const ref = locateMostRecentAgentSessionRef(runDir, homeDir)
     expect(ref?.agent).toBe('claude')
     expect(ref?.logPath).toBe(claudeLog)
-
-    try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('falls back to claude when the latest Codex file disappears before stat', () => {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const claudeLog = writeClaudeSession(runDir, 'sid-claude', new Date('2026-05-11T00:00:00Z'))
     const codexLog = writeCodexSessionWithMtime(
       runDir,
@@ -291,7 +281,6 @@ describe('locateMostRecentAgentSessionRef', () => {
       })
     } finally {
       statSpy.mockRestore()
-      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* best-effort */ }
     }
   })
 })
@@ -368,7 +357,7 @@ describe('resolveManifestSessionRef', () => {
 
 describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
   function workflowDir(): string {
-    return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-')))
+    return tempDir('cl-wf-')
   }
 
   it('returns null when no ref file has been written', () => {
@@ -381,7 +370,7 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
     // it, and the agent's session is orphaned (blank Activity rail despite a run).
     const stageDir = path.join(workflowDir(), 'scout') // nested, does not exist
     expect(fs.existsSync(stageDir)).toBe(false)
-    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    const cwd = tempDir('cl-wf-cwd-')
     writeWorkflowAgentRef(stageDir, { agent: 'claude', cwd, sessionId: 'sid-scout', spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
     expect(fs.existsSync(path.join(stageDir, 'agent-session.json'))).toBe(true)
     expect(resolveWorkflowAgentRef(stageDir, homeDir)).toEqual({
@@ -393,7 +382,7 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
 
   it('writes a claude ref and resolves it by session id once the log exists', () => {
     const dir = workflowDir()
-    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    const cwd = tempDir('cl-wf-cwd-')
     writeWorkflowAgentRef(dir, { agent: 'claude', cwd, sessionId: 'sid-claude', spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
 
     // No log on disk yet → falls back to the cwd-derived ref (logPath as written).
@@ -411,7 +400,7 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
 
   it('writes a codex hint and discovers the session by cwd + spawn time', () => {
     const dir = workflowDir()
-    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    const cwd = tempDir('cl-wf-cwd-')
     writeWorkflowAgentRef(dir, { agent: 'codex', cwd, spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
 
     // No codex session on disk yet → null (the WS keeps polling discoverRef).
@@ -426,8 +415,6 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
     )
 
     expect(resolveWorkflowAgentRef(dir, homeDir)).toEqual({ agent: 'codex', sessionId: 'sess-bbbb', logPath })
-
-    try { fs.rmSync(cwd, { recursive: true, force: true }) } catch { /* best-effort */ }
   })
 
   it('ignores a malformed ref file', () => {

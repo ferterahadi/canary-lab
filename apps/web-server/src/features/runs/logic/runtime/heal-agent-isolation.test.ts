@@ -1,16 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { HEAL_AGENT_ISOLATION_SETTINGS, writeHealAgentIsolationSettings } from './heal-agent-isolation'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-heal-isolation-')
 let root: string
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-isolation-')))
+  root = tempDir()
 })
-
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('writeHealAgentIsolationSettings', () => {
   it('allows the run worktree while denying the source checkout and authored suite', () => {

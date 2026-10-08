@@ -1,10 +1,12 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runDiscoveryRepairAgent } from './discovery-repair-agent'
 import type { DiscoveryRepair } from '../../../../../../shared/discovery-repair'
 import type { RunAgentProcessOpts, AgentProcessResult } from '../../agent-sessions/logic/agent-process'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('discovery-agent-')
 
 // One I/O edge is faked: the CLI subprocess. Everything this module owns — which
 // argv shape each agent gets, which directories the spawn may read, where the
@@ -57,7 +59,7 @@ function repair(over: Partial<DiscoveryRepair> = {}): DiscoveryRepair {
 }
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-agent-')))
+  root = tempDir()
   featureDir = path.join(root, 'features', 'suite')
   recordDir = path.join(root, 'logs', 'discovery-repairs', 'dr-1')
   fs.mkdirSync(featureDir, { recursive: true })
@@ -69,7 +71,6 @@ beforeEach(() => {
   amock.result = amock.resultFor()
   amock.chunk = null
 })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('runDiscoveryRepairAgent', () => {
   it('gives claude a fresh session id, the prompt in argv, and read access to the workspace, the suite and every cloned repo', async () => {

@@ -23,6 +23,7 @@ import { dependencyIncompatibilityReason } from '../../../../../../../shared/dep
 import { findFeature } from '../../../../shared/feature-loader'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import { readWatchCompilerFailure } from './watch-compiler-result'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 // node-pty reports the raw signal number; spawnSync reports the name. The
 // manifest stores names only, so one record can never read "signal 15" where
@@ -240,7 +241,7 @@ export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
       env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
     })
   } catch (err) {
-    const message = redactDiagnosticText(err instanceof Error ? err.message : String(err))
+    const message = redactDiagnosticText(errorMessage(err))
     try { fs.appendFileSync(logPath, `${message}\n`) } catch { /* best-effort; manifest still carries the spawn error */ }
     recordBootFailure(ctx, {
       service: svc.name,

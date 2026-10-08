@@ -15,6 +15,7 @@ import type { RunLifecyclePhase } from '../../../../../../../shared/run-state'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 export interface SummaryShape extends ApplicabilitySummary {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
@@ -74,11 +75,7 @@ export function stoppedEarlyReasonOf(manifestPath: string): StoppedEarlyReason |
 }
 
 export function readSummary(summaryPath: string): SummaryShape {
-  try {
-    return JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as SummaryShape
-  } catch {
-    return {}
-  }
+  return readJsonOr<SummaryShape>(summaryPath, {})
 }
 
 export type VerificationPlan =

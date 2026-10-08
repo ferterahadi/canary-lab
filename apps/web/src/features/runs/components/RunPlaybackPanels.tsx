@@ -10,7 +10,7 @@ import type {
 } from '@shared/run-detail'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { RunLifecycleEvent } from '@shared/run-state'
-import { formatDuration } from '@/shared/lib/format'
+import { formatDuration, shortTime } from '@/shared/lib/format'
 import { parseAssertionError } from '../utils/assertion-error'
 import { artifactsForPlayback, playbackTests, playbackFocusCase, type PlaybackTest } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
@@ -19,23 +19,8 @@ import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { DownloadIcon, ImageIcon, StepsIcon, VideoIcon } from '@/shared/ui/Icons'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '@/shared/test-numbering'
-import { formatLifecycleTime } from './RunDiagnosticsPanels'
 
 export type PlaywrightView = 'terminal' | 'playback'
-
-/** Playwright's Terminal / Playback switch. Same face and geometry as the run's
- *  primary tabs — it is sub-navigation, so it should look like navigation. */
-export function SegmentButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className={`cl-tab shrink-0 whitespace-nowrap ${props.active ? 'cl-tab-active' : ''}`}
-    >
-      {props.children}
-    </button>
-  )
-}
 
 export function PlaywrightPlayback({
   events,
@@ -400,7 +385,7 @@ export function PlaybackMeta({ test }: { test: PlaybackTest }) {
   const location = test.location ? shortSourceLocation(test.location) : null
   const parts: ReactNode[] = []
   if (location) parts.push(<span key="loc" className="min-w-0 truncate" title={test.location}>{location}</span>)
-  if (test.startedAt) parts.push(<span key="at">{formatLifecycleTime(test.startedAt)}</span>)
+  if (test.startedAt) parts.push(<span key="at">{shortTime(test.startedAt)}</span>)
   if (typeof test.retry === 'number' && test.retry > 0) parts.push(<span key="retry" style={{ color: 'var(--warning)' }}>retry {test.retry}</span>)
   if (parts.length === 0) return null
   return (

@@ -4,13 +4,13 @@
 // control flow: a mocked `runPlaywright` can flip `ctx.stopped` before it
 // returns, so the abort windows between awaits are ordinary assignments here
 // instead of the timing races they are in a full-orchestrator test.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { HealSignal } from '../../../../../../../shared/run-state'
 import type { RunContext } from './run-context'
 import type { VerificationPlan } from './run-verdict'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   runPlaywright: vi.fn(),
@@ -86,6 +86,7 @@ vi.mock('./run-manifest-writer', () => ({
 const { runAutoHealLoop, runManualExternalHealLoop } = await import('./run-heal-loop')
 const { makeHealLoopContext, makeLoopHost } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-heal-loop-')
 let tmpDir: string
 
 const ALL_PASSED: VerificationPlan = { kind: 'all-passed', total: 3 }
@@ -106,7 +107,7 @@ function rerunSignal(body: Record<string, unknown> = {}): HealSignal {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-loop-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   // Defaults: nothing failing, no services missing, no files changed.
   h.readSummary.mockReturnValue({})
@@ -125,10 +126,6 @@ beforeEach(() => {
   h.decideRunStatus.mockReturnValue('failed')
   h.runPlaywright.mockResolvedValue(1)
   h.captureHealAgentCause.mockReturnValue(undefined)
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {

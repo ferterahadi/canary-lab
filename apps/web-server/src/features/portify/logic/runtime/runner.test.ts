@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
@@ -14,6 +13,9 @@ import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, overlayDir } from './overlay'
 import type { PortifyManifest } from './types'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-it-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -63,13 +65,6 @@ const fakePtyFactory: PtyFactory = (): PtyHandle => ({
   write: () => {},
   resize: () => {},
   kill: () => {},
-})
-
-const roots: string[] = []
-
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
 })
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
@@ -157,8 +152,7 @@ const TERMINAL = ['ready-to-save', 'failed', 'aborted']
 
 // Single-repo fixture (the common case).
 async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; appRepo: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-it-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'myfeat')
   const appRepo = path.join(root, 'app')

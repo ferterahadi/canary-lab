@@ -1,14 +1,15 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildSuiteReview, suiteExecutionRevision, suiteReviewAssessment, suiteReviewRevision } from './suite-review'
 import { adoptSpecEdits, snapshotSuite } from './run-suite-snapshot'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-suite-review-')
 let root: string
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-suite-review-')) })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
+afterEach(() => { vi.restoreAllMocks() })
 function write(dir: string, file: string, content: string | Buffer) {
   fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
   fs.writeFileSync(path.join(dir, file), content)

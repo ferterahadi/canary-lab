@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { buildOrchestratorHealPrompt } from './auto-heal'
 import { buildHealPromptMap, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-heal-map-')
 
 function writeRunManifest(runDir: string, body: Record<string, unknown>): void {
   fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({
@@ -24,15 +26,11 @@ describe('buildHealPromptMap', () => {
   let projectRoot: string
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-map-')))
+    tmp = tempDir()
     runDir = path.join(tmp, 'run')
     projectRoot = path.join(tmp, 'project')
     fs.mkdirSync(runDir, { recursive: true })
     fs.mkdirSync(projectRoot, { recursive: true })
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   it('maps available service-mode resources and omits unavailable placeholders', () => {
@@ -139,15 +137,11 @@ describe('buildOrchestratorHealPrompt', () => {
   let projectRoot: string
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-')))
+    tmp = tempDir('cl-heal-')
     runDir = path.join(tmp, 'run')
     projectRoot = path.join(tmp, 'project')
     fs.mkdirSync(runDir, { recursive: true })
     fs.mkdirSync(projectRoot, { recursive: true })
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   it('throws synchronously when the packaged prompt template is missing', () => {
@@ -418,8 +412,7 @@ describe('buildOrchestratorHealPrompt', () => {
 
 describe('renderPlaywrightMcpHint', () => {
   let tmp: string
-  beforeEach(() => { tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-'))) })
-  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
+  beforeEach(() => { tmp = tempDir('cl-mcp-') })
 
   it('returns empty string when failed dir does not exist', () => {
     expect(renderPlaywrightMcpHint(path.join(tmp, 'nonexistent'))).toBe('')
@@ -440,8 +433,7 @@ describe('renderPlaywrightMcpHint', () => {
 
 describe('renderTraceExtractHint', () => {
   let tmp: string
-  beforeEach(() => { tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-trace-'))) })
-  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
+  beforeEach(() => { tmp = tempDir('cl-trace-') })
 
   it('returns empty string when no failure dir has trace-extract/failure-summary.md', () => {
     fs.mkdirSync(path.join(tmp, 'a'), { recursive: true })

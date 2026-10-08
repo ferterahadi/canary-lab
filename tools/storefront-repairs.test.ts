@@ -1,23 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { repairSteps, replaceOnce } from './storefront-repairs.mjs'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
 // Pins the scripted repairs to the shipped template. `smoke:demo` proves them
 // against a running run loop; this is the cheap half — every anchor matches the
 // template once, so a template edit that moves one fails here in seconds.
 
 const templateApp = path.resolve(import.meta.dirname, '..', 'templates', 'project', 'demo-app')
+const tempDir = trackTempDirs('storefront-repairs-')
 let appDir: string
 
 beforeEach(() => {
-  appDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storefront-repairs-'))
+  appDir = tempDir()
   fs.cpSync(templateApp, appDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(appDir, { recursive: true, force: true })
 })
 
 describe('repairSteps', () => {

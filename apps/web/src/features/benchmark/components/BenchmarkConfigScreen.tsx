@@ -12,6 +12,7 @@ import type { SabotageLevel } from '@shared/benchmark-index'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { ArmComparisonPage, badgeStyle } from './BenchmarkArmMatrix'
 import { BenchmarkHeader } from './BenchmarkHeader'
+import { displayError } from '@/shared/api/error-message'
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ export function ConfigScreen({
       const id = await startBenchmark({ feature, skill: selected.name, level: selected.level, iterations, agent })
       onStarted(id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(displayError(e))
       setBusy(false)
     }
   }

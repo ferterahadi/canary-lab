@@ -2,12 +2,10 @@
 // heal loops themselves are mocked out — this file is about the decisions the
 // controls make BEFORE handing off (is there anything to pause? is the run
 // already gone?), not about what the loop does afterwards.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { RunContext } from './run-context'
 import type { PtyHandle } from './pty-spawner'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   waitForPlaywrightExit: vi.fn(),
@@ -51,6 +49,7 @@ const { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure }
   await import('./run-heal-controls')
 const { makeHealLoopContext, makeLoopHost } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-heal-ctl-')
 let tmpDir: string
 
 /** A pty whose kills are recorded rather than sent anywhere. */
@@ -60,17 +59,13 @@ function fakePty(): PtyHandle & { kills: string[] } {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-ctl-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   h.killTree.mockImplementation((pty, signal) => { try { pty.kill(signal) } catch { /* exited test handle */ } })
   h.summarizeFailures.mockReturnValue({ failed: [], total: 4 })
   h.waitForPlaywrightExit.mockResolvedValue({ exitCode: 0 })
   h.runAutoHealLoop.mockResolvedValue('passed')
   h.runManualExternalHealLoop.mockResolvedValue('passed')
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {

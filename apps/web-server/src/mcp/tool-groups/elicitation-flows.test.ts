@@ -1,22 +1,21 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ServerContext, InputRequiredResult, CallToolResult } from '@modelcontextprotocol/server'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { registerFlightTools } from './flight'
 import { registerPortifyTools } from './portify'
 import { registerReadTools } from './reads'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-input-flow-')
 
 const facts = { surface: 'codex' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: true } }
 const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'domain-tests', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
 const text = (result: CallToolResult | InputRequiredResult) => (result.content as Array<{ text: string }>)[0].text
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
 
 function feature() {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-input-flow-'))
-  roots.push(projectRoot)
+  const projectRoot = tempDir()
   const featuresDir = path.join(projectRoot, 'features')
   const dir = path.join(featuresDir, 'checkout')
   fs.mkdirSync(dir, { recursive: true })

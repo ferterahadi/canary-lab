@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  errorMessage,
   frameToAction,
   initialRunsState,
   runsReducer,
   type RunsState,
 } from './runs-state'
-import { ApiError } from '@/shared/api/internal'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 
@@ -320,33 +318,5 @@ describe('frameToAction', () => {
     expect(frameToAction({ type: 'list-changed', runs: [] })).toEqual({
       type: 'list-changed', runs: [],
     })
-  })
-})
-
-describe('errorMessage', () => {
-  it('prefers `reason` from a structured ApiError body', () => {
-    expect(errorMessage(new ApiError(409, { reason: 'no-failures-yet' }))).toBe('no-failures-yet')
-  })
-
-  it('falls back to `error` when there is no `reason`', () => {
-    expect(errorMessage(new ApiError(404, { error: 'run not found' }))).toBe('run not found')
-  })
-
-  it('falls back to the ApiError message when the body has neither field', () => {
-    expect(errorMessage(new ApiError(500, null))).toBe('HTTP 500')
-  })
-
-  it('translates network-failure TypeErrors to a user-readable message', () => {
-    expect(errorMessage(new TypeError('Failed to fetch'))).toContain('Lost connection')
-    expect(errorMessage(new TypeError('Load failed'))).toContain('Lost connection')
-    expect(errorMessage(new TypeError('NetworkError when attempting to fetch resource'))).toContain('Lost connection')
-  })
-
-  it('returns plain Error.message for generic errors', () => {
-    expect(errorMessage(new Error('something broke'))).toBe('something broke')
-  })
-
-  it('stringifies non-Error throws', () => {
-    expect(errorMessage('plain string')).toBe('plain string')
   })
 })

@@ -1,5 +1,4 @@
 import { runIndexEntry, type RunIndexEntry } from '@shared/run-index'
-import { ApiError } from '@/shared/api/internal'
 import type { RunDetail } from '@shared/run-detail'
 import { isTerminalRunStatus, type TransientAction } from '@shared/run-state'
 import type { ConnectionState } from '@/shared/state/record-stream'
@@ -134,30 +133,4 @@ export function frameToAction(frame: RunsStreamFrame): RunsAction | null {
     case 'list-changed':
       return { type: 'list-changed', runs: frame.runs }
   }
-}
-
-/** Produce a user-facing error string from the various shapes our action
- *  layer can throw: ApiError (server returned non-2xx), TypeError (fetch
- *  failure / connection drop), generic Error, anything else. */
-export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const body = err.body
-    if (body && typeof body === 'object' && 'reason' in body) {
-      return String((body as { reason: unknown }).reason)
-    }
-    if (body && typeof body === 'object' && 'error' in body) {
-      return String((body as { error: unknown }).error)
-    }
-    return err.message
-  }
-  if (isNetworkError(err)) {
-    return 'Lost connection to server. Check that the server is running.'
-  }
-  return err instanceof Error ? err.message : String(err)
-}
-
-function isNetworkError(err: unknown): boolean {
-  if (!(err instanceof TypeError)) return false
-  const msg = err.message.toLowerCase()
-  return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
 }

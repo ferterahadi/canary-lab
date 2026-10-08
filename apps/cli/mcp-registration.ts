@@ -2,9 +2,10 @@ import { commandAvailable } from './command-available'
 import { execFileSync } from 'child_process'
 import path from 'path'
 import { claudeGlobalConfigFile } from '../web-server/src/features/agent-sessions/logic/agent-workspace-trust'
-import { isRecord, readMcpConfig } from './mcp-config'
+import { readMcpConfig } from './mcp-config'
 import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { isUnderTempDir } from '../../shared/runtime/temp-path'
+import { isRecord } from '../../shared/lib/is-record'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 

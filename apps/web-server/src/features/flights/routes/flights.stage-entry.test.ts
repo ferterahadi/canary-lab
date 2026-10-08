@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { writeRunsIndex } from '../../runs/logic/runtime/manifest'
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-stage-entry-')
 
 // `listRuns` is only faked for the one test that proves the validator survives
 // a broken run index; everything else drives the real reader over real files.
@@ -59,16 +61,13 @@ function useRealIndex(rows: RunIndexEntry[]): void {
 const ASK_FOR_RUN = /no passing run yet/
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-stage-entry-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
   seedCompleteFeature()
   runMocks.listRuns.mockReset()
-})
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('buildStageEntryValidator — env-capture accepts a proven boot', () => {

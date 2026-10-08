@@ -11,6 +11,7 @@ import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 import { checkoutBranch, getGitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── generic filesystem browser ────────────────────────────────────────
@@ -203,7 +204,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
         ? (err as { statusCode: number }).statusCode
         : 500
       reply.code(code)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return { error: errorMessage(err) }
     }
   })
 

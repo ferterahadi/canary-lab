@@ -40,14 +40,32 @@ export function formatElapsedSeconds(seconds: number): string {
   return `${Math.floor(mins / 60)}h ${pad(mins % 60)}m`
 }
 
-// Compute duration from ISO start + (optional) end. If end is missing, treats
-// the run as ongoing and returns null.
-export function durationBetween(startedAt: string, endedAt?: string): number | null {
-  if (!endedAt) return null
+/** Raw milliseconds between two ISO stamps; null when either is missing or
+ *  unparseable. Signed — each public reader decides what a reversed pair means. */
+function spanMs(startedAt: string | undefined, endedAt: string | undefined): number | null {
+  if (!startedAt || !endedAt) return null
   const start = Date.parse(startedAt)
   const end = Date.parse(endedAt)
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null
-  return Math.max(0, end - start)
+  return end - start
+}
+
+// Compute duration from ISO start + (optional) end. If end is missing, treats
+// the run as ongoing and returns null. A reversed pair clamps to 0: a run's
+// measured duration feeds `formatDuration`, which has no "unknown" rendering.
+export function durationBetween(startedAt: string, endedAt?: string): number | null {
+  const ms = spanMs(startedAt, endedAt)
+  return ms == null ? null : Math.max(0, ms)
+}
+
+/** Compact wall-clock span between two ISO stamps ("4s", "2m 14s", "1h 03m"),
+ *  rounded to the nearest second. Null when either stamp is missing or
+ *  unparseable, or the end precedes the start — a reversed pair is a clock
+ *  problem, and printing "0s" for it would claim a measurement. */
+export function formatSpan(startedAt: string | undefined, endedAt: string | undefined): string | null {
+  const ms = spanMs(startedAt, endedAt)
+  if (ms == null || ms < 0) return null
+  return formatElapsedSeconds(Math.round(ms / 1000))
 }
 
 // Human-readable byte size. Examples: 0 -> "0 B", 2048 -> "2 KB",
@@ -117,6 +135,30 @@ export function dayTime(iso: string, now: number = Date.now()): string {
   const d = new Date(t)
   if (d.toDateString() !== new Date(now).toDateString()) return shortDateTime(iso)
   return `Today ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}`
+}
+
+/** Cap `text` at `max` characters, the last one an ellipsis when it was cut. */
+export function truncateText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+/** The first non-blank line, trimmed and capped — a row is one line tall. */
+export function firstLineOf(text: string, max = 160): string {
+  return truncateText(text.split('\n').find((l) => l.trim().length > 0)?.trim() ?? '', max)
+}
+
+/** Joins names the way a sentence writes a list: "a", "a and b", "a, b and c". */
+export function joinNatural(items: readonly string[]): string {
+  if (items.length < 2) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** A long session id as its head and tail (`019a2b…7f3c`). Both ends, because
+ *  time-ordered ids (Codex's UUIDv7) share a prefix across sessions started
+ *  close together; an id of 12 characters or fewer is already short. */
+export function shortSession(sessionId: string): string {
+  if (sessionId.length <= 12) return sessionId
+  return `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}`
 }
 
 /** Short, stable run reference for an identity line — the trailing token of

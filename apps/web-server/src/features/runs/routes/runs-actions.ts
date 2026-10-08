@@ -10,7 +10,7 @@ import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
 import type { RunStore } from '../logic/run-store'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
 import type { RepoUpdateRefusal } from '../logic/runtime/repo-upstream-update'
@@ -28,6 +28,7 @@ import type { TestReviewDecision, TestReviewReceipt, TestReviewRequiredInfo } fr
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { withRunReviewLock } from '../logic/test-review-lock'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.post<{
@@ -63,8 +64,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       reply.code(400)
       return { error: 'feature required' }
     }
-    const features = loadFeatures(deps.featuresDir)
-    const featureCfg = features.find((f) => f.name === feature)
+    const featureCfg = findFeature(deps.featuresDir, feature)
     if (!featureCfg) return notFound(reply, 'feature')
     // env is optional only when the feature didn't declare any. Otherwise it
     // must be one of feature.envs (default: first entry).
@@ -197,7 +197,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         ? (err as { statusCode: number }).statusCode
         : 500
       reply.code(code)
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
       if (review) {
         const request = reservedRunId ? undefined : deps.runRequests?.remember(review, {

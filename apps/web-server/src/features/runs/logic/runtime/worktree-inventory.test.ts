@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
@@ -8,6 +7,9 @@ import {
   isUnder,
   listWorktrees,
 } from './worktree-inventory'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('wt-inv-')
 
 describe('parsePorcelainWorktrees', () => {
   it('parses branch and detached records, short-naming refs', () => {
@@ -143,16 +145,15 @@ describe('listWorktrees', () => {
   it('defaults to the real runGit when no git runner is injected', async () => {
     // A non-git temp dir → `git worktree list` exits non-zero → the source is
     // skipped. Exercises the `opts.git ?? runGit` default without a real repo.
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-nogit-'))
+    const tmp = tempDir('wt-nogit-')
     expect(await listWorktrees({ logsDir, sourceRoots: [tmp], now: 0 })).toEqual([])
-    fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   describe('with a real on-disk worktree', () => {
     afterEach(() => vi.restoreAllMocks())
 
     it('reports exists/bytes/ageMs for a worktree dir present on disk', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-inv-'))
+      const tmp = tempDir()
       const wtPath = path.join(tmp, 'runs', 'r1', 'worktrees', 'app')
       fs.mkdirSync(wtPath, { recursive: true })
       fs.writeFileSync(path.join(wtPath, 'file.txt'), 'hello')
@@ -167,7 +168,6 @@ describe('listWorktrees', () => {
       expect(entries[0].exists).toBe(true)
       expect(entries[0].bytes).toBeGreaterThan(0)
       expect(entries[0].ageMs).toBe(5000)
-      fs.rmSync(tmp, { recursive: true, force: true })
     })
 
     it('falls back to null age when statSync throws on an existing dir', async () => {

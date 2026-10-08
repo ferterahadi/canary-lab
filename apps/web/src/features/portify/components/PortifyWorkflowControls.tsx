@@ -6,6 +6,7 @@ import { useInvalidation } from '@/shared/state/invalidation'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { usePortify } from '../state/PortifyContext'
 import { FeedbackModal, ReviewScreen } from './PortifyScreens'
+import { displayError } from '@/shared/api/error-message'
 
 /** Actions for a standalone Portify workflow shown inside Flight's Parallel
  *  readiness stage. Conducted Flights keep using their checkpoint controls;
@@ -40,7 +41,7 @@ export function PortifyWorkflowControls({
       await portifyApi.savePortify(manifest.workflowId)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(displayError(err))
     } finally {
       setBusy(false)
     }
@@ -54,7 +55,7 @@ export function PortifyWorkflowControls({
       setFeedbackOpen(false)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(displayError(err))
     } finally {
       setBusy(false)
     }
@@ -68,7 +69,7 @@ export function PortifyWorkflowControls({
       setConfirmCancel(false)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(displayError(err))
     } finally {
       setBusy(false)
     }

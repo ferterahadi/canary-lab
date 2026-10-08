@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { computeDocsHash, type DocsCollection } from './docs-collection'
 import { buildPrdSummaryPrompt, summarizePrd } from './prd-summary'
@@ -20,6 +19,9 @@ import {
 } from './prd-summary-render'
 
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-prd-write-')
 
 function collection(entries: { relPath: string; content: string }[]): DocsCollection {
   return { docsDir: '/tmp/docs', entries, docsHash: computeDocsHash(entries) }
@@ -202,55 +204,45 @@ describe('assembleSummary', () => {
 
 describe('writePrdSummary', () => {
   it('writes the JSON sidecar + markdown into docs/, returning requirements with sourceRanges', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-write-'))
-    try {
-      const s = summary([
-        { id: 'R1', title: 'Login', text: 'user can log in', pathTypes: ['happy'] },
-      ])
-      const written = writePrdSummary(tmpDir, 'auth', s)
-      // Returned summary carries sourceRange offsets back to the caller.
-      expect(written.requirements[0].sourceRange).toBeDefined()
+    const tmpDir = tempDir()
+    const s = summary([
+      { id: 'R1', title: 'Login', text: 'user can log in', pathTypes: ['happy'] },
+    ])
+    const written = writePrdSummary(tmpDir, 'auth', s)
+    // Returned summary carries sourceRange offsets back to the caller.
+    expect(written.requirements[0].sourceRange).toBeDefined()
 
-      const docsDir = path.join(tmpDir, 'docs')
-      const json = JSON.parse(fs.readFileSync(path.join(docsDir, PRD_SUMMARY_JSON), 'utf-8')) as PrdSummary
-      expect(json.requirements[0].sourceRange).toBeDefined()
-      const md = fs.readFileSync(path.join(docsDir, PRD_SUMMARY_MD), 'utf-8')
-      expect(md).toContain('# auth — Requirements')
-      expect(md).toContain('R1 — Login')
+    const docsDir = path.join(tmpDir, 'docs')
+    const json = JSON.parse(fs.readFileSync(path.join(docsDir, PRD_SUMMARY_JSON), 'utf-8')) as PrdSummary
+    expect(json.requirements[0].sourceRange).toBeDefined()
+    const md = fs.readFileSync(path.join(docsDir, PRD_SUMMARY_MD), 'utf-8')
+    expect(md).toContain('# auth — Requirements')
+    expect(md).toContain('R1 — Login')
 
-      // Round-trips through readPrdSummary.
-      expect(readPrdSummary(tmpDir)?.requirements[0].id).toBe('R1')
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    }
+    // Round-trips through readPrdSummary.
+    expect(readPrdSummary(tmpDir)?.requirements[0].id).toBe('R1')
   })
 })
 
 describe('readPrdSummary — missing file', () => {
   it('returns null when the sidecar does not exist (!existsSync branch)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-read-'))
-    try {
-      expect(readPrdSummary(tmpDir)).toBeNull()
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    }
+    const tmpDir = tempDir('canary-prd-read-')
+    expect(readPrdSummary(tmpDir)).toBeNull()
   })
 })
 
 it('preserves a linked summary sidecar while updating matching Markdown ranges', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prd-linked-'))
-  try {
-    fs.mkdirSync(path.join(root, 'docs'))
-    const target = path.join(root, 'summary.json')
-    fs.writeFileSync(target, '{}', { mode: 0o640 })
-    const link = path.join(root, 'docs', PRD_SUMMARY_JSON)
-    fs.symlinkSync('../summary.json', link)
-    const result = writePrdSummary(root, 'fixture', summary([{ id: 'R1', title: 'Title', text: 'Requirement', pathTypes: ['happy'] }]))
-    expect(fs.readlinkSync(link)).toBe('../summary.json')
-    expect(fs.readFileSync(target, 'utf8')).toBe(JSON.stringify(result, null, 2) + '\n')
-    expect(fs.statSync(target).mode & 0o777).toBe(0o640)
-    const markdown = fs.readFileSync(path.join(root, 'docs', PRD_SUMMARY_MD), 'utf8')
-    const range = result.requirements[0].sourceRange!
-    expect(markdown.slice(range.start, range.end)).toBe('Requirement')
-  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+  const root = tempDir('prd-linked-')
+  fs.mkdirSync(path.join(root, 'docs'))
+  const target = path.join(root, 'summary.json')
+  fs.writeFileSync(target, '{}', { mode: 0o640 })
+  const link = path.join(root, 'docs', PRD_SUMMARY_JSON)
+  fs.symlinkSync('../summary.json', link)
+  const result = writePrdSummary(root, 'fixture', summary([{ id: 'R1', title: 'Title', text: 'Requirement', pathTypes: ['happy'] }]))
+  expect(fs.readlinkSync(link)).toBe('../summary.json')
+  expect(fs.readFileSync(target, 'utf8')).toBe(JSON.stringify(result, null, 2) + '\n')
+  expect(fs.statSync(target).mode & 0o777).toBe(0o640)
+  const markdown = fs.readFileSync(path.join(root, 'docs', PRD_SUMMARY_MD), 'utf8')
+  const range = result.requirements[0].sourceRange!
+  expect(markdown.slice(range.start, range.end)).toBe('Requirement')
 })

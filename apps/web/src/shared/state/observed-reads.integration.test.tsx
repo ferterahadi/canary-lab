@@ -11,6 +11,7 @@ import type { BenchmarkManifest } from '@/features/benchmark/api/benchmark-types
 import { PortifyProvider, usePortify } from '@/features/portify/state/PortifyContext'
 import { BenchmarkProvider, useBenchmarks } from '@/features/benchmark/state/BenchmarkContext'
 import { RunsProvider, useRuns, useRun } from '@/features/runs/state/RunsContext'
+import { deferred } from '../../../../../tools/test-helpers/deferred'
 
 vi.mock('@/shared/api/portify', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/portify')>()),
@@ -45,12 +46,7 @@ function mount() {
   const WS = Socket as unknown as typeof WebSocket
   act(() => root.render(<RunsProvider WebSocketImpl={WS}><PortifyProvider WebSocketImpl={WS}><BenchmarkProvider WebSocketImpl={WS}><Probe /></BenchmarkProvider></PortifyProvider></RunsProvider>))
 }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 const base = { feature: 'sample', startedAt: '2026-01-01T00:00:00.000Z' }
 const cases = [
   {

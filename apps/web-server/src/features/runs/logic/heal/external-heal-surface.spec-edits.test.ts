@@ -1,13 +1,14 @@
 import { runManifest } from '../__fixtures__/run-manifest'
 import { beforeEach, describe, expect, it } from 'vitest'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { RunDetail } from '../../../../../../../shared/run-detail'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
 import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 import { buildExternalRunSnapshot, buildSpecEditsWarning } from './external-heal-surface'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-spec-edits-warning-')
 
 // The specEdits warning is the agent-facing reading of the D9 boundary: the
 // run executed the run-start copy of the suite, so a live edit made after that
@@ -19,7 +20,7 @@ let tmpDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-spec-edits-warning-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
 })
 

@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { RunSummary, RunDetail } from '../../../../../../shared/run-detail'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { suiteDigest } from '../../runs/logic/runtime/run-suite-snapshot'
@@ -12,6 +12,9 @@ import type { CoverageLedger } from '../../../../../../shared/coverage/types'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../shared/verification-strength/disclosure'
 import { BEHAVIOR_CERTIFICATE_CHECKER_FILENAME, BEHAVIOR_CERTIFICATE_FORMAT, type BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
 import { buildBehaviorCertificate, requirementFingerprint } from './behavior-certificate'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-certificate-')
 
 // The certificate is a re-statement of evidence the run already holds, so it is
 // built here from a REAL suite on disk (the run-start copy, then the live dir)
@@ -56,7 +59,7 @@ let logsDir: string
 let snapshotDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-certificate-')))
+  tmpDir = tempDir()
   featureDir = path.join(tmpDir, 'features', 'checkout')
   logsDir = path.join(tmpDir, 'logs')
   snapshotDir = path.join(logsDir, 'runs', 'run-1', 'suite')
@@ -65,8 +68,6 @@ beforeEach(() => {
   fs.writeFileSync(path.join(featureDir, 'e2e', 'cart.spec.ts'), SPEC)
   fs.writeFileSync(path.join(snapshotDir, 'e2e', 'cart.spec.ts'), SPEC)
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 function lineOf(needle: string): number {
   return SPEC.slice(0, SPEC.indexOf(needle)).split('\n').length

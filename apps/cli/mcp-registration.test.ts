@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -12,11 +13,11 @@ vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
 const { registerCanaryLabMcp: register, resolveMcpInvocation, isEphemeralNpxInstall, isTempInstallPath } = await import('./mcp-registration')
 
+const tempDir = trackTempDirs('cl-mcp-registration-')
 let homeDir: string
 function registerCanaryLabMcp(target: 'codex' | 'claude', opts: Parameters<typeof register>[1] = {}) {
   return register(target, { ...opts, homeDir })
 }
-afterEach(() => fs.rmSync(homeDir, { recursive: true, force: true }))
 
 const lookup = process.platform === 'win32' ? 'where' : 'which'
 
@@ -38,7 +39,7 @@ function claudeAddJsonArgs(command: string, cliPath: string): string[] {
 
 beforeEach(() => {
   mocks.execFileSync.mockReset()
-  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-registration-'))
+  homeDir = tempDir()
 })
 
 function cliAvailable(command: string, outputByGet?: string): void {

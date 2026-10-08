@@ -1,11 +1,13 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-identity-wiring-')
 
 let root: string
 let repo: string
@@ -28,7 +30,7 @@ function toolValue(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 beforeEach(async () => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-wiring-')))
+  root = tempDir()
   repo = path.join(root, 'repo'); alias = path.join(root, 'alias')
   fs.mkdirSync(repo); fs.symlinkSync(repo, alias, 'dir')
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
@@ -49,7 +51,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close(); await server?.app.close()
   vi.unstubAllEnvs()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each(['rest', 'mcp'] as const)('refuses an alias, queues it, and delivers promotion through production %s wiring', async (transport) => {

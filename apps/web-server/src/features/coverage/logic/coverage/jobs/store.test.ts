@@ -1,12 +1,14 @@
 import type { WorkspaceEvent } from '../../../../../../../../shared/workspace-events'
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
 import type { CoverageJobManifest } from '../../../../../../../../shared/coverage/types'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-store-')
 
 let tmpDir: string
 let store: CoverageJobRunStore
@@ -26,12 +28,8 @@ function makeManifest(jobId: string, overrides: Partial<CoverageJobManifest> = {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-store-')))
+  tmpDir = tempDir()
   store = new CoverageJobRunStore(tmpDir)
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('CoverageJobRunStore', () => {

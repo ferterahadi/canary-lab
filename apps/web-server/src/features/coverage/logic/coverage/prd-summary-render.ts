@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { docsDirFor } from './document-files'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 /** Generated artifact filenames under docs/. */
 export const PRD_SUMMARY_JSON = '_prd-summary.json'
@@ -79,11 +80,5 @@ export function writePrdSummary(
 }
 
 export function readPrdSummary(featureDir: string): PrdSummary | null {
-  const file = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
-  if (!fs.existsSync(file)) return null
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as PrdSummary
-  } catch {
-    return null
-  }
+  return readJsonOr<PrdSummary | null>(path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON), null)
 }

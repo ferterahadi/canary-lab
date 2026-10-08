@@ -3,7 +3,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -37,6 +36,10 @@ import { readDocsCollection } from '../logic/coverage/docs-collection'
 
 
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-route-')
 
 let tmpDir: string
 
@@ -49,7 +52,7 @@ let app: FastifyInstance
 let events: WorkspaceEvent[]
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-route-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
@@ -62,24 +65,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeFeature(name: string, spec: string, docs: Record<string, string> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), spec)
-  if (Object.keys(docs).length) {
-    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-    for (const [rel, content] of Object.entries(docs)) {
-      fs.writeFileSync(path.join(dir, 'docs', rel), content)
-    }
-  }
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, { specs: { 'a.spec.ts': spec }, docs })
 }
 
 const SPEC = `

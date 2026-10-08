@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RunStartRequests, runStartRequestStore } from './run-start-requests'
@@ -7,13 +6,14 @@ import { RunStore } from './run-store'
 import { createRegistry } from './run-registry'
 import { suiteReviewRevision } from './runtime/suite-review'
 import type { TestReviewReceipt, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('canary-request-store-')
+
+afterEach(() => { vi.restoreAllMocks() })
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-request-store-'))
-  roots.push(root)
+  const root = tempDir()
   const runs = new RunStore(root, createRegistry())
   runs.bootstrap({ runId: 'source', feature: 'checkout', status: 'aborted', startedAt: 'now', services: [], healCycles: 0 })
   const publish = vi.fn()

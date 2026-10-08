@@ -16,6 +16,7 @@ import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
 import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from '../logic/test-declaration-changes'
+import { notFound } from '../../../shared/http-error'
 
 /** Resolve existing parents too: a deleted file behind a symlink must not
  * bypass the same boundary as a readable file. */
@@ -47,7 +48,7 @@ function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | u
 export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/test-source-comparison', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const snapshot = runSnapshot(deps, feature.name, req.query.runId)
     if ('error' in snapshot) return reply.code(snapshot.status).send({ error: snapshot.error })
     const relativeFiles = (root: string) => listSpecFiles(root).map((file) => path.relative(root, file))
@@ -72,7 +73,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
   })
   app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string; summary?: string } }>('/api/features/:name/test-review', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const file = req.query.file
     const supportingFile = !!file && !isSpecFile(file)
     if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || (supportingFile && !req.query.runId)) {

@@ -9,6 +9,7 @@ import { servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
 import { dependencyIncompatibilityReason, type RunDependencyProvenance } from '@shared/dependency-provenance'
 import { openRunLog } from '../utils/open-run-log'
 import { CompilerErrorRow } from './BootFailureDialog'
+import { Tab } from '@/shared/ui/Tab'
 
 /** The service card's state chip — the same tinted face as a playback test's
  *  verdict chip, so READY and FAILED on one run read as one vocabulary. */
@@ -56,13 +57,13 @@ export function ServiceTabButton({
 }) {
   const labelParts = serviceTabLabelParts(service, branch, siblings)
   return (
-    <button
-      type="button"
+    <Tab
+      active={active}
       onClick={onClick}
       title={branch ? branchTooltip(service, branch) : labelParts.primary}
-      // Same face and geometry as the run's primary tabs (`TabButton`) — a
-      // sub-tab is still a tab, and the old chip-sized variant read as a filter.
-      className={`cl-tab flex min-w-0 shrink-0 items-center gap-1.5 whitespace-nowrap ${active ? 'cl-tab-active' : ''}`}
+      // Same face and geometry as the run's primary tabs — a sub-tab is still
+      // a tab, and the old chip-sized variant read as a filter.
+      className="flex min-w-0 shrink-0 items-center gap-1.5 whitespace-nowrap"
     >
       {/* The label comes first so every sub-tab strip starts its text on the
           same left edge. The status dot used to lead, and since it reserves its
@@ -75,7 +76,7 @@ export function ServiceTabButton({
           @ {labelParts.branch}
         </span>
       )}
-    </button>
+    </Tab>
   )
 }
 
@@ -349,20 +350,3 @@ export function ServiceStatusDot({ status }: { status?: ServiceStatus }) {
   )
 }
 
-export function TabButton(props: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
-  const { active, disabled, onClick, children } = props
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={`cl-tab shrink-0 whitespace-nowrap ${active ? 'cl-tab-active' : ''}`}
-      style={{
-        opacity: disabled ? 0.45 : 1,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  )
-}

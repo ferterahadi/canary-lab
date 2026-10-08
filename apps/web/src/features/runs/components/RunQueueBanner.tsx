@@ -4,6 +4,7 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { getRunQueue } from '@/shared/api/runs'
 import { useRuns } from '../state/RunsContext'
 import { runWaitingState } from '../utils/run-waiting-state'
+import { displayError } from '@/shared/api/error-message'
 
 export function queueExplanation(d: RunQueueDiagnostics): string {
   if (d.reason === 'repo-collision') return 'Another run is using the same repository. This run starts after that repository is released.'
@@ -26,7 +27,7 @@ export function RunQueueBanner({ runId }: { runId: string }) {
     getRunQueue(runId).then(({ diagnostics }) => {
       if (alive) setResult({ runId, diagnostics })
     }).catch((err) => {
-      if (alive) setResult({ runId, diagnostics: null, error: err instanceof Error ? err.message : String(err) })
+      if (alive) setResult({ runId, diagnostics: null, error: displayError(err) })
     }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [runId, runState, connection, retry])

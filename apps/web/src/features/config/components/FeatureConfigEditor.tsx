@@ -9,6 +9,7 @@ import { TrashIcon } from '@/shared/ui/Icons'
 import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
+import { Tab } from '@/shared/ui/Tab'
 
 type Tab = ConfigTab
 
@@ -93,18 +94,17 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
   )
 }
 
-function TabButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  const { active, onClick, children } = props
+/** The editor's tabs sit on a modal, so a resting tab reads secondary rather
+ *  than muted. */
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
+    <Tab
+      active={active}
       onClick={onClick}
-      className={`cl-tab shrink-0 whitespace-nowrap px-2.5 py-1 ${active ? 'cl-tab-active' : ''}`}
-      style={{
-        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-      }}
+      className="shrink-0 whitespace-nowrap px-2.5 py-1"
+      style={{ color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}
     >
       {children}
-    </button>
+    </Tab>
   )
 }

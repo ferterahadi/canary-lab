@@ -1,12 +1,13 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { coverageRoutes } from './coverage'
 import { applyExternalSummary } from '../logic/coverage/feature-docs'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-accept-route-')
 
 let tmp: string
 let featuresDir: string
@@ -15,7 +16,7 @@ let app: FastifyInstance
 let events: WorkspaceEvent[]
 
 beforeEach(async () => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-accept-route-')))
+  tmp = tempDir()
   featuresDir = path.join(tmp, 'features')
   logsDir = path.join(tmp, 'logs')
   const dir = path.join(featuresDir, 'checkout')
@@ -41,7 +42,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('retired requirement confirmation endpoint', () => {

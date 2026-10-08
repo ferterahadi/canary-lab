@@ -1,10 +1,12 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
 import { registerFeatureAuthoringTools } from './authoring-features'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-authoring-')
 
 // Feature skeletons, feature docs, and the coverage reads a client needs before
 // authoring.
@@ -42,14 +44,12 @@ async function createFeature(name = 'checkout'): Promise<void> {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-authoring-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('create_feature', () => {
   it('scaffolds a skeleton on disk', async () => {

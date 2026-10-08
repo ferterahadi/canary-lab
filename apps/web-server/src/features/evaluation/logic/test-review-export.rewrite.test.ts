@@ -1,6 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { __testReviewExportInternals, createEvaluationHtml } from './test-review-export'
@@ -9,15 +8,14 @@ import { buildTestReviewPacket } from './test-review/packet'
 import { buildReadOnlyCodexArgs } from '../../agent-sessions/logic/agent-read-only-args'
 import { AGENT_DEFAULT_CHOICE } from '../../../../../../shared/agent-models'
 import { detail, testEndEvent } from './__fixtures__/test-review-fixtures'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-')))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 // The rewrite agent's codex argv, as runReadOnlyAnswerAgent builds it for the

@@ -1,22 +1,18 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { AgentSessionRefStore } from './agent-session-refs'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // This pointer is the only thing that makes a finished heal cycle re-readable
 // in the UI, and a wrong one fails silently — the run looks fine and the agent
 // view is blank later. So the round trip, the cache, and every "nothing to
 // point at" path are pinned here rather than only exercised by a live cycle.
 
-const dirs: string[] = []
-afterEach(() => {
-  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('cl-asr-')
 
 function makeStore(): { store: AgentSessionRefStore; runDir: string; refPath: string; idPath: string } {
-  const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asr-')))
-  dirs.push(runDir)
+  const runDir = tempDir()
   const refPath = path.join(runDir, 'agent-session.json')
   const idPath = path.join(runDir, 'agent-session-id')
   return {
@@ -118,8 +114,7 @@ describe('AgentSessionRefStore.persistActive', () => {
     // codex's first launch takes no --session-id, so the id is only learnable
     // by scanning its own session dir for a log whose cwd is this run.
     const { store, runDir, refPath, idPath } = makeStore()
-    const codexHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-codex-')))
-    dirs.push(codexHome)
+    const codexHome = tempDir('cl-codex-')
     const startedAt = '2026-07-26T12:00:00.000Z'
     const day = path.join(codexHome, 'sessions', '2026', '07', '26')
     fs.mkdirSync(day, { recursive: true })

@@ -6,6 +6,7 @@ import { ApiError } from '../api/internal'
 import type { FeatureSpecFile } from '../api/types'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useFeatureTestRoster } from './use-feature-test-roster'
+import { deferred } from '../../../../../tools/test-helpers/deferred'
 const api = vi.hoisted(() => ({ getFeatureTests: vi.fn() }))
 vi.mock('../api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/config')>()),
@@ -20,11 +21,7 @@ const roster = (file: string): FeatureSpecFile[] => [{ file, tests: [] }]
 function Probe(props: Options) { invalidate = useInvalidation().invalidate; value = useFeatureTestRoster(props); return null }
 const render = (opts: Partial<Options> = {}) => act(async () => root.render(<InvalidationProvider><Probe feature="checkout" {...opts} /></InvalidationProvider>))
 const tick = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms))
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((yes) => { resolve = yes })
-  return { promise, resolve }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   api.getFeatureTests.mockReset().mockResolvedValue(roster('current.spec.ts'))
@@ -149,18 +146,20 @@ it('cancels a scheduled retry when an event replaces it', async () => {
   expect(api.getFeatureTests).toHaveBeenCalledTimes(3)
 })
 
+// `error` is the request's own line: the server's string reason when it sent
+// one, else the status, else the fallback for a non-Error rejection.
 it.each([
-  [new ApiError(500, { error: 'server unavailable' }), 'Server returned HTTP 500. server unavailable'],
-  [new ApiError(500, { message: 'bad module' }), 'Server returned HTTP 500. bad module'],
-  [new ApiError(500, { error: 42 }), 'Server returned HTTP 500.'],
-  [new ApiError(500, null), 'Server returned HTTP 500.'],
-  ['offline', 'Unable to load tests for this suite.'],
-  [new ApiError(422, { code: 'discovery-failed', error: 42 }), 'Server returned HTTP 422.'],
-])('formats malformed or unstructured discovery failures: %s', async (error, message) => {
+  [new ApiError(500, { error: 'server unavailable' }), 'Server returned HTTP 500. server unavailable', 'server unavailable'],
+  [new ApiError(500, { message: 'bad module' }), 'Server returned HTTP 500. bad module', 'HTTP 500'],
+  [new ApiError(500, { error: 42 }), 'Server returned HTTP 500.', 'HTTP 500'],
+  [new ApiError(500, null), 'Server returned HTTP 500.', 'HTTP 500'],
+  ['offline', 'Unable to load tests for this suite.', 'Failed to load test source'],
+  [new ApiError(422, { code: 'discovery-failed', error: 42 }), 'Server returned HTTP 422.', 'HTTP 422'],
+])('formats malformed or unstructured discovery failures: %s', async (error, message, requestError) => {
   api.getFeatureTests.mockRejectedValue(error)
   await render()
   expect(value.failure?.message).toContain(message)
-  expect(value.error).toBe(error instanceof Error ? error.message : 'Failed to load test source')
+  expect(value.error).toBe(requestError)
   expect(value.confirmed).toBe(false)
 })
 

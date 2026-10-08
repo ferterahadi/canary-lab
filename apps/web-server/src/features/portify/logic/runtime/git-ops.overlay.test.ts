@@ -1,16 +1,12 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { applyOverlay, reverseOverlay, resetWorktree } from './git-ops'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
-})
+const tempDir = trackTempDirs('portify-overlay-apply-')
 
 const BASE = [
   'const config = {}',
@@ -24,8 +20,7 @@ const BASE = [
 const PORTED = BASE.replace('const PORT = 3007', 'const PORT = Number(process.env.PORT)')
 
 function tmpRepo(body: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-overlay-apply-'))
-  roots.push(root)
+  const root = tempDir()
   fs.writeFileSync(path.join(root, 'app.js'), body)
   initGitRepo(root)
   return root

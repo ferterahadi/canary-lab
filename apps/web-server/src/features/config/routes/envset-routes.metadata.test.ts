@@ -1,6 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -8,7 +7,9 @@ import { registerEnvsetRoutes } from './envset-routes'
 import { registerFeatureEnvTools } from '../../../mcp/tool-groups/authoring-env'
 import { captureTools, type CapturedTools } from '../../../mcp/tool-groups/__fixtures__/tool-group-harness'
 import { readFeatureConfig } from '../../../shared/config-ast'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-envset-metadata-')
 
 let root: string
 let suite: string
@@ -20,7 +21,7 @@ let events: WorkspaceEvent[]
 const error = 'envsets.config.json must contain a valid JSON object'
 
 beforeEach(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-envset-metadata-'))
+  root = tempDir()
   const featuresDir = path.join(root, 'features')
   suite = path.join(featuresDir, 'checkout')
   fs.mkdirSync(path.join(suite, 'envsets', 'local'), { recursive: true })
@@ -35,7 +36,7 @@ beforeEach(async () => {
   await registerEnvsetRoutes(app, deps)
   tools = captureTools(registerFeatureEnvTools, deps)
 })
-afterEach(async () => { await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(async () => { await app.close() })
 
 it.each(['{private', 'null', '[]', '42', '"private"', 'false'])('refuses REST and MCP metadata operations without mutation for %s, then recovers', async (invalid) => {
   fs.writeFileSync(metadata, invalid)

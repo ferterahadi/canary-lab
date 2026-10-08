@@ -1,13 +1,15 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiscoveryRepairService } from './discovery-repair-service'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
 import type { DiscoveryRepairOwner } from '../../../../../../shared/discovery-repair'
 import type { runDiscoveryRepairAgent } from './discovery-repair-agent'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import type { PlaywrightListEntry } from '../../runs/logic/playwright-list'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('discovery-repair-')
 
 let root: string
 let service: DiscoveryRepairService
@@ -15,14 +17,13 @@ let listTests: ReturnType<typeof vi.fn<(feature: FeatureConfig, diagnostic: (mes
 const owner: DiscoveryRepairOwner = { kind: 'external', clientKind: 'codex', sessionId: 'owner' }
 const tests = [{ file: '/spec.ts', line: 1, title: 'preserved case', originFile: '/spec.ts', originLine: 1 }]
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-repair-'))
+  root = tempDir()
   const dir = path.join(root, 'features', 'suite')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'feature.config.cjs'), "module.exports = { config: { name: 'suite', featureDir: __dirname, repos: [], envs: [] } }")
   listTests = vi.fn(async (_feature: FeatureConfig, diagnostic: (message: string) => void): Promise<PlaywrightListEntry[] | null> => { diagnostic('missing fixture'); return null })
   service = new DiscoveryRepairService({ projectRoot: root, featuresDir: path.join(root, 'features'), logsDir: path.join(root, 'logs'), listTests })
 })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('discovery repair lifecycle', () => {
   it.each(['missing', 'invalid'] as const)('offers a real repair for an existing suite with %s configuration', async (condition) => {

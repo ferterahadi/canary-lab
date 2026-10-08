@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import Fastify from 'fastify'
@@ -13,6 +12,9 @@ import { getGitRoot } from '../../../shared/git-repo'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
 import type { BenchmarkManifest, StartBenchmarkInput } from '../logic/runtime/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('bench-route-')
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -325,7 +327,7 @@ describe('benchmarkRoutes', () => {
     })
 
     it('frozen worktrees the sabotaged repo (repoPath), not the external featureDir', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       vi.mocked(addWorktree).mockResolvedValue({ repoName: 'cns', worktreeRoot: '/inspect/wt', sourceRoot: '/repo', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
@@ -337,12 +339,11 @@ describe('benchmarkRoutes', () => {
       expect(vi.mocked(addWorktree)).toHaveBeenCalledWith(
         expect.objectContaining({ branch: 'sha', localPath: '/repos/my-backend' }),
       )
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('frozen creates the inspect worktree and opens it', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       vi.mocked(addWorktree).mockResolvedValue({ repoName: 'demo_inventory', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
@@ -356,12 +357,11 @@ describe('benchmarkRoutes', () => {
       )
       // No projectRoot → editor falls back to 'auto'.
       expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', '/inspect/wt')
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('frozen reuses an existing inspect checkout without calling addWorktree', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
       const existing = path.join(inspectParent, 'app')
       fs.mkdirSync(existing, { recursive: true })
@@ -373,12 +373,11 @@ describe('benchmarkRoutes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ opened: true, path: existing, editor: 'vscode' })
       expect(vi.mocked(addWorktree)).not.toHaveBeenCalled()
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('frozen 500s when worktree creation throws', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       vi.mocked(addWorktree).mockRejectedValue(new Error('git exploded'))
       const app = await buildApp({
         logsDir: tmp,
@@ -387,12 +386,11 @@ describe('benchmarkRoutes', () => {
       const res = await app.inject(openBody('frozen'))
       expect(res.statusCode).toBe(500)
       expect(res.json()).toEqual({ error: 'git exploded' })
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('frozen 500s with a stringified non-Error throw', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       vi.mocked(addWorktree).mockRejectedValue('plain string boom')
       const app = await buildApp({
         logsDir: tmp,
@@ -401,12 +399,11 @@ describe('benchmarkRoutes', () => {
       const res = await app.inject(openBody('frozen'))
       expect(res.statusCode).toBe(500)
       expect(res.json()).toEqual({ error: 'plain string boom' })
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('frozen creates a worktree when the inspect dir exists but holds no checkout', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
+      const tmp = tempDir()
       const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
       fs.mkdirSync(inspectParent, { recursive: true })
       fs.writeFileSync(path.join(inspectParent, 'stray.txt'), 'not a dir') // file, not a checkout
@@ -419,7 +416,6 @@ describe('benchmarkRoutes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ opened: true, path: '/inspect/wt', editor: 'vscode' })
       expect(vi.mocked(addWorktree)).toHaveBeenCalledTimes(1)
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
@@ -434,7 +430,7 @@ describe('benchmarkRoutes', () => {
     })
 
     it('arm opens the live worktree, using the configured editor', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      const tmp = tempDir('bench-arm-')
       const app = await buildApp({
         projectRoot: '/proj',
         store: fakeStore({ get: () => manifest({ arms: [{ arm: 'B', mode: 'baseline', runIds: [], worktreePath: tmp }] }) }),
@@ -444,12 +440,11 @@ describe('benchmarkRoutes', () => {
       expect(res.json()).toEqual({ opened: true, path: tmp, editor: 'vscode' })
       expect(vi.mocked(loadProjectConfig)).toHaveBeenCalledWith('/proj')
       expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('cursor', tmp)
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('reports opened:false (200) when the editor launch throws', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      const tmp = tempDir('bench-arm-')
       vi.mocked(launchEditorDir).mockImplementation(() => { throw new Error('no editor') })
       const app = await buildApp({
         store: fakeStore({ get: () => manifest({ arms: [{ arm: 'A', mode: 'harness', runIds: [], worktreePath: tmp }] }) }),
@@ -457,12 +452,11 @@ describe('benchmarkRoutes', () => {
       const res = await app.inject(openBody('A'))
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ opened: false, path: tmp, error: 'no editor' })
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 
     it('stringifies a non-Error editor-launch throw in the opened:false body', async () => {
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-arm-'))
+      const tmp = tempDir('bench-arm-')
       vi.mocked(launchEditorDir).mockImplementation(() => { throw 'spawn string boom' })
       const app = await buildApp({
         store: fakeStore({ get: () => manifest({ arms: [{ arm: 'A', mode: 'harness', runIds: [], worktreePath: tmp }] }) }),
@@ -470,7 +464,6 @@ describe('benchmarkRoutes', () => {
       const res = await app.inject(openBody('A'))
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ opened: false, path: tmp, error: 'spawn string boom' })
-      fs.rmSync(tmp, { recursive: true, force: true })
       await app.close()
     })
 

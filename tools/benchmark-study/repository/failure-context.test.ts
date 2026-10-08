@@ -1,18 +1,16 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { readJson, write } from '../files'
 import type { Attempt, StudyManifest, UsageAttribution, PolicyAdherence } from '../types'
 import { readRepositoryFailureContext, writeRepositoryFailureContext } from './failure-context'
 import { renderRepositoryRepairPrompt } from './prompts'
 import { reviewCodexChildContext } from './child-context'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('repository-context-')
 function root(): string {
-  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-context-')))
-  roots.push(directory)
+  const directory = tempDir()
   return directory
 }
 const pin = { model: 'synthetic-model', effort: 'high', version: 'synthetic' }

@@ -1,15 +1,15 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { prepareNativeIsolation } from './isolation'
 import { checked, command, json, sourceRoot } from './files'
+import { trackTempDirs } from '../test-helpers/temp-dir'
 
 vi.mock('./files', async (original) => ({ ...await original<typeof import('./files')>(), checked: vi.fn(), command: vi.fn() }))
-const roots: string[] = []
-afterEach(() => { vi.resetAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('study-policy-')
+afterEach(() => { vi.resetAllMocks() })
 function fixture(): { root: string; attempt: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'study-policy-'))); roots.push(root)
+  const root = tempDir()
   const attempt = path.join(root, 'attempts/current')
   fs.mkdirSync(attempt, { recursive: true }); fs.mkdirSync(path.join(root, 'attempts/other'))
   fs.mkdirSync(path.join(root, 'runtime/node_modules/canary-lab'), { recursive: true })

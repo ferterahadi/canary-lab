@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FlightStage } from '../../../../../../shared/flights/types'
 import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
@@ -15,6 +14,9 @@ import {
   withWorkspaceEvidence,
   workspaceStageEvidence,
 } from './workspace-evidence'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-wsev-')
 
 let tmp: string
 let featuresDir: string
@@ -66,7 +68,6 @@ function writePortifyIndex(rows: Array<Record<string, unknown>>): void {
   fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(rows.map((r) => ({ id: r.workflowId, createdAt: r.startedAt, ...r }))))
 }
 
-
 /** Rewrite the fixture config's repos — Parallel readiness reads its port slots
  *  when no portify overlay exists. */
 function writeRepos(repos: string): void {
@@ -83,7 +84,7 @@ function writeRepos(repos: string): void {
 }
 
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wsev-')))
+  tmp = tempDir()
   featuresDir = path.join(tmp, 'features')
   logsDir = path.join(tmp, 'logs')
   featureDir = path.join(featuresDir, FEATURE)
@@ -103,7 +104,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('workspaceStageEvidence — shared evaluation inputs', () => {

@@ -8,11 +8,11 @@ import { STAGE_COLUMN } from './stage-meta'
 import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import { stageStateLine } from './StageStatusLines'
 import { CheckpointControls } from './CheckpointControls'
-import { truncate } from './StageActivity'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { BootEvidenceRows } from '@/shared/ui/BootEvidence'
 import { StatusDot } from '@/shared/ui/atoms'
 import { currentStageForPair } from './stage-metrics'
+import { displayError } from '@/shared/api/error-message'
 
 /** R73: the one failure card every stage renders when it fails — a danger-toned
  *  twin of CheckpointControls, so a crash reads with the same weight as a
@@ -57,7 +57,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
     setRemedyError(null)
     flightsApi.applyFlightRemedy(flightId, action)
       .catch((err) => {
-        if (current.current === target) setRemedyError(err instanceof Error ? err.message : String(err))
+        if (current.current === target) setRemedyError(displayError(err))
       })
       .finally(() => {
         if (current.current !== target) return

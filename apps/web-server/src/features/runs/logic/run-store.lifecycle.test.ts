@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { RunStore, type RunStoreEvent } from './run-store'
 import { trimRunArtifacts } from './run-artifacts'
@@ -8,11 +7,14 @@ import { getRunDetail } from './run-detail'
 import { createRegistry } from './run-registry'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('RunStore', () => {

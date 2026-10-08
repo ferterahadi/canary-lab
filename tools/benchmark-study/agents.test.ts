@@ -1,19 +1,18 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { captureExecutionEvidence } from './agents'
 import { json, write } from './files'
 import type { Attempt, StudyManifest } from './types'
+import { trackTempDirs } from '../test-helpers/temp-dir'
 
-const roots: string[] = []
+const tempDir = trackTempDirs('study-session-')
 afterEach(() => {
   vi.unstubAllEnvs()
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each([false, true])('captures the pinned Claude session under an opaque project slug (stale sidecar path: %s)', (stale) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'study-session-')); roots.push(root)
+  const root = tempDir()
   const config = path.join(root, 'relocated-config')
   vi.stubEnv('CLAUDE_CONFIG_DIR', config)
   const cwd = path.join(root, 'attempt/logs/runs/repair')
@@ -38,7 +37,7 @@ it.each([false, true])('captures the pinned Claude session under an opaque proje
 })
 
 it('keeps usage unknown when the pinned Claude transcript is missing', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'study-session-')); roots.push(root)
+  const root = tempDir()
   vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'empty-config'))
   const cwd = path.join(root, 'run')
   json(path.join(cwd, 'agent-session.json'), { agent: 'claude', sessionId: 'missing', logPath: path.join(root, 'missing.jsonl') })

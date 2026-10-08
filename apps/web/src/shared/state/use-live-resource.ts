@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInvalidationKey } from './invalidation'
 import type { InvalidationTopic } from './invalidation-bus'
+import { displayError } from '@/shared/api/error-message'
 
 // One call that fetches a remote value AND keeps it live.
 //
@@ -208,7 +209,7 @@ export function useLiveResource<T>(
           if (!alive || request !== requested) return
           if (!polling && !retainOnError) setValue(null)
           setConfirmed(false)
-          setError(error instanceof Error ? error.message : String(error))
+          setError(displayError(error))
           retry(current, error)
         })
         .finally(() => { if (alive && request === requested) setLoading(false) })

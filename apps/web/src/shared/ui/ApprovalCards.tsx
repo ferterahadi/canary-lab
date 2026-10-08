@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Approval } from '@shared/approval'
 import type { ApprovalsResource } from '../state/use-approvals'
+import { displayError } from '@/shared/api/error-message'
 
 export function ApprovalCards({ approvals, focus }: { approvals: ApprovalsResource; focus?: string | null }) {
   const visible = approvals.items.filter((item) => item.status === 'pending' || item.status === 'answering' || item.id === focus)
@@ -22,7 +23,7 @@ function ApprovalCard({ item, confirmed, answer }: {
     if (busy || !confirmed || !pending) return
     setBusy(true); setError(null)
     try { await answer(item.id, values) }
-    catch (err) { setError(err instanceof Error ? err.message : 'Could not submit the answer') }
+    catch (err) { setError(displayError(err, 'Could not submit the answer')) }
     finally { setBusy(false) }
   }
   return <article className="rounded-md border border-line bg-surface p-3" data-testid={`approval-${item.id}`}>

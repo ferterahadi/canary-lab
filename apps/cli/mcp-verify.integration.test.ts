@@ -1,14 +1,14 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createRequire } from 'module'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { verifySavedMcpRegistration } from './mcp-verify'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const requireModule = createRequire(import.meta.url)
+const tempDir = trackTempDirs('cl-saved-mcp-')
 let root: string
-beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-saved-mcp-'))) })
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
 
 function server(tool = 'exec', discover = true): string {
   const file = path.join(root, 'server.cjs')

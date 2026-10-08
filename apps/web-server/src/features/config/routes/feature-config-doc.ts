@@ -7,7 +7,7 @@ import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
 import os from 'os'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { getGitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo } from '../logic/feature-repos'
@@ -158,8 +158,7 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.post<{ Params: { name: string } }>(
     '/api/features/:name/pin-current-branches',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
+      const feature = findFeature(deps.featuresDir, req.params.name)
       if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
       if (!cfg) return notFound(reply, 'config file')

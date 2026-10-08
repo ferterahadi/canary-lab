@@ -12,16 +12,13 @@ import {
 import { STAGE_COLUMN } from './stage-meta'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { asRecord } from '../lib/as-record'
 
 // ─── Feature Setup: the editable config digest (R43) ────────────────────────
 // The fields the user cares about at approval time, editable IN PLACE — every
 // edit writes the REAL feature.config.cjs / playwright config through the same
 // PUT the FeatureConfigEditor uses, so this panel and "Advanced setup" are two
 // lenses on one document (features-changed keeps both live).
-
-export function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
-}
 
 export const PW_MODES = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
 

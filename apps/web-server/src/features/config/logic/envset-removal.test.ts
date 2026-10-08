@@ -1,17 +1,19 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { readFeatureConfig } from '../../../shared/config-ast'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { removeEnvironment } from './envset-removal'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-env-removal-')
 
 let dir: string
 let config: string
 let events: Array<{ type: string; feature?: string }>
 let publisher: WorkspaceEventPublisher
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-env-removal-'))
+  dir = tempDir()
   config = path.join(dir, 'feature.config.cjs')
   fs.writeFileSync(config, "// Preserve this comment\nmodule.exports = { config: { name: 'renamed', envs: ['staging', 'stale'] } }\n")
   for (const env of ['staging', 'local', 'dev']) fs.mkdirSync(path.join(dir, 'envsets', env), { recursive: true })
@@ -19,7 +21,6 @@ beforeEach(() => {
   events = []
   publisher = { publish: (event) => { events.push(event) } }
 })
-afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
 const declaredEnvs = () => readFeatureConfig(fs.readFileSync(config, 'utf8')).value.envs
 const remove = (env: string) => removeEnvironment({ feature: 'renamed', featureDir: dir, workspaceEvents: publisher }, env)
 

@@ -1,6 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
@@ -14,6 +13,10 @@ import type { RunsFeature } from '../runs/index'
 import type { PtyFactory } from '../runs/logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-bench-reg-')
 
 /**
  * `pickAvailableHealAgent` probes PATH for the `claude` / `codex` binaries — the
@@ -72,7 +75,7 @@ let attached: number
 let app: FastifyInstance
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-bench-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -130,12 +133,7 @@ async function registerFeature(): Promise<Registration[]> {
 
 /** A real on-disk feature config — `loadFeatures` requires and re-reads it. */
 function writeFeature(name: string): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name)
 }
 
 describe('benchmark feature registrar', () => {

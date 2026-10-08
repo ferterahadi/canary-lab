@@ -1,63 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
-import Fastify from 'fastify'
-import { registerMcpRoutes } from './server'
 import { RunStore } from '../features/runs/logic/run-store'
-import { createRegistry } from '../features/runs/logic/run-registry'
-import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client } from '@modelcontextprotocol/client'
+import { connectSmokeClient, createMcpHarness, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
-
-async function createMcpHarness(opts: {
-  logsDir: string
-  projectRoot: string
-  featuresDir: string
-  startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
-  restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
-  startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
-}) {
-  const app = Fastify()
-  const runStore = new RunStore(opts.logsDir, createRegistry())
-  const broker = new ExternalHealBroker({
-    now: () => Date.now(),
-    emit: (event) => runStore.emit('event', event),
-    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
-    audit: () => {},
-  })
-  await app.register(registerMcpRoutes, {
-    store: runStore,
-    broker,
-    featuresDir: opts.featuresDir,
-    projectRoot: opts.projectRoot,
-    startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
-    restartExternalRun: opts.restartExternalRun,
-    startVerification: opts.startVerification,
-  })
-  return { app, runStore }
-}
+const tempDir = trackTempDirs('cl-mcp-verify-')
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -80,7 +29,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('exposes verification config, execution, and result tools', async () => {
-    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-verify-')))
+    const projectRoot = tempDir()
     const featuresDir = path.join(projectRoot, 'features')
     const logsDir = path.join(projectRoot, 'logs')
     const featureDir = path.join(featuresDir, 'checkout')
@@ -129,7 +78,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=verify')
+      client = await connectSmokeClient(address, '/mcp?profile=verify')
 
       const created = await client.callTool({
         name: 'create_verification_config',
@@ -140,13 +89,13 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://api.example.com' },
         },
       })
-      const createdBody = JSON.parse(toolText(created)) as { id: string }
+      const createdBody = JSON.parse(smokeToolText(created)) as { id: string }
 
       const listed = await client.callTool({
         name: 'list_verification_configs',
         arguments: { featureId: 'checkout' },
       })
-      expect(JSON.parse(toolText(listed))).toHaveLength(1)
+      expect(JSON.parse(smokeToolText(listed))).toHaveLength(1)
 
       const updated = await client.callTool({
         name: 'update_verification_config',
@@ -158,7 +107,7 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://beta.example.com' },
         },
       })
-      expect(JSON.parse(toolText(updated))).toMatchObject({
+      expect(JSON.parse(smokeToolText(updated))).toMatchObject({
         id: createdBody.id,
         name: 'Beta',
       })
@@ -171,7 +120,7 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://api.example.com' },
         },
       })
-      expect(JSON.parse(toolText(executed))).toMatchObject({
+      expect(JSON.parse(smokeToolText(executed))).toMatchObject({
         executionId: 'verify-run-1',
         executionType: 'verify',
         status: 'running',
@@ -199,7 +148,7 @@ describe('MCP HTTP server (smoke)', () => {
           bootRunId: 'boot-run-9',
         },
       })
-      expect(JSON.parse(toolText(bootHandoff))).toMatchObject({ executionId: 'verify-run-2' })
+      expect(JSON.parse(smokeToolText(bootHandoff))).toMatchObject({ executionId: 'verify-run-2' })
       expect(executions[1]).toEqual({
         feature: 'checkout',
         input: {
@@ -228,7 +177,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_verification_result',
         arguments: { executionId: 'verify-run-1' },
       })
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         executionId: 'verify-run-1',
         executionType: 'verify',
         status: 'failed',
@@ -239,7 +188,6 @@ describe('MCP HTTP server (smoke)', () => {
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
-      fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
 })

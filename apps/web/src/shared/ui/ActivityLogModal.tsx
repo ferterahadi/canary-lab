@@ -1,16 +1,15 @@
 import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
 import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useState, type ReactNode } from 'react'
+import { formatSpan, shortSession } from '@/shared/lib/format'
 
 import {
   LOG_KIND_LABEL,
   describeEvent,
   externalLifecycle,
   formatJson,
-  isoSpan,
   languageFor,
   numberedLines,
-  shortSession,
   systemVerb,
   toolFilePath,
   type ExternalSessionActivity,
@@ -23,6 +22,7 @@ import { clientLabel } from './external-client-branding'
 import { Modal } from './Overlays'
 import { useCodeHighlight } from './use-code-highlight'
 import { TIMELINE_CSS } from './agent-session-css'
+import { plural } from '@shared/lib/plural'
 
 // The full content of one Activity row. The rail shows each entry as a single
 // line; this is where everything the line left out lives — the whole payload,
@@ -109,7 +109,7 @@ interface EntryView {
 function timeOf(iso: string | undefined): string {
   const time = Date.parse(iso ?? '')
   if (!Number.isFinite(time)) return 'Time unavailable'
-  return new Date(time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function sessionName(session: LogSessionFacts): string {
@@ -121,7 +121,7 @@ function entryView(entry: LogEntry, onOpenEntry: (id: string) => void, onPickNes
     const { session, phase } = entry
     const client = clientLabel(session.clientKind, 'External agent')
     const lifecycle = externalLifecycle(session.status, phase)
-    const duration = isoSpan(session.startedAt, session.endedAt)
+    const duration = formatSpan(session.startedAt, session.endedAt)
     const message = phase === 'start' && session.status !== 'running' ? `${session.actionLabel ?? 'External agent session'} started.` : session.message
     return {
       line: { kind: 'system', verb: lifecycle, summary: message },
@@ -249,7 +249,7 @@ function SubagentBands({ thread, input, onPick }: { thread: SubagentThread; inpu
     <Band title={`Task given · ${thread.agentType}`}>
       <Markdown text={prompt} />
     </Band>
-    <Band title={`Thread · ${events.length} event${events.length === 1 ? '' : 's'}`}>
+    <Band title={`Thread · ${plural(events.length, 'event')}`}>
       <ol className="agentts-rail agentts-nestrail" data-testid="activity-log-thread">
         {events.map(({ event, index }) => (
           <LogRow key={index} line={describeEvent(event)} glyph={eventGlyph(event)} timestamp={event.timestamp} onOpen={() => onPick(index)} />

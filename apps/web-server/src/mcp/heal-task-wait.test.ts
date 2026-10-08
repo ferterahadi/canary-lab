@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunStoreEvent, RunStoreEventListener } from '../features/runs/logic/run-store'
@@ -18,6 +17,9 @@ import {
   waitForHealTask,
   type WaitForHealTaskResult,
 } from './heal-task-wait'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-heal-wait-')
 
 // The wait_for_heal_task decision layer: what a blocked external heal client is
 // told, and when. `server.smoke.wait-for-heal.test.ts` proves the same
@@ -92,7 +94,7 @@ function asDeps(deps: Record<string, unknown>): CanaryLabMcpDeps {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-wait-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
 })
@@ -101,7 +103,6 @@ afterEach(() => {
   // Unconditional: a no-op for every test that never installed a fake clock,
   // and leaving one installed would strand the next test's 1ms window.
   vi.useRealTimers()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('healWaitNext', () => {

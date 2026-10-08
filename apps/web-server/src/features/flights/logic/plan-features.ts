@@ -16,6 +16,7 @@ import { renderPrompt } from '../../../shared/prompts'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { defaultSpawnAgent, extractJson, type FlightAgentSpawner } from './stages/context'
 import { stopAgentProcesses } from '../../agent-sessions/logic/agent-process'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 /** Outcome of the server's single-feature auto-launch attempt. A name clash
  *  leaves the plan `done` (the dialog reopens on the proposal to rename). */
@@ -246,6 +247,6 @@ async function runPlanAgent(
       }
     }
   } catch (err) {
-    settle({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+    settle({ status: 'failed', error: errorMessage(err) })
   }
 }

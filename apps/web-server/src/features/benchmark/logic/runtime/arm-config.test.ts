@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { baselinePlaywrightSpawner, buildBaselineHealPrompt } from './arm-config'
 import type { PlaywrightSpawner } from '../../../runs/logic/runtime/run-spawn'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-armcfg-')
 
 describe('baselinePlaywrightSpawner', () => {
   it('prepends CANARY_LAB_BENCHMARK_MODE=baseline to the Playwright command (per-child, parallel-safe)', () => {
@@ -36,9 +38,9 @@ describe('buildBaselineHealPrompt', () => {
   let restartSignal: string
   let rerunSignal: string
   beforeEach(() => {
-    runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-armcfg-')))
+    runDir = tempDir()
     // Worktree-local signal dir (as the runner wires it) — NOT under runDir.
-    worktree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-armcfg-wt-')))
+    worktree = tempDir('cl-armcfg-wt-')
     restartSignal = path.join(worktree, '.canary-signals', '.restart')
     rerunSignal = path.join(worktree, '.canary-signals', '.rerun')
   })

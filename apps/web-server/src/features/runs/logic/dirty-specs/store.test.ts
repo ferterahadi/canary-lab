@@ -1,18 +1,16 @@
-import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DirtySpecStore } from './store'
 import * as detect from './detect'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('dirty-store-')
 
 let root: string
 let featureDir: string
 let logsDir: string
-
-function git(args: string[]): void {
-  execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' })
-}
 
 function writeSpec(body: string): void {
   const abs = path.join(featureDir, 'e2e', 'voucher.spec.ts')
@@ -33,18 +31,14 @@ test('b', async () => { expect(2).toBe(3) })
 `
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'dirty-store-'))
+  root = tempDir()
   featureDir = path.join(root, 'feature')
   logsDir = path.join(root, 'logs')
   fs.mkdirSync(featureDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
-  execFileSync('git', ['init', '-q'], { cwd: featureDir, stdio: 'pipe' })
-  git(['config', 'user.email', 't@t.dev'])
-  git(['config', 'user.name', 'test'])
-})
-
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true })
+  git(featureDir, 'init', '-q')
+  git(featureDir, 'config', 'user.email', 't@t.dev')
+  git(featureDir, 'config', 'user.name', 'test')
 })
 
 describe('DirtySpecStore', () => {

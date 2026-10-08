@@ -15,6 +15,7 @@ import { patchFileName } from '@shared/portify-overlay'
 import { portInjectability, startCommandPortSlotCounts, type PortInjectability } from '@shared/launcher/port-injectability'
 import { PortSlotTable } from './ReposTab'
 import { deriveRepoName, parseRepo, type RepoSlice } from './repo-slice'
+import { displayError } from '@/shared/api/error-message'
 
 /**
  * The frame every state of this tab shares: the inset scroller plus the footer
@@ -140,7 +141,7 @@ export function PortsTab({
       cached.refresh()
       setConfirmRemove(false)
     } catch (err) {
-      setRemoveError(err instanceof Error ? err.message : 'Remove failed')
+      setRemoveError(displayError(err, 'Remove failed'))
     } finally {
       setRemoving(false)
     }

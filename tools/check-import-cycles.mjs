@@ -39,8 +39,11 @@ const CEILING = {
    *  deleted: a barrel joins every file behind it into one import node, so
    *  pointing callers at the declaring file dissolved five knots outright.
    *  26 → 25 when the wire types moved to root `shared/`: the run manifest
-   *  types no longer sit in the module that also reads and writes manifests. */
-  components: 25,
+   *  types no longer sit in the module that also reads and writes manifests.
+   *  25 → 23 during the duplicate-helper consolidation (error text, storage,
+   *  time formatting, the elapsed clock), which gave those helpers one shared
+   *  home each instead of a copy inside a feature module. */
+  components: 23,
   /** Modules inside the single largest knot — the real "how much must I read
    *  at once" number, and the one that hurts when it grows.
    *

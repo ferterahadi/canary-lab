@@ -15,20 +15,22 @@ import {
   parseRedactedEntries,
 } from './feature-authoring'
 import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-feature-authoring-')
 
 let tmpDir: string
 
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-feature-authoring-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctx() {

@@ -9,6 +9,7 @@ import { TaskListeners } from '../../../../../../shared/lib/file-backed-task-sto
 import type { WorkspaceEventBus } from '../../../shared/workspace-events'
 import type { FlightStore, FlightStoreEvent } from './store'
 import { workspaceStageEvidence, type WorkspaceEvidenceDeps } from './workspace-evidence'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 /** These stages have current, target-aware postconditions. Other failures stay
  * actionable until their owning workflow provides equivalent evidence. */
@@ -62,7 +63,7 @@ function assess(manifest: FlightManifest, readEvidence: () => FlightWorkspaceEvi
       ...(next ? { remainingStage: next.fromStage } : {}),
     }
   } catch (error) {
-    return { ...actionable, state: 'unavailable', reason: `Could not verify current state: ${error instanceof Error ? error.message : String(error)}` }
+    return { ...actionable, state: 'unavailable', reason: `Could not verify current state: ${errorMessage(error)}` }
   }
 }
 

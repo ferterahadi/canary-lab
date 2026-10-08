@@ -7,7 +7,6 @@ import { hasAuthoredSpecs } from '../../flights/logic/stage-evidence'
 import { loadSourceTests } from '../../evaluation/logic/test-review/source-analysis'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { featuresRoutes } from './features'
@@ -21,14 +20,17 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-import { git } from '../../../../../../tools/test-helpers/git-repo'
+import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-froutes-')
 
 let tmpDir: string
 
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-froutes-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
   clearPlaywrightListCache()
@@ -474,8 +476,7 @@ test('configured client', async () => {
     ].join('\n'))
     // A real repo, so the markers are genuinely attempted: `getGitRoot` runs
     // for real and only the `git show` that reads the committed side fails.
-    git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
-    git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
+    initGitRepo(dir)
     const previous = vi.mocked(runGit).getMockImplementation()!
     vi.mocked(runGit).mockRejectedValue(new Error('git: command not found'))
     try {
@@ -497,8 +498,7 @@ test('configured client', async () => {
 it('ships matching source and markers for each expanded Playwright test', async () => {
   const source = 'for (const channel of ["line", "whatsapp"]) {\n  test(`reads ${channel}`, () => {\n    expect(1).toBe(1)\n  })\n}'
   const dir = writeFeature('markers', { spec: source })
-  git(dir, 'init', '-q'); git(dir, 'config', 'user.email', 'test@example.test'); git(dir, 'config', 'user.name', 'Test')
-  git(dir, 'add', '.'); git(dir, 'commit', '-qm', 'baseline')
+  initGitRepo(dir)
   fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), source.replace('    expect(1)', '    console.log("this")\n    expect(1)'))
   const app = await build({ spawner: jsonSpawner((featureDir) => ({
     config: { rootDir: featureDir },

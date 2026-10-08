@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
 import type { RunDetail } from '../../../../../../../shared/run-detail'
@@ -20,13 +18,16 @@ import {
 import { compactCounts, normalizeRunCounts } from './external-heal-counts'
 
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-external-surface-')
 
 let tmpDir: string
 
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-external-surface-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
 })
 

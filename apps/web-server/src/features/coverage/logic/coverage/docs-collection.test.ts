@@ -1,21 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { isGeneratedDoc } from './document-files'
 import { computeDocsHash, readDocsCollection, type DocEntry } from './docs-collection'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-docs-collection-')
 
 let tmpDir: string
 let featureDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-docs-collection-')))
+  tmpDir = tempDir()
   featureDir = path.join(tmpDir, 'feature')
   fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeDoc(name: string, content: string) {

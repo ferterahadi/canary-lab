@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
-
-import os from 'os'
 
 import path from 'path'
 
@@ -33,15 +31,14 @@ import { runStage, healStage } from './run'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
+import { flightStageCtx } from './__fixtures__/stage-context'
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -52,7 +49,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
@@ -61,26 +58,12 @@ beforeEach(() => {
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
     featuresDir,
     logsDir,
     projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
+    inject: fakeFlightInject(() => undefined),
     ...over,
   }
 }
@@ -101,34 +84,13 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('run + heal stages', () => {
   const runInject = (finalStatus: string, healCycles = 0): FlightInject =>
-    makeInject((call) => {
+    fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: finalStatus, healCycles, services: [] } } }
       return undefined
@@ -143,8 +105,8 @@ describe('run + heal stages', () => {
   })
 
   it("forwards the flight's stored stage plan on the run start payload", async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
       return undefined
@@ -162,7 +124,7 @@ describe('run + heal stages', () => {
   // poll already fetched — NEVER derived, because a test missing from every
   // result list is not-run, and `total - failed` would count it as passed.
   it('carries the run score in its evidence, read off the summary', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
       if (call.method === 'GET') {
         return {
@@ -189,7 +151,7 @@ describe('run + heal stages', () => {
   })
 
   it('reports zero failures when a green summary carries no failed list at all', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
       if (call.method === 'GET') {
         return {
@@ -219,7 +181,7 @@ describe('run + heal stages', () => {
   it('states the give-up reason in the run-failed prompt when auto-heal explains itself', async () => {
     // `healEnd.message` is why auto-heal stopped; the decision footer has to
     // read it out of the checkpoint rather than fetching the run again.
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
       if (call.method === 'GET') {
         return {
@@ -257,22 +219,22 @@ describe('run + heal stages', () => {
   })
 
   it('heal skips when healCycles is entirely absent from the manifest (not just zero)', async () => {
-    const inject = makeInject(() => ({ statusCode: 200, body: { manifest: { status: 'passed', services: [] } } }))
+    const inject = fakeFlightInject(() => ({ statusCode: 200, body: { manifest: { status: 'passed', services: [] } } }))
     const withRun = manifest({ links: { runId: 'run-1' } })
     const outcome = await healStage(deps({ inject })).run(ctxFor(withRun).ctx)
     expect(outcome).toMatchObject({ kind: 'skipped', reason: 'nothing needed repairing' })
   })
 
   it('heal skips when the linked run has no manifest', async () => {
-    const inject = makeInject(() => ({ statusCode: 200, body: {} }))
+    const inject = fakeFlightInject(() => ({ statusCode: 200, body: {} }))
     const withRun = manifest({ links: { runId: 'run-1' } })
     const outcome = await healStage(deps({ inject })).run(ctxFor(withRun).ctx)
     expect(outcome).toMatchObject({ kind: 'skipped', reason: 'run run-1 has no manifest' })
   })
 
   it('queues behind a repo collision and still starts the run', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') {
         const payload = call.payload as Record<string, unknown>
         if (payload.isolation === 'queue') return { statusCode: 201, body: { runId: 'run-1' } }
@@ -287,7 +249,7 @@ describe('run + heal stages', () => {
   })
 
   it('fails when the run start request is rejected', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 400, body: { error: 'bad feature' } }
       return undefined
     })
@@ -296,7 +258,7 @@ describe('run + heal stages', () => {
   })
 
   it('fails with "unknown" when the run start rejection carries no error field', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 400, body: {} }
       return undefined
     })
@@ -326,8 +288,8 @@ describe('run + heal stages', () => {
   })
 
   it('run() re-attaches to an already-linked runId instead of starting a new run (resume after restart)', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-existing') {
         return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 1, services: [] } } }
       }
@@ -340,7 +302,7 @@ describe('run + heal stages', () => {
   })
 
   it('run() falls through to starting fresh when the previously-linked run no longer exists', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-vanished') return { statusCode: 200, body: {} } // no manifest
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-new' } }
       if (call.method === 'GET' && call.url === '/api/runs/run-new') {
@@ -359,7 +321,7 @@ describe('run + heal stages', () => {
   // step. Re-attaching to the run our own pause aborted would replay that abort
   // as the verdict and park the user on the run-failed checkpoint instead.
   it('run() starts fresh when the linked run was ABORTED (Continue after a pause)', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-paused') {
         return { statusCode: 200, body: { manifest: { status: 'aborted', healCycles: 2, services: [] } } }
       }
@@ -380,8 +342,8 @@ describe('run + heal stages', () => {
     // is editing the user's repo, and a pause that left it writing was the one
     // promise the UI could not keep.
     it('aborts the linked run on a PAUSE, not only on an abort', async () => {
-      const calls: InjectCall[] = []
-      const inject = makeInject((call) => {
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'healing', services: [] } } }
         if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
         return undefined
@@ -393,8 +355,8 @@ describe('run + heal stages', () => {
     })
 
     it('owns no job at all when the flight never linked a run', async () => {
-      const calls: InjectCall[] = []
-      const inject = makeInject(() => undefined, calls)
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject(() => undefined, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest())
       // Null, not a job that no-ops: there is nothing to name in the teardown log.
@@ -403,8 +365,8 @@ describe('run + heal stages', () => {
     })
 
     it('does nothing on abort when the linked run has already vanished', async () => {
-      const calls: InjectCall[] = []
-      const inject = makeInject((call) => {
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'GET') return { statusCode: 200, body: {} } // no manifest
         return undefined
       }, calls)
@@ -415,8 +377,8 @@ describe('run + heal stages', () => {
     })
 
     it('does nothing on abort when the linked run is already terminal', async () => {
-      const calls: InjectCall[] = []
-      const inject = makeInject((call) => {
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'passed', services: [] } } }
         return undefined
       }, calls)
@@ -427,8 +389,8 @@ describe('run + heal stages', () => {
     })
 
     it('aborts the linked run when it is still active', async () => {
-      const calls: InjectCall[] = []
-      const inject = makeInject((call) => {
+      const calls: FlightInjectCall[] = []
+      const inject = fakeFlightInject((call) => {
         if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running', services: [] } } }
         if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
         return undefined
@@ -464,8 +426,8 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('starts the run UNCLAIMED in external-heal mode and parks immediately — no verdict poll', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-ext' } }
       return undefined
     }, calls)
@@ -500,7 +462,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('a submit while the run is still active re-parks the SAME engagement', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'healing', healCycles: 1 } } }
       return undefined
     })
@@ -513,7 +475,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('a submit on a PASSED run settles with the manifest verdict and counts — never the client word', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
         return {
           statusCode: 200,
@@ -533,7 +495,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('a submit on a FAILED run parks the run-failed question (yolo settles as-is)', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 3 } } }
       return undefined
     })
@@ -549,8 +511,8 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('rerun after a failed external run re-enters the external posture', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 1 } } }
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-ext-2' } }
       return undefined
@@ -563,9 +525,9 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('run-internally on an ACTIVE run aborts it and starts a fresh internal run', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let aborted = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
         return { statusCode: 200, body: { manifest: { status: aborted ? 'aborted' : 'healing', healCycles: 1 } } }
       }
@@ -585,9 +547,9 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('run-internally on a TERMINAL failed run restarts heal locally via the handoff route', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     let handed = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
         return { statusCode: 200, body: { manifest: { status: handed ? 'passed' : 'failed', healCycles: 2 } } }
       }
@@ -603,8 +565,8 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('run-internally falls back to a fresh internal run when the local handoff is unavailable', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject((call) => {
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 2 } } }
       if (call.method === 'POST' && call.url === '/api/runs/run-ext/heal-agent/handoff') return { statusCode: 409, body: { reason: 'restart-local-heal-unavailable' } }
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
@@ -618,7 +580,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('run-internally with no run yet just starts an internal run', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
       if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
       return undefined
@@ -650,7 +612,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('resume re-issues the hand-off for a still-active external run instead of polling it', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'healing', healCycles: 1 } } }
       return undefined
     })
@@ -661,7 +623,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('resume settles straight from a run that reached its verdict while parked', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 1 } } }
       return undefined
     })
@@ -670,7 +632,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
   })
 
   it('heal mirror reports an externally-healed run exactly like an internal one', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 2, healMode: 'external' } } }
       return undefined
     })
@@ -685,7 +647,7 @@ describe('run — external producer (heal engagement hand-off)', () => {
 describe('run stage — re-attach and take-back arms', () => {
   it('run() re-attaches to a still-ACTIVE internal run and polls it to the verdict', async () => {
     let reads = 0
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-live') {
         reads += 1
         return { statusCode: 200, body: { manifest: { status: reads === 1 ? 'healing' : 'passed', healCycles: 1, services: [] } } }
@@ -698,7 +660,7 @@ describe('run stage — re-attach and take-back arms', () => {
 
   it('rerun with the previous run still ACTIVE re-attaches per producer (internal polls, external re-parks)', async () => {
     let reads = 0
-    const internalInject = makeInject((call) => {
+    const internalInject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-live') {
         reads += 1
         return { statusCode: 200, body: { manifest: { status: reads === 1 ? 'running' : 'passed', healCycles: 0, services: [] } } }
@@ -712,7 +674,7 @@ describe('run stage — re-attach and take-back arms', () => {
       evidence: { status: 'passed' },
     })
 
-    const externalInject = makeInject((call) => {
+    const externalInject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-live') return { statusCode: 200, body: { manifest: { status: 'running', healCycles: 0, services: [] } } }
       return undefined
     })
@@ -724,7 +686,7 @@ describe('run stage — re-attach and take-back arms', () => {
 
   it('run-internally on an ABORTED terminal run hands heal to the local agent', async () => {
     let handed = false
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
         return { statusCode: 200, body: { manifest: { status: handed ? 'passed' : 'aborted', healCycles: 1, services: [] } } }
       }
@@ -740,7 +702,7 @@ describe('run stage — re-attach and take-back arms', () => {
   })
 
   it('run-internally when the handed-off run has VANISHED just starts an internal run', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-gone') return { statusCode: 200, body: {} }
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
       if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
@@ -755,7 +717,7 @@ describe('run stage — re-attach and take-back arms', () => {
   })
 
   it('a submit on a run with no manifest fails instead of guessing', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: {} }
       return undefined
     })

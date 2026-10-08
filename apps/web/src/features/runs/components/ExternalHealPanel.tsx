@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useExternalClientAction } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, pillPalette, useExternalClientAction, type PillPalette } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
@@ -122,39 +122,14 @@ function sharedRunPresentation(status: PanelStatus) {
   return null
 }
 
-function statusPalette(status: PanelStatus): { fg: string; bg: string; border: string } {
+function statusPalette(status: PanelStatus): PillPalette {
   const runStatus = sharedRunPresentation(status)
-  if (runStatus) return {
-    fg: runStatus.tone,
-    bg: runStatus.background,
-    border: `color-mix(in srgb, ${runStatus.tone} 40%, transparent)`,
-  }
-  if (status === 'disconnected') {
-    return {
-      fg: 'var(--danger)',
-      bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-    }
-  }
-  if (status === 'paused') {
-    return {
-      fg: 'var(--warning)',
-      bg: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--warning) 40%, transparent)',
-    }
-  }
-  if (status === 'running-tests') {
-    return {
-      fg: 'var(--border-focus)',
-      bg: 'color-mix(in srgb, var(--border-focus) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--border-focus) 40%, transparent)',
-    }
-  }
-  return {
-    fg: 'var(--success)',
-    bg: 'color-mix(in srgb, var(--success) 12%, transparent)',
-    border: 'color-mix(in srgb, var(--success) 40%, transparent)',
-  }
+  // The run's own chip fill, so this pill and the run-detail chip match.
+  if (runStatus) return { ...pillPalette(runStatus.tone), bg: runStatus.background }
+  if (status === 'disconnected') return pillPalette('var(--danger)')
+  if (status === 'paused') return pillPalette('var(--warning)')
+  if (status === 'running-tests') return pillPalette('var(--border-focus)')
+  return pillPalette('var(--success)')
 }
 
 function terminalMessage(

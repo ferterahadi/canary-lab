@@ -3,19 +3,21 @@
 // elicitation for the exact revision, pinned by MCP integration regressions.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { RunStore } from '../logic/run-store'
 import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-restore-')
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-restore-')))
+  tmpDir = tempDir()
   fs.mkdirSync(path.join(tmpDir, 'logs'), { recursive: true })
   fs.mkdirSync(path.join(tmpDir, 'features'), { recursive: true })
 })

@@ -1,16 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
-import Fastify from 'fastify'
 import { createServer } from '../server'
-import { registerMcpRoutes } from './server'
-import { RunStore } from '../features/runs/logic/run-store'
-import { createRegistry } from '../features/runs/logic/run-registry'
-import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import type { ElicitResult } from '@modelcontextprotocol/client'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { connectSmokeClient, createMcpHarness, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-demo-busy-')
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -25,58 +23,6 @@ const inertPtyFactory: PtyFactory = () => ({
   resize: () => { /* noop */ },
   kill: () => { /* noop */ },
 })
-
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
-
-async function createMcpHarness(opts: {
-  logsDir: string
-  projectRoot: string
-  featuresDir: string
-  startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
-  restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
-  startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
-  flightsRequest?: Parameters<typeof registerMcpRoutes>[1]['flightsRequest']
-}) {
-  const app = Fastify()
-  const runStore = new RunStore(opts.logsDir, createRegistry())
-  const broker = new ExternalHealBroker({
-    now: () => Date.now(),
-    emit: (event) => runStore.emit('event', event),
-    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
-    audit: () => {},
-  })
-  await app.register(registerMcpRoutes, {
-    store: runStore,
-    broker,
-    featuresDir: opts.featuresDir,
-    projectRoot: opts.projectRoot,
-    startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
-    restartExternalRun: opts.restartExternalRun,
-    startVerification: opts.startVerification,
-    flightsRequest: opts.flightsRequest,
-  })
-  return { app, runStore }
-}
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -100,7 +46,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('preserves the typed Getting Started owner when start_run is blocked', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-demo-busy-')))
+    const logsDir = tempDir()
     const { app } = await createMcpHarness({
       logsDir,
       projectRoot,
@@ -117,12 +63,12 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
       const result = await client.callTool({
         name: 'start_run',
         arguments: { feature: 'storefront-journey', claim_heal: true, session_id: 'external' },
       })
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         type: 'getting_started_busy',
         active: { sessionId: 'gs-flight', owner: 'internal', target: { id: 'fl-live' } },
       })
@@ -134,7 +80,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('preserves the typed Getting Started owner when start_flight is blocked', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-flight-demo-busy-')))
+    const logsDir = tempDir('cl-mcp-flight-demo-busy-')
     const { app } = await createMcpHarness({
       logsDir,
       projectRoot,
@@ -154,12 +100,12 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
       const result = await client.callTool({
         name: 'start_flight',
         arguments: { repoPaths: [path.join(projectRoot, 'flight-app')], description: 'lending' },
       })
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         type: 'getting_started_busy',
         active: { sessionId: 'gs-run', owner: 'external', target: { id: 'run-live' } },
       })
@@ -171,7 +117,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run asks about stale coverage before asking how to resolve a repo collision', async () => {
     const repoRoot = path.resolve(__dirname, '..', '..', '..', '..')
-    const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-project-')))
+    const workspace = tempDir('cl-mcp-start-project-')
     const projectRoot = path.join(workspace, 'project')
     fs.cpSync(path.join(repoRoot, 'templates', 'project'), projectRoot, { recursive: true })
     fs.cpSync(
@@ -179,7 +125,7 @@ describe('MCP HTTP server (smoke)', () => {
       path.join(projectRoot, 'features', 'storefront-journey'),
       { recursive: true },
     )
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
+    const logsDir = tempDir('cl-mcp-start-block-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -225,7 +171,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         queued: true,
         queueReason: 'repo-collision',
         coverageStale: true,
@@ -241,7 +187,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run prefers an existing run that is waiting for heal over a newer running run', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-heal-first-')))
+    const logsDir = tempDir('cl-mcp-start-heal-first-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -289,7 +235,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         runId: 'older-waiting-heal',
         reused: true,
         status: 'healing',
@@ -303,7 +249,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run restarts a failed or aborted run by unique suffix when no run is healing', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ref-')))
+    const logsDir = tempDir('cl-mcp-start-ref-')
     const featuresDir = path.join(projectRoot, 'features')
     const restarted: Array<{ runId: string; sessionId: string }> = []
     const { app, runStore } = await createMcpHarness({
@@ -348,7 +294,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-	      expect(JSON.parse(toolText(result))).toMatchObject({
+	      expect(JSON.parse(smokeToolText(result))).toMatchObject({
 	        runId: '2026-05-19T0841-7cvh',
 	        reused: true,
 	        restarted: true,
@@ -362,7 +308,7 @@ describe('MCP HTTP server (smoke)', () => {
 	        },
 	        claimed: true,
 	      })
-      const restartBody = JSON.parse(toolText(result)) as { nextSteps?: string[] }
+      const restartBody = JSON.parse(smokeToolText(result)) as { nextSteps?: string[] }
       expect(restartBody.nextSteps).toContain('wait_for_heal_task')
       expect(restarted).toEqual([{ runId: '2026-05-19T0841-7cvh', sessionId: 'sess-restart' }])
     } finally {
@@ -373,7 +319,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('refuses a terminal run_ref when its suite attempt receipt was claimed', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-spent-ref-')))
+    const logsDir = tempDir('cl-mcp-spent-ref-')
     const restarted = vi.fn()
     const { app, runStore } = await createMcpHarness({
       logsDir,
@@ -384,7 +330,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=lifecycle')
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
       const runId = '2026-05-19T0841-spent'
       const featureDir = path.join(logsDir, 'features', 'demo_catalog')
       fs.mkdirSync(featureDir, { recursive: true })
@@ -405,7 +351,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { feature: 'demo_catalog', env: 'local', run_ref: 'spent', session_id: 'sess-restart' },
       })
 
-      expect(JSON.parse(toolText(result))).toMatchObject({ type: 'new_run_required', runId })
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({ type: 'new_run_required', runId })
       expect(restarted).not.toHaveBeenCalled()
     } finally {
       if (client) await client.close().catch(() => undefined)
@@ -415,13 +361,13 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run reports a held boot session instead of claiming heal', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-boot-')))
+    const logsDir = tempDir('cl-mcp-start-boot-')
     const featuresDir = path.join(projectRoot, 'features')
     const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=full')
+      client = await connectSmokeClient(address, '/mcp?profile=full')
 
       runStore.bootstrap({
         runId: '2026-06-04T1525-6qdm',
@@ -446,7 +392,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      const body = JSON.parse(toolText(result))
+      const body = JSON.parse(smokeToolText(result))
       expect(body).toMatchObject({
         type: 'boot_session',
         executionType: 'boot',
@@ -466,12 +412,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('wait_for_heal_task returns boot_session immediately for a held boot run', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-boot-')))
+    const logsDir = tempDir('cl-mcp-wait-boot-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=full')
+      client = await connectSmokeClient(address, '/mcp?profile=full')
 
       runStore.bootstrap({
         runId: 'wait-boot',
@@ -490,7 +436,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-boot', session_id: 'sess-boot', timeout_ms: 600000 },
       })
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         type: 'boot_session',
         runId: 'wait-boot',
         executionType: 'boot',

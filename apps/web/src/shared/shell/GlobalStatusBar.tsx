@@ -18,6 +18,7 @@ import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
 import { Tooltip } from '../ui/Tooltip'
+import { usePersistedFlag } from '@/shared/state/browser-storage'
 
 interface ReviewControl {
   features?: Feature[]
@@ -112,20 +113,7 @@ export function GlobalStatusBar({
   const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || r.runId === review?.runId)
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
-  const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('cl-actions-expanded') !== 'false'
-    } catch {
-      return true
-    }
-  })
-  useEffect(() => {
-    try {
-      localStorage.setItem('cl-actions-expanded', String(actionsExpanded))
-    } catch {
-      /* storage unavailable — non-fatal */
-    }
-  }, [actionsExpanded])
+  const [actionsExpanded, setActionsExpanded] = usePersistedFlag('cl-actions-expanded', true)
   const { benchmarks } = useBenchmarks()
   const activeBenchmark = benchmarks.find((b) => b.status === 'sabotaging' || b.status === 'running')
   // Benchmark is an internal-experiment surface (product surface retired in

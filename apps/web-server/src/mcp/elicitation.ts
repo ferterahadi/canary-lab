@@ -6,6 +6,7 @@ import { inputRequired, type CallToolResult, type ElicitRequestFormParams, type 
 import { z } from 'zod'
 import type { McpClientFacts } from './client-surface'
 import { asJsonResult, errorResult } from './tool-support'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 type ToolResult = CallToolResult | InputRequiredResult
 /** Everything needed to recognise an answer to a question already asked. */
@@ -144,7 +145,7 @@ async function applyAnswer<T>(
       store.update(id, { status: 'isError' in result && result.isError ? 'failed' : 'answered', result })
       return result
     }, (error: unknown) => {
-      store.update(id, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+      store.update(id, { status: 'failed', error: errorMessage(error) })
       throw error
     })
   }

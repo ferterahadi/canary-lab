@@ -10,6 +10,7 @@ import type {
   CoverageJobModels,
 } from '../../../../../../../../shared/coverage/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
+import { errorMessage } from '../../../../../../../../shared/lib/error-message'
 
 // Background driver + single-flight gate for coverage jobs. The start path
 // rejects a second job of the same kind for the same feature while one runs
@@ -80,7 +81,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     store.save(manifest)
   }
   const finishErr = (err: unknown) => {
-    manifest = { ...manifest, status: 'failed', endedAt: now(), error: err instanceof Error ? err.message : String(err) }
+    manifest = { ...manifest, status: 'failed', endedAt: now(), error: errorMessage(err) }
     store.save(manifest)
   }
 
@@ -109,7 +110,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           )
           chainedJobId = chained.manifest.jobId
         } catch (chainErr) {
-          append(`[chain] coverage not started: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}\n`)
+          append(`[chain] coverage not started: ${errorMessage(chainErr)}\n`)
         }
         finishOk({ requirementCount: res.summary.requirements.filter((r) => !r.deprecated).length }, chainedJobId ? { chainedJobId } : undefined)
       } else {

@@ -11,6 +11,7 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { useInvalidationKey } from '@/shared/state/invalidation'
+import { displayError } from '@/shared/api/error-message'
 
 // Below this width the column drops the per-run action buttons for a kebab menu.
 const COMPACT_THRESHOLD_PX = 340
@@ -70,7 +71,7 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
         : undefined
       const msg = typeof reason === 'string'
         ? `Retest failed: ${reason}`
-        : e instanceof Error ? e.message : 'Retest failed'
+        : displayError(e, 'Retest failed')
       setRestartErrors((prev) => ({ ...prev, [runId]: msg }))
     } finally {
       setRestartingIds((prev) => {

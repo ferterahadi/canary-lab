@@ -1,23 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createRunContext } from './run-context'
 import type { OrchestratorOptions } from './run-orchestrator-types'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The defaults live here rather than in the orchestrator's constructor, which is
 // what makes them testable at all: every orchestrator test injects a fake delay,
 // spawner and health probe, so before the split nothing ever ran the real ones.
 
+const tempDir = trackTempDirs('cl-ctx-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ctx-')))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 function opts(over: Partial<OrchestratorOptions> = {}): OrchestratorOptions {

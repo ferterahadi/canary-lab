@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ConnectWorkspaceEventsOptions } from '@/shared/api/workspace-socket'
 import { useWorkspaceRecords } from './use-workspace-records'
+import { deferred } from '../../../../../tools/test-helpers/deferred'
 
 const bus = vi.hoisted(() => ({ options: null as ConnectWorkspaceEventsOptions | null, close: vi.fn(), throws: false }))
 vi.mock('@/shared/api/workspace-socket', () => ({
@@ -16,12 +17,7 @@ vi.mock('@/shared/api/workspace-socket', () => ({
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 type Row = { id: string; status: string }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 const list = vi.fn<() => Promise<Row[]>>()
 let observed: ReturnType<typeof useWorkspaceRecords<Row>>
 let root: Root
