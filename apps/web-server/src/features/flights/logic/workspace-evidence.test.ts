@@ -221,6 +221,15 @@ describe('workspaceStageEvidence — shared evaluation inputs', () => {
     expect(list).toHaveBeenCalledTimes(2)
   })
 
+  it('propagates unavailable configuration and failed probes for strict evidence readers', () => {
+    vi.spyOn(featureLoader, 'findFeature').mockImplementationOnce(() => { throw new Error('discovery failed') })
+    expect(() => workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'], 'local', true)).toThrow('discovery failed')
+    vi.spyOn(runStore, 'listRuns').mockImplementationOnce(() => { throw new Error('index read failed') })
+    expect(() => workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['run'], 'local', true)).toThrow('index read failed')
+    fs.appendFileSync(path.join(featureDir, 'feature.config.cjs'), '\ndelete module.exports.config.featureDir\n')
+    expect(() => workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'], 'local', true)).toThrow('Suite configuration is unavailable')
+  })
+
   it('returns no evidence when discovery throws or the configured directory is absent', () => {
     vi.spyOn(featureLoader, 'findFeature').mockImplementationOnce(() => { throw new Error('discovery failed') })
     expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])).toEqual({})

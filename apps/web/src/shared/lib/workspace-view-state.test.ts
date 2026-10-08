@@ -613,3 +613,25 @@ it('round-trips a shared approval within Notifications without broadcasting its 
   persistView(view({ dialog: null, approval: 'decision-1' }))
   expect(window.location.search).not.toContain('approval=')
 })
+
+
+it('round-trips failure identity only with its run and name, never across tabs', () => {
+  const target = view({ feature: 'checkout', run: 'r1', focusTest: 'test-case-checkout', testId: 'second', testLocation: 'e2e/checkout.spec.ts:30' })
+  persistView(target)
+  expect(readPersistedView()).toEqual(target)
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
+  persistView({ ...target, focusTest: null })
+  expect(window.location.search).not.toContain('testId')
+  expect(window.location.search).not.toContain('testLocation')
+  window.history.replaceState(null, '', '/?testId=orphan&testLocation=file:1')
+  expect(readPersistedView().testId).toBeUndefined()
+  persistView({ ...target, run: null })
+  expect(window.location.search).not.toContain('testId')
+})
+
+
+it('does not retain an approval qualifier when opening notifications without a selection', () => {
+  window.history.replaceState(null, '', '/?dialog=notifications&approval=stale')
+  persistView(view({ dialog: 'notifications' }))
+  expect(window.location.search).not.toContain('approval=')
+})

@@ -1,3 +1,4 @@
+import { distinctRepoPaths } from '@shared/lib/repository-paths'
 import type { ReactNode } from 'react'
 import './stage-evidence.css'
 import type { FlightManifest, FlightStage, FlightStageKey } from '@shared/flights/types'
@@ -14,7 +15,7 @@ import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { STAGE_COLUMN, evidenceOf, num, portifyWorkflowId, progressOf, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at

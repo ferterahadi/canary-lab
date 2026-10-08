@@ -1,3 +1,4 @@
+import { distinctRepoPaths } from '../../../../shared/lib/repository-paths'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -37,4 +38,13 @@ export function resolveRepoPaths(paths: readonly string[]): { ok: true; paths: s
     }
   }
   return { ok: true, paths: resolved }
+}
+
+
+/** Configuration reads expand home paths before counting; no filesystem probe
+ * is needed, so missing historical directories remain readable. */
+export function configuredRepoPaths(repos: readonly { localPath?: string }[] | undefined): string[] {
+  return distinctRepoPaths((repos ?? []).map((repo) => repo.localPath)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map(resolveRepoPath))
 }

@@ -326,3 +326,14 @@ it('rehydrates the notification inbox and serializes it as a routed dialog', () 
   expect(state.notificationsOpen).toBe(true)
   expect(navToPersistedView(state).dialog).toBe('notifications')
 })
+
+
+it('preserves approval routing beside a qualified test and drops stale run qualifiers', () => {
+  const focusTest = { runId: 'r1', test: 'checkout', testId: 'second', testLocation: 'file:2' }
+  const active = navToPersistedView({ ...base, run: 'r1', notificationsOpen: true, approval: 'approval-1', focusTest })
+  expect(active).toMatchObject({ approval: 'approval-1', focusTest: 'checkout', testId: 'second', testLocation: 'file:2' })
+  const changed = navToPersistedView({ ...base, run: 'r2', focusTest })
+  expect(changed.focusTest).toBeNull()
+  expect(changed.testId).toBeUndefined()
+  expect(changed.testLocation).toBeUndefined()
+})

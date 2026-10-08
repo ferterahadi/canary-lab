@@ -87,6 +87,8 @@ export type RunArrivalTab = 'changes'
  *  Both absent = the detail's own default (Overview). */
 export interface RunOpenTarget {
   test?: string
+  testId?: string
+  testLocation?: string
   tab?: RunArrivalTab
 }
 
@@ -153,6 +155,8 @@ export interface PersistedView {
    *  playback tests on. An unknown name simply doesn't match — the tab opens
    *  unscrolled rather than blank. */
   focusTest: string | null
+  testId?: string
+  testLocation?: string
   /** Tab qualifier for `run` — which run-detail tab a drill-through asked for
    *  (URL only; dropped unless a run is selected, and an unknown value is
    *  ignored rather than rendering a blank pane). */
@@ -231,6 +235,10 @@ export function readPersistedView(): PersistedView {
     const modelsAgent = dialog === 'settings' ? parseModelsAgent(params.get('models')) : null
     // `test` only qualifies a selected run — dropped elsewhere.
     const focusTest = run ? params.get('test') || null : null
+    const testIdentity = focusTest ? {
+      ...(params.get('testId') ? { testId: params.get('testId')! } : {}),
+      ...(params.get('testLocation') ? { testLocation: params.get('testLocation')! } : {}),
+    } : {}
     // `runtab` qualifies a selected run too — an unknown tab name is ignored, so
     // the detail opens on its own default instead of a pane that doesn't exist.
     const runTab = run ? parseRunArrivalTab(params.get('runtab')) : null
@@ -247,8 +255,8 @@ export function readPersistedView(): PersistedView {
     const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
       ? { currentTests: source === 'current' } : {}
     const log = flightLog ? { flightLog } : {}
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...approval, ...tests }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...approval, ...tests }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...approval, ...tests, ...testIdentity }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...approval, ...tests, ...testIdentity }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -306,6 +314,8 @@ export function persistView(state: PersistedView): void {
     // `test` only qualifies a selected run — drop it otherwise, so switching runs
     // can't leave a previous run's failure pinned in the URL.
     setOrDelete(params, 'test', state.run ? state.focusTest : null)
+    setOrDelete(params, 'testId', state.run && state.focusTest ? state.testId ?? null : null)
+    setOrDelete(params, 'testLocation', state.run && state.focusTest ? state.testLocation ?? null : null)
     // Same rule for the arrival tab: it belongs to the run in the URL, so
     // switching runs can't leave a previous drill-through's tab pinned.
     setOrDelete(params, 'runtab', state.run ? state.runTab : null)

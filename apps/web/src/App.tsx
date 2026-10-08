@@ -342,7 +342,7 @@ export function App() {
             totalTests={specTotalTests}
             /* Honoured only when the focus belongs to the run being shown, so a
                stale pair from a previous selection can't scroll this one. */
-            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
+            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation } : {})}
             /* Same pairing rule for the arrival tab a drill-through named. */
             {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
             bootFailureOpen={bootFailureFor !== null && bootFailureFor === selectedRunId}

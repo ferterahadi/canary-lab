@@ -360,7 +360,7 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number"]')?.click()
     })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { test: 'test-case-req-r5-path-happy-clean-number' })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { test: 'test-case-req-r5-path-happy-clean-number', testId: 'f2', testLocation: '/ws/e2e/blocklist.spec.ts:176' })
   })
 
   it('reports the repair fixes as one link into that run’s Changes tab', async () => {

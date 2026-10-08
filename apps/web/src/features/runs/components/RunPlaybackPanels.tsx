@@ -12,7 +12,7 @@ import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { RunLifecycleEvent } from '@shared/run-state'
 import { formatDuration } from '@/shared/lib/format'
 import { parseAssertionError } from '../utils/assertion-error'
-import { artifactsForPlayback, playbackTests, type PlaybackTest } from '../utils/run-detail-playback'
+import { artifactsForPlayback, playbackTests, playbackFocusCase, type PlaybackTest } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -46,6 +46,8 @@ export function PlaywrightPlayback({
   totalTests,
   embedded = false,
   focusTest,
+  focusTestId,
+  focusTestLocation,
 }: {
   events?: PlaywrightPlaybackEvent[]
   playbackIdentity?: PlaybackIdentity
@@ -54,27 +56,28 @@ export function PlaywrightPlayback({
   summary?: RunSummary
   totalTests?: number
   embedded?: boolean
-  /** R82: land on this test — matched against the playback test `name`, the same
-   *  key `currentPlaybackIndex` compares against `summary.running`. An unknown
-   *  name matches nothing and the list simply renders unscrolled. */
+  /** Legacy names focus only a unique case; qualifiers preserve duplicate identity. */
   focusTest?: string
+  focusTestId?: string
+  focusTestLocation?: string
 }) {
-  // Scroll the focused test into view once it exists. Keyed on the name (not a
+  const tests = playbackTests(events, playbackIdentity, summary?.knownTests)
+  const focusedCase = focusTest ? playbackFocusCase(tests, { name: focusTest, id: focusTestId, location: focusTestLocation }, summary?.knownTests) : undefined
+  // Scroll the focused case into view once it exists. Keyed on identity (not a
   // mount-once effect) so clicking a SECOND failure while this list is already
   // open re-scrolls, and so the scroll still happens when playback events arrive
   // after the first render.
   const focusRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (!focusTest) return
+    if (!focusedCase) return
     // `start`, not `center`: these cards run taller than the run-detail panel is
     // (error block + snippet + artifact sections), and centering a 265px card in a
     // ~200px panel scrolls its own title and status pill off the top — you land
     // mid-evidence with no idea which test you're looking at. Aligning the top
     // edge puts the header first, which is the point of landing here.
     focusRef.current?.scrollIntoView({ block: 'start' })
-  }, [focusTest, events])
+  }, [focusedCase, events])
 
-  const tests = playbackTests(events, playbackIdentity, summary?.knownTests)
   if (tests.length === 0) {
     return <EmptyState {...EMPTY_COPY.playback} />
   }
@@ -99,10 +102,10 @@ export function PlaywrightPlayback({
           const traceArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'trace')
           const videoArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'video')
           const isCurrent = idx === activeIndex
-          const isFocused = focusTest != null && test.name === focusTest
+          const isFocused = focusedCase === test.caseKey
           return (
             <div
-              key={`${test.name}:${test.location ?? ''}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
+              key={test.caseKey}
               {...(isFocused ? { 'data-focus-test': test.name } : {})}
               ref={isFocused ? focusRef : undefined}
               className="cl-card overflow-hidden"

@@ -55,6 +55,7 @@ describe('playbackTests', () => {
 
     expect(playbackTests(events)).toEqual([
       {
+        caseKey: 'auth.spec.ts:login@auth.spec.ts:1', ids: [], locations: ['auth.spec.ts:1'],
         name: 'auth.spec.ts:login',
         title: 'logs in after retry',
         location: 'auth.spec.ts:1',
@@ -242,6 +243,7 @@ describe('playbackTests', () => {
 
     expect(playbackTests(events)).toEqual([
       {
+        caseKey: 'setup.spec.ts:seed@setup.spec.ts:1', ids: [], locations: ['setup.spec.ts:1'],
         name: 'setup.spec.ts:seed',
         title: 'seeds data',
         location: 'setup.spec.ts:1',

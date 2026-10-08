@@ -40,6 +40,7 @@ it.each([
     `)
   const script = path.join(temp, 'check.mjs')
   fs.writeFileSync(script, checker)
+  fs.copyFileSync(path.join(repo, 'tools/shared-behavior-contracts.mjs'), path.join(temp, 'shared-behavior-contracts.mjs'))
   const result = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(typeName)

@@ -1,3 +1,7 @@
+import { tokenizeTestAnnotations } from '@shared/test-annotations'
+import { findSummaryTest } from '@shared/summary-test-identity'
+import { playbackCaseKey } from '@shared/playback-identity'
+import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import type { RunSummary, RunSummaryFailedEntry } from '@shared/run-detail'
 import { HERO_ROW } from './stage-meta'
@@ -62,10 +66,8 @@ export function FailingTests({
   /** The run's known tests — carries each test's REAL title, which the failed
    *  entry only has in slug form. Matched by id, then by name. */
   knownTests?: RunSummary['knownTests']
-  /** Open this failure on the run detail (R82). Receives the failed entry's
-   *  `name` — the same key the run detail's Playwright tab matches playback
-   *  tests on, so it lands on this exact test. Omitted → rows are inert text. */
-  onOpenTest?: (testName: string) => void
+  /** The name keeps legacy links readable; qualifiers identify the exact case. */
+  onOpenTest?: (testName: string, identity: Pick<RunOpenTarget, 'testId' | 'testLocation'>) => void
   /** Open the run detail on the whole list — the destination for the failures
    *  past `VISIBLE_FAILURES`. Omitted → the remainder is stated, not offered. */
   onOpenAll?: () => void
@@ -87,9 +89,9 @@ export function FailingTests({
       <ul className="m-0 flex list-none flex-col p-0">
         {shown.map((f, i) => (
           <FailureRow
-            key={`${f.entry.id ?? f.entry.name}-${i}`}
+            key={f.entry.id ?? `${playbackCaseKey(f.entry)}:${i}`}
             failure={f}
-            {...(onOpenTest ? { onOpen: () => onOpenTest(f.entry.name) } : {})}
+            {...(onOpenTest ? { onOpen: () => onOpenTest(f.entry.name, { testId: f.entry.id, testLocation: f.fullLoc }) } : {})}
           />
         ))}
       </ul>
@@ -210,7 +212,7 @@ export function parseFailure(
   entry: RunSummaryFailedEntry,
   knownTests?: RunSummary['knownTests'],
 ): ParsedFailure {
-  const known = knownTests?.find((k) => (entry.id && k.id === entry.id) || k.name === entry.name)
+  const known = findSummaryTest(knownTests ?? [], { ...entry, location: entry.location ?? entry.locations?.[0] })
   const raw = known?.title ?? (entry.name.startsWith('test-case-') ? deslug(entry.name) : entry.name)
   const { title, tags } = splitTags(raw)
   const loc = entry.location ?? entry.locations?.[0] ?? known?.location
@@ -225,15 +227,8 @@ export function parseFailure(
 
 /** Lift `@req-R4 @path-sad …` off the front (or anywhere) of a title. */
 function splitTags(raw: string): { title: string; tags: TestTag[] } {
-  const tags: TestTag[] = []
-  const title = raw
-    .replace(/@(req|path|variant)-([A-Za-z0-9_.]+)/g, (_m, kind: string, value: string) => {
-      tags.push({ kind: kind as TestTag['kind'], value })
-      return ''
-    })
-    .replace(/\s+/g, ' ')
-    .trim()
-  return { title, tags }
+  const parsed = tokenizeTestAnnotations(raw, ['req', 'path', 'variant'])
+  return { title: parsed.title, tags: parsed.tokens.map(({ kind, value }) => ({ kind: kind as TestTag['kind'], value })) }
 }
 
 /** `test-case-req-r4-path-sad-a-request-is-refused` →

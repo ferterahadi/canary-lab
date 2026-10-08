@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { resolveRepoIdentity, resolveRepoPath, resolveRepoPaths, sameRepoSet } from './repo-identity'
+import { configuredRepoPaths, resolveRepoIdentity, resolveRepoPath, resolveRepoPaths, sameRepoSet } from './repo-identity'
 
 let root: string
 beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-'))) })
@@ -105,4 +105,12 @@ it('returns the first original failing path without processing later paths', () 
   const spy = vi.spyOn(fs, 'realpathSync')
   expect(resolveRepoPaths([root, first, second])).toEqual({ ok: false, path: first })
   expect(spy).not.toHaveBeenCalledWith(second)
+})
+
+
+it('normalizes configured paths without probing or merging filesystem identities', () => {
+  expect(configuredRepoPaths(undefined)).toEqual([])
+  expect(configuredRepoPaths([{}, { localPath: '' }])).toEqual([])
+  const dirs = ['~/missing-repo', path.join(os.homedir(), 'missing-repo') + '/', '/repo/service-a', '/repo/service-b', '/worktree']
+  expect(configuredRepoPaths(dirs.map((localPath) => ({ localPath })))).toEqual([path.join(os.homedir(), 'missing-repo'), '/repo/service-a', '/repo/service-b', '/worktree'])
 })

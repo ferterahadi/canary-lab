@@ -4,7 +4,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunSummary, RunSummaryFailedEntry } from '@shared/run-detail'
-import { FailingTests } from './FailingTests'
+import { annotationCases } from '@shared/__fixtures__/test-annotations'
+import { collidingTests } from '@shared/__fixtures__/summary-test-identity'
+import { FailingTests, parseFailure } from './FailingTests'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -43,7 +45,7 @@ describe('FailingTests', () => {
     expect(container.textContent).toContain('e2e/checkout.spec.ts:12:3')
     expect(container.textContent).not.toContain('C:\\repo')
     act(() => container.querySelector('button')!.click())
-    expect(onOpenTest).toHaveBeenCalledWith(failed().name)
+    expect(onOpenTest).toHaveBeenCalledWith(failed().name, { testId: 't1', testLocation: 'C:\\repo\\e2e\\checkout.spec.ts:12:3' })
   })
 
   it('renders nothing when there is nothing failing', () => {
@@ -92,7 +94,7 @@ describe('FailingTests', () => {
     const second = failed({ id: 't2', name: 'test-case-req-r5-path-happy-clean-number-is-allowed' })
     render([failed(), second])
     act(() => { container.querySelector<HTMLElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number-is-allowed"]')?.click() })
-    expect(onOpenTest).toHaveBeenCalledWith('test-case-req-r5-path-happy-clean-number-is-allowed')
+    expect(onOpenTest).toHaveBeenCalledWith('test-case-req-r5-path-happy-clean-number-is-allowed', { testId: second.id, testLocation: second.location })
   })
 
   it('shows the readable location tail, duration and retry count', () => {
@@ -108,4 +110,18 @@ describe('FailingTests', () => {
     expect(container.querySelector('[data-testid^="failing-open-"]')).toBeNull()
     expect(container.textContent).toContain('a request with no bot challenge token is refused')
   })
+})
+
+
+it.each(annotationCases)('shares full annotation tokens: $source', ({ source, title, tags }) => {
+  const entry = { name: 'case', id: 'x' }
+  const parsed = parseFailure(entry, [{ ...entry, title: source }])
+  expect(parsed.title).toBe(title)
+  expect(parsed.tags.map(({ kind, value }) => `@${kind}-${value}`)).toEqual(tags)
+})
+
+it('resolves ids before colliding names and preserves unresolved failure evidence', () => {
+  expect(parseFailure({ id: 'second', name: collidingTests[0].name }, collidingTests)).toMatchObject({ title: 'Checkout?', fullLoc: collidingTests[1].location })
+  expect(parseFailure({ id: 'stale', name: collidingTests[0].name, location: 'e2e/other.spec.ts:4' }, collidingTests)).toMatchObject({ title: 'checkout', fullLoc: 'e2e/other.spec.ts:4' })
+  expect(parseFailure({ name: 'case' }, [{ name: 'case', title: '@owner-team @req-R1 checkout' }])).toMatchObject({ title: '@owner-team checkout', tags: [{ kind: 'req', value: 'R1' }] })
 })

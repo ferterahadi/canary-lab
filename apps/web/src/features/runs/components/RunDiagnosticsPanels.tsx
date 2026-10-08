@@ -25,6 +25,8 @@ export function PlaywrightPanel({
   diagnostics,
   totalTests,
   focusTest,
+  focusTestId,
+  focusTestLocation,
 }: {
   runId: string
   view: PlaywrightView
@@ -39,6 +41,8 @@ export function PlaywrightPanel({
   totalTests?: number
   /** R82: forwarded to the playback list, which scrolls this test into view. */
   focusTest?: string
+  focusTestId?: string
+  focusTestLocation?: string
 }) {
   return (
     <RunPane
@@ -80,7 +84,7 @@ export function PlaywrightPanel({
       {view === 'playback' && (
         <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
           {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-          <PlaywrightPlayback events={events} playbackIdentity={playbackIdentity} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
+          <PlaywrightPlayback events={events} playbackIdentity={playbackIdentity} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest, focusTestId, focusTestLocation } : {})} embedded />
         </div>
       )}
     </RunPane>

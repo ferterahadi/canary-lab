@@ -1,3 +1,4 @@
+import { configuredRepoPaths } from '../../../shared/repo-identity'
 import { capturedEnvsetCount } from './envset-evidence'
 import fs from 'fs'
 import path from 'path'
@@ -198,13 +199,8 @@ function evaluationExportEvidence({ deps, feature }: EvidenceContext): EvidenceB
  *  Deduplicated for the reason `distinctRepoPaths` exists: services sharing one
  *  source tree are one repository. */
 function scoutEvidence({ config }: EvidenceContext): EvidenceBlock | undefined {
-  const paths = new Set(
-    (config.repos ?? [])
-      .map((r) => r.localPath)
-      .filter((p): p is string => typeof p === 'string' && p.length > 0)
-      .map((p) => p.replace(/[\\/]+$/, '')),
-  )
-  return paths.size > 0 ? { repos: paths.size } : undefined
+  const paths = configuredRepoPaths(config.repos)
+  return paths.length > 0 ? { repos: paths.length } : undefined
 }
 
 /** Per-stage probe. `similarity` is deliberately absent: it reports which suites

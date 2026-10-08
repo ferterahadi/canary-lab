@@ -216,7 +216,7 @@ export function TestRunPanel({
           knownTests={summary?.knownTests}
           {...(onOpenRun && runId
             ? {
-                onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }),
+                onOpenTest: (name: string, identity: Pick<RunOpenTarget, 'testId' | 'testLocation'>) => onOpenRun(feature, runId, { test: name, ...identity }),
                 /* The remainder past the sixth goes to the same place a row
                    does, minus the per-test landing. */
                 onOpenAll: () => onOpenRun(feature, runId),

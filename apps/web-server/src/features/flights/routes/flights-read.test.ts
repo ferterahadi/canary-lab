@@ -1,3 +1,4 @@
+import { workspaceStageEvidence } from '../logic/workspace-evidence'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -147,6 +148,18 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     app = await buildApp(allDone())
     const { body } = await entryFor('homey')
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
+  })
+
+  it('uses the same expanded repository count in prefill and workspace evidence', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'aliases')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const repos = [{ name: 'a', localPath: '~/synthetic-repo' }, { name: 'b', localPath: path.join(os.homedir(), 'synthetic-repo') + '/' }]
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports.config = ${JSON.stringify({ name: 'aliases', repos, featureDir })}`)
+    app = await buildApp(allDone())
+    const { body } = await entryFor('aliases')
+    expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'synthetic-repo')])
+    const evidence = workspaceStageEvidence({ featuresDir: path.join(tmpDir, 'features'), logsDir: path.join(tmpDir, 'logs') }, 'aliases', ['scout'], 'local')
+    expect(evidence.scout).toEqual({ repos: 1 })
   })
 
   // A suite may declare one repo per service over a SHARED source tree so each

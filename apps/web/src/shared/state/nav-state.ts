@@ -75,7 +75,7 @@ export interface NavState {
    *  it belongs to. Stored as a PAIR so selecting a different run makes the focus
    *  inert automatically — no clearing effect to keep in sync, and the run detail
    *  only honours a focus whose `runId` is the run it is showing. */
-  focusTest: { runId: string; test: string } | null
+  focusTest: { runId: string; test: string; testId?: string; testLocation?: string } | null
   /** Which run-detail tab a drill-through asked for, paired with its run for the
    *  same reason `focusTest` is: a tab intent that outlived the run it was meant
    *  for would silently reroute the next run the user opens. The flight's Test
@@ -120,7 +120,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     modelsFor: persisted.dialog === 'settings' ? persisted.modelsAgent : null,
     resumePlanTaskId: null,
     focusTest: persisted.run && persisted.focusTest
-      ? { runId: persisted.run, test: persisted.focusTest }
+      ? { runId: persisted.run, test: persisted.focusTest, testId: persisted.testId, testLocation: persisted.testLocation }
       : null,
     runTab: persisted.run && persisted.runTab
       ? { runId: persisted.run, tab: persisted.runTab }
@@ -179,6 +179,8 @@ export function navToPersistedView(state: NavState): PersistedView {
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
     focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,
+    testId: state.focusTest?.runId === state.run ? state.focusTest.testId : undefined,
+    testLocation: state.focusTest?.runId === state.run ? state.focusTest.testLocation : undefined,
     runTab: state.runTab?.runId === state.run ? state.runTab.tab : null,
     returnFlight: state.returnFlight,
   }

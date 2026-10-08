@@ -317,6 +317,15 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
     expect(nav.selectedFeature).toBe('checkout')
   })
 
+  it('hydrates and replaces identity qualifiers, then drops them for another run', async () => {
+    await mount(persisted({ run: 'r1', focusTest: 'checkout', testId: 'first', testLocation: 'file:1' }))
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'first', testLocation: 'file:1' })
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'checkout', testId: 'second', testLocation: 'file:2' }) })
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'second', testLocation: 'file:2' })
+    await act(async () => { nav.navigateToRun('checkout', 'r2') })
+    expect(nav.focusTest).toBeNull()
+  })
+
   it('lands on a named tab when no test is named', async () => {
     await mount()
 

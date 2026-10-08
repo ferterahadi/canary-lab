@@ -1,4 +1,4 @@
-import { buildPlaybackIdentity, latestPlaybackAttempt, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
+import { buildPlaybackIdentity, latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
 import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
@@ -23,6 +23,12 @@ export interface PlaybackTest {
   steps: Array<{ title: string; category: string; ended: boolean }>
 }
 
+export interface PlaybackCase extends PlaybackTest {
+  caseKey: string
+  ids: string[]
+  locations: string[]
+}
+
 export interface PlaybackArtifacts {
   screenshots: PlaywrightArtifact[]
   links: PlaywrightArtifact[]
@@ -35,16 +41,21 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   trace: 'retain-on-failure',
 }
 
-export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackTest[] {
+export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackCase[] {
   const projection = identity?.eventKeys.length === events.length ? identity : buildPlaybackIdentity(events, known)
   const attempts = new Map<string, PlaybackTest>()
   const cases = new Map<string, Set<string>>()
+  const identities = new Map<string, { ids: Set<string>; locations: Set<string> }>()
   for (const [index, event] of events.entries()) {
     const keys = projection.eventKeys[index]
     if (!keys) continue
     const group = cases.get(keys.caseKey) ?? new Set<string>()
     group.add(keys.attemptKey)
     cases.set(keys.caseKey, group)
+    const evidence = identities.get(keys.caseKey) ?? { ids: new Set<string>(), locations: new Set<string>() }
+    if (event.test.id) evidence.ids.add(event.test.id)
+    if ('location' in event.test) evidence.locations.add(event.test.location)
+    identities.set(keys.caseKey, evidence)
     const current = attempts.get(keys.attemptKey) ?? { name: event.test.name, title: event.test.title, steps: [] }
     current.title = event.test.title || current.title
     if ('location' in event.test) current.location = event.test.location
@@ -65,11 +76,39 @@ export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?:
     }
     attempts.set(keys.attemptKey, current)
   }
-  return [...cases.values()].map((keys) => {
+  for (const entry of known) {
+    const evidence = identities.get(playbackCaseKey(entry))
+    if (entry.id) evidence?.ids.add(entry.id)
+    if (entry.location) evidence?.locations.add(entry.location)
+  }
+  return [...cases.entries()].map(([caseKey, keys]) => {
     // Every key was inserted alongside its attempt above.
     const test = latestPlaybackAttempt([...keys].map((key) => attempts.get(key)!))!
-    return { ...test, steps: compactPlaybackSteps(test.steps) }
+    const evidence = identities.get(caseKey)!
+    return { ...test, caseKey, ids: [...evidence.ids], locations: [...evidence.locations], steps: compactPlaybackSteps(test.steps) }
   })
+}
+
+/** Focus belongs to a case, including earlier attempts whose ids/lines moved. */
+export function playbackFocusCase(tests: readonly PlaybackCase[], target: PlaybackCaseEntry, known: readonly PlaybackCaseEntry[] = []): string | undefined {
+  const uniqueKey = (matches: readonly PlaybackCase[]) => matches.length === 1 ? matches[0].caseKey : undefined
+  if (target.id) {
+    const identified = tests.filter((test) => test.ids.includes(target.id!))
+    if (identified.length) {
+      const key = uniqueKey(identified)
+      const conflictingLocation = target.location && tests.some((test) => test.caseKey !== key &&
+        test.locations.some((location) => playbackLocationKey(location) === playbackLocationKey(target.location!)))
+      return conflictingLocation ? undefined : key
+    }
+  }
+  if (target.location) {
+    const located = tests.filter((test) => test.name === target.name && test.locations.some((location) =>
+      playbackLocationKey(location) === playbackLocationKey(target.location!)))
+    if (located.length) return uniqueKey(located)
+    const resolved = reconcilePlaybackCases(known, [target]).find((item) => item.attempts.length)
+    return resolved?.declared ? uniqueKey(tests.filter((test) => test.caseKey === playbackCaseKey(resolved.entry))) : undefined
+  }
+  return target.id ? undefined : uniqueKey(tests.filter((test) => test.name === target.name))
 }
 
 export function artifactsForPlayback(

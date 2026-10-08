@@ -1,5 +1,12 @@
 // Targeted ownership contracts complement consumer parity tests; not a clone detector.
 export const sharedBehaviors = [
+  ...['RepoScanPanel', 'StageFacts'].map((name) => ({ file: `apps/web/src/features/flights/components/${name}.tsx`, owner: '@shared/lib/repository-paths', symbols: ['distinctRepoPaths'] })),
+  { file: 'apps/web-server/src/shared/repo-identity.ts', owner: '../../../../shared/lib/repository-paths', symbols: ['distinctRepoPaths'] },
+  ...['routes/flights-read.ts', 'logic/workspace-evidence.ts'].map((file) => ({ file: `apps/web-server/src/features/flights/${file}`, owner: '../../../shared/repo-identity', symbols: ['configuredRepoPaths'] })),
+  { file: 'apps/web/src/features/flights/components/FailingTests.tsx', owner: '@shared/test-annotations', symbols: ['tokenizeTestAnnotations'] },
+  { file: 'apps/web-server/src/features/evaluation/logic/test-review/text.ts', owner: '../../../../../../../shared/test-annotations', symbols: ['tokenizeTestAnnotations'] },
+  ...['features/flights/components/FailingTests.tsx', 'features/runs/utils/test-step-status.ts'].map((file) => ({ file: `apps/web/src/${file}`, owner: '@shared/summary-test-identity', symbols: ['findSummaryTest'] })),
+  { file: 'apps/web/src/features/runs/components/RunPlaybackPanels.tsx', owner: '../utils/run-detail-playback', symbols: ['playbackFocusCase'] },
   { file: 'apps/web/src/features/runs/utils/run-view-model.ts', owner: '@shared/run-state', symbols: ['deriveRunActionAvailability'] },
   { file: 'apps/web-server/src/features/runs/logic/run-actions.ts', owner: '../../../../../../shared/run-state', symbols: ['deriveRunActionAvailability'] },
   { file: 'apps/web-server/src/features/runs/routes/external-heal.ts', owner: '../logic/run-actions', symbols: ['buildRunActionsResponse'] },

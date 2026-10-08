@@ -40,6 +40,8 @@ export function RunDetailColumn({
   onOpenPlaywrightSettings,
   totalTests,
   focusTest,
+  focusTestId,
+  focusTestLocation,
   arriveTab,
   onOpenEvaluationReport,
   onOpenSpecReview,
@@ -57,6 +59,8 @@ export function RunDetailColumn({
    *  that test's card into view. Routed as `?run=…&test=…`, so a refresh or a
    *  pasted link lands in the same place. */
   focusTest?: string
+  focusTestId?: string
+  focusTestLocation?: string
   /** Which tab to open on, when the view that linked here named one instead of a
    *  failing test — the flight's Test Run stage sends its captured fixes to
    *  `changes`. Routed as `?run=…&runtab=…`, so a refresh lands the same way. */
@@ -125,7 +129,7 @@ export function RunDetailColumn({
   // switches back to the tab that can show it.
   useEffect(() => {
     if (focusTest) setTab('playwright')
-  }, [focusTest, runId])
+  }, [focusTest, focusTestId, focusTestLocation, runId])
   // Same for a later arrival at a named tab (clicking the run's captured fixes
   // while that run is already open) — otherwise the click looks ignored.
   useEffect(() => {
@@ -269,7 +273,7 @@ export function RunDetailColumn({
             summary={detail.summary}
             diagnostics={m.verification?.diagnostics}
             totalTests={totalTests}
-            {...(focusTest ? { focusTest } : {})}
+            {...(focusTest ? { focusTest, focusTestId, focusTestLocation } : {})}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
