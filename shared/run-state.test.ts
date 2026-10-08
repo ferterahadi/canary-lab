@@ -12,6 +12,7 @@ import {
   isTerminalRunStatus,
   isUnsettledRunStatus,
   reduceRunLifecycleSnapshot,
+  runBootPhase,
   type RunLifecycleSnapshot,
 } from './run-state'
 
@@ -194,4 +195,27 @@ describe('HealSignalGate', () => {
     expect(gate.isReadyForSignal()).toBe(false)
     expect(gate.consume()).toBeNull()
   })
+})
+
+it('retains lifecycle recovery metadata and supplies a timestamp when omitted', () => {
+  const opts = {
+    detail: 'Service failed', activeCycle: 0,
+    lastSignal: { kind: 'restart' as const, status: 'accepted' as const },
+    restartPlan: { restarted: ['app'], kept: [] },
+    targetedRerun: { selected: 1, total: 2, mode: 'failed-only' as const, reason: 'retry' },
+    abortReason: { reason: 'failed readiness', service: 'app' }, id: 'event',
+  }
+  const before = Date.now()
+  const event = createRunLifecycleEvent('restarting-services', 'Restarting', opts)
+  expect(event).toMatchObject({ ...opts, phase: 'restarting-services', headline: 'Restarting' })
+  expect(Date.parse(event.updatedAt)).toBeGreaterThanOrEqual(before)
+  expect(Date.parse(event.updatedAt)).toBeLessThanOrEqual(Date.now())
+  expect(event).not.toHaveProperty('severity')
+})
+
+it.each([
+  ['spawn-failed', 'spawn'], ['process-exited', 'process-exit'], ['health-timeout', 'readiness'],
+  ['dependency-incompatible', 'configuration'], ['compiler-failed', 'compilation'],
+] as const)('classifies %s as a %s failure', (reason, phase) => {
+  expect(runBootPhase(reason)).toBe(phase)
 })

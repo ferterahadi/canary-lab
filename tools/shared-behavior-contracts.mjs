@@ -1,5 +1,13 @@
 // Targeted ownership contracts complement consumer parity tests; not a clone detector.
 export const sharedBehaviors = [
+  { file: 'apps/web/src/features/runs/utils/run-view-model.ts', owner: '@shared/run-state', symbols: ['deriveRunActionAvailability'] },
+  { file: 'apps/web-server/src/features/runs/logic/run-actions.ts', owner: '../../../../../../shared/run-state', symbols: ['deriveRunActionAvailability'] },
+  { file: 'apps/web-server/src/features/runs/routes/external-heal.ts', owner: '../logic/run-actions', symbols: ['buildRunActionsResponse'] },
+  { file: 'apps/web-server/src/mcp/tool-groups/reads.ts', owner: '../../features/runs/logic/run-actions', symbols: ['buildRunActionsResponse'] },
+  { file: 'apps/web/src/features/runs/utils/test-step-status.ts', owner: '@shared/lib/source-location', symbols: ['parseSourceLocation'] },
+  { file: 'apps/web-server/src/features/runs/logic/runtime/launcher/project-config.ts', owner: '../../../../../../../../shared/lib/atomic-write', symbols: ['atomicWriteJson'] },
+  { file: 'apps/web-server/src/features/config/logic/envset-config.ts', owner: '../../../../../../shared/lib/atomic-write', symbols: ['atomicWriteJson'] },
+  { file: 'apps/web-server/src/features/coverage/logic/coverage/prd-summary-render.ts', owner: '../../../../../../../shared/lib/atomic-write', symbols: ['atomicWriteJson'] },
   { file: 'apps/web/src/features/runs/state/RunsContext.tsx', owner: '@/shared/state/record-stream', symbols: ['useRecordStream'] },
   { file: 'apps/web/src/features/runs/components/DirtyReviewDialog.tsx', owner: '@shared/test-review', symbols: ['normalizeRunTestReview'] },
   { file: 'apps/web-server/src/mcp/tool-groups/test-review.ts', owner: '../../../../../shared/test-review', symbols: ['normalizeRunTestReview', 'testReviewUrl'] },

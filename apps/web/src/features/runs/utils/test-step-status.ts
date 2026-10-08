@@ -1,3 +1,4 @@
+import { parseSourceLocation } from '@shared/lib/source-location'
 import { summaryEntryName } from '@shared/test-names'
 // Pure utilities to map a Playwright test (extracted from the AST) onto its
 // status and latest reporter-owned step location from e2e-summary.json. The
@@ -232,17 +233,15 @@ function bodyLineForLocations(
 }
 
 function lineFromLocation(location: string): number | null {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  if (!match) return null
-  const line = Number(match[1])
+  const parsed = parseSourceLocation(location)
+  if (parsed.line === undefined) return null
+  const line = Number(parsed.line)
   return Number.isFinite(line) ? line : null
 }
 
 function fileFromLocation(location: string): string | null {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  if (!match || match.index == null) return null
-  const file = location.slice(0, match.index)
-  return file.length > 0 ? file : null
+  const parsed = parseSourceLocation(location)
+  return parsed.line !== undefined && parsed.file.length > 0 ? parsed.file : null
 }
 
 export function sameSourceFile(a: string, b: string): boolean {

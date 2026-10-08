@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import fs from 'fs'
 import path from 'path'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
@@ -72,7 +73,7 @@ export function writePrdSummary(
   fs.mkdirSync(docsDir, { recursive: true })
   const { markdown, requirements } = renderPrdSummaryMarkdown(summary, featureName)
   const withRanges: PrdSummary = { ...summary, requirements }
-  fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_JSON), JSON.stringify(withRanges, null, 2) + '\n')
+  atomicWriteJson(path.join(docsDir, PRD_SUMMARY_JSON), withRanges, undefined, { uniqueTemporary: true, followSymlinks: true, createParents: false })
   fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_MD), markdown)
   return withRanges
 }

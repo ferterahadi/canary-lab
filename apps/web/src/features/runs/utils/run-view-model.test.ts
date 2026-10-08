@@ -1,3 +1,5 @@
+import { runActionStatuses, runActionTypes, runActionTransients } from '../../../../../../tools/test-helpers/run-action-cases'
+import { deriveRunActionAvailability } from '@shared/run-state'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
@@ -356,4 +358,11 @@ describe('deriveRunViewModel', () => {
       message: 'Boot stopped because api failed health checks. Envset reverted.',
     })
   })
+})
+
+it.each(runActionStatuses)('shares action availability across execution contexts for %s', (status) => {
+  for (const executionType of runActionTypes) for (const spent of [false, true]) for (const transient of runActionTransients) {
+    const entry = { runId: 'case', feature: 'fixture', startedAt: '2026-01-01T00:00:00Z', status, executionType, ...(spent ? { newRunRequired: true as const } : {}) }
+    expect(deriveRunViewModel(entry, transient).actions).toEqual(deriveRunActionAvailability(status, transient, { executionType, newRunRequired: spent }))
+  }
 })

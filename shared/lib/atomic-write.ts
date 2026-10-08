@@ -36,10 +36,14 @@ export function atomicWrite(file: string, body: string, mode?: number): void {
 // so a file diffs cleanly and matches what an editor would save.
 export function atomicWriteJson(file: string, value: unknown, mode?: number, options: {
   uniqueTemporary?: boolean
+  followSymlinks?: boolean
+  createParents?: boolean
 } = {}): void {
   const body = JSON.stringify(value, null, 2) + '\n'
+  if (options.followSymlinks) file = symlinkWriteTarget(file)
   if (!options.uniqueTemporary) {
-    atomicWrite(file, body, mode)
+    if (options.createParents === false) atomicReplace(file, body, { mode })
+    else atomicWrite(file, body, mode)
     return
   }
   // Independent processes may replace the same registry. Unique staging avoids
@@ -51,11 +55,38 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number, opt
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true })
+  if (options.createParents !== false) fs.mkdirSync(path.dirname(file), { recursive: true })
   atomicReplace(file, body, {
     mode,
     preserveMode: true,
     temporaryPath: `${file}.${randomUUID()}.tmp`,
     cleanupOnError: true,
   })
+}
+
+// Resolve leaf links without requiring the final file to exist: writeFileSync
+// follows dangling links too. Parent links remain the filesystem's concern.
+function symlinkWriteTarget(file: string): string {
+  const seen = new Set<string>()
+  while (true) {
+    try {
+      file = path.join(fs.realpathSync.native(path.dirname(file)), path.basename(file))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return file
+      throw error
+    }
+    if (seen.has(file)) throw Object.assign(new Error(`ELOOP: symbolic link cycle, ${file}`), { code: 'ELOOP' })
+    seen.add(file)
+    let stat: fs.Stats
+    try {
+      stat = fs.lstatSync(file)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return file
+      throw error
+    }
+    if (!stat.isSymbolicLink()) return file
+    const target = fs.readlinkSync(file)
+    // Do not normalize '..' before the filesystem resolves intervening links.
+    file = path.isAbsolute(target) ? target : `${path.dirname(file)}${path.sep}${target}`
+  }
 }

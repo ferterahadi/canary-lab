@@ -1,3 +1,4 @@
+import { buildRunActionsResponse } from '../../features/runs/logic/run-actions'
 // MCP tools — reads.
 //
 // Registration bodies are unchanged from the pre-split tools.ts; only the
@@ -9,9 +10,7 @@ import { buildExternalRunSnapshotSlim, buildSpecEditsWarning } from '../../featu
 import { findFeature, loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
 import {
-  isActiveRunStatus,
   isTerminalRunStatus,
-  deriveRunActionAvailability,
 } from '../../../../../shared/run-state'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, failureResult, verificationResult } from '../tool-support'
@@ -97,14 +96,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
   }, async ({ runId }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    const status = detail.manifest.status
-    return asJsonResult({
-      status,
-      availability: deriveRunActionAvailability(status, null),
-      signal: { rerun: isActiveRunStatus(status), restart: isActiveRunStatus(status), heal: isActiveRunStatus(status) },
-      evaluationExport: { available: isTerminalRunStatus(status) },
-      externalClaim: deps.broker.getSession(runId),
-    })
+    return asJsonResult(buildRunActionsResponse(detail, deps.store.logsDir, deps.broker.getSession(runId)))
   })
 
   registerTool('list_verification_configs', {

@@ -69,3 +69,16 @@ it('removes stale declarations, preserves comments, and skips unchanged config w
   syncEnvsInConfig(dir)
   expect(readFeatureConfig(fs.readFileSync(file, 'utf8')).value).toMatchObject({ envs: [] })
 })
+
+it('replaces linked metadata without replacing the link or changing its permissions', () => {
+  fs.mkdirSync(envsets)
+  const target = path.join(dir, 'metadata.json')
+  fs.writeFileSync(target, '{}', { mode: 0o600 })
+  const link = path.join(envsets, 'envsets.config.json')
+  fs.symlinkSync('../metadata.json', link)
+  writeEnvsetsConfig(envsets, { appRoots: { app: '/workspace/app' } })
+  expect(fs.readlinkSync(link)).toBe('../metadata.json')
+  expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toEqual({ appRoots: { app: '/workspace/app' } })
+  expect(fs.statSync(target).mode & 0o777).toBe(0o600)
+  expect(fs.readdirSync(envsets)).toEqual(['envsets.config.json'])
+})

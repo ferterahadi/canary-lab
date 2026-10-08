@@ -1,3 +1,4 @@
+import { buildRunActionsResponse } from '../logic/run-actions'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -16,7 +17,6 @@ import {
   isActiveRunStatus,
   isRestartableRunStatus,
   isTerminalRunStatus,
-  deriveRunActionAvailability,
   type HealSignalKind,
 } from '../../../../../../shared/run-state'
 import { notFound } from '../../../shared/http-error'
@@ -345,27 +345,13 @@ export async function externalHealRoutes(
 
   // GET /api/runs/:runId/actions — which actions are valid right now. Lets
   // the external client reason about what to do without re-deriving server
-  // logic. Mirrors `deriveRunActionAvailability` for the run's current status.
+  // logic. Includes execution type and historical spent-attempt receipts.
   app.get<{ Params: { runId: string } }>(
     '/api/runs/:runId/actions',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
       if (!detail) return notFound(reply, 'run')
-      const availability = deriveRunActionAvailability(detail.manifest.status, null)
-      const isActive = isActiveRunStatus(detail.manifest.status)
-      const isTerminal = isTerminalRunStatus(detail.manifest.status)
-      const externalSession = deps.broker.getSession(req.params.runId)
-      return {
-        status: detail.manifest.status,
-        availability,
-        signal: {
-          rerun: isActive,
-          restart: isActive,
-          heal: isActive,
-        },
-        evaluationExport: { available: isTerminal },
-        externalClaim: externalSession,
-      }
+      return buildRunActionsResponse(detail, deps.store.logsDir, deps.broker.getSession(req.params.runId))
     },
   )
 }

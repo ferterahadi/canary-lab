@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../../../../../../../../shared/lib/atomic-write'
 import type { ProjectConfig, HealAgentChoice, EditorChoice } from '../../../../../../../../shared/project-config'
 import fs from 'fs'
 import os from 'os'
@@ -109,5 +110,5 @@ export function saveProjectConfig(projectRoot: string, config: ProjectConfig): v
     showDemo: config.showDemo !== false,
     ...(port === undefined ? {} : { port }),
   }
-  fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify(next, null, 2) + '\n')
+  atomicWriteJson(projectConfigPath(projectRoot), next, undefined, { uniqueTemporary: true, followSymlinks: true, createParents: false })
 }

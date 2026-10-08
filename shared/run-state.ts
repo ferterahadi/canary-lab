@@ -1,3 +1,5 @@
+import type { ExecutionType } from './verification'
+
 export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 export type ServiceStatus = 'queued' | 'starting' | 'ready' | 'failed' | 'timeout' | 'stopped'
 
@@ -356,14 +358,28 @@ export function deriveDisplayStatus(
 export function deriveRunActionAvailability(
   status: RunStatus,
   transient: TransientAction | null = null,
+  context: { executionType?: ExecutionType; newRunRequired?: boolean } = {},
 ): RunActionAvailabilitySet {
-  return {
+  const base = {
     pauseHeal: availability(status === 'running' && !transient, disabledReason('pauseHeal', status, transient)),
     stop: availability((status === 'running' || status === 'queued') && !transient, disabledReason('stop', status, transient)),
     cancelHeal: availability(status === 'healing' && !transient, disabledReason('cancelHeal', status, transient)),
     delete: availability(isTerminalRunStatus(status) && !transient, disabledReason('delete', status, transient)),
     restartHeal: availability(isRestartableRunStatus(status) && !transient, disabledReason('restartHeal', status, transient)),
   }
+  // Preserve the browser's spent-attempt precedence over execution-type reasons.
+  if (context.newRunRequired) return { ...base, restartHeal: { enabled: false, reason: 'This attempt is spent; start a fresh run after approval.' } }
+  if (context.executionType === 'verify') return {
+    ...base,
+    pauseHeal: { enabled: false, reason: 'Verify is observational and does not start healing.' },
+    cancelHeal: { enabled: false, reason: 'Verify does not start heal cycles.' },
+    restartHeal: { enabled: false, reason: 'Verify results are not healed; start another Verify execution instead.' },
+  }
+  if (context.executionType === 'boot') {
+    const reason = 'Boot-only sessions do not run tests or heal.'
+    return { ...base, pauseHeal: { enabled: false, reason }, cancelHeal: { enabled: false, reason }, restartHeal: { enabled: false, reason } }
+  }
+  return base
 }
 
 export function reduceRunLifecycleSnapshot(

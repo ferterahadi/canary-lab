@@ -271,3 +271,20 @@ describe('project config', () => {
     expect(DEFAULT_PORT).toBe(7421)
   })
 })
+
+it('does not create a missing workspace when saving configuration', () => {
+  const missing = path.join(mkProject(), 'missing')
+  expect(() => saveProjectConfig(missing, DEFAULTS)).toThrow(/ENOENT/)
+  expect(fs.existsSync(missing)).toBe(false)
+})
+
+it('preserves a linked project configuration and target permissions', () => {
+  const root = mkProject()
+  const target = path.join(root, 'settings.json')
+  fs.writeFileSync(target, '{}', { mode: 0o640 })
+  fs.symlinkSync('settings.json', projectConfigPath(root))
+  saveProjectConfig(root, DEFAULTS)
+  expect(fs.readlinkSync(projectConfigPath(root))).toBe('settings.json')
+  expect(fs.readFileSync(target, 'utf8')).toBe(JSON.stringify(DEFAULTS, null, 2) + '\n')
+  expect(fs.statSync(target).mode & 0o777).toBe(0o640)
+})

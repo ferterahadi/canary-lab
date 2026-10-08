@@ -236,3 +236,21 @@ describe('readPrdSummary — missing file', () => {
     }
   })
 })
+
+it('preserves a linked summary sidecar while updating matching Markdown ranges', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prd-linked-'))
+  try {
+    fs.mkdirSync(path.join(root, 'docs'))
+    const target = path.join(root, 'summary.json')
+    fs.writeFileSync(target, '{}', { mode: 0o640 })
+    const link = path.join(root, 'docs', PRD_SUMMARY_JSON)
+    fs.symlinkSync('../summary.json', link)
+    const result = writePrdSummary(root, 'fixture', summary([{ id: 'R1', title: 'Title', text: 'Requirement', pathTypes: ['happy'] }]))
+    expect(fs.readlinkSync(link)).toBe('../summary.json')
+    expect(fs.readFileSync(target, 'utf8')).toBe(JSON.stringify(result, null, 2) + '\n')
+    expect(fs.statSync(target).mode & 0o777).toBe(0o640)
+    const markdown = fs.readFileSync(path.join(root, 'docs', PRD_SUMMARY_MD), 'utf8')
+    const range = result.requirements[0].sourceRange!
+    expect(markdown.slice(range.start, range.end)).toBe('Requirement')
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
