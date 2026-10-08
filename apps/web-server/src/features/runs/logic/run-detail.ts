@@ -1,8 +1,10 @@
+import { buildPlaybackIdentity, reconcilePlaybackCases } from '../../../../../../shared/playback-identity'
+import { readPlaybackSourceDeclarations } from '../../../shared/playback-source-declarations'
 import { testLogicalKey } from './test-identity'
 import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
 import path from 'path'
-import { readManifest } from './runtime/manifest'
+import { readManifest, suiteDirForReading } from './runtime/manifest'
 import type { RunLifecycleEvent } from '../../../../../../shared/run-state'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { indexPlaywrightArtifacts } from './run-artifacts'
@@ -112,13 +114,19 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   if (!m) return null
   const summary = readRunSummary(dir)
   const playbackEvents = readPlaywrightPlaybackEvents(dir)
+  // Only undeclared cases need source hints. A complete recorded roster is sufficient.
+  const known = summary?.knownTests ?? []
+  const eventTests = (playbackEvents ?? []).filter((event) => event.type === 'test-begin' || event.type === 'test-end').map((event) => event.test)
+  const needsSource = reconcilePlaybackCases(known, eventTests).some((item) => !item.declared)
+  const sources = needsSource ? readPlaybackSourceDeclarations(suiteDirForReading(m)) : []
+  const playbackIdentity = playbackEvents?.length ? buildPlaybackIdentity(playbackEvents, known, sources) : undefined
   const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
   const lifecycleEvents = readRunLifecycleEvents(dir)
   return {
     runId,
     manifest: m,
     ...(summary ? { summary } : {}),
-    ...(playbackEvents?.length ? { playbackEvents } : {}),
+    ...(playbackEvents?.length ? { playbackEvents, playbackIdentity } : {}),
     ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
     ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
   }

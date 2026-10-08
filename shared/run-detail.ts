@@ -1,3 +1,4 @@
+import type { PlaybackIdentity } from './playback-identity'
 import type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
 export type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
 // What GET /api/runs/:id returns: the manifest plus the reporter's summary,
@@ -95,6 +96,7 @@ export interface RunDetail {
   newRunRequired?: true
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
+  playbackIdentity?: PlaybackIdentity
   playwrightArtifacts?: PlaywrightArtifactGroup[]
   lifecycleEvents?: RunLifecycleEvent[]
 }

@@ -1,3 +1,4 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
 import { flightNeedsAttention } from '@shared/flights/attention'
 import {
   FLIGHT_STAGE_KEYS,
@@ -14,7 +15,7 @@ import { presentRunStatus } from '@/features/runs/utils/run-presentation'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import { derivedFlightToken } from '../lib/derived-stages'
-import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
+import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark } from '../lib/external-work'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for

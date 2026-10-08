@@ -14,8 +14,8 @@ import {
   type RunStatus,
   type TransientAction,
 } from '@shared/run-state'
-import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
-import type { ConnectionState } from '@/shared/state/record-stream'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { useRecordStream, type ConnectionState } from '@/shared/state/record-stream'
 import {
   errorMessage,
   frameToAction,
@@ -173,56 +173,25 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     }
   }, [detailObserver, indexObserver])
 
-  // ── WebSocket lifecycle ───────────────────────────────────────────
+  useRecordStream({
+    url: wsUrl ?? defaultWsUrl(),
+    WebSocketImpl,
+    reads: detailLoadsRef.current,
+    reconnectDelayMs: RECONNECT_DELAY_MS,
+    disconnectedAfterAttempts: DISCONNECTED_AFTER_ATTEMPTS,
+    coerceMessageData: false,
+    decode: (frame) => frame && typeof frame === 'object' ? frameToAction(frame as RunsStreamFrame) ?? null : null,
+    recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.runId : null,
+    dispatch: (action) => {
+      indexReadsRef.current.invalidate('index')
+      if (action.type === 'snapshot' || action.type === 'list-changed') setIndexError(null)
+      dispatchRef.current(action)
+    },
+    onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
+  })
   useEffect(() => {
-    const url = wsUrl ?? defaultWsUrl()
-    const detailLoads = detailLoadsRef.current
-    const connection = connectReconnectingSocket({
-      url,
-      WebSocketImpl,
-      maxReconnects: Infinity,
-      // The global Live badge must recover promptly after the local server is
-      // rebuilt. A fixed delay bounds recovery at 500 ms instead of letting an
-      // already-open tab sleep in an 8–10 second exponential-backoff window.
-      reconnectDelayMs: RECONNECT_DELAY_MS,
-      onOpen: () => {
-        dispatchRef.current({ type: 'connection', status: 'live' })
-      },
-      onReconnect: (attempt) => {
-        dispatchRef.current({
-          type: 'connection',
-          status: attempt >= DISCONNECTED_AFTER_ATTEMPTS ? 'disconnected' : 'reconnecting',
-        })
-      },
-      onMessage: (data) => {
-        let frame: RunsStreamFrame
-        try {
-          frame = JSON.parse(data)
-        } catch {
-          return
-        }
-        const action = frameToAction(frame)
-        if (action) {
-          indexReadsRef.current.invalidate('index')
-          if (action.type === 'snapshot' || action.type === 'list-changed') setIndexError(null)
-          // A later stream observation supersedes reads already in flight.
-          // Invalidate their tokens so a late response cannot undo a stop or
-          // resurrect a removed run, and a new observation can read again.
-          if (action.type === 'update' || action.type === 'removed') {
-            detailLoads.invalidate(action.runId)
-          } else {
-            detailLoads.clear()
-          }
-          dispatchRef.current(action)
-        }
-      },
-    })
-
-    return () => {
-      detailLoads.clear()
-      indexReadsRef.current.clear()
-      connection.close()
-    }
+    const reads = indexReadsRef.current
+    return () => reads.clear()
   }, [wsUrl, WebSocketImpl])
 
   // ── Actions ───────────────────────────────────────────────────────

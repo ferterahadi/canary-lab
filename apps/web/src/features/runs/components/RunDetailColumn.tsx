@@ -262,6 +262,7 @@ export function RunDetailColumn({
             view={playwrightView}
             onViewChange={setPlaywrightView}
             events={detail.playbackEvents}
+            playbackIdentity={detail.playbackIdentity}
             artifactGroups={detail.playwrightArtifacts}
             artifactPolicy={m.playwrightArtifacts}
             onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}

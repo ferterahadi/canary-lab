@@ -1,3 +1,4 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
 import { useRef, useState } from 'react'
 import * as flightsApi from '@/shared/api/flights'
 import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@shared/flights/types'
@@ -8,7 +9,7 @@ import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
-import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
+import { externalMutationTooltip } from '../lib/external-work'
 
 /** Read the structured outcome of the previous collector attempt off the
  *  parked checkpoint. Absent on a first visit, and on flights parked by an

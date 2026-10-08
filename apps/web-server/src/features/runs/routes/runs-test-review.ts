@@ -6,28 +6,8 @@ import { buildSuiteReview, suiteReviewFiles, suiteReviewRevision } from '../logi
 import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteRuntimeInputTargetsForSnapshot } from '../logic/runtime/suite-runtime-inputs'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import type { TestReviewDecision } from '../../../../../../shared/test-review'
+import { deriveRunReviewCapabilities, type RunTestReview } from '../../../../../../shared/test-review'
 
-function reviewCapabilities(active: boolean, terminal: boolean, decision: TestReviewDecision | undefined, hasFiles: boolean) {
-  if (decision) return {
-    reviewState: 'settled' as const,
-    allowedActions: [],
-    nextAction: decision.decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
-    ...(decision.receipt ? { receipt: decision.receipt } : {}),
-  }
-  if (!hasFiles) return { reviewState: 'settled' as const, allowedActions: [], nextAction: 'none' as const }
-  if (active) return {
-    reviewState: 'pending-active' as const,
-    allowedActions: ['adopt-and-rerun', 'restore', 'leave-pending'] as const,
-    nextAction: 'rerun-current' as const,
-  }
-  if (terminal) return {
-    reviewState: 'pending-terminal' as const,
-    allowedActions: ['approve-new-run', 'restore', 'leave-pending'] as const,
-    nextAction: 'restore-or-leave' as const,
-  }
-  return { reviewState: 'locked' as const, allowedActions: [], nextAction: 'none' as const }
-}
 
 export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Params: { runId: string }; Querystring: { summary?: string } }>('/api/runs/:runId/test-review', async (req, reply) => {
@@ -54,8 +34,8 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
         runId: manifest.runId, feature: manifest.feature, baseline: 'run-start',
         review_revision: review.revision, files: review.files,
         canAdopt: active,
-        ...reviewCapabilities(active, terminal, decision, review.files.length > 0),
-      }
+        ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0),
+      } satisfies RunTestReview
     }
     const review = await buildSuiteReview(snapshot.dir, manifest.featureDir, runtimeInputs)
     if (suiteReviewRevision(snapshot.dir, manifest.featureDir, runtimeInputs) !== review.revision) {
@@ -71,7 +51,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
       review_revision: review.revision, files: review.files, patchPath,
       ...(Buffer.byteLength(review.patch) <= 8000 ? { patch: review.patch } : {}),
       canAdopt: active,
-      ...reviewCapabilities(active, terminal, decision, review.files.length > 0),
-    }
+      ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0),
+    } satisfies RunTestReview
   })
 }

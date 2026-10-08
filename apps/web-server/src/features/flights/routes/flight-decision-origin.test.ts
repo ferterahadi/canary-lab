@@ -1,10 +1,11 @@
+import { isExternallyDriven } from '../../../../../../shared/flights/ownership'
 import { describe, it, expect } from 'vitest'
 
 import type { FastifyReply, FastifyRequest } from 'fastify'
 
 import type { FlightManifest, FlightStatus } from '../../../../../../shared/flights/types'
 
-import { MCP_ORIGIN_HEADER, isExternallyDriven, rejectForeignFlightDecision } from './flight-decision-origin'
+import { MCP_ORIGIN_HEADER, rejectForeignFlightDecision } from './flight-decision-origin'
 
 function manifest(
   status: FlightStatus,

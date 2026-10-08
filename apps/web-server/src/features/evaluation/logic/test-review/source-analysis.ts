@@ -1,11 +1,11 @@
-import { readDisplayTestTitle } from '../../../../shared/test-title'
+import { playbackSourceNodes } from '../../../../shared/playback-source-declarations'
 import { scanSpecFiles } from '../../../../../../../shared/spec-files'
 import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import fs from 'fs'
 import ts from 'typescript'
 import { formatCodeForDisplay, formatSourceSnippetForDisplay } from '../../../../../../../shared/code-display-format'
 import { assertionFor, collectDirectAssertions, dedupeAssertions, helperAssertion, isNoiseHelper } from './assertions'
-import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead } from './ast'
+import { calledIdentifier, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead } from './ast'
 import { cleanSnippet, dedupe } from './text'
 import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion } from './types'
 
@@ -28,32 +28,22 @@ export function loadSourceTests(featureDir: string | undefined): Map<string, Sou
       return resolved
     }
 
-    function visit(node: ts.Node): void {
-      if (ts.isCallExpression(node) && isPlaywrightTestCall(node)) {
-        const title = readDisplayTestTitle(node, src)
-        const body = functionBody(node)
-        if (title && body) {
-          const review = reviewTestBody(body, src, helperFor)
-          out.set(`${file}:${lineFor(node, src)}`, {
-            file,
-            line: lineFor(node, src),
-            title,
-            bodySource: formatCodeForDisplay(body.getText(src)),
-            helperCalls: review.helperCalls,
-            helperDefinitions: review.helperDefinitions,
-            externalImports: dedupe([
-              ...externalImports,
-              ...review.helperDefinitions.flatMap((helper) => flattenHelpers([helper]).flatMap((h) => h.externalImports)),
-            ]),
-            assertions: review.assertions,
-          })
-        }
-        return
-      }
-      node.forEachChild(visit)
+    for (const { node, title, body } of playbackSourceNodes(src)) {
+      const review = reviewTestBody(body, src, helperFor)
+      out.set(`${file}:${lineFor(node, src)}`, {
+        file,
+        line: lineFor(node, src),
+        title,
+        bodySource: formatCodeForDisplay(body.getText(src)),
+        helperCalls: review.helperCalls,
+        helperDefinitions: review.helperDefinitions,
+        externalImports: dedupe([
+          ...externalImports,
+          ...review.helperDefinitions.flatMap((helper) => flattenHelpers([helper]).flatMap((h) => h.externalImports)),
+        ]),
+        assertions: review.assertions,
+      })
     }
-
-    visit(src)
   }
   return out
 }

@@ -1,3 +1,4 @@
+import type { PlaybackIdentity } from '@shared/playback-identity'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -38,6 +39,7 @@ export function SegmentButton(props: { active: boolean; onClick: () => void; chi
 
 export function PlaywrightPlayback({
   events,
+  playbackIdentity,
   artifactGroups,
   artifactPolicy,
   summary,
@@ -46,6 +48,7 @@ export function PlaywrightPlayback({
   focusTest,
 }: {
   events?: PlaywrightPlaybackEvent[]
+  playbackIdentity?: PlaybackIdentity
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
   summary?: RunSummary
@@ -71,7 +74,7 @@ export function PlaywrightPlayback({
     focusRef.current?.scrollIntoView({ block: 'start' })
   }, [focusTest, events])
 
-  const tests = playbackTests(events)
+  const tests = playbackTests(events, playbackIdentity, summary?.knownTests)
   if (tests.length === 0) {
     return <EmptyState {...EMPTY_COPY.playback} />
   }
@@ -99,7 +102,7 @@ export function PlaywrightPlayback({
           const isFocused = focusTest != null && test.name === focusTest
           return (
             <div
-              key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
+              key={`${test.name}:${test.location ?? ''}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
               {...(isFocused ? { 'data-focus-test': test.name } : {})}
               ref={isFocused ? focusRef : undefined}
               className="cl-card overflow-hidden"

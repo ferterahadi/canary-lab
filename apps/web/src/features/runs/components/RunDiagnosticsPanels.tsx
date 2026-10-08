@@ -1,3 +1,4 @@
+import type { PlaybackIdentity } from '@shared/playback-identity'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { formatLocalDateTime } from '@/shared/lib/format'
 import { useNow } from '@/shared/state/use-now'
@@ -16,6 +17,7 @@ export function PlaywrightPanel({
   view,
   onViewChange,
   events,
+  playbackIdentity,
   artifactGroups,
   artifactPolicy,
   onOpenArtifactSettings,
@@ -28,6 +30,7 @@ export function PlaywrightPanel({
   view: PlaywrightView
   onViewChange: (view: PlaywrightView) => void
   events?: PlaywrightPlaybackEvent[]
+  playbackIdentity?: PlaybackIdentity
   artifactGroups?: PlaywrightArtifactGroup[]
   artifactPolicy?: PlaywrightArtifactPolicy
   onOpenArtifactSettings?: () => void
@@ -77,7 +80,7 @@ export function PlaywrightPanel({
       {view === 'playback' && (
         <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
           {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-          <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
+          <PlaywrightPlayback events={events} playbackIdentity={playbackIdentity} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
         </div>
       )}
     </RunPane>

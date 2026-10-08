@@ -19,6 +19,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { checkSharedBehaviors } from './shared-behavior-contracts.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '..')
 // Root files that own wire types. Every exported interface or type alias in
@@ -30,6 +31,8 @@ const WIRE_HOMES = [
   'shared/getting-started.ts',
   'shared/run-manifest.ts',
   'shared/run-detail.ts',
+  'shared/playback-identity.ts',
+  'shared/test-review.ts',
   'shared/run-index.ts',
   'shared/cleanup-listing.ts',
   'shared/draft-types.ts',
@@ -132,7 +135,7 @@ function walk(dir) {
   return out
 }
 
-const problems = []
+const problems = checkSharedBehaviors(read)
 
 const wireNames = new Map()
 for (const home of WIRE_HOMES) {

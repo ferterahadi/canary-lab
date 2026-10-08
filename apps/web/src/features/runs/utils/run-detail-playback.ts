@@ -1,3 +1,4 @@
+import { buildPlaybackIdentity, latestPlaybackAttempt, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
 import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
@@ -34,31 +35,23 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   trace: 'retain-on-failure',
 }
 
-export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[] {
-  const tests = new Map<string, PlaybackTest>()
-  const activeKeyByName = new Map<string, string>()
-  const latestKeyByName = new Map<string, string>()
-  // Tracks the `location` (file:line) for each attempt's key — only test-begin
-  // and test-end events carry location, so we record it as we see them.
-  const locationByKey = new Map<string, string>()
-  for (const event of events ?? []) {
-    let key = activeKeyByName.get(event.test.name) ?? latestKeyByName.get(event.test.name) ?? event.test.name
-    if (event.type === 'test-begin') {
-      key = `${event.test.name}:${event.time}`
-      activeKeyByName.set(event.test.name, key)
-      latestKeyByName.set(event.test.name, key)
-    }
-    if ((event.type === 'test-begin' || event.type === 'test-end') && event.test.location) {
-      locationByKey.set(key, event.test.location)
-    }
-    const current = tests.get(key) ?? { name: event.test.name, title: event.test.title, steps: [] }
+export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackTest[] {
+  const projection = identity?.eventKeys.length === events.length ? identity : buildPlaybackIdentity(events, known)
+  const attempts = new Map<string, PlaybackTest>()
+  const cases = new Map<string, Set<string>>()
+  for (const [index, event] of events.entries()) {
+    const keys = projection.eventKeys[index]
+    if (!keys) continue
+    const group = cases.get(keys.caseKey) ?? new Set<string>()
+    group.add(keys.attemptKey)
+    cases.set(keys.caseKey, group)
+    const current = attempts.get(keys.attemptKey) ?? { name: event.test.name, title: event.test.title, steps: [] }
     current.title = event.test.title || current.title
+    if ('location' in event.test) current.location = event.test.location
     if (event.type === 'test-begin') current.startedAt = event.time
-    if (event.type === 'step-begin') {
-      current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
-    }
+    if (event.type === 'step-begin') current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
     if (event.type === 'step-end') {
-      const open = [...current.steps].reverse().find((s) => s.title === event.step.title && !s.ended)
+      const open = [...current.steps].reverse().find((step) => step.title === event.step.title && !step.ended)
       if (open) open.ended = true
       else current.steps.push({ title: event.step.title, category: event.step.category, ended: true })
     }
@@ -69,34 +62,14 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
       current.retry = event.retry
       current.error = event.error
       current.endedAt = event.time
-      activeKeyByName.delete(event.test.name)
     }
-    tests.set(key, current)
-    latestKeyByName.set(event.test.name, key)
+    attempts.set(keys.attemptKey, current)
   }
-  // Collapse attempts to one entry per (name, spec file). Retries and
-  // heal-cycle reruns fold into the latest attempt — the line number is
-  // deliberately ignored because heal edits shift a test's line between
-  // cycles (e.g. :205 → :222) while it stays the same test. Two distinct
-  // tests that happen to share a title (and therefore a `name`) but live in
-  // different files stay as separate entries — the export HTML disambiguates
-  // them via positional anchor IDs. Map preserves first-seen identity order,
-  // last write wins so the latest attempt is kept.
-  // Carries the test alongside its key: every entry here comes straight out of
-  // `tests`, so re-looking it up afterwards only added a `has`/`get` pair whose
-  // miss arm nothing could reach.
-  const latestByIdentity = new Map<string, { key: string; test: PlaybackTest }>()
-  for (const [key, test] of tests.entries()) {
-    const file = parseLocation(locationByKey.get(key))?.file ?? ''
-    const identity = `${test.name}@${file}`
-    latestByIdentity.set(identity, { key, test })
-  }
-  return [...latestByIdentity.values()]
-    .map(({ key, test }) => ({
-      ...test,
-      location: test.location ?? locationByKey.get(key),
-      steps: compactPlaybackSteps(test.steps),
-    }))
+  return [...cases.values()].map((keys) => {
+    // Every key was inserted alongside its attempt above.
+    const test = latestPlaybackAttempt([...keys].map((key) => attempts.get(key)!))!
+    return { ...test, steps: compactPlaybackSteps(test.steps) }
+  })
 }
 
 export function artifactsForPlayback(

@@ -1,3 +1,4 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
 import { useState } from 'react'
 import { isElicitationReview, checkpointInputToken } from '@/shared/lib/workspace-view-state'
 import * as flightsApi from '@/shared/api/flights'
@@ -9,7 +10,7 @@ import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExpo
 import { checkpointOptionLabel, STAGE_COLUMN } from './stage-meta'
 import { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
 import { evaluationTaskId } from './StageFacts'
-import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
+import { externalMutationTooltip } from '../lib/external-work'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 /** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance

@@ -310,3 +310,14 @@ describe('test review human gate', () => {
     expect(value(await tools.raw('review_test_changes', args, context())).reason).toContain('no available decision action')
   })
 })
+
+it.each([1, 2])('requests human review for %s files without a UI base URL', async (count) => {
+  const { send, review } = fixture()
+  if (count === 2) review.files.push({ file: 'e2e/b.spec.ts', change: 'modified' })
+  const tools = captureTools(registerTestReviewTools, { projectRoot: '/project', testReviewRequest: send }, facts)
+  const result = await tools.raw('review_test_changes', args, context()) as InputRequiredResult
+  expect(result).toHaveProperty('requestState')
+  expect(JSON.stringify(result.inputRequests)).toContain(`${count} changed test-suite file${count === 1 ? '' : 's'}`)
+  expect(JSON.stringify(result.inputRequests)).not.toContain('Compare changes in Canary')
+  expect(send.mock.calls.filter(([request]) => request.method === 'POST')).toEqual([])
+})

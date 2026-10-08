@@ -145,7 +145,7 @@ describe('playbackTests', () => {
       },
     ]
 
-    expect(playbackTests(events)).toEqual([
+    expect(playbackTests(events, undefined, [{ name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' }])).toEqual([
       expect.objectContaining({
         name: 'cleanup',
         status: 'passed',
