@@ -1,7 +1,7 @@
+import { expandHomePath } from './home-path'
 import http from 'http'
 import https from 'https'
 import net from 'net'
-import os from 'os'
 import type { FeatureConfig, HealthCheck, HealthProbe, HttpProbe, LegacyHealthProbe, RepoPrerequisite, StartCommand, TcpProbe } from '../../../../shared/launcher/types'
 
 export interface StartTab {
@@ -11,7 +11,7 @@ export interface StartTab {
 }
 
 export function resolvePath(p: string): string {
-  return p.startsWith('~/') ? p.replace('~', os.homedir()) : p
+  return expandHomePath(p)
 }
 
 // Whether a repo or startCommand with an `envs` whitelist is active in the

@@ -49,11 +49,11 @@ export async function pauseAndHeal(ctx: RunContext, host: RunLoopHost): Promise<
   ctx.emit('paused-by-user', { failureCount: failed.length })
 
   const pty = ctx.playwrightPty
-  try { pty.kill('SIGTERM') } catch { /* already dead */ }
+  killTree(pty, 'SIGTERM')
   const exited = await waitForPlaywrightExit(ctx, 5000)
   if (!exited && ctx.playwrightPty) {
-    try { ctx.playwrightPty.kill('SIGKILL') } catch { /* already dead */ }
-    await waitForPlaywrightExit(ctx, 1000)
+    killTree(pty, 'SIGKILL')
+    if (ctx.playwrightPty === pty) await waitForPlaywrightExit(ctx, 1000)
   }
 
   return { ok: true, failureCount: failed.length }

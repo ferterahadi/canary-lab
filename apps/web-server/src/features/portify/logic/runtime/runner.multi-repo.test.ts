@@ -37,7 +37,7 @@ vi.mock('./agent', () => ({
 // would populate, so abort()'s child-kill loop is exercised on cancel. Tests
 // can override per-case (e.g. the retry case).
 async function defaultAgentEdit(opts: { cwd: string; children?: Set<unknown> }): Promise<void> {
-  opts.children?.add({ kill: () => {} })
+  opts.children?.add({ stop: () => {} })
   try {
     fs.mkdirSync(path.join(opts.cwd, 'src'), { recursive: true })
     fs.appendFileSync(path.join(opts.cwd, 'src', 'server.js'), '\n// port made injectable by agent\n')

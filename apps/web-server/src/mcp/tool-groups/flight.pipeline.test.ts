@@ -1,3 +1,4 @@
+import { flightActivityCases } from '../../../../../shared/__fixtures__/flight-activity'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   flightHarness,
@@ -1155,5 +1156,38 @@ describe('respond_flight_checkpoint — what rides the response', () => {
     // `data !== undefined` rather than a truthiness check: null is a submitted
     // result, not an omitted one.
     expect(requests[0].payload).toEqual({ response: { choice: 'submit', data: null } })
+  })
+})
+
+it.each(flightActivityCases)('follows active flights without restarting for $status', async ({ status, active }) => {
+  const { call, requests } = flightHarness({ reply: startRoutes({
+    flights: [{ flightId: 'fl-existing', status, repoPaths: ['/repo/shop'] }],
+    detail: { statusCode: 200, body: plainFlight(status, { flightId: 'fl-existing' }) },
+  }) })
+  const result = await call('start_flight', { repoPaths: ['/repo/shop'], description: 'checkout' })
+  if (active) {
+    expect(result.note).toBe('a flight is already active for these repos — following it')
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
+  } else if (status === 'paused') {
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', url: '/api/flights/fl-existing/resume' })
+  } else {
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', url: '/api/flights' })
+  }
+})
+
+it('preserves list attention and does not invent next steps for a failed flight without a remedy', async () => {
+  const attention = { state: 'unavailable', reason: 'Source unavailable' }
+  const listing = flightHarness({ reply: { statusCode: 200, body: { flights: [plainFlight('failed', { attention })] } } })
+  expect(await listing.call('get_flight', {})).toMatchObject({ flights: [{ attention }] })
+  const detail = flightHarness({ reply: { statusCode: 200, body: plainFlight('failed') } })
+  expect(await detail.call('get_flight', { flightId: 'fl-1' })).toMatchObject({ status: 'failed', next: '' })
+})
+
+it('requires a fresh evidence read before recommending recovery when attention is unavailable', async () => {
+  const { call } = flightHarness({ reply: { statusCode: 200,
+    body: plainFlight('failed', { attention: { state: 'unavailable', reason: 'Source unavailable' } }),
+  } })
+  expect(await call('get_flight', { flightId: 'fl-1' })).toMatchObject({
+    next: 'Source unavailable Retry get_flight to confirm the current evidence before recommending recovery.',
   })
 })

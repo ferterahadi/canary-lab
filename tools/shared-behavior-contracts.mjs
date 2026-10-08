@@ -1,5 +1,24 @@
 // Targeted ownership contracts complement consumer parity tests; not a clone detector.
 export const sharedBehaviors = [
+  { file: 'apps/web-server/src/shared/repo-identity.ts', owner: './home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/web-server/src/shared/launcher-startup.ts', owner: './home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/web-server/src/features/config/routes/workspace-fs-routes.ts', owner: '../../../shared/home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/web-server/src/features/config/routes/envset-routes.ts', owner: '../../../shared/home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/web-server/src/features/config/logic/feature-docs-authoring.ts', owner: '../../../shared/home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/web-server/src/features/runs/logic/runtime/launcher/project-config.ts', owner: '../../../../../shared/home-path', symbols: ['expandHomePath'] },
+  { file: 'apps/cli/e2e-flight-drive.ts', owner: '../../shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web/src/features/flights/lib/workspace-flights.ts', owner: '@shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web/src/features/flights/components/FlightControls.tsx', owner: '@shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web/src/features/flights/components/FlightChipState.tsx', owner: '@shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web/src/features/flights/components/FlightDetail.tsx', owner: '@shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web-server/src/mcp/tool-groups/flight.ts', owner: '../../../../../shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web-server/src/features/flights/routes/flights-plan.ts', owner: '../../../../../../shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web-server/src/features/flights/ws/flights-stream.ts', owner: '../../../../../../shared/flights/types', symbols: ['isActiveFlightStatus'] },
+  { file: 'apps/web-server/src/features/runs/logic/runtime/run-spawn.ts', owner: '../../../../shared/process-tree', symbols: ['signalProcessTree'] },
+  { file: 'apps/web-server/src/features/runs/logic/runtime/run-heal-controls.ts', owner: './run-spawn', symbols: ['killTree'] },
+  { file: 'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts', owner: './run-spawn', symbols: ['killTree'] },
+  { file: 'apps/web-server/src/features/portify/logic/runtime/agent.ts', owner: '../../../agent-sessions/logic/agent-process', symbols: ['runAgentProcess'] },
+  { file: 'apps/web-server/src/features/benchmark/logic/runtime/runner.ts', owner: '../../../agent-sessions/logic/agent-process', symbols: ['runAgentProcess'] },
   ...['RepoScanPanel', 'StageFacts'].map((name) => ({ file: `apps/web/src/features/flights/components/${name}.tsx`, owner: '@shared/lib/repository-paths', symbols: ['distinctRepoPaths'] })),
   { file: 'apps/web-server/src/shared/repo-identity.ts', owner: '../../../../shared/lib/repository-paths', symbols: ['distinctRepoPaths'] },
   ...['routes/flights-read.ts', 'logic/workspace-evidence.ts'].map((file) => ({ file: `apps/web-server/src/features/flights/${file}`, owner: '../../../shared/repo-identity', symbols: ['configuredRepoPaths'] })),
@@ -39,4 +58,28 @@ export function checkSharedBehaviors(read, rules = sharedBehaviors) {
     if (/\b(?:interface|type)\s+TestReview\b/.test(code)) problems.push(`${file}: use the shared RunTestReview contract`)
   }
   return problems
+}
+
+export const forbiddenSharedCopies = [
+  ...['features/portify/logic/runtime/prepare-workflow.ts', 'features/benchmark/logic/runtime/runner.ts',
+    'features/runs/logic/runtime/run-heal-controls.ts', 'features/runs/logic/runtime/orchestrator.ts',
+    'features/runs/logic/runtime/run-spawn.ts'].map((file) => ({
+    file: `apps/web-server/src/${file}`, pattern: /\.kill\s*\(/,
+    invalid: "child.kill('SIGTERM')", valid: "handle.stop('SIGTERM')",
+    message: 'use the owned agent handle or shared process-tree adapter',
+  })),
+  ...['apps/cli/e2e-flight-drive.ts', 'apps/web/src/features/flights/lib/workspace-flights.ts',
+    'apps/web/src/features/flights/components/FlightControls.tsx', 'apps/web/src/features/flights/components/FlightChipState.tsx',
+    'apps/web/src/features/flights/components/FlightDetail.tsx', 'apps/web-server/src/mcp/tool-groups/flight.ts',
+    'apps/web-server/src/features/flights/routes/flights-plan.ts', 'apps/web-server/src/features/flights/ws/flights-stream.ts'].map((file) => ({
+    file, pattern: /\b(flight|entry|latest|f|a|b)\.status\s*===\s*['"]running['"]\s*\|\|\s*\1\.status\s*===\s*['"]waiting-for-approval['"]|(?<![\w.])status\s*===\s*['"]running['"]\s*\|\|\s*status\s*===\s*['"]waiting-for-approval['"]/,
+    invalid: "flight.status === 'running' || flight.status === 'waiting-for-approval'",
+    valid: "stage.status === 'running' || stage.status === 'waiting-for-approval'",
+    message: 'use isActiveFlightStatus for flight-level activity',
+  })),
+]
+
+export function checkForbiddenSharedCopies(read, rules = forbiddenSharedCopies) {
+  return rules.filter(({ file, pattern }) => pattern.test(read(file).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')))
+    .map(({ file, message }) => `${file}: ${message}`)
 }

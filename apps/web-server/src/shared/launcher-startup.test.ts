@@ -51,8 +51,8 @@ describe('resolvePath', () => {
     expect(resolvePath('/abs/path')).toBe('/abs/path')
   })
 
-  it('leaves a bare "~" or "~foo" (no slash) untouched', () => {
-    expect(resolvePath('~')).toBe('~')
+  it('expands bare home while leaving named-user syntax untouched', () => {
+    expect(resolvePath('~')).toBe('/Users/test')
     expect(resolvePath('~foo')).toBe('~foo')
   })
 

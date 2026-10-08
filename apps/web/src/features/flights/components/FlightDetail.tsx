@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '@shared/flights/types'
 import { isExternallyDriven } from '@shared/flights/ownership'
 import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { coverageJobStage } from '../lib/coverage-activity'
@@ -544,7 +545,7 @@ export function FlightDetail({
             Settled → ONE Continue menu absorbing resume / repeat-a-step /
             start-over: "Resume at <stage>" (paused) + "From a step…" (+ optional
             what-went-wrong note that reaches the agent's prompt). */}
-        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && !externalWorkCheckpoint && !showParallelSetupStart && (
+        {isActiveFlightStatus(flight.status) && !externalWorkCheckpoint && !showParallelSetupStart && (
           <DisabledControlTooltip>
             <button
               type="button"

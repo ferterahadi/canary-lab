@@ -1,3 +1,4 @@
+import { isActiveFlightStatus, type FlightStatus } from '../../../../../shared/flights/types'
 import type { FlightAttention } from '../../../../../shared/flights/attention'
 // MCP tools — the conducted flight pipeline (start / inspect / answer checkpoints).
 import { z } from 'zod'
@@ -232,7 +233,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to continue a configured suite / locate its existing Flight.')
     }
     const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
-    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: string; repoPaths?: string[] }> }).flights ?? [])
+    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: FlightStatus; repoPaths?: string[] }> }).flights ?? [])
     const targets = new Set((repoPaths ?? []).map((p) => path.resolve(p)))
     const latest = flights.find((f) =>
       targets.size > 0
@@ -276,7 +277,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
           ...(external_session_url ? { sessionUrl: external_session_url } : {}),
         }
       : undefined
-    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval') && !redo && !from_stage) {
+    if (latest && isActiveFlightStatus(latest.status) && !redo && !from_stage) {
       const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
       const view = flightView(current.body)
       return asJsonResult({ ...view, note: 'a flight is already active for these repos — following it', next: flightNext(view) })

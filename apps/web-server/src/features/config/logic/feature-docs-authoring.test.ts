@@ -374,3 +374,7 @@ describe('symlink-aware doc write/delete', () => {
     expect(fs.lstatSync(path.join(featureDir, 'docs'), { throwIfNoEntry: false })).toBeTruthy()
   })
 })
+
+it('refuses linking a document into a missing feature before resolving its source', () => {
+  expect(linkFeatureDoc(ctx(), { feature: 'missing', targetPath: '~' })).toEqual({ ok: false, error: 'feature not found' })
+})

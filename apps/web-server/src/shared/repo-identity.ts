@@ -1,12 +1,10 @@
+import { expandHomePath } from './home-path'
 import { distinctRepoPaths } from '../../../../shared/lib/repository-paths'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 export function resolveRepoPath(localPath: string): string {
-  if (localPath === '~') return os.homedir()
-  if (localPath.startsWith('~/')) return path.join(os.homedir(), localPath.slice(2))
-  return localPath
+  return expandHomePath(localPath)
 }
 
 /** Compare configured directories, not Git roots: sibling services and separate

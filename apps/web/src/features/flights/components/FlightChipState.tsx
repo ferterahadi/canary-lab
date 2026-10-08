@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '@shared/flights/types'
 import { isExternallyDriven } from '@shared/flights/ownership'
 import { flightNeedsAttention } from '@shared/flights/attention'
 import {
@@ -44,7 +45,7 @@ export function summarizeFlightActivity(
   activity: Map<string, FeatureActivity>,
 ): { activeFeatures: Set<string>; preFlightRows: PlanFeaturesTask[]; activeCount: number } {
   const activeFeatures = new Set([
-    ...flights.filter((flight) => flight.status === 'running' || flight.status === 'waiting-for-approval').map((flight) => flight.feature),
+    ...flights.filter((flight) => isActiveFlightStatus(flight.status)).map((flight) => flight.feature),
     ...activity.keys(),
   ])
   const preFlightRows = preFlights.filter((task) => task.status === 'running' || task.status === 'done')

@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '../../shared/flights/types'
 /**
  * Scripted end-to-end drive of the Flight experience (R53–R68 verification).
  *
@@ -75,7 +76,7 @@ async function main(): Promise<void> {
     if (event.type !== 'flights-changed') return
     flightsChanged += 1
     const all = store.list()
-    const active = all.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval')
+    const active = all.filter((f) => isActiveFlightStatus(f.status))
     maxConcurrentActive = Math.max(maxConcurrentActive, active.length)
     if (all.some((f) => f.status === 'paused' && f.pauseReason === 'queued')) sawQueued = true
   })
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
   // store (the drain starts queued flights on its own schedule — a script-side
   // variable would race it).
   const currentFeatureName = (): string => {
-    const active = store.list().find((f) => f.status === 'running' || f.status === 'waiting-for-approval')
+    const active = store.list().find((f) => isActiveFlightStatus(f.status))
     return active?.feature ?? store.list()[0]?.feature ?? 'first-flight-app'
   }
   const spawnAgent = async ({ prompt }: { prompt: string }): Promise<{ text: string }> => {

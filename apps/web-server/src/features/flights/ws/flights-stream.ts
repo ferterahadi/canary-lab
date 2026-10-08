@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '../../../../../../shared/flights/types'
 import type { FastifyInstance } from 'fastify'
 import type { FlightStore, FlightStoreEvent } from '../logic/store'
 import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
@@ -27,12 +28,6 @@ export type FlightsStreamFrame =
   | { type: 'update'; flightId: string; manifest: FlightManifest }
   | { type: 'removed'; flightId: string }
 
-/** Active = still moving, so its manifest is worth pushing up front. A settled
- *  flight's detail is one REST read away and most of them are never opened. */
-function isActive(status: FlightIndexEntry['status']): boolean {
-  return status === 'running' || status === 'waiting-for-approval'
-}
-
 export async function flightsStreamRoutes(
   app: FastifyInstance,
   deps: FlightsStreamDeps,
@@ -42,7 +37,7 @@ export async function flightsStreamRoutes(
     store: deps.store,
     snapshot: () => {
       const flights = deps.store.list()
-      const details = activeDetails(flights, (entry) => isActive(entry.status), (entry) => entry.flightId, (id) => deps.store.get(id))
+      const details = activeDetails(flights, (entry) => isActiveFlightStatus(entry.status), (entry) => entry.flightId, (id) => deps.store.get(id))
       return { type: 'snapshot', flights, details }
     },
     frameFor: (event) => {

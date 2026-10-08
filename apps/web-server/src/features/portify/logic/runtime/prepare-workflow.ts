@@ -1,3 +1,4 @@
+import type { AgentProcessHandle } from '../../../agent-sessions/logic/agent-process'
 import { realpathOrSelf } from '../../../../shared/realpath-or-self'
 // Validating and setting up one port-ification workflow: git prerequisites,
 // the scratch worktrees, the manifest, and the orchestrator with its injected
@@ -7,7 +8,6 @@ import { realpathOrSelf } from '../../../../shared/realpath-or-self'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { readWorkingTree, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
 import { resolveRepoPath } from '../../../../shared/repo-identity'
@@ -145,7 +145,7 @@ export async function prepareWorkflow(
   deps.store.save(manifest)
 
   let aborted = false
-  const children = new Set<ChildProcess>()
+  const children = new Set<AgentProcessHandle>()
   // External edits happen in the user's own client — no local session to pin.
   const sessionId = opts.producer === 'internal' && agent === 'claude' ? randomUUID() : undefined
   const state: ActiveWorkflow = {
@@ -158,7 +158,7 @@ export async function prepareWorkflow(
     seededFrom: [],
     abort: () => {
       aborted = true
-      for (const c of children) { try { c.kill('SIGTERM') } catch { /* gone */ } }
+      for (const handle of children) handle.stop('SIGTERM')
     },
   }
   active.set(workflowId, state)

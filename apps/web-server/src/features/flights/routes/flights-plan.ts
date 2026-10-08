@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '../../../../../../shared/flights/types'
 // Flights REST — the multi-repo plan surface (propose a plan, poll the task,
 // launch the planned flights) plus stage evidence and abort. Bodies unchanged.
 import { resolveRepoPaths } from '../../../shared/repo-identity'
@@ -111,8 +112,8 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
           .map((flightId) => store.get(flightId))
           .filter((flight): flight is NonNullable<typeof flight> =>
             flight !== null && !isTerminalFlightStatus(flight.status))
-          .sort((a, b) => Number(a.status === 'running' || a.status === 'waiting-for-approval')
-            - Number(b.status === 'running' || b.status === 'waiting-for-approval'))
+          .sort((a, b) => Number(isActiveFlightStatus(a.status))
+            - Number(isActiveFlightStatus(b.status)))
         for (const flight of descendants) await abortFlight(flight.flightId, conductorDeps)
         return planStore.get(req.params.taskId) ?? task
       } catch (err) {

@@ -62,6 +62,7 @@ function fakePty(): PtyHandle & { kills: string[] } {
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-ctl-')))
   vi.clearAllMocks()
+  h.killTree.mockImplementation((pty, signal) => { try { pty.kill(signal) } catch { /* exited test handle */ } })
   h.summarizeFailures.mockReturnValue({ failed: [], total: 4 })
   h.waitForPlaywrightExit.mockResolvedValue({ exitCode: 0 })
   h.runAutoHealLoop.mockResolvedValue('passed')
@@ -133,6 +134,23 @@ describe('pauseAndHeal', () => {
     expect(pty.kills).toEqual(['SIGTERM', 'SIGKILL'])
     expect(h.waitForPlaywrightExit).toHaveBeenNthCalledWith(1, ctx, 5000)
     expect(h.waitForPlaywrightExit).toHaveBeenNthCalledWith(2, ctx, 1000)
+  })
+
+  it('escalates the original tree without signaling or waiting on a replacement', async () => {
+    const original = fakePty()
+    const replacement = fakePty()
+    const { ctx } = ctxFor({ playwrightPty: original })
+    h.summarizeFailures.mockReturnValue({ failed: ['a'], total: 4 })
+    h.waitForPlaywrightExit.mockImplementationOnce(async () => {
+      ctx.playwrightPty = replacement
+      return null
+    })
+    expect(await pauseAndHeal(ctx, makeLoopHost())).toEqual({ ok: true, failureCount: 1 })
+    expect(h.killTree).toHaveBeenNthCalledWith(1, original, 'SIGTERM')
+    expect(h.killTree).toHaveBeenNthCalledWith(2, original, 'SIGKILL')
+    expect(original.kills).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(replacement.kills).toEqual([])
+    expect(h.waitForPlaywrightExit).toHaveBeenCalledTimes(1)
   })
 
   it('survives a pty that is already dead on both kill attempts', async () => {

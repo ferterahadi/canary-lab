@@ -1,11 +1,10 @@
 import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
-import { type ChildProcess } from 'child_process'
 import { writeClaudeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import { type AgentProcessHandle, runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity
 // (no session-JSONL / log growth). No hard wall-clock — a slow-but-working agent
@@ -41,7 +40,7 @@ export function runPortifyAgent(opts: {
   prompt: string
   cwd: string
   logPath?: string
-  children?: Set<ChildProcess>
+  children?: Set<AgentProcessHandle>
   /** claude session id — set on attempt 1, reused on retries. */
   sessionId?: string
   /** true on a retry: resume the prior claude session instead of starting one. */
@@ -80,9 +79,9 @@ export function runPortifyAgent(opts: {
     idleMs: PORTIFY_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, cwd, sessionId, logPath ?? undefined),
   })
-  children?.add(handle.child)
+  children?.add(handle)
   const cleanup = (): void => {
-    children?.delete(handle.child)
+    children?.delete(handle)
     if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
   }
   return handle.done.then(

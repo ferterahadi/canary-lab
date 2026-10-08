@@ -19,7 +19,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import { checkSharedBehaviors } from './shared-behavior-contracts.mjs'
+import { checkSharedBehaviors, checkForbiddenSharedCopies } from './shared-behavior-contracts.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '..')
 // Root files that own wire types. Every exported interface or type alias in
@@ -135,7 +135,7 @@ function walk(dir) {
   return out
 }
 
-const problems = checkSharedBehaviors(read)
+const problems = [...checkSharedBehaviors(read), ...checkForbiddenSharedCopies(read)]
 
 const wireNames = new Map()
 for (const home of WIRE_HOMES) {

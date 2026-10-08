@@ -1,7 +1,7 @@
+import { expandHomePath } from '../../../../../shared/home-path'
 import { atomicWriteJson } from '../../../../../../../../shared/lib/atomic-write'
 import type { ProjectConfig, HealAgentChoice, EditorChoice } from '../../../../../../../../shared/project-config'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { normalizeAgentModels } from '../../../../../../../../shared/agent-models'
 
@@ -59,7 +59,7 @@ export function normalizePersonalWikiPath(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   if (!trimmed) return null
-  const expanded = expandHome(trimmed)
+  const expanded = expandHomePath(trimmed, { backslash: true })
   if (!path.isAbsolute(expanded)) return null
   try {
     const resolved = fs.realpathSync(expanded)
@@ -67,14 +67,6 @@ export function normalizePersonalWikiPath(value: unknown): string | null {
   } catch {
     return null
   }
-}
-
-function expandHome(value: string): string {
-  if (value === '~') return os.homedir()
-  if (value.startsWith('~/') || value.startsWith('~\\')) {
-    return path.join(os.homedir(), value.slice(2))
-  }
-  return value
 }
 
 export function loadProjectConfig(projectRoot: string): ProjectConfig {

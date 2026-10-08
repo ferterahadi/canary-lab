@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { ChildProcess } from 'child_process'
+import type { AgentProcessHandle } from '../../../agent-sessions/logic/agent-process'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import * as agentProcess from '../../../agent-sessions/logic/agent-process'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
@@ -44,8 +44,10 @@ describe('runPortifyAgent', () => {
   it('runs claude with a pinned session id and tees output to a log', async () => {
     const dir = tmp()
     const logPath = path.join(dir, 'agent.log')
-    const children = new Set<ChildProcess>()
-    await runPortifyAgent({ agent: 'claude', prompt: 'do it', cwd: dir, logPath, children, sessionId: 's1', resume: false })
+    const children = new Set<AgentProcessHandle>()
+    const running = runPortifyAgent({ agent: 'claude', prompt: 'do it', cwd: dir, logPath, children, sessionId: 's1', resume: false })
+    expect([...children][0].stop).toBeTypeOf('function')
+    await running
     expect(fs.existsSync(logPath)).toBe(true)
     expect(children.size).toBe(0) // child removed on close
   })
@@ -110,7 +112,7 @@ describe('runPortifyAgent', () => {
   it('records the launch failure to the log so it is not mistaken for an empty run', async () => {
     const dir = tmp()
     const logPath = path.join(dir, 'agent.log')
-    const children = new Set<ChildProcess>()
+    const children = new Set<AgentProcessHandle>()
     await expect(
       runPortifyAgent({ agent: 'definitely-not-a-binary' as HealAgent, prompt: 'x', cwd: dir, logPath, children }),
     ).rejects.toThrow()

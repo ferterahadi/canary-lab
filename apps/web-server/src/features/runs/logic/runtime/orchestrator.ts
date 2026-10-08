@@ -228,7 +228,7 @@ export class RunOrchestrator extends EventEmitter {
     for (const svc of targets) {
       const pty = this.ctx.servicePtys.get(svc.name)
       if (pty) {
-        try { pty.kill('SIGTERM') } catch { /* already dead */ }
+        killTree(pty, 'SIGTERM')
         this.ctx.servicePtys.delete(svc.name)
       }
       this.ctx.logFiles.delete(this.ctx.paths.serviceLog(svc.safeName))

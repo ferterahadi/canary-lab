@@ -12,7 +12,7 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyHandle } from './pty-spawner'
 import type { RunPaths } from './run-paths'
 import type { PlaywrightRerunSelection } from './rerun-targets'
-import { canSignalProcessGroup, signalProcessTree } from '../../../../shared/process-tree'
+import { signalProcessTree } from '../../../../shared/process-tree'
 
 export interface PlaywrightInvocation {
   command: string
@@ -105,11 +105,7 @@ export function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void 
 // pid here must stay inert forever, not just while a suite's spies are up.
 export function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
   setTimeout(() => {
-    if (canSignalProcessGroup(pty.pid)) {
-      try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
-    } else {
-      try { pty.kill('SIGKILL') } catch { /* already dead */ }
-    }
+    killTree(pty, 'SIGKILL')
   }, ms).unref?.()
 }
 

@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '@shared/flights/types'
 import type { ProjectConfigResponse } from '@shared/project-config'
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import * as flightsApi from '@/shared/api/flights'
@@ -524,7 +525,7 @@ export function FlightMenu({
   // Escape-to-exit — one press dismisses the menu, not the whole page.
   useEscapeToClose(() => setOpen(false), open)
 
-  const active = flight.status === 'running' || flight.status === 'waiting-for-approval'
+  const active = isActiveFlightStatus(flight.status)
 
   interface MenuItem {
     key: string

@@ -1,5 +1,5 @@
+import { expandHomePath } from '../../../shared/home-path'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FeatureAuthoringContext } from './feature-authoring'
 import { findFeature } from '../../../shared/feature-loader'
@@ -65,10 +65,7 @@ export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
 }): { ok: true; writtenPath: string; relativePath: string; linked: boolean } | { ok: false; error: string } {
   const feature = findFeature(ctx.featuresDir, input.feature)
   if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  const expanded =
-    input.targetPath === '~' || input.targetPath.startsWith('~/')
-      ? path.join(os.homedir(), input.targetPath.slice(1))
-      : input.targetPath
+  const expanded = expandHomePath(input.targetPath)
   let real: string
   try {
     real = fs.realpathSync(path.resolve(expanded))

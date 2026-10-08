@@ -1,9 +1,9 @@
+import { expandHomePath } from '../../../shared/home-path'
 // Feature-config REST — envsets and feature-scoped port/env slots.
 // Split out of feature-config.ts; handler bodies are unchanged.
 import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { parseDotenv, writeDotenv, type KvEntry } from '../../../../../../shared/lib/dotenv-edit'
 import { loadFeatures } from '../../../shared/feature-loader'
@@ -187,10 +187,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       reply.code(400)
       return { error: 'sourcePath required' }
     }
-    const home = os.homedir()
-    const sourcePath = sourceRaw.startsWith('~/') || sourceRaw === '~'
-      ? path.join(home, sourceRaw.slice(1))
-      : sourceRaw
+    const sourcePath = expandHomePath(sourceRaw)
     if (!path.isAbsolute(sourcePath)) {
       reply.code(400)
       return { error: 'sourcePath must be absolute or start with ~' }
