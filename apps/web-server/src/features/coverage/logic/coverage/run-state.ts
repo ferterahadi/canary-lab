@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import fs from 'fs'
 import path from 'path'
 import { docsDirFor } from './document-files'
@@ -42,7 +43,5 @@ export function readCoverageRunState(featureDir: string): CoverageRunState | nul
 }
 
 export function writeCoverageRunState(featureDir: string, state: CoverageRunState): void {
-  const docsDir = docsDirFor(featureDir)
-  fs.mkdirSync(docsDir, { recursive: true })
-  fs.writeFileSync(statePath(featureDir), JSON.stringify(state, null, 2) + '\n')
+  atomicWriteJson(statePath(featureDir), state, undefined, { uniqueTemporary: true })
 }

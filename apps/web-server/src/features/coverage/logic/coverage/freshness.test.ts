@@ -7,6 +7,7 @@ import { CoverageFreshnessMonitor } from './freshness-monitor'
 import { freshnessWorkspace } from './__fixtures__/freshness-workspace'
 import { computeFeatureCoverage } from './service'
 import { runCoverageEngine } from './coverage-engine'
+import { readCoverageRunState, writeCoverageRunState } from './run-state'
 import { fakePropose } from './__fixtures__/fake-coverage-agents'
 import { CoverageJobRunStore } from './jobs/store'
 import { startExternalCoverage, startExternalSummary, submitExternalCoverage, submitExternalSummary } from './jobs/external'
@@ -25,6 +26,22 @@ beforeEach(async () => {
 afterEach(() => { monitor.close(); fixture.cleanup() })
 
 describe('coverage freshness, real inputs and live delivery', () => {
+  it('delivers atomic coverage-state replacements to an already waiting consumer', async () => {
+    monitor.start()
+    await monitor.reconcile()
+    const before = monitor.read('shop')
+    const original = readCoverageRunState(fixture.featureDir)!
+    const waiting = monitor.wait('shop', before.freshness.revision, 2000)
+    writeCoverageRunState(fixture.featureDir, { ...original, requirementsHash: 'outdated' })
+    const changed = await waiting
+    expect(changed.changed).toBe(true)
+    expect(changed.change.freshness.state).toBe('stale')
+    expect(events).toContainEqual(expect.objectContaining({ type: 'coverage-changed', feature: 'shop', revision: changed.change.freshness.revision }))
+    const recovery = monitor.wait('shop', changed.change.freshness.revision, 2000)
+    writeCoverageRunState(fixture.featureDir, original)
+    expect(await recovery).toMatchObject({ changed: true, change: { freshness: { state: 'current' } } })
+  })
+
   it('detects an edited linked source without a browser request and routes recovery to requirements', async () => {
     monitor.start()
     const before = monitor.read('shop')

@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../lib/atomic-write'
 import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
@@ -70,9 +71,8 @@ function readRaw(homeDir?: string): ActiveServerEntry[] {
 
 function writeFile(entries: ActiveServerEntry[], homeDir?: string): void {
   const file = activeServersPath(homeDir)
-  fs.mkdirSync(path.dirname(file), { recursive: true })
   const payload: ActiveServersFile = { version: 1, servers: entries }
-  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
+  atomicWriteJson(file, payload, undefined, { uniqueTemporary: true })
 }
 
 // Live entries only — dead pids are filtered out (and not persisted; the next

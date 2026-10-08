@@ -1,3 +1,4 @@
+import { readLiveSource } from '../read-live-source'
 import { SPEC_INVENTORY_VERSION } from '../../../../../../../shared/spec-files'
 import type { AdoptSpecEditsResult, RestoreSpecEditsResult } from '../run-control-results'
 // The run-start suite snapshot (D9). Canary Lab's verdict must stay outside the
@@ -99,7 +100,7 @@ export function recordSpecEdits(ctx: RunContext, decision?: TestReviewDecision):
   const pending = computePendingEdits(ctx.feature.featureDir, ctx.suiteDir)
   ctx.stateSink.patchManifest(ctx.runId, {
     specEdits: { checkedAt: new Date().toISOString(), pending, adopted, ...(reviewDecisions.length ? { reviewDecisions } : {}) },
-    integrity: { hints: deriveIntegrityHints(pending, (rel) => readLive(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+    integrity: { hints: deriveIntegrityHints(pending, (rel) => readLiveSource(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
 }
 
@@ -115,13 +116,6 @@ export function refreshSpecEdits(ctx: RunContext, feature: string): void {
   recordSpecEdits(ctx)
 }
 
-function readLive(featureDir: string, rel: string): string | undefined {
-  try {
-    return fs.readFileSync(path.join(featureDir, rel), 'utf8')
-  } catch {
-    return undefined // deleted since run start — the hint then carries no @req ids
-  }
-}
 
 /** A human lets the live edits into this run: the snapshot is taken again from
  *  the live suite, the dirty baseline re-read from it, the adoption recorded on
@@ -263,7 +257,7 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
     installedSpecEdits = { checkedAt: at, pending: remaining, adopted: [...(previous?.adopted ?? []), { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }], ...(reviewDecisions.length ? { reviewDecisions } : {}) }
     return {
       specEdits: installedSpecEdits,
-      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLiveSource(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
     }
   }
   if (expectedRevision !== undefined) {
@@ -282,7 +276,7 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
     const latest = readManifest(ctx.paths.manifestPath)?.specEdits ?? installedSpecEdits!
     ctx.stateSink.patchManifest(ctx.runId, {
       specEdits: { ...latest, checkedAt: new Date().toISOString(), pending: remaining },
-      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLiveSource(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
     })
   }
   return { ok: true, adopted }

@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../lib/atomic-write'
 import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
@@ -56,8 +57,7 @@ export function writeWorkspaceRegistry(
   homeDir?: string,
 ): void {
   const file = registryPath(homeDir)
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  atomicWriteJson(file, registry, undefined, { uniqueTemporary: true })
 }
 
 export function upsertWorkspace(

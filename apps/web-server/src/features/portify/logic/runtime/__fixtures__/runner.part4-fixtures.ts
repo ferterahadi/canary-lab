@@ -1,3 +1,5 @@
+import { initGitRepo } from '../../../../../../../../tools/test-helpers/git-repo'
+import { waitForStatus as waitForRecordStatus } from '../../../../../../../../tools/test-helpers/wait-for-status'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -34,11 +36,7 @@ export const fakePtyFactory: PtyFactory = (): PtyHandle => ({
 export const roots: string[] = []
 
 export async function gitInit(dir: string): Promise<void> {
-  await runGit(dir, ['init', '-q'])
-  await runGit(dir, ['config', 'user.email', 't@t'])
-  await runGit(dir, ['config', 'user.name', 'test'])
-  await runGit(dir, ['add', '-A'])
-  await runGit(dir, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(dir)
 }
 
 export function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
@@ -104,13 +102,7 @@ export function makeRunner(
 }
 
 export async function waitForStatus(store: PortifyRunStore, id: string, until: string[], timeoutMs = 8000): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const m = store.get(id)
-    if (m && until.includes(m.status)) return m.status
-    await new Promise((r) => setTimeout(r, 25))
-  }
-  return store.get(id)?.status ?? 'missing'
+  return waitForRecordStatus(store, id, until, timeoutMs, 25)
 }
 
 export const TERMINAL = ['ready-to-save', 'failed', 'aborted']

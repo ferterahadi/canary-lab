@@ -8,7 +8,7 @@ import { internalAgentContextArgs } from '../../agent-sessions/logic/agent-conte
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { resolveStageChoice } from '../../../../../../shared/agent-models'
 import type { DiscoveryRepair } from '../../../../../../shared/discovery-repair'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 
 export async function runDiscoveryRepairAgent(
   repair: DiscoveryRepair,
@@ -22,7 +22,7 @@ export async function runDiscoveryRepairAgent(
   const config = loadProjectConfig(projectRoot)
   const choice = resolveStageChoice(agent, config.agentModels, 'heal', null)
   const cwd = path.dirname(repair.promptPath)
-  const feature = loadFeatures(path.dirname(repair.featureDir)).find((f) => f.name === repair.feature)
+  const feature = findFeature(path.dirname(repair.featureDir), repair.feature)
   const directories = [...new Set([projectRoot, repair.featureDir, ...(feature?.repos ?? []).map((repo) => repo.localPath)])]
     .filter((directory) => fs.existsSync(directory))
   const directoryArgs = directories.flatMap((directory) => ['--add-dir', directory])

@@ -20,7 +20,7 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { prepareWorktreeDependencies } from './dependency-provenance'
 import { dependencyIncompatibilityReason } from '../../../../../../../shared/dependency-provenance'
-import { loadFeatures } from '../../../../shared/feature-loader'
+import { findFeature } from '../../../../shared/feature-loader'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import { readWatchCompilerFailure } from './watch-compiler-result'
 
@@ -122,7 +122,7 @@ export async function preflightServiceBoot(ctx: RunContext): Promise<boolean> {
     let latest: RunContext['feature'] | undefined
     try {
       if (ctx.dependencyConfigPath && fs.existsSync(ctx.dependencyConfigPath)) {
-        latest = loadFeatures(path.dirname(ctx.feature.featureDir)).find((feature) => feature.name === ctx.feature.name)
+        latest = findFeature(path.dirname(ctx.feature.featureDir), ctx.feature.name)
       }
     } catch {
       // An unreadable configuration becomes a durable blocker below, never a
