@@ -1,12 +1,19 @@
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import { useMemo, useState } from 'react'
-import type { FormattedCodeDisplay, FormattedDisplayLine } from '@shared/code-display-format'
+import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
-import type { ReadableSource } from '@shared/readable-tests/types'
+import { storyCodeLineNumbers, storyItemIdForSourceLine } from '@shared/readable-tests/story-source-map'
+import {
+  bodyLineForSourceLine,
+  buildTestViewRows,
+  markedRowIndexes,
+  sourceLineForBodyLine,
+  storyChangeMarks,
+  testViewSource,
+} from '@shared/test-view/render-model'
 import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step-status'
 import { ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, SourceOpenShell } from './TestCodeBlock'
-import { storyCodeLineNumbers, storyItemIdForSourceLine } from './readable-story-sequence'
 
 type PresentationMode = 'english' | 'code'
 
@@ -24,7 +31,7 @@ export function TestPresentation({
   showOpenButton?: boolean
 }) {
   const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
-    ? new Set(test.sourceChanges.changedLines.map((line) => line - testBodyLine(test) + 1))
+    ? new Set(test.sourceChanges.changedLines.map((line) => bodyLineForSourceLine(test, line)))
     : undefined), [suppliedChangedLines, test])
   const [mode, setMode] = useState<PresentationMode>('english')
   const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
@@ -33,20 +40,18 @@ export function TestPresentation({
     setSelectedSource(selection)
     setMode('code')
   }
-  const showingFullTest = !selectedSource || sourceBelongsToTestBody(test, sourceFile, selectedSource.source)
-  const code = codeSelection(test, sourceFile, selectedSource?.source)
+  const code = testViewSource(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
-  const fullTestRange = codeSelection(test, sourceFile, undefined)
-  const displayedExecutionLines = showingFullTest
-    ? displayLinesForBodyLines(
-        test,
-        executionHighlight ? new Set([executionHighlight.bodyLine]) : undefined,
-        code.lineMap,
-      )
-    : undefined
-  const displayedChangedLines = showingFullTest
-    ? displayLinesForBodyLines(test, changedLines, code.lineMap)
-    : undefined
+  const fullTestRange = testViewSource(test, sourceFile, undefined)
+  const rows = buildTestViewRows({
+    test,
+    sourceFile,
+    selectedSource: selectedSource?.source,
+    execution: executionHighlight ?? undefined,
+    changedBodyLines: changedLines,
+  })
+  const displayedExecutionLines = markedRowIndexes(rows, (marks) => marks.execution !== undefined)
+  const displayedChangedLines = markedRowIndexes(rows, (marks) => marks.changed)
   const storyLineNumbers = useMemo(() => {
     const steps = test.readable.story?.steps
     if (!steps) return undefined
@@ -58,29 +63,12 @@ export function TestPresentation({
     )
   }, [code.endLine, code.file, code.startLine, test.readable.story?.steps])
   const executionSourceLine = executionHighlight
-    ? testBodyLine(test) + executionHighlight.bodyLine - 1
+    ? sourceLineForBodyLine(test, executionHighlight.bodyLine)
     : undefined
   const executionStoryNodeId = executionSourceLine == null || !test.readable.story
     ? undefined
     : storyItemIdForSourceLine(test.readable.story.steps, sourceFile, executionSourceLine)
-  const changedStory = useMemo(() => {
-    const steps = test.readable.story?.steps
-    if (!changedLines?.size) {
-      return { nodeIds: undefined, unmappedSourceLines: [] as number[] }
-    }
-    const sourceLines = [...changedLines]
-      .sort((a, b) => a - b)
-      .map((bodyLine) => testBodyLine(test) + bodyLine - 1)
-    if (!steps) return { nodeIds: undefined, unmappedSourceLines: sourceLines }
-    const nodeIds = new Set<string>()
-    const unmappedSourceLines: number[] = []
-    for (const sourceLine of sourceLines) {
-      const nodeId = storyItemIdForSourceLine(steps, sourceFile, sourceLine)
-      if (nodeId) nodeIds.add(nodeId)
-      else unmappedSourceLines.push(sourceLine)
-    }
-    return { nodeIds, unmappedSourceLines }
-  }, [changedLines, sourceFile, test])
+  const changedStory = useMemo(() => storyChangeMarks(test, sourceFile, changedLines), [changedLines, sourceFile, test])
 
   return (
     <div data-testid="test-presentation">
@@ -185,101 +173,8 @@ function formatSourceLines(lines: readonly number[]): string {
   return lines.map((line) => `L${line}`).join(', ')
 }
 
-function codeSelection(
-  test: ExtractedTest,
-  sourceFile: string,
-  selectedSource?: ReadableSource,
-): {
-  source: string
-  file: string
-  startLine: number
-  endLine: number
-  lineMap: FormattedDisplayLine[]
-} {
-  if (selectedSource && !sourceBelongsToTestBody(test, sourceFile, selectedSource)) {
-    const display = displayCodeSource(selectedSource.snippet, selectedSource.startLine)
-    return {
-      source: display.source,
-      file: selectedSource.file,
-      startLine: selectedSource.startLine,
-      endLine: selectedSource.endLine,
-      lineMap: display.lineMap,
-    }
-  }
-  const startLine = testBodyLine(test)
-  const display = displayCodeSource(test.bodySource, startLine, test.codeDisplay)
-  return {
-    source: display.source,
-    file: sourceFile,
-    startLine,
-    endLine: startLine + Math.max(test.bodySource.split('\n').length - 1, 0),
-    lineMap: display.lineMap,
-  }
-}
-
-/** Test callback bodies arrive as `{ ... }`. Code mode is already scoped to
- * that body, so showing the wrapper adds two rows that English mode cannot have.
- * Remove only standalone wrapper lines and their shared indentation; source
- * navigation keeps using the original absolute lines. */
-function displayCodeSource(
-  source: string,
-  startLine: number,
-  formatted?: FormattedCodeDisplay,
-): { source: string; lineMap: FormattedDisplayLine[] } {
-  const usableDisplay = formatted && formatted.lineMap.length === formatted.code.split('\n').length
-    ? formatted
-    : {
-        code: source,
-        lineMap: source.split('\n').map((_, index) => ({
-          sourceLine: startLine + index,
-          sourceLines: [startLine + index],
-        })),
-      }
-  const lines = usableDisplay.code.split('\n')
-  if (lines.length === 1 && /^\{\s*\}$/.test(lines[0])) {
-    return { source: '', lineMap: [] }
-  }
-  if (lines.length < 2 || lines[0].trim() !== '{' || lines.at(-1)?.trim() !== '}') {
-    return { source: usableDisplay.code, lineMap: usableDisplay.lineMap }
-  }
-  const inner = lines.slice(1, -1)
-  const indentation = inner
-    .filter((line) => line.trim())
-    .reduce((least, line) => Math.min(least, line.match(/^\s*/)?.[0].length ?? 0), Infinity)
-  const dedented = Number.isFinite(indentation)
-    ? inner.map((line) => line.slice(Math.min(indentation, line.length)))
-    : inner
-  return { source: dedented.join('\n'), lineMap: usableDisplay.lineMap.slice(1, -1) }
-}
-
-function displayLinesForBodyLines(
-  test: ExtractedTest,
-  bodyLines: ReadonlySet<number> | undefined,
-  lineMap: readonly FormattedDisplayLine[],
-): Set<number> | undefined {
-  if (!bodyLines?.size) return undefined
-  const bodyStartLine = testBodyLine(test)
-  const sourceLines = new Set([...bodyLines].map((line) => bodyStartLine + line - 1))
-  const displayLines = new Set<number>()
-  lineMap.forEach((mapping, index) => {
-    if (mapping.sourceLines.some((line) => sourceLines.has(line))) displayLines.add(index + 1)
-  })
-  return displayLines.size ? displayLines : undefined
-}
-
 function firstMappedSourceLine(lineMap: readonly FormattedDisplayLine[]): number | null {
   return lineMap[0]?.sourceLine ?? null
-}
-
-function sourceBelongsToTestBody(test: ExtractedTest, sourceFile: string, source: ReadableSource): boolean {
-  if (source.file !== sourceFile) return false
-  const bodyLine = testBodyLine(test)
-  const bodyEndLine = bodyLine + Math.max(test.bodySource.split('\n').length - 1, 0)
-  return source.startLine >= bodyLine && source.endLine <= bodyEndLine
-}
-
-function testBodyLine(test: ExtractedTest): number {
-  return test.bodyLine ?? test.line
 }
 
 function shortSourceLabel(file: string, startLine: number, endLine: number): string {

@@ -64,7 +64,7 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   because it shipped as one 2740-line `tools.ts`; the tool-groups split made it
 //   testable. Measured 389 files at 100/100/100/100 over 7658 tests. The floor
 //   keeps a small margin because the count only includes files a test loaded.
-const MIN_GATED_FILES = 385
+const MIN_GATED_FILES = 387
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']

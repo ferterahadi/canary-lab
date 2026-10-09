@@ -148,6 +148,12 @@ export default defineConfig({
         'shared/flights/**/*.ts',
         'shared/launcher/**/*.ts',
         'shared/lib/**/*.ts',
+        // The story→source map and the test-view row model: pure data behind
+        // the Tests column, the coverage cards, the before/after review and the
+        // server report. Enumerated by file because `shared/readable-tests/`
+        // also holds the translator's types and the ungated source-lines helper.
+        'shared/readable-tests/story-source-map.ts',
+        'shared/test-view/**/*.ts',
         'shared/robustness/**/*.ts',
         'shared/runtime/**/*.ts',
         'shared/agent-models.ts',

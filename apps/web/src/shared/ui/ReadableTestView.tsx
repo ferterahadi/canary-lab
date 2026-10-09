@@ -10,7 +10,7 @@ import type {
 import type { TestExecutionHighlightKind } from '@/features/runs/utils/test-step-status'
 import { useTheme } from '../lib/theme'
 import { codeThemeFor, getCodeHighlighter } from './code-highlighter'
-import { storyLocalSequenceLabel, storySequenceLabel } from './readable-story-sequence'
+import { storyLocalSequenceLabel, storySequenceLabel } from '@shared/readable-tests/story-source-map'
 
 export interface ReadableSourceSelection {
   id: string

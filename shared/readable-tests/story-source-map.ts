@@ -1,4 +1,4 @@
-import type { ReadableStoryItem } from '@shared/readable-tests/types'
+import type { ReadableStoryItem } from './types'
 
 export interface ReadableStorySequenceEntry {
   item: ReadableStoryItem

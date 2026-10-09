@@ -4,7 +4,7 @@ import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedStep } from '@shared/extracted-test'
 import * as workspaceApi from '../api/workspace'
 import { useCodeHighlight } from './use-code-highlight'
-import type { StoryCodeLineNumber } from './readable-story-sequence'
+import type { StoryCodeLineNumber } from '@shared/readable-tests/story-source-map'
 import {
   colorClassForStatus,
   statusLabel,
