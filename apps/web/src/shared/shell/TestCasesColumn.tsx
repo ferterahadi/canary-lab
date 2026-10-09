@@ -21,6 +21,7 @@ import { StatusDot } from '@/shared/ui/atoms'
 import { DisclosureCaret } from '@/shared/ui/Icons'
 import { useTestVersions } from './use-test-versions'
 import type { TestChangeKind } from '@shared/test-review'
+import type { RunOpenTarget } from '../lib/workspace-view-state'
 import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { EmptyState } from '@/shared/ui/EmptyState'
@@ -48,13 +49,16 @@ interface Props {
    *  It can be present before the displayed run's roster has loaded. */
   comparisonBaseline?: TestRunEvidence
   onReviewTest?: (file: string, line?: number, baseline?: 'run', change?: TestChangeKind, test?: string) => void
+  /** Opens a recorded result in the run's Results & Fixes. Absent = badges stay
+   *  read-only. The card's caret still only expands source. */
+  onOpenResult?: (runId: string, target: RunOpenTarget) => void
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
    *  affected — only those test cards get a direct review action. */
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence, comparisonBaseline, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence, comparisonBaseline, onTotalTestsChange, onReviewTest, onOpenResult, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
   const baselineRun = comparisonBaseline?.manifest
   const baselineRunSummary = comparisonBaseline?.summary
   const baselineRunStatus = comparisonBaseline?.status
@@ -303,6 +307,10 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                       sourceLine: sourceLineForBodyLine(bodyStartLine, executionLine.bodyLine),
                     }
                   : undefined
+                const status = statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)
+                const resultTarget = runId && onOpenResult && hasRecordedResult(status)
+                  ? resultTargetFor(t.name, testIdentity, activeRunSummary)
+                  : undefined
                 return (
                   <TestCard
                     key={`${sourceKey}:${key}`}
@@ -310,7 +318,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
                     sourceUnavailable={spec.recordedSourceUnavailable}
-                    status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
+                    status={status}
                     showStatus={!currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
@@ -321,6 +329,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     modifiedLabel={baselineRunId ? 'Changed since this run' : 'Modified since the committed test'}
                     changedLines={changedLines}
                     onToggle={() => setExpandedBySource((current) => new Map(current).set(sourceKey, isExpanded ? null : key))}
+                    {...(resultTarget && runId ? { onOpenResult: () => onOpenResult?.(runId, resultTarget) } : {})}
                   />
                 )
               })
@@ -389,6 +398,24 @@ function summaryIdentityForWorkspaceTest(
  *
  *  Every bar carries the CARD's sweep offset rather than its own: one card is
  *  one test arriving, so it sweeps as a unit while the stack reads top-down. */
+/** A badge opens Results & Fixes only when the run recorded a result for the
+ *  test; a not-run or unmatched card has nothing there to show. */
+function hasRecordedResult(status: StepStatus): boolean {
+  return status !== 'pending' && status !== 'unmatched'
+}
+
+/** The run detail's focus target for a card: its summary name, plus the
+ *  roster id and recorded location when the card matched one exact entry, so
+ *  two tests sharing a title open their own rows. */
+function resultTargetFor(name: string, identity: TestStatusIdentity, summary: RunSummary | undefined): RunOpenTarget {
+  const known = identity.id ? summary?.knownTests?.find((entry) => entry.id === identity.id) : undefined
+  return {
+    test: known?.name ?? summaryEntryName(name),
+    ...(identity.id ? { testId: identity.id } : {}),
+    ...(known?.location ? { testLocation: known.location } : {}),
+  }
+}
+
 function TestCardSkeleton({ width, row }: { width: string; row: number }) {
   return (
     <div className="cl-card" data-testid="test-card-skeleton" aria-hidden="true">
@@ -428,6 +455,7 @@ function TestCard({
   modifiedLabel,
   changedLines,
   onToggle,
+  onOpenResult,
 }: {
   sourceFile: string
   testNumber?: number
@@ -446,6 +474,9 @@ function TestCard({
    *  `changedLineNumbers`. Rendered as changed source, independently of execution status. */
   changedLines?: Set<number>
   onToggle: () => void
+  /** Present when the badge opens this test's recorded result. A sibling of
+   *  the toggle, never nested in it: one button cannot own two actions. */
+  onOpenResult?: () => void
 }) {
   const [lastRunningHighlight, setLastRunningHighlight] = useState<{
     bodySource: string
@@ -486,7 +517,9 @@ function TestCard({
       : undefined
   return (
     <div
-      className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
+      // Two columns so a result button can sit beside the toggle as its
+      // sibling; the expanded body spans both.
+      className={`cl-card cl-card-hover grid grid-cols-[minmax(0,1fr)_auto] items-center transition-all duration-150 ${colorClassForStatus(status)}`}
       style={{
         background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
       }}
@@ -494,7 +527,8 @@ function TestCard({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        aria-expanded={expanded}
+        className="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left"
       >
         <DisclosureCaret open={expanded} className="inline-flex shrink-0 items-center justify-center" />
         <TestIdBadge n={testNumber} />
@@ -522,10 +556,24 @@ function TestCard({
         >
           :{test.line}
         </span>
-        {showStatus && <StepStatusBadge status={status} label={showNotRun && (status === 'unmatched' || status === 'pending') ? 'not run' : undefined} />}
+        {/* A badge with nothing to open stays part of the toggle, as before;
+            one that opens a result becomes its own sibling button. */}
+        {showStatus && !onOpenResult && <StepStatusBadge status={status} label={showNotRun && (status === 'unmatched' || status === 'pending') ? 'not run' : undefined} />}
       </button>
+      {showStatus && onOpenResult && (
+        <button
+          type="button"
+          onClick={onOpenResult}
+          aria-label={`Open ${stripLeadingTestOrdinal(test.name)} in Results & Fixes`}
+          title="Open in Results & Fixes"
+          data-testid="test-open-result"
+          className="mr-3 inline-flex shrink-0 rounded transition-opacity duration-150 hover:opacity-80"
+        >
+          <StepStatusBadge status={status} />
+        </button>
+      )}
       {expanded && (
-        <div className="space-y-2 px-3 pb-3">
+        <div className="col-span-2 space-y-2 px-3 pb-3">
           {lineMessage && (
             <div
               className="rounded-md border px-2 py-1 text-[10px]"

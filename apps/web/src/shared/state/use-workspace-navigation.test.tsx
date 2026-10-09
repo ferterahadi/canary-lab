@@ -315,7 +315,7 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
 
     await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', tab: 'changes' }) })
 
-    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'should pay' })
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'should pay', request: 1 })
     expect(nav.runTab).toBeNull()
     expect(nav.view).toBe('workspace')
     expect(nav.selectedFeature).toBe('checkout')
@@ -325,9 +325,17 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
     await mount(persisted({ run: 'r1', focusTest: 'checkout', testId: 'first', testLocation: 'file:1' }))
     expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'first', testLocation: 'file:1' })
     await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'checkout', testId: 'second', testLocation: 'file:2' }) })
-    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'second', testLocation: 'file:2' })
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'second', testLocation: 'file:2', request: 1 })
     await act(async () => { nav.navigateToRun('checkout', 'r2') })
     expect(nav.focusTest).toBeNull()
+  })
+
+  it('counts a repeated click on the same test as a new request, so a collapsed row reopens', async () => {
+    await mount()
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', testId: 'a' }) })
+    const first = nav.focusTest
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', testId: 'a' }) })
+    expect(nav.focusTest).toEqual({ ...first, request: first!.request! + 1 })
   })
 
   it('lands on a named tab when no test is named', async () => {

@@ -189,6 +189,12 @@ export function App() {
     openReview({ file, line, baseline, change, test, mode: 'english' })
   }, [openReview])
 
+  // A Tests-column result badge opens that test in the run's Results & Fixes.
+  // It stays on the run the column shows; a test never borrows another run's result.
+  const openTestResult = useCallback((runId: string, target: RunOpenTarget): void => {
+    if (selectedFeature) navigateToRun(selectedFeature, runId, target)
+  }, [navigateToRun, selectedFeature])
+
   const reviewStartError = useCallback((review: TestReviewRequired): void => {
     openPendingReview(review.feature, review.runId)
   }, [openPendingReview])
@@ -283,6 +289,7 @@ export function App() {
         currentTests={nav.currentTests}
         onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
         onReviewTest={reviewTest}
+        onOpenResult={openTestResult}
         dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
       />
     ),
@@ -319,7 +326,7 @@ export function App() {
             onOpenEvaluationReport={openEvaluationReport}
             /* Honoured only when the focus belongs to the run being shown, so a
                stale pair from a previous selection can't scroll this one. */
-            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation } : {})}
+            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation, focusRequest: focusTest.request } : {})}
             /* Same pairing rule for the arrival tab a drill-through named. */
             {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
             bootFailureOpen={bootFailureFor !== null && bootFailureFor === selectedRunId}

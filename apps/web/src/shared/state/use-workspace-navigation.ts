@@ -126,7 +126,7 @@ export interface WorkspaceNavigation {
   returnFlight: string | null
   /** R82: which failing test the open run detail should land on, or null. Paired
    *  with its run so a stale focus can never apply to a different one. */
-  focusTest: { runId: string; test: string; testId?: string; testLocation?: string } | null
+  focusTest: { runId: string; test: string; testId?: string; testLocation?: string; request?: number } | null
   /** Which tab the open run detail should land on, or null. Paired with its run
    *  under the same rule as `focusTest`. */
   runTab: NavState['runTab']
@@ -208,6 +208,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [returnFlight, setReturnFlight] = useState<string | null>(SEED.returnFlight)
 
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
+  const focusRequestRef = useRef(0)
   const selectedFeatureRef = useRef<string | null>(null)
   const selectedRunIdRef = useRef<string | null>(PERSISTED.run)
   // Read synchronously by openFlight, which must tell "same flight, coming back"
@@ -292,7 +293,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // clears the previous instead of inheriting it. A named test wins: it already
     // implies the Playwright tab, so honouring a `tab` beside it would fight over
     // the same destination.
-    setFocusTest(target?.test ? { runId, test: target.test, testId: target.testId, testLocation: target.testLocation } : null)
+    setFocusTest(target?.test ? { runId, test: target.test, testId: target.testId, testLocation: target.testLocation, request: ++focusRequestRef.current } : null)
     setRunTab(!target?.test && target?.tab ? { runId, tab: target.tab } : null)
     // Same rule for the origin: an arrival that names no flight clears one a
     // previous drill-through left behind.

@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react'
 import type { RunDetail } from '@shared/run-detail'
 import { focusedCaseKey } from '../utils/results-fixes'
 
-export interface ResultsFocus { test?: string; testId?: string; testLocation?: string }
+/** `request` distinguishes a repeated click on the same test, so it re-opens a
+ *  row the reader collapsed; absent on a cold load from the URL. */
+export interface ResultsFocus { test?: string; testId?: string; testLocation?: string; request?: number }
 
 /**
  * Opens the case a routed or clicked test points at, once the run has recorded
@@ -17,8 +19,8 @@ export function useResultsFocus(
   onResolve: (caseKey: string) => void,
 ): void {
   const resolved = useRef<string | null>(null)
-  const { test, testId, testLocation } = focus
-  const focusKey = JSON.stringify([runId, test ?? null, testId ?? null, testLocation ?? null])
+  const { test, testId, testLocation, request } = focus
+  const focusKey = JSON.stringify([runId, test ?? null, testId ?? null, testLocation ?? null, request ?? null])
   const resolve = useRef(onResolve)
   resolve.current = onResolve
   useEffect(() => {

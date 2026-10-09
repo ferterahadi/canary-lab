@@ -101,6 +101,21 @@ describe('run detail tabs', () => {
     expect(open?.querySelector('select')?.value).toBe('2')
   })
 
+  it('re-opens a collapsed row when the same test is clicked again, and only then', async () => {
+    const detail = detailOf()
+    const focus = { focusTest: 'test-case-applies-the-discount', focusTestId: 'discount' }
+    await show(detail, { ...focus, focusRequest: 1 })
+    const header = () => container.querySelector<HTMLButtonElement>('[data-open] > button')
+    act(() => header()!.click())
+    expect(container.querySelector('[data-open]')).toBeNull()
+    // A pushed update with the same request leaves the reader's collapse alone.
+    await show({ ...detail }, { ...focus, focusRequest: 1 })
+    expect(container.querySelector('[data-open]')).toBeNull()
+    click('Overview')
+    await show(detail, { ...focus, focusRequest: 2 })
+    expect(container.querySelector('[data-open]')?.textContent).toContain('applies the discount')
+  })
+
   it('lands a captured-fixes arrival on the run-wide evidence', async () => {
     await show(detailOf(), { arriveTab: 'changes' })
     expect(container.querySelector('[data-testid="results-run-wide"]')).toBeTruthy()

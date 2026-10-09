@@ -216,7 +216,7 @@ describe('workspace selection through navigation, data, and run streams', () => 
       nav.navigateToRun('suite', 'first', { test: 'failure' }, 'flight-1')
       nav.setCurrentTests(false)
     })
-    expect(nav.focusTest).toEqual({ runId: 'first', test: 'failure' })
+    expect(nav.focusTest).toEqual({ runId: 'first', test: 'failure', request: 1 })
     expect(nav.returnFlight).toBe('flight-1')
     await act(async () => crossTab({ view: 'workspace', feature: 'other' }))
     expect(nav.selectedRunId).toBe('other-run')

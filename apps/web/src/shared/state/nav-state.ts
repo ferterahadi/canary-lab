@@ -74,8 +74,10 @@ export interface NavState {
   /** R82: which failing test the run detail should land on, paired with the run
    *  it belongs to. Stored as a PAIR so selecting a different run makes the focus
    *  inert automatically — no clearing effect to keep in sync, and the run detail
-   *  only honours a focus whose `runId` is the run it is showing. */
-  focusTest: { runId: string; test: string; testId?: string; testLocation?: string } | null
+   *  only honours a focus whose `runId` is the run it is showing. `request`
+   *  counts in-session clicks (never routed), so clicking the same test again
+   *  re-opens a row the reader collapsed. */
+  focusTest: { runId: string; test: string; testId?: string; testLocation?: string; request?: number } | null
   /** Which run-detail tab a drill-through asked for, paired with its run for the
    *  same reason `focusTest` is: a tab intent that outlived the run it was meant
    *  for would silently reroute the next run the user opens. The flight's Test

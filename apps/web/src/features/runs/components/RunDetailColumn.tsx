@@ -41,6 +41,7 @@ export function RunDetailColumn({
   focusTest,
   focusTestId,
   focusTestLocation,
+  focusRequest,
   arriveTab,
   onOpenEvaluationReport,
   onOpenSpecReview,
@@ -52,13 +53,16 @@ export function RunDetailColumn({
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
-  /** R82: a failing test to land on — the run-summary failed-entry `name` a
-   *  flight's Test Run stage was clicked on. Opens Results & Fixes with that
-   *  test's row expanded and scrolled into view. Routed as `?run=…&test=…`, so a refresh or a
-   *  pasted link lands in the same place. */
+  /** R82: a test to land on — the run-summary `name` of a failure clicked in a
+   *  flight's Test Run stage, or of a result badge clicked in the Tests column.
+   *  Opens Results & Fixes with that test's row expanded and scrolled into
+   *  view. Routed as `?run=…&test=…`, so a refresh or a pasted link lands in
+   *  the same place. */
   focusTest?: string
   focusTestId?: string
   focusTestLocation?: string
+  /** Bumped by each click on a test, so the same test clicked again re-opens. */
+  focusRequest?: number
   /** Which tab to open on, when the view that linked here named one instead of a
    *  failing test — the flight's Test Run stage sends its captured fixes to
    *  `changes`, which is Results & Fixes' run-wide view. Routed as
@@ -137,8 +141,8 @@ export function RunDetailColumn({
     if (!focusTest) return
     setTab('results')
     setResultsView('tests')
-  }, [focusTest, focusTestId, focusTestLocation, runId])
-  useResultsFocus(runId, detail, { test: focusTest, testId: focusTestId, testLocation: focusTestLocation }, (caseKey) => setSelection({ caseKey }))
+  }, [focusTest, focusTestId, focusTestLocation, focusRequest, runId])
+  useResultsFocus(runId, detail, { test: focusTest, testId: focusTestId, testLocation: focusTestLocation, request: focusRequest }, (caseKey) => setSelection({ caseKey }))
   // Same for a later arrival at a named tab (clicking the run's captured fixes
   // while that run is already open) — otherwise the click looks ignored.
   useEffect(() => {
