@@ -49,7 +49,11 @@ export const sharedBehaviors = [
   { file: 'apps/web-server/src/features/runs/routes/runs-test-review.ts', owner: '../../../../../../shared/test-review', symbols: ['deriveRunReviewCapabilities'] },
   { file: 'apps/web-server/src/features/flights/routes/flight-decision-origin.ts', owner: '../../../../../../shared/flights/ownership', symbols: ['isExternallyDriven'] },
   ...['RequirementsFork', 'FlightDetail', 'StageDetail', 'CheckpointControls', 'FlightChipState'].map((name) => ({ file: `apps/web/src/features/flights/components/${name}.tsx`, owner: '@shared/flights/ownership', symbols: ['isExternallyDriven'] })),
-  { file: 'apps/web/src/features/runs/utils/run-detail-playback.ts', owner: '@shared/playback-identity', symbols: ['buildPlaybackIdentity', 'latestPlaybackAttempt'] },
+  { file: 'apps/web/src/features/runs/utils/run-detail-playback.ts', owner: '@shared/playback-identity', symbols: ['latestPlaybackAttempt'] },
+  // Attempt building (and the identity call inside it) is owned by the shared
+  // evidence projection the Results & Fixes view reads too.
+  { file: 'apps/web/src/features/runs/utils/run-detail-playback.ts', owner: '@shared/run-evidence', symbols: ['playbackAttempts'] },
+  { file: 'shared/run-evidence.ts', owner: './playback-identity', symbols: ['buildPlaybackIdentity', 'latestPlaybackAttempt', 'reconcilePlaybackCases'] },
   { file: 'apps/web-server/src/features/runs/logic/run-detail.ts', owner: '../../../../../../shared/playback-identity', symbols: ['buildPlaybackIdentity', 'reconcilePlaybackCases'] },
   { file: 'apps/web-server/src/features/evaluation/logic/test-review/packet.ts', owner: '../../../../../../../shared/playback-identity', symbols: ['reconcilePlaybackCases', 'latestPlaybackAttempt'] },
   { file: 'apps/cli/flight.ts', owner: '../../shared/flights/types', symbols: ['deriveFeatureSlug'] },

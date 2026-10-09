@@ -49,6 +49,11 @@ export function splitJournalSections(raw: string): JournalSection[] {
     else if (key === 'run') current.run = value
     else if (key === 'outcome') current.outcome = value
     else if (key === 'hypothesis') current.hypothesis = value
+    else if (key === 'failingTests') {
+      const names = value.split(',').map((name) => name.trim()).filter(Boolean)
+      if (names.length > 0) current.failingTests = names
+    } else if (key === 'cycle' && /^\d+$/.test(value)) current.cycle = Number(value)
+    else if (key === 'inputExecution' && /^\d+$/.test(value)) current.inputExecution = Number(value)
   }
   flush()
   return sections

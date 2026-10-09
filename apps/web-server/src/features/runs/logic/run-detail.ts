@@ -7,7 +7,7 @@ import { readManifest, suiteDirForReading } from './runtime/manifest'
 import type { RunLifecycleEvent } from '../../../../../../shared/run-state'
 import { buildRunPaths, runDirFor, runManifestPath, runSummaryPath } from './runtime/run-paths'
 import { readJsonOr } from '../../../../../../shared/lib/read-file-or'
-import { indexPlaywrightArtifacts } from './run-artifacts'
+import { indexAttemptArtifacts, indexPlaywrightArtifacts } from './run-artifacts'
 import type { RunSummary, PlaywrightPlaybackEvent, RunDetail } from '../../../../../../shared/run-detail'
 
 export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
@@ -110,6 +110,7 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const sources = needsSource ? readPlaybackSourceDeclarations(suiteDirForReading(m)) : []
   const playbackIdentity = playbackEvents?.length ? buildPlaybackIdentity(playbackEvents, known, sources) : undefined
   const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
+  const { byAttempt, unassigned } = indexAttemptArtifacts(runId, dir, playbackEvents ?? [], playbackIdentity ?? { eventKeys: [] })
   const lifecycleEvents = readRunLifecycleEvents(dir)
   return {
     runId,
@@ -117,6 +118,8 @@ export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
     ...(summary ? { summary } : {}),
     ...(playbackEvents?.length ? { playbackEvents, playbackIdentity } : {}),
     ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
+    ...(Object.keys(byAttempt).length ? { attemptArtifacts: byAttempt } : {}),
+    ...(unassigned.length ? { unassignedArtifacts: unassigned } : {}),
     ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
   }
 }

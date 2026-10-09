@@ -273,6 +273,51 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
 })
 
 
+describe('GET /api/runs/:runId/execution-artifacts/:execution/*', () => {
+  it('serves one execution\'s retained copy, not a later execution\'s file of the same name', async () => {
+    writeManifestForRun('r1')
+    const history = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history')
+    for (const [n, body] of [[1, 'BEFORE'], [2, 'AFTER']] as const) {
+      fs.mkdirSync(path.join(history, `execution-${n}`, 'case-a'), { recursive: true })
+      fs.writeFileSync(path.join(history, `execution-${n}`, 'case-a', 'test-failed-1.png'), body)
+    }
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/1/case-a/test-failed-1.png' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('image/png')
+    expect(res.body).toBe('BEFORE')
+  })
+
+  it('rejects a malformed execution or a path that leaves its execution dir', async () => {
+    writeManifestForRun('r1')
+    fs.mkdirSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history', 'execution-2', 'case-a'), { recursive: true })
+    fs.writeFileSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history', 'execution-2', 'case-a', 'x.png'), 'X')
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/one/case-a/x.png' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/1/..%2Fexecution-2%2Fcase-a%2Fx.png' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/2/case-a/missing.png' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/2/case-a' })).statusCode).toBe(404)
+  })
+})
+
+describe('GET /api/runs/:runId/cycle-patches/:iteration', () => {
+  it('serves one cycle\'s persisted diff and 404s a cycle that has none', async () => {
+    writeManifestForRun('r1')
+    const diffs = path.join(runDirFor(logsDir, 'r1'), 'diffs')
+    fs.mkdirSync(diffs, { recursive: true })
+    fs.writeFileSync(path.join(diffs, 'iteration-2.patch'), '--- a/x\n+++ b/x\n')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/2' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ iteration: 2, patchPath: path.join(diffs, 'iteration-2.patch'), diff: '--- a/x\n+++ b/x\n' })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/1' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/..%2F..' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/cycle-patches/1' })).statusCode).toBe(404)
+  })
+})
+
 describe('GET /api/runs/:runId/queue', () => {
   it('reads the live queue only for a queued run, without mutating its manifest', async () => {
     writeManifestForRun('q', 'foo', 'queued')

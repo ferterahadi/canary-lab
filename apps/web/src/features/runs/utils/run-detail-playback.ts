@@ -1,4 +1,5 @@
-import { buildPlaybackIdentity, latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
+import { latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
+import { playbackAttempts } from '@shared/run-evidence'
 import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
@@ -43,49 +44,13 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
 }
 
 export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackCase[] {
-  const projection = identity?.eventKeys.length === events.length ? identity : buildPlaybackIdentity(events, known)
-  const attempts = new Map<string, PlaybackTest>()
-  const cases = new Map<string, Set<string>>()
-  const identities = new Map<string, { ids: Set<string>; locations: Set<string> }>()
-  for (const [index, event] of events.entries()) {
-    const keys = projection.eventKeys[index]
-    if (!keys) continue
-    const group = cases.get(keys.caseKey) ?? new Set<string>()
-    group.add(keys.attemptKey)
-    cases.set(keys.caseKey, group)
-    const evidence = identities.get(keys.caseKey) ?? { ids: new Set<string>(), locations: new Set<string>() }
-    if (event.test.id) evidence.ids.add(event.test.id)
-    if ('location' in event.test) evidence.locations.add(event.test.location)
-    identities.set(keys.caseKey, evidence)
-    const current = attempts.get(keys.attemptKey) ?? { name: event.test.name, title: event.test.title, steps: [] }
-    current.title = event.test.title || current.title
-    if ('location' in event.test) current.location = event.test.location
-    if (event.type === 'test-begin') current.startedAt = event.time
-    if (event.type === 'step-begin') current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
-    if (event.type === 'step-end') {
-      const open = [...current.steps].reverse().find((step) => step.title === event.step.title && !step.ended)
-      if (open) open.ended = true
-      else current.steps.push({ title: event.step.title, category: event.step.category, ended: true })
-    }
-    if (event.type === 'test-end') {
-      current.status = event.status
-      current.passed = event.passed
-      current.durationMs = event.durationMs
-      current.retry = event.retry
-      current.error = event.error
-      current.endedAt = event.time
-    }
-    attempts.set(keys.attemptKey, current)
-  }
-  for (const entry of known) {
-    const evidence = identities.get(playbackCaseKey(entry))
-    if (entry.id) evidence?.ids.add(entry.id)
-    if (entry.location) evidence?.locations.add(entry.location)
-  }
-  return [...cases.entries()].map(([caseKey, keys]) => {
-    // Every key was inserted alongside its attempt above.
-    const test = latestPlaybackAttempt([...keys].map((key) => attempts.get(key)!))!
-    const evidence = identities.get(caseKey)!
+  const { attempts, caseEvidence } = playbackAttempts(events, identity, known)
+  const byCase = new Map<string, typeof attempts>()
+  for (const attempt of attempts) byCase.set(attempt.caseKey, [...(byCase.get(attempt.caseKey) ?? []), attempt])
+  return [...byCase.entries()].map(([caseKey, own]) => {
+    // Every case in the map holds at least the attempt that created it.
+    const { attemptKey: _attemptKey, caseKey: _caseKey, execution: _execution, ...test } = latestPlaybackAttempt(own)!
+    const evidence = caseEvidence.get(caseKey)!
     return { ...test, caseKey, ids: [...evidence.ids], locations: [...evidence.locations], steps: compactPlaybackSteps(test.steps) }
   })
 }

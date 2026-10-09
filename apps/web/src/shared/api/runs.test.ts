@@ -13,6 +13,7 @@ import {
   applyRunFixes,
   getGhStatus,
   getRunPrPreflight,
+  getRunCyclePatch,
   getRunFixPatch,
   getRunApplyPreflight,
   openRunRepo,
@@ -326,6 +327,13 @@ describe('runs api', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
     await expect(getRunFixPatch('run 9', 'mighty cns', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/fixes/mighty%20cns/patch', { method: 'GET' })
+  })
+
+  it('getRunCyclePatch GETs one repair cycle\'s own diff by iteration', async () => {
+    const body = { iteration: 2, patchPath: '/r/diffs/iteration-2.patch', diff: '+x\n' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunCyclePatch('run 9', 2, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/cycle-patches/2', { method: 'GET' })
   })
 
   it('getRunFixPatch surfaces the 410 once the patch has been cleaned away', async () => {

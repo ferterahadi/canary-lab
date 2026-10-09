@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import { readPlaywrightPlaybackEvents } from './run-detail'
-import { indexPlaywrightArtifacts } from './run-artifacts'
+import { indexAttemptArtifacts, indexPlaywrightArtifacts } from './run-artifacts'
+import { buildPlaybackIdentity } from '../../../../../../shared/playback-identity'
+import type { PlaywrightPlaybackEvent } from '../../../../../../shared/run-detail'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-rs-')
@@ -290,5 +292,72 @@ describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
     expect(a?.artifacts[0].sizeBytes).toBe(Buffer.byteLength('a-fresh'))
     const b = result?.find((g) => g.testName === 'pw-b')
     expect(b?.artifacts[0].sizeBytes).toBe(Buffer.byteLength('b-stale'))
+  })
+})
+
+describe('indexAttemptArtifacts', () => {
+  const end = (attachments: Array<{ name: string; path: string; contentType?: string }>, execution?: number, location = 'e2e/a.spec.ts:1'): PlaywrightPlaybackEvent => ({
+    type: 'test-end', time: '1', test: { name: 'test-case-a', title: 'a', location }, status: 'failed', passed: false, durationMs: 1, retry: 0,
+    attachments, ...(execution !== undefined ? { execution } : {}),
+  })
+  const begin = (execution?: number, location = 'e2e/a.spec.ts:1'): PlaywrightPlaybackEvent => ({
+    type: 'test-begin', time: '0', test: { name: 'test-case-a', title: 'a', location }, ...(execution !== undefined ? { execution } : {}),
+  })
+  const write = (rel: string, body = 'x') => {
+    const file = path.join(tmpDir, rel)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, body)
+  }
+
+  it('gives each attempt the media its own execution kept, even under one dir name', () => {
+    const live = path.join(tmpDir, 'playwright-artifacts')
+    write('playwright-artifacts-history/execution-1/a-chromium/test-failed-1.png', 'before')
+    write('playwright-artifacts-history/execution-2/a-chromium/test-failed-1.png', 'after')
+    // Not referenced by any attachment, but inside an attempt's own dir.
+    write('playwright-artifacts-history/execution-2/a-chromium/video.webm')
+    const shot = { name: 'screenshot', path: path.join(live, 'a-chromium', 'test-failed-1.png'), contentType: 'image/png' }
+    const events = [begin(1), end([shot], 1), begin(2), end([shot], 2)]
+    const identity = buildPlaybackIdentity(events)
+
+    const { byAttempt, unassigned } = indexAttemptArtifacts('r1', tmpDir, events, identity)
+
+    const first = byAttempt[identity.eventKeys[0]!.attemptKey]
+    const second = byAttempt[identity.eventKeys[2]!.attemptKey]
+    expect(first.map((a) => [a.kind, a.path, a.url])).toEqual([
+      ['screenshot', 'execution-1/a-chromium/test-failed-1.png', '/api/runs/r1/execution-artifacts/1/a-chromium/test-failed-1.png'],
+    ])
+    expect(second.map((a) => a.path)).toEqual(['execution-2/a-chromium/test-failed-1.png', 'execution-2/a-chromium/video.webm'])
+    expect(unassigned).toEqual([])
+  })
+
+  it('skips path-less attachments, ones naming a directory, and events no identity key covers', () => {
+    write('playwright-artifacts-history/execution-1/a-chromium/sub/inner.txt')
+    const live = path.join(tmpDir, 'playwright-artifacts')
+    const bare = { ...end([], 1), attachments: undefined }
+    const events = [end([{ name: 'no-path' } as { name: string; path: string }, { name: 'dir', path: path.join(live, 'a-chromium', 'sub') }], 1), end([{ name: 'x', path: path.join(live, 'a-chromium', 'sub', 'inner.txt') }], 1), bare]
+    const { byAttempt } = indexAttemptArtifacts('r1', tmpDir, events, { eventKeys: [{ caseKey: 'c', attemptKey: 'k' }, null, { caseKey: 'c', attemptKey: 'k2' }] })
+    // The directory claims its dir for attempt k, so the file inside is k's —
+    // but never as the directory entry itself, and the uncovered event adds nothing.
+    expect(byAttempt).toEqual({ k: [expect.objectContaining({ path: 'execution-1/a-chromium/sub/inner.txt' })] })
+  })
+
+  it('reports history files no attempt claims instead of attaching them to a guessed test', () => {
+    write('playwright-artifacts-history/execution-1/orphan-dir/trace.zip')
+    write('playwright-artifacts-history/not-an-execution/x.png')
+    const { byAttempt, unassigned } = indexAttemptArtifacts('r1', tmpDir, [], { eventKeys: [] })
+    expect(byAttempt).toEqual({})
+    expect(unassigned.map((a) => [a.execution, a.kind, a.path])).toEqual([[1, 'trace', 'execution-1/orphan-dir/trace.zip']])
+  })
+
+  it('reads nothing for unstamped attempts, attachments outside the live dir, or a run without history', () => {
+    expect(indexAttemptArtifacts('r1', tmpDir, [], { eventKeys: [] })).toEqual({ byAttempt: {}, unassigned: [] })
+    write('playwright-artifacts-history/execution-1/a-chromium/kept.png')
+    const outside = { name: 'x', path: path.join(tmpDir, 'elsewhere', 'x.png') }
+    const missing = { name: 'gone', path: path.join(tmpDir, 'playwright-artifacts', 'b-chromium', 'gone.png') }
+    const events = [begin(), end([{ name: 'k', path: path.join(tmpDir, 'playwright-artifacts', 'a-chromium', 'kept.png') }]), begin(1, 'e2e/b.spec.ts:1'), end([outside, missing], 1, 'e2e/b.spec.ts:1')]
+    const { byAttempt, unassigned } = indexAttemptArtifacts('r1', tmpDir, events, buildPlaybackIdentity(events))
+    expect(byAttempt).toEqual({})
+    // Its dir was never claimed by a stamped attempt, so it stays unassigned.
+    expect(unassigned.map((a) => a.path)).toEqual(['execution-1/a-chromium/kept.png'])
   })
 })

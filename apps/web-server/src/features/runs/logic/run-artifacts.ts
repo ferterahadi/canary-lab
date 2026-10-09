@@ -4,10 +4,13 @@ import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import type {
+  PlaywrightArtifact,
   PlaywrightArtifactKind,
   PlaywrightArtifactGroup,
   PlaywrightPlaybackEvent,
+  RunExecutionArtifact,
 } from '../../../../../../shared/run-detail'
+import type { PlaybackIdentity } from '../../../../../../shared/playback-identity'
 /** Recursively sum the byte size of every regular file under `dir`. Returns 0
  *  when the directory is absent or unreadable — callers treat missing artifacts
  *  as "nothing to reclaim". Symlinks are not followed (lstat). */
@@ -160,6 +163,83 @@ export function indexPlaywrightArtifacts(
     }))
     .sort((a, b) => a.testName.localeCompare(b.testName))
   return indexed.length > 0 ? indexed : undefined
+}
+
+/**
+ * Each attempt's own media, from the immutable per-execution copies
+ * (`playwright-artifacts-history/execution-<n>/`). An attachment names its file
+ * under the live output dir; the attempt's execution stamp says which copy is
+ * its. Files an attachment did not name are claimed by the attempt whose
+ * attachments share their per-test dir in the same execution — Playwright gives
+ * every attempt its own output dir — and anything else is returned unassigned,
+ * never attached to a test by name. Unstamped (legacy) attempts get nothing
+ * here; their media is the latest-copy `playwrightArtifacts` index.
+ */
+export function indexAttemptArtifacts(
+  runId: string,
+  runDir: string,
+  events: readonly PlaywrightPlaybackEvent[],
+  identity: PlaybackIdentity,
+): { byAttempt: Record<string, PlaywrightArtifact[]>; unassigned: RunExecutionArtifact[] } {
+  const paths = buildRunPaths(runDir)
+  const historyDir = paths.playwrightArtifactsHistoryDir
+  const byAttempt: Record<string, PlaywrightArtifact[]> = {}
+  const unassigned: RunExecutionArtifact[] = []
+  if (!fs.existsSync(historyDir)) return { byAttempt, unassigned }
+
+  const claimed = new Set<string>()
+  const ownerOfDir = new Map<string, string>()
+  const artifactAt = (execution: number, rel: string, name?: string, contentType?: string): PlaywrightArtifact | null => {
+    const file = path.join(historyDir, `execution-${execution}`, rel)
+    let stat: fs.Stats
+    try { stat = fs.statSync(file) } catch { return null } // not retained for this execution
+    if (!stat.isFile()) return null
+    return {
+      name: name || path.basename(file),
+      kind: classifyArtifact(file, name, contentType),
+      path: path.join(`execution-${execution}`, rel).split(path.sep).join('/'),
+      url: executionArtifactUrl(runId, execution, rel),
+      ...(contentType ? { contentType } : {}),
+      sizeBytes: stat.size,
+      mtimeMs: stat.mtimeMs,
+    }
+  }
+
+  for (const [index, event] of events.entries()) {
+    const attemptKey = identity.eventKeys[index]?.attemptKey
+    if (event.type !== 'test-end' || event.execution === undefined || !attemptKey) continue
+    for (const attachment of event.attachments ?? []) {
+      if (!attachment.path) continue
+      const abs = path.resolve(attachment.path)
+      if (!isPathUnder(abs, paths.playwrightArtifactsDir, true)) continue
+      const rel = path.relative(paths.playwrightArtifactsDir, abs)
+      ownerOfDir.set(`${event.execution}/${rel.split(path.sep)[0]}`, attemptKey)
+      const artifact = artifactAt(event.execution, rel, attachment.name, attachment.contentType)
+      if (!artifact || claimed.has(artifact.path)) continue
+      claimed.add(artifact.path)
+      ;(byAttempt[attemptKey] ??= []).push(artifact)
+    }
+  }
+
+  for (const execDir of fs.readdirSync(historyDir)) {
+    const execution = /^execution-(\d+)$/.exec(execDir)?.[1]
+    if (!execution) continue
+    const root = path.join(historyDir, execDir)
+    for (const file of listFiles(root)) {
+      const rel = path.relative(root, file)
+      const artifact = artifactAt(Number(execution), rel)
+      if (!artifact || claimed.has(artifact.path)) continue
+      const owner = ownerOfDir.get(`${execution}/${rel.split(path.sep)[0]}`)
+      if (owner) (byAttempt[owner] ??= []).push(artifact)
+      else unassigned.push({ ...artifact, execution: Number(execution) })
+    }
+  }
+  for (const list of Object.values(byAttempt)) list.sort((a, b) => a.path.localeCompare(b.path))
+  return { byAttempt, unassigned }
+}
+
+export function executionArtifactUrl(runId: string, execution: number, relPath: string): string {
+  return `/api/runs/${encodeURIComponent(runId)}/execution-artifacts/${execution}/${relPath.split(path.sep).map(encodeURIComponent).join('/')}`
 }
 
 export function classifyArtifact(filePath: string, name?: string, contentType?: string): PlaywrightArtifactKind {

@@ -157,6 +157,7 @@ export default defineConfig({
         'shared/run-counts.ts',
         'shared/run-mode.ts',
         'shared/run-state.ts',
+        'shared/run-evidence.ts',
         'shared/repository-observation.ts',
         'shared/verification.ts',
         // Frontend non-component modules: the API client, the pure utilities,

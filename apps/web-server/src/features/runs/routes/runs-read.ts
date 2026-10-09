@@ -190,6 +190,26 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     }
   })
 
+  // One journaled repair cycle's own diff (`diffs/iteration-<n>.patch`), as
+  // opposed to the run's cumulative capture above. Runs recorded before every
+  // cycle was persisted lack small ones; the journal entry's inline block is
+  // then the only copy, and 404 says so.
+  app.get<{ Params: { runId: string; iteration: string } }>('/api/runs/:runId/cycle-patches/:iteration', async (req, reply) => {
+    if (!/^\d+$/.test(req.params.iteration)) {
+      reply.code(400)
+      return { error: 'invalid iteration' }
+    }
+    if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
+    const iteration = Number(req.params.iteration)
+    const patchPath = path.join(runDirFor(deps.store.logsDir, req.params.runId), 'diffs', `iteration-${iteration}.patch`)
+    try {
+      return { iteration, patchPath, diff: fs.readFileSync(patchPath, 'utf-8') }
+    } catch {
+      reply.code(404)
+      return { error: 'no persisted patch for this cycle' }
+    }
+  })
+
   // Can we open a PR from this run's captured fix? Per-repo origin + default
   // branch + push rights (side-effect-free). The PR dialog re-runs this on open
   // (auth changes outside the app). 404/409 mirror apply-fixes.
@@ -334,6 +354,29 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(400)
       return { error: 'invalid artifact path' }
     }
+    return notFound(reply, 'artifact')
+  })
+
+  // One execution's immutable artifact copy (`playwright-artifacts-history/
+  // execution-<n>/`). Separate from the route above because that one answers
+  // "the latest copy", which is exactly what a before-repair screenshot is not.
+  app.get<{ Params: { runId: string; execution: string; '*': string } }>('/api/runs/:runId/execution-artifacts/:execution/*', async (req, reply) => {
+    if (!/^\d+$/.test(req.params.execution)) {
+      reply.code(400)
+      return { error: 'invalid execution' }
+    }
+    const base = path.join(buildRunPaths(runDirFor(deps.store.logsDir, req.params.runId)).playwrightArtifactsHistoryDir, `execution-${req.params.execution}`)
+    const requested = path.resolve(base, req.params['*'])
+    if (!isPathUnder(requested, base, true)) {
+      reply.code(400)
+      return { error: 'invalid artifact path' }
+    }
+    try {
+      if (fs.statSync(requested).isFile()) {
+        reply.type(contentTypeFor(requested))
+        return reply.send(fs.createReadStream(requested))
+      }
+    } catch { /* not retained: answered below */ }
     return notFound(reply, 'artifact')
   })
 }

@@ -115,3 +115,27 @@ export const evidenceJournalMarkdown = [
   '- outcome: all_tests_passed',
   '',
 ].join('\n')
+
+// The same run as a current build records it: each test-begin/test-end
+// carries its execution, and the lifecycle records that open and close an
+// execution (and start a repair cycle) carry their run-wide numbers.
+const executionOfBegin = [1, 1, 1, 1, 1, 2, 2, 3]
+
+export function stampedEvidencePlaybackEvents(): PlaywrightPlaybackEvent[] {
+  let begin = -1
+  return evidencePlaybackEvents.map((event) => {
+    if (event.type === 'test-begin') begin += 1
+    return event.type === 'test-begin' || event.type === 'test-end' ? { ...event, execution: executionOfBegin[begin] } : event
+  })
+}
+
+export function stampedEvidenceLifecycleEvents(): RunLifecycleEvent[] {
+  let execution = 0
+  let cycle = 0
+  return evidenceLifecycleEvents.map((event) => {
+    if (event.phase === 'running-tests' || event.phase === 'rerunning-tests') execution += 1
+    if (event.phase === 'agent-healing') cycle += 1
+    if (event.phase === 'agent-healing') return { ...event, repairCycle: cycle }
+    return { ...event, execution: { index: execution, afterCycle: cycle } }
+  })
+}

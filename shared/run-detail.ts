@@ -99,6 +99,12 @@ export interface RunDetail {
   playbackEvents?: PlaywrightPlaybackEvent[]
   playbackIdentity?: PlaybackIdentity
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  /** Each stamped attempt's own retained media, keyed by
+   *  `PlaybackEventKey.attemptKey`. Unlike `playwrightArtifacts` (the latest
+   *  copy per test name), a later execution never replaces these. */
+  attemptArtifacts?: Record<string, PlaywrightArtifact[]>
+  /** Retained per-execution media no attempt claims. */
+  unassignedArtifacts?: RunExecutionArtifact[]
   lifecycleEvents?: RunLifecycleEvent[]
 }
 
@@ -112,6 +118,10 @@ export interface PlaywrightArtifact {
   contentType?: string
   sizeBytes: number
   mtimeMs: number
+}
+
+export interface RunExecutionArtifact extends PlaywrightArtifact {
+  execution: number
 }
 
 export interface PlaywrightArtifactGroup {
@@ -130,6 +140,13 @@ export interface JournalSection {
   run: string | null
   outcome: string | null
   hypothesis: string | null
+  /** The cycle's input failures, by summary name (title slugs — two cases
+   *  that share a title share a name). Absent when the entry lists none. */
+  failingTests?: string[]
+  /** Run-wide repair cycle and the execution it started from. Absent on
+   *  entries written before they were stamped. */
+  cycle?: number
+  inputExecution?: number
   body: string
 }
 
