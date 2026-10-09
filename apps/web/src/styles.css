@@ -2247,6 +2247,12 @@ body {
 .cl-review-source-line { min-height: 1.65em; font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cl-review-source-line > del, .cl-review-source-line > ins { display: block; margin-inline: -6px; padding-inline: 6px; text-decoration: none; border-radius: 0; color: inherit; }
 .cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: calc(var(--review-gutter-width, 2ch) + 8px); }
+/* The edit tint fills the whole cell, padding and gutter included, so a run of
+   edited lines reads as one block. Painted on the line instead, each cell's
+   vertical padding showed through as a stripe between rows. */
+.cl-context-table td:has(> .cl-review-source-line > del) { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cl-context-table td:has(> .cl-review-source-line > ins) { background: color-mix(in srgb, var(--success) 12%, transparent); }
+.cl-context-table .cl-review-source-line > del, .cl-context-table .cl-review-source-line > ins { background: transparent; }
 .cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
 .cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }
