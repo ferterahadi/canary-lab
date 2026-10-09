@@ -86,6 +86,20 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
     ],
   },
   {
+    // A CLI dialog that ends a TURN and then waits: Claude Code's "Teach auto
+    // mode about your environment?" offer. The unattended-dialog policy in
+    // agent-context-policy.ts normally keeps it off, so reaching here means
+    // that policy stopped applying. Its presence says the turn finished — not
+    // that it succeeded (run 2026-10-09T0458-zk6u's turn had failed on an
+    // expired login the dialog then painted over) — so the hard blockers above
+    // win when their text is visible. Ahead of `approval-prompt`: a pending
+    // approval keeps a turn open, so approval text beside this dialog is history.
+    cause: 'cli-dialog',
+    needles: [
+      'teach auto mode about your environment',
+    ],
+  },
+  {
     // A tool-approval prompt the agent is still sitting on. Distinct from
     // `trust-prompt`: that one fires before any work, this one can fire *after*
     // a complete repair is already on disk, which is how a working fix gets

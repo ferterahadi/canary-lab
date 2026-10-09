@@ -23,6 +23,7 @@ export const HEAL_CAUSE_PHRASE: Record<NonNullable<HealEnd['agentCause']>, strin
   'crash': 'agent crashed',
   'trust-prompt': 'waiting for you to approve it in the terminal',
   'approval-prompt': 'waiting on a CLI approval prompt',
+  'cli-dialog': 'blocked on an interactive CLI prompt',
   'unknown': '',
 }
 

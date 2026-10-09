@@ -4,7 +4,7 @@ import path from 'path'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 import { agentActivityPath } from '../../agent-sessions/logic/agent-producer'
 import { agentModelArgs } from '../../agent-sessions/logic/agent-models'
-import { internalAgentContextArgs } from '../../agent-sessions/logic/agent-context-policy'
+import { internalAgentInvocationArgs } from '../../agent-sessions/logic/agent-context-policy'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { resolveStageChoice } from '../../../../../../shared/agent-models'
 import type { DiscoveryRepair } from '../../../../../../shared/discovery-repair'
@@ -32,7 +32,7 @@ export async function runDiscoveryRepairAgent(
     command: agent,
     args: agent === 'claude'
       ? [...buildClaudeAgenticArgs(prompt, { ...choice, sessionId }), ...directoryArgs]
-      : ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', ...directoryArgs, ...internalAgentContextArgs(agent), ...agentModelArgs(agent, choice), '-'],
+      : ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', ...directoryArgs, ...internalAgentInvocationArgs(agent), ...agentModelArgs(agent, choice), '-'],
     // A unique cwd also lets the canonical Codex locator identify this repair
     // without confusing it with another agent in the same workspace.
     cwd,

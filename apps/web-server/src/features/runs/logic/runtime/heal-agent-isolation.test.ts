@@ -45,6 +45,22 @@ describe('writeHealAgentIsolationSettings', () => {
     ])
   })
 
+  it('carries the unattended-dialog policy, because this file is the REPL\'s only --settings', () => {
+    // The heal command passes this file in place of the inline policy, and a
+    // second `--settings` would replace it — so without the key here the
+    // "Teach auto mode about your environment?" dialog could strand the REPL.
+    const settingsPath = writeHealAgentIsolationSettings({
+      runDir: path.join(root, 'run'),
+      writableDirs: [path.join(root, 'repo')],
+      featureDir: path.join(root, 'features', 'checkout'),
+      featureDirReadOnly: true,
+      worktrees: [],
+    })
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    expect(settings.skillOverrides).toEqual({ 'auto-mode-setup': 'off' })
+    expect(settings.sandbox.enabled).toBe(true)
+  })
+
   it('fails closed when a protected source path contains the requested worktree path', () => {
     const sourceRoot = path.join(root, 'source')
     const worktreeRoot = path.join(sourceRoot, 'logs', 'worktree')

@@ -3,7 +3,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
 import { effortArgs, modelArgs } from './agent-models'
 import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
-import { internalAgentContextArgs } from './agent-context-policy'
+import { internalAgentInvocationArgs } from './agent-context-policy'
 import { agentJobStore } from './agent-jobs/store'
 import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 import { processGroupAlive, signalProcessTree } from '../../../shared/process-tree'
@@ -287,9 +287,12 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   // cancellable unit. Windows reaches the same tree through taskkill /T.
   const detachedProcessGroup = process.platform !== 'win32'
   // This is the final common boundary for every non-interactive Canary-owned
-  // agent. Feature-specific builders cannot accidentally omit the context and
-  // auto-compaction policy, and arbitrary non-agent commands stay untouched.
-  const args = agent ? [...internalAgentContextArgs(agent), ...opts.args] : opts.args
+  // agent. Feature-specific builders cannot accidentally omit the context,
+  // auto-compaction and unattended-dialog policy, and arbitrary non-agent
+  // commands stay untouched. The policy carries this spawn's only claude
+  // `--settings`; a builder that needs its own settings must go through
+  // `withClaudeUnattendedSettings`, because a second flag replaces the first.
+  const args = agent ? [...internalAgentInvocationArgs(agent), ...opts.args] : opts.args
   const child = spawnImpl(command, args, {
     cwd: opts.cwd,
     detached: detachedProcessGroup,

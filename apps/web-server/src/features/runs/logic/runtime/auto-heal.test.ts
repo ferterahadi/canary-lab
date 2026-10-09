@@ -58,6 +58,10 @@ describe('buildClaudeMcpConfigArg', () => {
 describe('buildAgentSpawnCommand', () => {
   it('enforces each REPL context and auto-compaction policy', () => {
     expect(buildAgentSpawnCommand('claude')).toContain('--autocompact 350k')
+    // Without an isolation file the policy travels inline, shell-quoted.
+    expect(buildAgentSpawnCommand('claude')).toContain(
+      `--settings ${JSON.stringify('{"skillOverrides":{"auto-mode-setup":"off"}}')}`,
+    )
     for (const cmd of [
       buildAgentSpawnCommand('codex'),
       buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true }),
@@ -134,6 +138,9 @@ describe('buildAgentSpawnCommand', () => {
     })
     expect(cmd).toContain('--setting-sources ""')
     expect(cmd).toContain('--settings "/runs/demo/heal-agent-isolation.settings.json"')
+    // The file stands in for the inline dialog policy — never beside it: a
+    // second `--settings` replaces the first, which would drop the sandbox.
+    expect(cmd.match(/--settings /g)).toHaveLength(1)
     expect(buildAgentSpawnCommand('codex', {
       isolationSettingsFile: '/runs/demo/heal-agent-isolation.settings.json',
     })).not.toContain('--settings')

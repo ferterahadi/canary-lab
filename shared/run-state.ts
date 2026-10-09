@@ -171,7 +171,7 @@ export interface HealEnd {
   /** Best-effort classification of why the agent went quiet, from its output
    *  tail. Set only when `reason === 'no-signal'`. `unknown` = tail captured
    *  but no known fingerprint matched. */
-  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'trust-prompt' | 'approval-prompt' | 'unknown'
+  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'trust-prompt' | 'approval-prompt' | 'cli-dialog' | 'unknown'
   /** 1-based heal cycle in flight when the loop gave up (0 if it never began). */
   cycle: number
   /** Plain-language sentence for the UI + transcript. */

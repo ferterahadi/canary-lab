@@ -2,6 +2,7 @@ import { isPathUnder } from '../../../../shared/path-containment'
 import path from 'path'
 import type { WorktreeHandle } from './repo-worktree'
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import { withClaudeUnattendedSettings } from '../../../agent-sessions/logic/agent-context-policy'
 
 export const HEAL_AGENT_ISOLATION_SETTINGS = 'heal-agent-isolation.settings.json'
 
@@ -40,7 +41,9 @@ export interface HealAgentIsolationArgs {
 
 /** Write invocation-local Claude settings that make the authored suite and any
  * canonical checkout read-only. The CLI is also started without user/project
- * settings sources, so a broad personal allow rule cannot reopen these paths. */
+ * settings sources, so a broad personal allow rule cannot reopen these paths.
+ * The file is the heal REPL's only `--settings`, so it also carries the shared
+ * unattended-dialog policy. */
 export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): string {
   const writableDirs = uniqueResolved(args.writableDirs)
   const featureDir = path.resolve(args.featureDir)
@@ -73,7 +76,7 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
   ])
 
   const settingsPath = path.join(args.runDir, HEAL_AGENT_ISOLATION_SETTINGS)
-  const settings = {
+  const settings = withClaudeUnattendedSettings({
     permissions: {
       deny: protectedDirs.map((candidate) => `Edit(${claudeAbsolutePermissionPath(candidate)}/**)`),
     },
@@ -87,7 +90,7 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
         denyWrite: protectedDirs,
       },
     },
-  }
+  })
   atomicWriteJson(settingsPath, settings)
   return settingsPath
 }

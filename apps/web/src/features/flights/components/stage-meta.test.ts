@@ -278,6 +278,7 @@ describe('healEndLine / healEndShort (R80)', () => {
   it('short form names the cause for a no-signal give-up', () => {
     expect(healEndShort(he({ reason: 'no-signal', agentCause: 'usage-limit' }))).toBe('stopped — usage limit')
     expect(healEndShort(he({ reason: 'no-signal', agentCause: 'unknown' }))).toBe('stopped — agent went quiet')
+    expect(healEndShort(he({ reason: 'no-signal', agentCause: 'cli-dialog' }))).toBe('stopped — blocked on an interactive CLI prompt')
     expect(healEndShort(he({ reason: 'max-cycles' }))).toBe('stopped — cycle limit')
     expect(healEndShort(he({ reason: 'cancelled' }))).toBe('stopped by you')
   })
