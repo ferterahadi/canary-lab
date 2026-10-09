@@ -19,8 +19,11 @@ import {
   selectedResult,
   verificationSummary,
   type CycleChoice,
+  type ServiceLogAnchor,
 } from '../utils/results-fixes'
 import { AssertionMessage, EmptyArtifactMessage, EvidenceRail } from './RunPlaybackPanels'
+import { ResultSection } from './ResultSection'
+import { ServiceLogsSection } from './ServiceLogExcerpt'
 
 type MediaDetail = Pick<RunDetail, 'attemptArtifacts' | 'playwrightArtifacts'>
 
@@ -39,8 +42,11 @@ export function RepairStory({
   choice,
   media,
   policy,
-  serviceLogs,
+  hasServices,
+  onOpenServiceLog,
   onOpenRunWide,
+  journal,
+  onJournalChange,
 }: {
   runId: string
   feature: string
@@ -49,10 +55,14 @@ export function RepairStory({
   choice: CycleChoice
   media: MediaDetail
   policy?: PlaywrightArtifactPolicy
-  /** The service-log excerpt for the input execution, when one is retained. */
-  serviceLogs?: (attempt: EvidenceAttempt) => ReactNode
+  /** False for a suite that boots no service: the section has nothing to say. */
+  hasServices: boolean
+  onOpenServiceLog?: (anchor: ServiceLogAnchor) => void
   /** Opens the run-wide captures, journal and unassigned evidence. */
   onOpenRunWide?: () => void
+  /** The repair notes' open source dialog — owned by the caller so it routes. */
+  journal?: 'entry' | 'all'
+  onJournalChange: (journal: 'entry' | 'all' | null) => void
 }) {
   const { cycle, before, after } = selectedResult(caseEvidence, choice)
   if (!before) {
@@ -62,42 +72,32 @@ export function RepairStory({
       </p>
     )
   }
+  const beforeLabel = cycle ? 'Before this repair' : caseEvidence.cycles.length > 0 ? 'Initial execution' : 'Test result'
   return (
     <div className="flex flex-col gap-3" data-testid="repair-story">
       <FailureSection attempt={before} initial={!cycle} />
-      {serviceLogs?.(before)}
+      {hasServices && (
+        <ServiceLogsSection
+          runId={runId}
+          evidence={evidence}
+          attempt={before}
+          label={beforeLabel}
+          {...(cycle ? { cycle: `Repair cycle ${cycle.cycle}` } : {})}
+          caseTitle={caseEvidence.title}
+          onOpenFullLog={onOpenServiceLog}
+        />
+      )}
       {cycle && (
         <>
-          <CycleRepair runId={runId} feature={feature} evidence={evidence} caseEvidence={caseEvidence} cycle={cycle} onOpenRunWide={onOpenRunWide} />
+          <CycleRepair runId={runId} feature={feature} evidence={evidence} caseEvidence={caseEvidence} cycle={cycle} onOpenRunWide={onOpenRunWide} open={journal ?? null} setOpen={onJournalChange} />
           <VerificationSection cycle={cycle} latest={caseEvidence.latest} />
         </>
       )}
       <ResultSection title="Artifacts" testId="section-artifacts">
-        <ArtifactGroup label={cycle ? 'Before this repair' : caseEvidence.cycles.length > 0 ? 'Initial execution' : 'Test result'} attempt={before} evidence={evidence} media={media} policy={policy} />
+        <ArtifactGroup label={beforeLabel} attempt={before} evidence={evidence} media={media} policy={policy} />
         {after && <ArtifactGroup label="After this repair" attempt={after} evidence={evidence} media={media} policy={policy} />}
       </ResultSection>
     </div>
-  )
-}
-
-/** A titled band over its body — the run panes' card anatomy. */
-export function ResultSection({ title, context, action, testId, children }: {
-  title: string
-  context?: string
-  action?: ReactNode
-  testId?: string
-  children: ReactNode
-}) {
-  return (
-    <section className="cl-card overflow-hidden" aria-label={title} data-testid={testId}>
-      <header className="cl-card-head flex-wrap">
-        <h3 className="m-0 text-[12.5px] font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h3>
-        {context && <span className="min-w-0 truncate text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{context}</span>}
-        <span className="min-w-2 flex-1" />
-        {action}
-      </header>
-      {children}
-    </section>
   )
 }
 
@@ -138,21 +138,25 @@ function FailureSection({ attempt, initial }: { attempt: EvidenceAttempt; initia
 
 /** Repair notes and code changes: both come from the cycle's journal entry,
  *  so they share one live journal read. */
-function CycleRepair({ runId, feature, evidence, caseEvidence, cycle, onOpenRunWide }: {
+function CycleRepair({ runId, feature, evidence, caseEvidence, cycle, onOpenRunWide, open: requestedOpen, setOpen }: {
   runId: string
   feature: string
   evidence: RunEvidence
   caseEvidence: CaseEvidence
   cycle: CaseCycle
   onOpenRunWide?: () => void
+  open: 'entry' | 'all' | null
+  setOpen: (open: 'entry' | 'all' | null) => void
 }) {
   const { value: sections, error } = useRunJournal(feature, runId)
   const attribution = sections ? journalForCycle(cycle.cycle, sections, evidence, caseEvidence.name) : undefined
-  const [open, setOpen] = useState<'entry' | 'all' | null>(null)
   const fields = attribution ? parseBodyFields(attribution.section.body) : []
   const hypothesis = fields.find((f) => f.key === 'hypothesis')?.value
   const fix = fields.find((f) => f.key === 'fix.description')?.value
   const entryTitle = attribution ? `Iteration ${attribution.section.iteration ?? '?'}` : ''
+  // A routed entry dialog waits for the journal, and opens nothing for a cycle
+  // with no attributed entry; the whole journal opens once there is one.
+  const open = requestedOpen === 'entry' ? (attribution ? 'entry' : null) : requestedOpen === 'all' && sections && sections.length > 0 ? 'all' : null
   const sameName = evidence.cases.filter((c) => c.name === caseEvidence.name).length
   return (
     <>
@@ -172,7 +176,7 @@ function CycleRepair({ runId, feature, evidence, caseEvidence, cycle, onOpenRunW
           {attribution && (
             <>
               {hypothesis || fix ? (
-                <div className="space-y-2" style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 6, overflow: 'hidden' }} data-testid="journal-excerpt">
+                <div className="line-clamp-6 space-y-2" data-testid="journal-excerpt">
                   {hypothesis && <p className="m-0 whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--text-primary)' }}><span className="cl-rubric mr-2">hypothesis</span>{hypothesis}</p>}
                   {fix && <p className="m-0 whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--text-secondary)' }}><span className="cl-rubric mr-2">fix</span>{fix}</p>}
                 </div>

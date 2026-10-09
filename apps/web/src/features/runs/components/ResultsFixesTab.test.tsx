@@ -244,7 +244,7 @@ describe('a repaired test’s story', () => {
       cycleSelect()!.value = '1'
       cycleSelect()!.dispatchEvent(new Event('change', { bubbles: true }))
     })
-    expect(selections.at(-1)).toEqual({ caseKey: discountKey(), cycle: 1 })
+    expect(selections.at(-1)).toEqual({ caseKey: discountKey(), test: discountTarget, cycle: 1 })
     expect(section('section-failure')?.textContent).toContain('Execution 1')
     expect(section('section-failure')?.textContent).toContain('Expected total 90, received 100')
     expect(section('section-verification')?.textContent).toContain('Failed in execution 2')
@@ -366,6 +366,38 @@ describe('repair notes and code changes', () => {
     expect(section('section-notes')?.textContent).toContain('This cycle entry covers 2 tests.')
   })
 
+  it('bounds a long entry to an excerpt, keeping every line in the full entry', async () => {
+    const steps = Array.from({ length: 40 }, (_, i) => `step ${i + 1} of the investigation`).join('; ')
+    const [latest, earlier] = journalSections()
+    await mountStory({ journal: [{ ...latest, body: `\n- hypothesis: ${steps}\n- fix.description: multiply by 0.9\n` }, earlier] })
+    const excerpt = section('section-notes')?.querySelector<HTMLElement>('[data-testid="journal-excerpt"]')
+    expect(excerpt?.className).toContain('line-clamp-6')
+    act(() => { button('Read full entry')?.click() })
+    expect(document.querySelector('[data-testid="journal-source-modal"]')?.textContent).toContain('step 40 of the investigation')
+  })
+
+  it('says when an entry records no hypothesis or fix, and still opens it', async () => {
+    const [latest, earlier] = journalSections()
+    await mountStory({ journal: [{ ...latest, body: '\n- outcome: all_tests_passed\n' }, earlier] })
+    expect(section('section-notes')?.textContent).toContain('This entry records no hypothesis or fix description.')
+    act(() => { button('Read full entry')?.click() })
+    expect(document.querySelector('[data-testid="journal-source-modal"]')?.textContent).toContain('outcome: all_tests_passed')
+  })
+
+  it('names an entry matched by order because it predates cycle stamps', async () => {
+    const legacy = journalSections().map(({ cycle: _cycle, inputExecution: _input, failingTests: _tests, ...rest }) => rest)
+    await mountStory({ journal: legacy })
+    expect(section('section-notes')?.textContent).toContain('Matched to this cycle by entry order; the entry predates cycle stamps.')
+  })
+
+  it('reports a journal it could not read, and offers no full journal', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.listJournal).mockRejectedValue(new Error('EACCES'))
+    await mountStory()
+    expect(section('section-notes')?.textContent).toContain('Failed to load the journal: EACCES')
+    expect(button('Full run journal')).toBeUndefined()
+  })
+
   it('renders the cycle’s retained patch with the shared diff view', async () => {
     const runsApi = await import('@/shared/api/runs')
     vi.mocked(runsApi.getRunCyclePatch).mockResolvedValue({ iteration: 2, patchPath: '/runs/r/diffs/iteration-2.patch', diff: patch('0.95', '0.9') })
@@ -413,6 +445,19 @@ describe('the run’s own evidence', () => {
     expect(view?.querySelector('[data-testid="unassigned-artifacts"]')?.textContent).toContain('execution 2 · screenshot')
   })
 
+  it('keeps Playwright’s run-folder copies reachable when no story can show them', async () => {
+    const shot = { ...artifact('screenshot', 'loads.png') }
+    await mount(detailOf({
+      playbackEvents: stampedEvidencePlaybackEvents(), lifecycleEvents: stampedEvidenceLifecycleEvents(),
+      summary: { complete: true, total: 4, passed: 4, failed: [], knownTests: evidenceKnownTests },
+      playwrightArtifacts: [{ testName: 'test-case-loads-the-page', testTitle: '3 loads the page', artifacts: [shot] }],
+    }), { view: 'run-wide' })
+    const list = container.querySelector('[data-testid="latest-copies"]')
+    expect(list?.querySelector('a')?.getAttribute('href')).toBe('/artifacts/loads.png')
+    expect(list?.textContent).toContain('loads the page · screenshot')
+    expect(list?.textContent).toContain('Playwright output folder · latest copy per test')
+  })
+
   it('lists results recorded outside every known execution', async () => {
     await mount(detailOf({ playbackEvents: events, lifecycleEvents: [{ phase: 'running-tests', headline: 'x', updatedAt: '2026-01-02T00:00:00.000Z' }] }), { view: 'run-wide' })
     expect(container.querySelector('[data-testid="unplaced-attempts"]')?.textContent).toContain('passed checkout')
@@ -441,7 +486,7 @@ describe('accordion selection', () => {
     const { selections } = await mountStory({ selected: false })
     expect(caseRows().some((r) => r.hasAttribute('data-open'))).toBe(false)
     act(() => headerOf(discountKey())?.click())
-    expect(selections.at(-1)).toEqual({ caseKey: discountKey() })
+    expect(selections.at(-1)).toEqual({ caseKey: discountKey(), test: discountTarget })
     expect(caseRows().filter((r) => r.hasAttribute('data-open'))).toHaveLength(1)
     expect(headerOf(discountKey())?.getAttribute('aria-expanded')).toBe('true')
     act(() => headerOf(discountKey())?.click())
@@ -574,6 +619,9 @@ async function mountStory({ journal, cycle, selected = true, lifecycle = stamped
     manifest: { healCycles: 2, playwrightArtifacts: { screenshot: 'on', trace: 'on', video: 'off' } },
   }), { selection: selected ? { caseKey: discountKey(), ...(cycle !== undefined ? { cycle } : {}) } : { caseKey: null } })
 }
+
+// How the selection names the discount case for a link: its recorded name and spec location.
+const discountTarget = { name: evidenceCases.discount.name, location: 'e2e/checkout.spec.ts:12' }
 
 function caseRows(): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="case-result"]')]

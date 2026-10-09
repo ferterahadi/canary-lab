@@ -11,7 +11,7 @@ import type { OrchestratorLike } from '../logic/run-registry'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 
-import { runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
@@ -315,6 +315,47 @@ describe('GET /api/runs/:runId/cycle-patches/:iteration', () => {
     expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/1' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/..%2F..' })).statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/api/runs/nope/cycle-patches/1' })).statusCode).toBe(404)
+  })
+})
+
+describe('service log excerpts and windows', () => {
+  function writeRunWithService(): string {
+    const dir = runDirFor(logsDir, 'svc')
+    fs.mkdirSync(dir, { recursive: true })
+    const logPath = buildRunPaths(dir).serviceLog('api')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'svc', feature: 'foo', featureDir: path.join(featuresDir, 'foo'), startedAt: 'now', status: 'passed', healCycles: 0,
+      playwrightExecutions: 1, services: [{ name: 'api', safeName: 'api', command: 'x', cwd: dir, logPath }],
+    })
+    fs.writeFileSync(logPath, 'boot\n<test-case-pay>\ntotal=95\n</test-case-pay>\n')
+    return dir
+  }
+
+  it('serves one attempt’s span per service, bounded, and rejects malformed queries', async () => {
+    writeRunWithService()
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=test-case-pay' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ execution: 1, excerpts: [{ service: 'api', source: 'live', span: { startLine: 3, endLine: 3 }, window: { lines: ['total=95'] } }] })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=x&name=t' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=t&occurrence=-1' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/service-excerpts?execution=1&name=t' })).statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('serves a window of a known service’s retained log, and 404s anything else', async () => {
+    writeRunWithService()
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1&from=2&count=2' })
+    expect(res.json()).toEqual({ service: 'api', execution: 1, source: 'live', totalLines: 4, firstLine: 2, lines: ['<test-case-pay>', 'total=95'], truncated: true })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1' })).json().lines).toHaveLength(4)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1&from=a' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/..%2Fmanifest/lines?execution=1' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=7' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/service-logs/api/lines?execution=1' })).statusCode).toBe(404)
+    await app.close()
   })
 })
 

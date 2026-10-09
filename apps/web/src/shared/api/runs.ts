@@ -6,7 +6,7 @@ import type { StageModelChoice } from '@shared/agent-models'
 import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
 import type { AuditList } from './types-wizard'
 import type { RunIndexEntry } from '@shared/run-index'
-import type { RunDetail, JournalSection } from '@shared/run-detail'
+import type { RunDetail, JournalSection, ServiceLogExcerpts, ServiceLogLines } from '@shared/run-detail'
 import type { ApplyFixesOutcome, GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
 export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
 import { requestJson, ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
@@ -257,6 +257,21 @@ export function getRunCyclePatch(runId: string, iteration: number, opts?: Client
     { method: 'GET' },
     fetchImpl,
   )
+}
+
+// One test attempt's output in each service, from the log that kept that
+// execution: `occurrence` picks among spans sharing the marker name.
+export function getRunServiceExcerpts(runId: string, query: { execution: number; name: string; occurrence: number }, opts?: ClientOptions): Promise<ServiceLogExcerpts> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = new URLSearchParams({ execution: String(query.execution), name: query.name, occurrence: String(query.occurrence) })
+  return request<ServiceLogExcerpts>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/service-excerpts?${qs}`, { method: 'GET' }, fetchImpl)
+}
+
+// A window of one service's retained log for one execution.
+export function getRunServiceLogLines(runId: string, service: string, query: { execution: number; from: number; count: number }, opts?: ClientOptions): Promise<ServiceLogLines> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = new URLSearchParams({ execution: String(query.execution), from: String(query.from), count: String(query.count) })
+  return request<ServiceLogLines>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/service-logs/${encodeURIComponent(service)}/lines?${qs}`, { method: 'GET' }, fetchImpl)
 }
 
 // gh (GitHub CLI) connection status — detect-and-instruct only.

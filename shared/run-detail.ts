@@ -124,6 +124,46 @@ export interface RunExecutionArtifact extends PlaywrightArtifact {
   execution: number
 }
 
+/** Where one execution's service output is kept: the immutable per-execution
+ *  segment, or the live log while that execution is the latest. */
+export type ServiceLogSource = 'segment' | 'live'
+
+/** Lines `startLine`…`endLine` (1-based, inclusive) of a retained service log,
+ *  between one test attempt's `<name>`…`</name>` markers. `closed: false` = the
+ *  close marker never arrived (the attempt is running, or it was cut short), so
+ *  the span runs to the end of the file. */
+export interface ServiceLogSpan { startLine: number; endLine: number; closed: boolean }
+
+/** A bounded, plain-text window of a retained service log. */
+export interface ServiceLogWindow { firstLine: number; lines: string[]; truncated: boolean }
+
+/** One service's output for one test attempt. `matchedBy: 'order'` = the log
+ *  holds several spans under the same marker name (retries, or tests sharing
+ *  a title), and this one was chosen by its position. */
+export interface ServiceLogExcerpt {
+  service: string
+  name: string
+  execution: number
+  source?: ServiceLogSource
+  totalLines?: number
+  span?: ServiceLogSpan
+  matchedBy?: 'marker' | 'order'
+  window?: ServiceLogWindow
+  /** Why there is no span: the execution's output was not retained, or the
+   *  service printed no marker for this attempt. */
+  missing?: 'not-retained' | 'no-marker'
+}
+
+export interface ServiceLogExcerpts { execution: number; excerpts: ServiceLogExcerpt[] }
+
+/** A window of one service's retained log for the anchored full-log view. */
+export interface ServiceLogLines extends ServiceLogWindow {
+  service: string
+  execution: number
+  source: ServiceLogSource
+  totalLines: number
+}
+
 export interface PlaywrightArtifactGroup {
   testName: string
   testTitle?: string

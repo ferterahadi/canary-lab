@@ -1,21 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { buildRunEvidence, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
-import type { JournalSection } from '@shared/run-detail'
+import type { JournalSection, PlaywrightArtifactGroup, ServiceLogExcerpt } from '@shared/run-detail'
 import {
   evidenceKnownTests,
   stampedEvidenceLifecycleEvents,
+  evidencePlaybackEvents,
   stampedEvidencePlaybackEvents,
 } from '@shared/__fixtures__/run-evidence'
 import {
   attemptStatus,
   caseNumbers,
   cycleOptions,
+  excerptCaption,
+  excerptGapCopy,
   focusedCaseKey,
   journalMarkdown,
+  markerOccurrence,
   mediaGapCopy,
   resolveCycleChoice,
   runWideReason,
   selectedResult,
+  unshownLatestCopies,
   verificationOutcome,
   verificationSummary,
 } from './results-fixes'
@@ -166,5 +171,64 @@ describe('focusedCaseKey', () => {
     expect(focusedCaseKey(detail, { name: 'test-case-applies-the-discount' })).toBe(caseOf(evidence, 'discount').caseKey)
     expect(focusedCaseKey(detail, { name: 'test-case-loads-the-page' })).toBeUndefined()
     expect(focusedCaseKey(detail, { name: 'test-case-loads-the-page', location: 'e2e/admin.spec.ts:5' })).toBe(caseOf(evidence, 'admin-loads').caseKey)
+  })
+})
+
+describe('service log excerpts', () => {
+  it('picks a retry’s span by its position among same-name attempts in that execution', () => {
+    const evidence = evidenceOf()
+    const [first, retry, rerun] = caseOf(evidence, 'inventory').attempts
+    expect([first, retry, rerun].map((a) => markerOccurrence(a, evidence))).toEqual([0, 1, 0])
+    // Two tests share a title, so their markers share a name too.
+    expect(markerOccurrence(caseOf(evidence, 'home-loads').attempts[0], evidence)).toBe(0)
+    expect(markerOccurrence(caseOf(evidence, 'admin-loads').attempts[0], evidence)).toBe(1)
+  })
+
+  it('orders an attempt without a start time by its end', () => {
+    const evidence = evidenceOf()
+    const [first, retry] = caseOf(evidence, 'inventory').attempts
+    const unstarted = { ...retry, startedAt: undefined }
+    const unstamped = { ...first, startedAt: undefined, endedAt: undefined }
+    const inventory = caseOf(evidence, 'inventory')
+    const patched: RunEvidence = { ...evidence, cases: evidence.cases.map((c) => c === inventory ? { ...c, attempts: [unstamped, unstarted] } : c) }
+    expect(markerOccurrence(unstarted, patched)).toBe(1)
+    expect(markerOccurrence(unstamped, patched)).toBe(0)
+  })
+
+  const excerpt = (over: Partial<ServiceLogExcerpt>): ServiceLogExcerpt => ({ service: 'api', name: 'API', execution: 2, ...over })
+
+  it('captions where an excerpt came from', () => {
+    expect(excerptCaption(excerpt({ source: 'segment', totalLines: 900, span: { startLine: 40, endLine: 60, closed: true }, window: { firstLine: 41, lines: ['a'], truncated: false } }), 'Before this repair'))
+      .toBe('Before this repair · execution 2 · lines 40–60 of 900')
+    expect(excerptCaption(excerpt({ source: 'live', totalLines: 900, span: { startLine: 1, endLine: 400, closed: false }, window: { firstLine: 200, lines: ['a', 'b'], truncated: true } }), 'Test result'))
+      .toBe('Test result · execution 2 · lines 1–400 of 900 · last 2 lines of this test\'s span · live log')
+    expect(excerptCaption(excerpt({}), 'Initial execution')).toBe('Initial execution · execution 2')
+  })
+
+  it('says whether output was lost or never marked', () => {
+    expect(excerptGapCopy([excerpt({ missing: 'not-retained' }), excerpt({ service: 'web', missing: 'not-retained' })], 2))
+      .toBe("Execution 2's service output was not retained — this run emptied the live log before the next execution.")
+    expect(excerptGapCopy([excerpt({ missing: 'not-retained' }), excerpt({ service: 'web', missing: 'no-marker' })], 2))
+      .toBe("No service printed this test's markers in execution 2.")
+    expect(excerptGapCopy([], 3)).toBe("No service printed this test's markers in execution 3.")
+  })
+})
+
+describe('unshownLatestCopies', () => {
+  const group = (testName: string, n = 1): PlaywrightArtifactGroup => ({
+    testName,
+    artifacts: Array.from({ length: n }, (_, i) => ({ name: `${testName}-${i}.png`, kind: 'screenshot' as const, path: `${testName}-${i}.png`, url: `/a/${testName}-${i}.png`, sizeBytes: 1, mtimeMs: 0 })),
+  })
+  const groups = [group('test-case-applies-the-discount'), group('test-case-loads-the-page'), group('test-case-reserves-stock', 0)]
+
+  it('keeps the copies an unstamped run’s stories cannot show — a name two tests share', () => {
+    const legacy = buildRunEvidence({ events: evidencePlaybackEvents, known: evidenceKnownTests })
+    expect(unshownLatestCopies(legacy, { playwrightArtifacts: groups }).map((g) => g.testName)).toEqual(['test-case-loads-the-page'])
+  })
+
+  it('keeps every copy of a stamped run, where stories show retained attempt copies instead', () => {
+    expect(unshownLatestCopies(evidenceOf(), { playwrightArtifacts: groups }).map((g) => g.testName))
+      .toEqual(['test-case-applies-the-discount', 'test-case-loads-the-page'])
+    expect(unshownLatestCopies(evidenceOf(), {})).toEqual([])
   })
 })

@@ -74,7 +74,7 @@ export function App() {
     demoOpen, setDemoOpen,
     settingsOpen, setSettingsOpen, modelsFor, setModelsFor,
     resumePlanTaskId, setResumePlanTaskId,
-    focusTest, runTab, bootFailureFor, setBootFailureFor,
+    focusTest, runTab, runLocation, setRunLocation, bootFailureFor, setBootFailureFor,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     flightStage, setFlightStage, flightLog, setFlightLog,
   } = nav
@@ -329,6 +329,10 @@ export function App() {
             {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation, focusRequest: focusTest.request } : {})}
             /* Same pairing rule for the arrival tab a drill-through named. */
             {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
+            /* The reader's place inside the run, restored on a cold load and
+               reported back so the URL follows it. */
+            {...(runLocation && runLocation.runId === selectedRunId ? { location: runLocation.location } : {})}
+            onLocationChange={(location) => { if (selectedRunId) setRunLocation(selectedRunId, location) }}
             bootFailureOpen={bootFailureFor !== null && bootFailureFor === selectedRunId}
             onBootFailureOpenChange={(open) => setBootFailureFor(open ? selectedRunId : null)}
           />

@@ -5,8 +5,9 @@ import type { RunDetail } from '@shared/run-detail'
 import { evidenceKnownTests, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
 import { useResultsFocus, type ResultsFocus } from './use-results-focus'
 
+let status: ReturnType<typeof useResultsFocus> | undefined
 function Probe({ runId, detail, focus, onResolve }: { runId: string; detail?: RunDetail; focus: ResultsFocus; onResolve: (key: string) => void }) {
-  useResultsFocus(runId, detail, focus, onResolve)
+  status = useResultsFocus(runId, detail, focus, onResolve)
   return null
 }
 
@@ -30,5 +31,23 @@ it('waits for the run detail, resolves each focus once, and resolves a new focus
   expect(onResolve).toHaveBeenCalledOnce()
   act(() => root.render(<Probe runId="run-1" detail={detail} focus={{ test: 'test-case-reserves-stock' }} onResolve={onResolve} />))
   expect(onResolve).toHaveBeenCalledTimes(2)
+  act(() => root.unmount())
+})
+
+it('says whether a focus is absent, waiting, resolved, or names a test the finished roster lacks', () => {
+  const root = createRoot(document.createElement('div'))
+  const onResolve = vi.fn()
+  act(() => root.render(<Probe runId="run-1" detail={detail} focus={{}} onResolve={onResolve} />))
+  expect(status).toBe('none')
+  act(() => root.render(<Probe runId="run-1" focus={{ test: 'test-case-applies-the-discount' }} onResolve={onResolve} />))
+  expect(status).toBe('pending')
+  act(() => root.render(<Probe runId="run-1" detail={detail} focus={{ test: 'test-case-applies-the-discount' }} onResolve={onResolve} />))
+  expect(status).toBe('resolved')
+  // Still recording: an unknown name may yet arrive.
+  const running = { ...detail, summary: { ...detail.summary!, complete: false } }
+  act(() => root.render(<Probe runId="run-1" detail={running} focus={{ test: 'test-case-gone' }} onResolve={onResolve} />))
+  expect(status).toBe('pending')
+  act(() => root.render(<Probe runId="run-1" detail={detail} focus={{ test: 'test-case-gone' }} onResolve={onResolve} />))
+  expect(status).toBe('unmatched')
   act(() => root.unmount())
 })

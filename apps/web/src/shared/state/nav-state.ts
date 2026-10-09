@@ -1,4 +1,4 @@
-import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
+import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, RunLocation, WorkspaceView } from '../lib/workspace-view-state'
 import { ACTIVITY_STAGE, type FeatureActivity } from '@/features/flights/state/feature-activity'
 import { derivedFlightToken } from '@/features/flights/lib/derived-stages'
 import { stageRowKey } from '@/features/flights/components/StageRail'
@@ -83,6 +83,10 @@ export interface NavState {
    *  for would silently reroute the next run the user opens. The flight's Test
    *  Run stage sets it when the run's captured fixes are clicked. */
   runTab: { runId: string; tab: RunArrivalTab } | null
+  /** Where the reader is inside a run's detail, paired with that run for the
+   *  `focusTest` reason. Reported by the run detail itself; a cold load seeds it
+   *  from the URL so the detail can open on the same place. */
+  runLocation: { runId: string; location: RunLocation } | null
   /** R83: the flight this view was drilled into FROM, or null when the user got
    *  here on their own. Set only by the flight's stage drill-throughs (coverage
    *  ledger, run detail), which switch the top-level view and would otherwise
@@ -127,6 +131,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     runTab: persisted.run && persisted.runTab
       ? { runId: persisted.run, tab: persisted.runTab }
       : null,
+    runLocation: persisted.run && persisted.runLocation ? { runId: persisted.run, location: persisted.runLocation } : null,
     returnFlight: persisted.returnFlight,
   }
 }
@@ -184,6 +189,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     testId: state.focusTest?.runId === state.run ? state.focusTest.testId : undefined,
     testLocation: state.focusTest?.runId === state.run ? state.focusTest.testLocation : undefined,
     runTab: state.runTab?.runId === state.run ? state.runTab.tab : null,
+    ...(state.runLocation?.runId === state.run ? { runLocation: state.runLocation.location } : {}),
     returnFlight: state.returnFlight,
   }
 }

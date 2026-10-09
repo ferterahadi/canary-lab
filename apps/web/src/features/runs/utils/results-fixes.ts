@@ -3,8 +3,8 @@
 // Pure presentation over the shared run-evidence projection: which cycles a
 // case offers, which one is rendered, and the plain words for runner outcomes
 // and media gaps. Verdicts stay the runner's — nothing here decides a pass.
-import type { AttemptMedia, CaseCycle, CaseEvidence, CycleVerification, EvidenceAttempt } from '@shared/run-evidence'
-import type { JournalSection, RunDetail, RunSummary } from '@shared/run-detail'
+import { mediaForAttempt, type AttemptMedia, type CaseCycle, type CaseEvidence, type CycleVerification, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
+import type { JournalSection, PlaywrightArtifactGroup, RunDetail, RunSummary, ServiceLogExcerpt } from '@shared/run-detail'
 import type { PlaybackCaseEntry } from '@shared/playback-identity'
 import { buildTestNumbering, parseLocation, testNumberKey } from '@/shared/test-numbering'
 import { playbackFocusCase, playbackTests } from './run-detail-playback'
@@ -17,8 +17,15 @@ export interface CycleOption { value: CycleChoice; label: string }
 
 /** The reader's place in Results & Fixes. `cycle` absent = follow the case's
  *  latest cycle, so a new cycle advances the view; a number or `'initial'` is
- *  an explicit pick that a later cycle never replaces. */
-export interface ResultsSelection { caseKey: string | null; cycle?: CycleChoice }
+ *  an explicit pick that a later cycle never replaces. `test` names the open
+ *  case the way a link does (the key is in-memory only), and `journal` is the
+ *  repair notes' open source dialog. */
+export interface ResultsSelection {
+  caseKey: string | null
+  test?: { name: string; id?: string; location?: string }
+  cycle?: CycleChoice
+  journal?: 'entry' | 'all'
+}
 
 /** An attempt that has not ended reads as running; no attempt at all is the
  *  roster's not-run case, never a pass. */
@@ -146,4 +153,60 @@ export function runWideReason(section: JournalSection, sameNameCases: number): s
 export function focusedCaseKey(detail: Pick<RunDetail, 'playbackEvents' | 'playbackIdentity' | 'summary'>, target: PlaybackCaseEntry): string | undefined {
   const known = detail.summary?.knownTests
   return playbackFocusCase(playbackTests(detail.playbackEvents, detail.playbackIdentity, known), target, known)
+}
+
+/** Which same-name span in its execution's service log belongs to this
+ *  attempt. The log-marker fixture marks every attempt — retries, and tests
+ *  that share a title — under one summary name, in the order they ran. */
+export function markerOccurrence(attempt: EvidenceAttempt, evidence: RunEvidence): number {
+  const when = (a: EvidenceAttempt) => a.startedAt ?? a.endedAt ?? ''
+  return evidence.cases
+    .flatMap((c) => c.attempts)
+    .filter((a) => a.name === attempt.name && a.executionIndex === attempt.executionIndex)
+    .sort((a, b) => when(a).localeCompare(when(b)))
+    .findIndex((a) => a.attemptKey === attempt.attemptKey)
+}
+
+/** Where a Full service log link lands: one service's retained log for one
+ *  execution, with the lines to highlight and the story it was opened from. */
+export interface ServiceLogAnchor {
+  service: string
+  execution: number
+  startLine: number
+  endLine: number
+  /** The span was chosen by position among same-name spans. */
+  approximate: boolean
+  /** Absent when the range came from a link rather than a click. */
+  caseTitle?: string
+  /** e.g. "Repair cycle 2 · Before this repair". */
+  context?: string
+}
+
+/** The excerpt's provenance line, in the order the reader needs it. */
+export function excerptCaption(excerpt: ServiceLogExcerpt, label: string): string {
+  const parts = [label, `execution ${excerpt.execution}`]
+  if (excerpt.span && excerpt.totalLines !== undefined) parts.push(`lines ${excerpt.span.startLine}–${excerpt.span.endLine} of ${excerpt.totalLines}`)
+  if (excerpt.window?.truncated) parts.push(`last ${excerpt.window.lines.length} lines of this test's span`)
+  if (excerpt.source === 'live') parts.push('live log')
+  return parts.join(' · ')
+}
+
+/** Why a service shows no output for an attempt. */
+export function excerptGapCopy(excerpts: readonly ServiceLogExcerpt[], execution: number): string {
+  if (excerpts.length > 0 && excerpts.every((e) => e.missing === 'not-retained')) {
+    return `Execution ${execution}'s service output was not retained — this run emptied the live log before the next execution.`
+  }
+  return `No service printed this test's markers in execution ${execution}.`
+}
+
+/** Playwright's run-folder copies that no test's story shows. A story shows
+ *  one only for an unstamped latest attempt with a unique name; every other
+ *  copy — a stamped run's, or one two same-name tests could own — would
+ *  otherwise be unreachable, though the run kept it. */
+export function unshownLatestCopies(
+  evidence: RunEvidence,
+  detail: Pick<RunDetail, 'attemptArtifacts' | 'playwrightArtifacts'>,
+): PlaywrightArtifactGroup[] {
+  const shown = new Set(evidence.cases.flatMap((c) => (c.latest && mediaForAttempt(c.latest, evidence, detail).kind === 'latest-copy' ? [c.latest.name] : [])))
+  return (detail.playwrightArtifacts ?? []).filter((g) => g.artifacts.length > 0 && !shown.has(g.testName))
 }

@@ -21,6 +21,7 @@ import { EMPTY_AGENT_MODELS } from '../../../../../../shared/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { readableTerminalLog } from '../logic/runtime/log-enrichment'
+import { WINDOW_MAX_LINES, serviceLogExcerpts, serviceLogLines } from '../logic/service-log-excerpts'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
 import { type RunProposedPr } from '../../../../../../shared/run-state'
@@ -208,6 +209,36 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(404)
       return { error: 'no persisted patch for this cycle' }
     }
+  })
+
+  // One test attempt's service output: the span between its markers in the
+  // log that kept that execution. Bounded, so a large log never ships whole.
+  app.get<{ Params: { runId: string }; Querystring: { execution?: string; name?: string; occurrence?: string } }>('/api/runs/:runId/service-excerpts', async (req, reply) => {
+    const { execution, name, occurrence = '0' } = req.query
+    if (!execution || !/^\d+$/.test(execution) || !/^\d+$/.test(occurrence) || !name) {
+      reply.code(400)
+      return { error: 'execution, name and a numeric occurrence are required' }
+    }
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return notFound(reply, 'run')
+    const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    return { execution: Number(execution), excerpts: serviceLogExcerpts(runDir, detail.manifest, Number(execution), name, Number(occurrence)) }
+  })
+
+  // A window of one service's retained log, for the anchored full-log view.
+  app.get<{ Params: { runId: string; service: string }; Querystring: { execution?: string; from?: string; count?: string } }>('/api/runs/:runId/service-logs/:service/lines', async (req, reply) => {
+    const { execution, from = '1', count = String(WINDOW_MAX_LINES) } = req.query
+    if (!execution || ![execution, from, count].every((v) => /^\d+$/.test(v))) {
+      reply.code(400)
+      return { error: 'execution, from and count must be numbers' }
+    }
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return notFound(reply, 'run')
+    const service = detail.manifest.services.find((s) => s.safeName === req.params.service)
+    if (!service) return notFound(reply, 'service')
+    const window = serviceLogLines(runDirFor(deps.store.logsDir, req.params.runId), detail.manifest, service, Number(execution), Number(from), Number(count))
+    if (!window) return notFound(reply, 'service log for this execution')
+    return window
   })
 
   // Can we open a PR from this run's captured fix? Per-repo origin + default

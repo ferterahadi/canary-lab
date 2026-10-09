@@ -31,6 +31,7 @@ const base: NavState = {
   resumePlanTaskId: null,
   focusTest: null,
   runTab: null,
+  runLocation: null,
   returnFlight: null,
 }
 

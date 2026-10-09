@@ -115,6 +115,62 @@ describe('workspace-view-state (R12)', () => {
     expect(readPersistedView().runTab).toBeNull()
   })
 
+  // The reader's place inside a run: tab, Results & Fixes sub-view, test,
+  // cycle, journal dialog, service and a Full service log range.
+  it('round-trips where the reader is inside a run, and the test it names reads as its focus too', () => {
+    const runLocation = { tab: 'results' as const, test: { name: 'cart-total', id: 't-1', location: 'e2e/cart.spec.ts:9' }, cycle: 2, journal: 'entry' as const, service: 'api' }
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&test=cart-total&testId=t-1&testLocation=e2e%2Fcart.spec.ts%3A9&runtab=results&cycle=2&journal=entry&svc=api')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', focusTest: 'cart-total', testId: 't-1', testLocation: 'e2e/cart.spec.ts:9', runLocation }))
+  })
+
+  it('round-trips a run-wide or terminal sub-view, an initial-execution pick and a service log range', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', view: 'run-wide' } }))
+    expect(readPersistedView().runLocation).toEqual({ tab: 'results', view: 'run-wide' })
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', test: { name: 'cart-total' }, cycle: 'initial', journal: 'all' } }))
+    expect(readPersistedView().runLocation).toEqual({ tab: 'results', test: { name: 'cart-total' }, cycle: 'initial', journal: 'all' })
+    const log = { execution: 3, startLine: 120, endLine: 140, approximate: true }
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'services', service: 'api', log } }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&runtab=services&svc=api&exec=3&lines=120-140&match=order')
+    expect(readPersistedView().runLocation).toEqual({ tab: 'services', service: 'api', log })
+  })
+
+  it('lets a reported place supersede the arrival that opened the run', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'cart-total', runTab: 'changes', runLocation: { tab: 'agent' } }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&runtab=agent')
+    // A place on Overview names no tab, and a test without its journal open names none.
+    persistView(view({ feature: 'checkout', run: '7cvh', runTab: 'changes', runLocation: { test: { name: 'cart-total' }, cycle: 1 } }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&test=cart-total&cycle=1')
+    // Until a place is reported, the arrival is what the URL says.
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'cart-total', testId: 't-1' }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&test=cart-total&testId=t-1')
+  })
+
+  it('drops every run qualifier without a run, and keeps them out of localStorage', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'services', service: 'api', log: { execution: 1, startLine: 1, endLine: 2, approximate: false } } }))
+    persistView(view({ feature: 'checkout', runLocation: { tab: 'results', view: 'terminal', test: { name: 'x' }, cycle: 1, journal: 'all', service: 'api' } }))
+    expect(window.location.search).toBe('?feature=checkout')
+    expect(localStorage.getItem('cl.workspace.view')).toBe(JSON.stringify({ view: 'workspace', feature: 'checkout' }))
+  })
+
+  it('gates each qualifier on the one it belongs to, so a stale or edited link reads as less, not as nonsense', () => {
+    const read = (qs: string) => { window.history.replaceState(null, '', `/?feature=checkout&run=7cvh${qs}`); return readPersistedView().runLocation }
+    // A cycle or journal dialog with no test, a sub-view off Results & Fixes.
+    expect(read('&runtab=agent&rview=terminal&cycle=2&journal=entry')).toEqual({ tab: 'agent' })
+    // A log range off the Services tab, with no service, or malformed.
+    expect(read('&runtab=results&svc=api&exec=2&lines=4-9')).toEqual({ tab: 'results', service: 'api' })
+    expect(read('&runtab=services&exec=2&lines=4-9')).toEqual({ tab: 'services' })
+    expect(read('&runtab=services&svc=api&exec=0&lines=4-9')).toEqual({ tab: 'services', service: 'api' })
+    expect(read('&runtab=services&svc=api&exec=2&lines=9-4')).toEqual({ tab: 'services', service: 'api' })
+    expect(read('&test=x&cycle=two')).toBeUndefined()
+    // The legacy arrival and a bare test stay arrivals, not a restored place.
+    expect(read('&runtab=changes')).toBeUndefined()
+    expect(read('&test=x')).toBeUndefined()
+    expect(read('&test=x&cycle=3')).toEqual({ test: { name: 'x' }, cycle: 3 })
+    window.history.replaceState(null, '', '/?feature=checkout&runtab=results&cycle=1')
+    expect(readPersistedView().runLocation).toBeUndefined()
+  })
+
   // R83: `from` names the flight a stage drill-through left, so the destination
   // (coverage ledger / run detail) can offer a way back that survives a refresh.
   it('round-trips the origin flight on a drilled-into view', () => {

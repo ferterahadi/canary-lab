@@ -76,10 +76,35 @@ export type ModelsAgent = 'claude' | 'codex'
 /** Which tab the run detail should OPEN on when another view links into a run —
  *  the `runtab` qualifier for `run`. Only cross-view arrivals are listed, not the
  *  whole tab set: a flight's Test Run stage reports the repairs a run captured
- *  and sends them to that run's Changes tab. Tab switches made INSIDE the run
- *  detail stay local to it (unrouted), exactly as before — this carries the
- *  arrival intent, the same way `test` does. */
+ *  and sends them to that run's Changes tab, now Results & Fixes' run-wide
+ *  view. This carries the arrival intent, the same way `test` does; where the
+ *  reader goes inside the run afterwards is its `RunLocation`. */
 export type RunArrivalTab = 'changes'
+
+/** A run-detail tab a reader can be on, other than Overview (the default). */
+export type RunDetailTab = 'run-logs' | 'services' | 'agent' | 'results'
+
+/** Where the reader is inside one run's detail — URL only, and written only for
+ *  the selected run, so two tabs can inspect two places independently. Each
+ *  field qualifies the one before it: a cycle belongs to a test, a log range
+ *  to a service, the journal dialog to a test's repair story. Names, not
+ *  in-memory keys, so a pasted link resolves against the run it names; a name
+ *  the run no longer has is explained by the view, not silently dropped here. */
+export interface RunLocation {
+  /** Absent = Overview. */
+  tab?: RunDetailTab
+  /** Results & Fixes' sub-view; absent = the test list. */
+  view?: 'run-wide' | 'terminal'
+  test?: { name: string; id?: string; location?: string }
+  /** Absent = follow the test's latest repair cycle. */
+  cycle?: number | 'initial'
+  /** The selected service's safe name. */
+  service?: string
+  /** A Full service log range on `service`. */
+  log?: { execution: number; startLine: number; endLine: number; approximate: boolean }
+  /** The repair notes' source dialog: the cycle's entry or the whole journal. */
+  journal?: 'entry' | 'all'
+}
 
 /** What a drill-through wants the run detail to land on. `test` is a run-summary
  *  failed-entry name (R82 — the Playwright tab, scrolled to that failure) and
@@ -161,6 +186,10 @@ export interface PersistedView {
    *  (URL only; dropped unless a run is selected, and an unknown value is
    *  ignored rather than rendering a blank pane). */
   runTab: RunArrivalTab | null
+  /** Where the reader was inside the selected run (URL only; see RunLocation).
+   *  When present it is what the URL says about that run — the arrival
+   *  intents above only describe how a link entered it. */
+  runLocation?: RunLocation
   /** R83: the flight a drill-through came FROM (URL only; dropped on the flights
    *  view, where it would point at the screen you're already on). A flight's
    *  stage drill-throughs switch the top-level view outright — the coverage
@@ -196,6 +225,36 @@ function parseConfigTab(v: string | null): ConfigTab | null {
 
 function parseRunArrivalTab(v: string | null): RunArrivalTab | null {
   return v != null && (RUN_ARRIVAL_TABS as string[]).includes(v) ? (v as RunArrivalTab) : null
+}
+
+const RUN_DETAIL_TABS: RunDetailTab[] = ['run-logs', 'services', 'agent', 'results']
+const POSITIVE_INT = /^[1-9]\d*$/
+
+/** The routed place inside a run, or undefined when the URL names none beyond
+ *  an arrival. Every qualifier is gated on the one it belongs to, so a stale or
+ *  hand-edited link can't produce a log range without a service, say. */
+function parseRunLocation(params: URLSearchParams): RunLocation | undefined {
+  const raw = params.get('runtab')
+  const tab = raw != null && (RUN_DETAIL_TABS as string[]).includes(raw) ? raw as RunDetailTab : undefined
+  const viewParam = params.get('rview')
+  const view = tab === 'results' && (viewParam === 'run-wide' || viewParam === 'terminal') ? viewParam : undefined
+  const name = params.get('test')
+  const test = name ? { name, ...(params.get('testId') ? { id: params.get('testId')! } : {}), ...(params.get('testLocation') ? { location: params.get('testLocation')! } : {}) } : undefined
+  const cycleParam = params.get('cycle') ?? ''
+  const cycle = test && (cycleParam === 'initial' || POSITIVE_INT.test(cycleParam)) ? (cycleParam === 'initial' ? 'initial' as const : Number(cycleParam)) : undefined
+  const service = params.get('svc') || undefined
+  const lines = /^([1-9]\d*)-([1-9]\d*)$/.exec(params.get('lines') ?? '')
+  const exec = params.get('exec') ?? ''
+  const log = tab === 'services' && service && lines && POSITIVE_INT.test(exec) && Number(lines[1]) <= Number(lines[2])
+    ? { execution: Number(exec), startLine: Number(lines[1]), endLine: Number(lines[2]), approximate: params.get('match') === 'order' }
+    : undefined
+  const journalParam = params.get('journal')
+  const journal = test && (journalParam === 'entry' || journalParam === 'all') ? journalParam : undefined
+  if (!tab && !cycle && !service && !journal) return undefined
+  return {
+    ...(tab ? { tab } : {}), ...(view ? { view } : {}), ...(test ? { test } : {}), ...(cycle !== undefined ? { cycle } : {}),
+    ...(service ? { service } : {}), ...(log ? { log } : {}), ...(journal ? { journal } : {}),
+  }
 }
 
 function parseModelsAgent(v: string | null): ModelsAgent | null {
@@ -242,6 +301,8 @@ export function readPersistedView(): PersistedView {
     // `runtab` qualifies a selected run too — an unknown tab name is ignored, so
     // the detail opens on its own default instead of a pane that doesn't exist.
     const runTab = run ? parseRunArrivalTab(params.get('runtab')) : null
+    const location = run ? parseRunLocation(params) : undefined
+    const runLocation = location ? { runLocation: location } : {}
     // `from` names the flight a drill-through left — meaningless on the flights
     // view itself, dropped there.
     const returnFlight = v === 'flights' ? null : params.get('from') || null
@@ -255,8 +316,8 @@ export function readPersistedView(): PersistedView {
     const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
       ? { currentTests: source === 'current' } : {}
     const log = flightLog ? { flightLog } : {}
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...approval, ...tests, ...testIdentity }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...approval, ...tests, ...testIdentity }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...log, ...review, ...approval, ...tests, ...testIdentity, ...runLocation }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...approval, ...tests, ...testIdentity, ...runLocation }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -339,14 +400,24 @@ function writeViewParams(params: URLSearchParams, state: PersistedView): void {
   setOrDelete(params, 'reviewLine', state.dialog === 'tests-review' && state.reviewFocus?.line ? String(state.reviewFocus.line) : null)
   setOrDelete(params, 'reviewMode', state.dialog === 'tests-review' ? state.reviewFocus?.mode ?? null : null)
   setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
-  // `test` only qualifies a selected run — drop it otherwise, so switching runs
-  // can't leave a previous run's failure pinned in the URL.
-  setOrDelete(params, 'test', state.run ? state.focusTest : null)
-  setOrDelete(params, 'testId', state.run && state.focusTest ? state.testId ?? null : null)
-  setOrDelete(params, 'testLocation', state.run && state.focusTest ? state.testLocation ?? null : null)
-  // Same rule for the arrival tab: it belongs to the run in the URL, so
-  // switching runs can't leave a previous drill-through's tab pinned.
-  setOrDelete(params, 'runtab', state.run ? state.runTab : null)
+  // Every run qualifier is dropped without a run, so switching runs can't leave
+  // a previous run's test, tab or log range pinned in the URL. A reported
+  // location is the reader's current place and supersedes the arrival that
+  // brought them; until one is reported, the arrival is what the URL says.
+  const loc = state.run ? state.runLocation : undefined
+  const test = !state.run ? undefined : loc ? loc.test : state.focusTest ? { name: state.focusTest, id: state.testId, location: state.testLocation } : undefined
+  setOrDelete(params, 'test', test?.name ?? null)
+  setOrDelete(params, 'testId', test?.id ?? null)
+  setOrDelete(params, 'testLocation', test?.location ?? null)
+  setOrDelete(params, 'runtab', !state.run ? null : loc ? loc.tab ?? null : state.runTab)
+  setOrDelete(params, 'rview', loc?.tab === 'results' ? loc.view ?? null : null)
+  setOrDelete(params, 'cycle', loc?.test && loc.cycle !== undefined ? String(loc.cycle) : null)
+  setOrDelete(params, 'journal', loc?.test ? loc.journal ?? null : null)
+  setOrDelete(params, 'svc', loc?.service ?? null)
+  const log = loc?.tab === 'services' && loc.service ? loc.log : undefined
+  setOrDelete(params, 'exec', log ? String(log.execution) : null)
+  setOrDelete(params, 'lines', log ? `${log.startLine}-${log.endLine}` : null)
+  setOrDelete(params, 'match', log?.approximate ? 'order' : null)
   // `from` is dropped on the flights view — arriving at a flight IS the return,
   // so keeping it would leave a back-link to the screen you're already on.
   setOrDelete(params, 'from', state.view === 'flights' ? null : state.returnFlight)

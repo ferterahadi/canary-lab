@@ -360,6 +360,35 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
     expect(nav.pendingRunSelectionRef.current).toBeNull()
   })
 
+  it('restores where the reader was inside a run, follows each report, and lets an arrival replace it', async () => {
+    const location = { tab: 'services' as const, service: 'api', log: { execution: 2, startLine: 5, endLine: 9, approximate: false } }
+    await mount(persisted({ feature: 'checkout', run: 'r1', runLocation: location }))
+    expect(nav.runLocation).toEqual({ runId: 'r1', location })
+
+    await act(async () => { nav.setRunLocation('r1', { tab: 'results', test: { name: 'should pay' }, cycle: 2 }) })
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'r1', runLocation: { tab: 'results', test: { name: 'should pay' }, cycle: 2 } }))
+
+    // An equal report keeps the same state, so the URL is not rewritten.
+    const writes = viewState.persistView.mock.calls.length
+    const before = nav.runLocation
+    await act(async () => { nav.setRunLocation('r1', { tab: 'results', test: { name: 'should pay' }, cycle: 2 }) })
+    expect(nav.runLocation).toBe(before)
+    expect(viewState.persistView.mock.calls.length).toBe(writes)
+
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { tab: 'changes' }) })
+    expect(nav.runLocation).toBeNull()
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'r1', runTab: 'changes' }))
+    expect(viewState.persistView.mock.lastCall?.[0]).not.toHaveProperty('runLocation')
+  })
+
+  it('never writes one run’s place under another', async () => {
+    await mount(persisted({ feature: 'checkout', run: 'r1' }))
+    await act(async () => { nav.setRunLocation('r1', { tab: 'agent' }) })
+    await act(async () => { nav.setSelectedRunId('r2') })
+    expect(viewState.persistView.mock.lastCall?.[0]).toMatchObject({ run: 'r2' })
+    expect(viewState.persistView.mock.lastCall?.[0]).not.toHaveProperty('runLocation')
+  })
+
   it('opens the coverage ledger, carrying the way back only when given one', async () => {
     await mount()
 
