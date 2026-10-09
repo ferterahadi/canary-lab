@@ -12,6 +12,9 @@ export interface ContextRow {
   change?: number
   beforeChanged?: boolean
   afterChanged?: boolean
+  /** Unchanged lines a patch leaves out just above this row, per side. Only a
+   * view built from a patch alone has them. */
+  gap?: { before: number; after: number }
 }
 
 export function sourceRows(review: SourceComparison): ContextRow[] {

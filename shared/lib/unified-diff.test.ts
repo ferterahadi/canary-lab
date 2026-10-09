@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { unifiedDiffLines } from './unified-diff'
+import { hunkRange, unifiedDiffLines } from './unified-diff'
 import { comparisonPatchRows } from '../comparison-patch'
 
 // These are changed source lines whose text begins with -- and ++, not headers.
@@ -41,5 +41,14 @@ describe('unifiedDiffLines', () => {
       { kind: 'values', before: 'b', after: null },
       { kind: 'section', text: ' context' },
     ])
+  })
+})
+
+describe('hunkRange', () => {
+  it('reads both ranges, an omitted count as one line, and ignores the context trailer', () => {
+    expect(hunkRange('@@ -40,2 +40,4 @@ export function price() {')).toEqual({ oldStart: 40, oldCount: 2, newStart: 40, newCount: 4 })
+    expect(hunkRange('@@ -10 +12 @@')).toEqual({ oldStart: 10, oldCount: 1, newStart: 12, newCount: 1 })
+    expect(hunkRange('@@ -3,0 +4,2 @@')).toEqual({ oldStart: 3, oldCount: 0, newStart: 4, newCount: 2 })
+    expect(hunkRange(' @@ -1 +1 @@')).toBeNull()
   })
 })

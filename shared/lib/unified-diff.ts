@@ -3,6 +3,16 @@ export interface UnifiedDiffLine {
   text: string
 }
 
+export interface HunkRange { oldStart: number; oldCount: number; newStart: number; newCount: number }
+
+const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
+
+/** A hunk header's ranges; an omitted count means one line. */
+export function hunkRange(text: string): HunkRange | null {
+  const hunk = HUNK.exec(text)
+  return hunk && { oldStart: Number(hunk[1]), oldCount: Number(hunk[2] ?? 1), newStart: Number(hunk[3]), newCount: Number(hunk[4] ?? 1) }
+}
+
 /** Hunk counts distinguish changed source beginning with ---/+++ from headers.
  * Headerless fragments remain useful, even when a captured patch is incomplete. */
 export function unifiedDiffLines(diff: string): UnifiedDiffLine[] {
@@ -11,14 +21,14 @@ export function unifiedDiffLines(diff: string): UnifiedDiffLine[] {
   const lines = diff.split('\n')
   if (lines.at(-1) === '') lines.pop()
   return lines.map((text): UnifiedDiffLine => {
-    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text)
+    const hunk = hunkRange(text)
     if (text.startsWith('diff --git ') || /^# (repo|feature config): /.test(text)) {
       oldRemaining = newRemaining = 0
       return { kind: text.startsWith('diff --git ') ? 'file' : 'metadata', text }
     }
     if (hunk) {
-      oldRemaining = Number(hunk[2] ?? 1)
-      newRemaining = Number(hunk[4] ?? 1)
+      oldRemaining = hunk.oldCount
+      newRemaining = hunk.newCount
       return { kind: 'hunk', text }
     }
     if (text.startsWith('-') && (oldRemaining > 0 || !text.startsWith('--- '))) {

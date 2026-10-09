@@ -51,6 +51,7 @@ const WIRE_HOMES = [
   'shared/lib/dotenv-edit.ts',
   'shared/verification.ts',
   'shared/run-pr.ts',
+  'shared/test-view/cycle-review.ts',
 ]
 const APP_ROOTS = ['apps/web/src', 'apps/web-server/src']
 
