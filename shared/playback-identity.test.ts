@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlaybackIdentity, latestPlaybackAttempt, reconcilePlaybackCases } from './playback-identity'
+import { buildPlaybackIdentity, latestPlaybackAttempt, playbackCaseKey, reconcilePlaybackCases } from './playback-identity'
 import type { PlaywrightPlaybackEvent } from './playback'
+import { evidenceKnownTests, evidenceLifecycleEvents, evidencePlaybackEvents } from './__fixtures__/run-evidence'
 
 const test = (line: number, id?: string) => ({ name: 'renders', title: 'renders', location: `page.spec.ts:${line}`, ...(id ? { id } : {}) })
 const end = (line: number, time: string, passed = true): PlaywrightPlaybackEvent => ({ type: 'test-end', test: test(line), time, status: passed ? 'passed' : 'failed', passed, retry: 0, durationMs: 1 })
@@ -65,4 +66,53 @@ it('uses name and location when legacy active attempts share a name', () => {
 it('honors supplied case identities even when source declarations later change', () => {
   const attempts = [{ ...test(10), caseKey: 'first' }, { ...test(20), caseKey: 'second' }]
   expect(reconcilePlaybackCases([], attempts, [{ file: 'page.spec.ts', title: 'renders' }])).toHaveLength(2)
+})
+
+// Pins today's identity contract against one recorded-shape run (three
+// executions, two heal cycles, a retry and a duplicate title) so the evidence
+// projection built on top of it cannot quietly fold or split cases.
+describe('run evidence baseline', () => {
+  const groups = (events: readonly PlaywrightPlaybackEvent[], known = evidenceKnownTests) => {
+    const keys = buildPlaybackIdentity(events, known).eventKeys
+    const byCase = new Map<string, Set<string>>()
+    for (const key of keys) {
+      if (!key) continue
+      byCase.set(key.caseKey, (byCase.get(key.caseKey) ?? new Set()).add(key.attemptKey))
+    }
+    return byCase
+  }
+  const caseOf = (id: string) => playbackCaseKey(evidenceKnownTests.find((t) => t.id === id)!)
+
+  it('folds every execution of a case into one case and keeps each execution a distinct attempt', () => {
+    const byCase = groups(evidencePlaybackEvents)
+    expect(byCase.size).toBe(4)
+    expect(byCase.get(caseOf('discount'))!.size).toBe(3)
+  })
+
+  it('records a Playwright retry as its own attempt beside the heal rerun', () => {
+    const byCase = groups(evidencePlaybackEvents)
+    expect(byCase.get(caseOf('inventory'))!.size).toBe(3)
+    const retries = evidencePlaybackEvents.filter((e) => e.type === 'test-end' && e.test.id === 'inventory').map((e) => e.type === 'test-end' && e.retry)
+    // Two attempts carry retry 0: one per execution. `retry` counts within an
+    // invocation, so it can never number an execution or a heal cycle.
+    expect(retries).toEqual([0, 1, 0])
+  })
+
+  it('keeps same-title cases in different files apart with and without a roster', () => {
+    const withRoster = groups(evidencePlaybackEvents)
+    expect(withRoster.get(caseOf('home-loads'))!.size).toBe(1)
+    expect(withRoster.get(caseOf('admin-loads'))!.size).toBe(1)
+    // A legacy record has no roster and no ids: locations alone still separate them.
+    const legacy = evidencePlaybackEvents.map((event) => ({ ...event, test: { ...event.test, id: undefined } })) as PlaywrightPlaybackEvent[]
+    expect(groups(legacy, []).size).toBe(4)
+  })
+
+  it('carries no execution boundary in the stream: only lifecycle start/exit times bracket one', () => {
+    const begins = evidencePlaybackEvents.filter((e) => e.type === 'test-begin')
+    expect(begins.every((e) => Object.keys(e).sort().join() === 'test,time,type')).toBe(true)
+    const starts = evidenceLifecycleEvents.filter((e) => e.phase === 'running-tests' || e.phase === 'rerunning-tests').map((e) => e.updatedAt)
+    const exits = evidenceLifecycleEvents.filter((e) => e.phase === 'completed' || e.phase === 'failed').map((e) => e.updatedAt)
+    const execution = (time: string) => starts.findIndex((start, i) => time >= start && time <= exits[i]) + 1
+    expect(begins.map((e) => execution(e.time))).toEqual([1, 1, 1, 1, 1, 2, 2, 3])
+  })
 })

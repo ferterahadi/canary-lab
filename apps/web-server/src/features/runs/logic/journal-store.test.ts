@@ -9,6 +9,7 @@ import {
   readJournal,
 } from './journal-store'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { evidenceJournalMarkdown } from '../../../../../../shared/__fixtures__/run-evidence'
 
 const tempDir = trackTempDirs('cl-jrnl-')
 
@@ -145,5 +146,21 @@ describe('readJournal', () => {
     fs.writeFileSync(file, SAMPLE)
     const { sections } = readJournal(file)
     expect(sections).toHaveLength(3)
+  })
+})
+
+// The run panel attaches journal entries to repair cycles. Pin what an entry
+// can and cannot say about that today: its input failures arrive as summary
+// NAMES only, so same-title cases in different files share one name, and its
+// per-cycle diff lives inside the body rather than as a field.
+describe('journal as cycle evidence', () => {
+  it('carries input failures by name and the cycle diff inside the body', () => {
+    const [first, second] = parseStructured(evidenceJournalMarkdown)
+    expect(first).toMatchObject({ iteration: 1, failingTests: 'test-case-applies-the-discount, test-case-reserves-stock', outcome: 'partial' })
+    expect(second).toMatchObject({ iteration: 2, failingTests: 'test-case-applies-the-discount', outcome: 'all_tests_passed' })
+    const sections = splitJournalSections(evidenceJournalMarkdown)
+    expect(sections.map((s) => s.iteration)).toEqual([1, 2])
+    expect(sections[0].body).toContain('```diff\n--- a/src/pricing.ts')
+    expect(sections[1].body).not.toContain('### Diff')
   })
 })
