@@ -1,144 +1,10 @@
-import type { PlaybackIdentity } from '@shared/playback-identity'
-import { shortSourceLocation } from '@shared/lib/source-location'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type {
-  PlaywrightArtifact,
-  PlaywrightArtifactGroup,
-  PlaywrightPlaybackEvent,
-  RunSummary,
-} from '@shared/run-detail'
-import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
+import type { PlaywrightArtifact } from '@shared/run-detail'
 import type { RunLifecycleEvent } from '@shared/run-state'
-import { formatDuration, shortTime } from '@/shared/lib/format'
 import { parseAssertionError } from '../utils/assertion-error'
-import { artifactsForPlayback, playbackTests, playbackFocusCase, type PlaybackTest } from '../utils/run-detail-playback'
-import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
-import { EmptyState } from '@/shared/ui/EmptyState'
-import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
+import type { PlaybackTest } from '../utils/run-detail-playback'
 import { DownloadIcon, ImageIcon, StepsIcon, VideoIcon } from '@/shared/ui/Icons'
-import { TestIdBadge } from '@/shared/ui/TestIdBadge'
-import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '@/shared/test-numbering'
-
-export type PlaywrightView = 'terminal' | 'playback'
-
-export function PlaywrightPlayback({
-  events,
-  playbackIdentity,
-  artifactGroups,
-  artifactPolicy,
-  summary,
-  totalTests,
-  embedded = false,
-  focusTest,
-  focusTestId,
-  focusTestLocation,
-}: {
-  events?: PlaywrightPlaybackEvent[]
-  playbackIdentity?: PlaybackIdentity
-  artifactGroups?: PlaywrightArtifactGroup[]
-  artifactPolicy?: PlaywrightArtifactPolicy
-  summary?: RunSummary
-  totalTests?: number
-  embedded?: boolean
-  /** Legacy names focus only a unique case; qualifiers preserve duplicate identity. */
-  focusTest?: string
-  focusTestId?: string
-  focusTestLocation?: string
-}) {
-  const tests = playbackTests(events, playbackIdentity, summary?.knownTests)
-  const focusedCase = focusTest ? playbackFocusCase(tests, { name: focusTest, id: focusTestId, location: focusTestLocation }, summary?.knownTests) : undefined
-  // Scroll the focused case into view once it exists. Keyed on identity (not a
-  // mount-once effect) so clicking a SECOND failure while this list is already
-  // open re-scrolls, and so the scroll still happens when playback events arrive
-  // after the first render.
-  const focusRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!focusedCase) return
-    // `start`, not `center`: these cards run taller than the run-detail panel is
-    // (error block + snippet + artifact sections), and centering a 265px card in a
-    // ~200px panel scrolls its own title and status pill off the top — you land
-    // mid-evidence with no idea which test you're looking at. Aligning the top
-    // edge puts the header first, which is the point of landing here.
-    focusRef.current?.scrollIntoView({ block: 'start' })
-  }, [focusedCase, events])
-
-  if (tests.length === 0) {
-    return <EmptyState {...EMPTY_COPY.playback} />
-  }
-  const activeIndex = currentPlaybackIndex(tests, summary?.running?.name)
-  // Stable per-test ids, shared with the Tests column + Coverage Ledger. Number
-  // against the run's full known set so a partial/targeted rerun keeps each
-  // test's canonical id; fall back to the played-back tests when absent.
-  const knownLocations = summary?.knownTests
-    ?.map((t) => parseLocation(t.location))
-    .filter((p): p is { file: string; line: number } => p !== null) ?? []
-  const numberingSource = knownLocations.length > 0
-    ? knownLocations
-    : tests.map((t) => parseLocation(t.location)).filter((p): p is { file: string; line: number } => p !== null)
-  const testNumbering = buildTestNumbering(numberingSource)
-  return (
-    // `p-4`: the run panes' one content inset (`RunPane padded`), so a test card
-    // starts on the same edge and at the same height as the Overview's cards.
-    <div className={`${embedded ? '' : 'h-full overflow-y-auto scrollbar-thin'} p-4 text-xs`} style={{ background: 'var(--bg-base)' }}>
-      <div className="space-y-3">
-        {tests.map((test, idx) => {
-          const playbackArtifacts = artifactsForPlayback(test.name, artifactGroups, artifactPolicy)
-          const traceArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'trace')
-          const videoArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'video')
-          const isCurrent = idx === activeIndex
-          const isFocused = focusedCase === test.caseKey
-          return (
-            <div
-              key={test.caseKey}
-              {...(isFocused ? { 'data-focus-test': test.name } : {})}
-              ref={isFocused ? focusRef : undefined}
-              className="cl-card overflow-hidden"
-              // Inline, not a `border-*` utility: `.cl-card` is unlayered, so its
-              // border colour beats any utility beside it. The landing marker
-              // (accent) outranks the verdict tone — it is the one card you came
-              // to read.
-              style={cardBorder(isFocused, test, isCurrent)}
-            >
-              {/* The title strip: identity, title, duration, verdict — the same
-                  anatomy as the Overview's service cards, state on the right. */}
-              <div className="cl-card-head">
-                <TestIdBadge n={(() => { const p = parseLocation(test.location); return p ? testNumbering.get(testNumberKey(p.file, p.line)) : undefined })()} />
-                <PlaybackTitle test={test} current={isCurrent} />
-                {typeof test.durationMs === 'number' && (
-                  <span className="shrink-0 tabular-nums text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {formatDuration(test.durationMs)}
-                  </span>
-                )}
-                <StatusPill passed={test.passed} status={test.status} current={isCurrent} />
-              </div>
-              <div className="cl-card-body">
-                <PlaybackMeta test={test} />
-                {test.error?.message ? (
-                  <AssertionMessage message={test.error.message} />
-                ) : isCurrent ? (
-                  <div className="mt-1.5 text-[11px]" style={{ color: 'var(--running)' }}>
-                    Currently executing in this Playwright process.
-                  </div>
-                ) : test.passed !== true && test.status ? (
-                  <div className="mt-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>Status: {test.status}</div>
-                ) : null}
-              </div>
-              <EvidenceRail
-                screenshots={playbackArtifacts.screenshots}
-                screenshotMode={playbackArtifacts.screenshotMode}
-                videos={videoArtifacts}
-                videoMode={artifactPolicy?.video ?? 'off'}
-                steps={test.steps}
-                traces={traceArtifacts}
-              />
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 /**
  * The card's foot: one bar for everything the test left behind.
@@ -364,37 +230,6 @@ export function TraceActions({ artifacts }: { artifacts: PlaywrightArtifact[] })
   )
 }
 
-/** The title on the card's strip. It wraps to two lines rather than
- *  truncating — a Playwright test name carries its `@req-…`/`@path-…` tags up
- *  front, so the tail is the part that actually says what the test does. */
-export function PlaybackTitle({ test, current }: { test: PlaybackTest; current: boolean }) {
-  return (
-    <div
-      className="min-w-0 flex-1 text-xs font-medium leading-snug"
-      style={{ color: current ? 'var(--running)' : 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-      title={test.title}
-    >
-      {stripLeadingTestOrdinal(test.title)}
-    </div>
-  )
-}
-
-/** Where and when, the body's first line: the spec location, the start time,
- *  and a retry when there was one. The duration sits on the title strip. */
-export function PlaybackMeta({ test }: { test: PlaybackTest }) {
-  const location = test.location ? shortSourceLocation(test.location) : null
-  const parts: ReactNode[] = []
-  if (location) parts.push(<span key="loc" className="min-w-0 truncate" title={test.location}>{location}</span>)
-  if (test.startedAt) parts.push(<span key="at">{shortTime(test.startedAt)}</span>)
-  if (typeof test.retry === 'number' && test.retry > 0) parts.push(<span key="retry" style={{ color: 'var(--warning)' }}>retry {test.retry}</span>)
-  if (parts.length === 0) return null
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-      {parts.flatMap((part, i) => (i === 0 ? [part] : [<Dot key={`dot-${i}`} />, part]))}
-    </div>
-  )
-}
-
 /** The failure message. A matcher failure lays out as its headline over an
  *  Expected / Received table — the mismatch is the thing to read, so it gets
  *  rows of its own, in Playwright's own green/red. Anything the split cannot
@@ -432,21 +267,6 @@ function AssertionSide({ label, value, color, divided = false }: { label: string
       <dd className="whitespace-pre-wrap break-all px-2.5 py-1.5" style={{ color, fontFamily: 'var(--font-mono)' }}>{value}</dd>
     </div>
   )
-}
-
-/** The card's border tone. Inline because `.cl-card` is unlayered and its
- *  border colour would beat a utility. */
-function cardBorder(focused: boolean, test: PlaybackTest, current: boolean): React.CSSProperties | undefined {
-  if (focused) return { borderColor: 'var(--accent)' }
-  if (current) return undefined
-  const status = statusFromPlaybackResult({ status: test.status, passed: test.passed })
-  if (status === 'failed') return { borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }
-  if (status === 'timedout') return { borderColor: 'color-mix(in srgb, var(--warning) 45%, var(--border-default))' }
-  return undefined
-}
-
-function Dot() {
-  return <span aria-hidden="true" style={{ opacity: 0.5 }}>·</span>
 }
 
 export function ScreenshotPreview({ artifact }: { artifact: PlaywrightArtifact }) {
@@ -493,31 +313,6 @@ export function EmptyArtifactMessage({ children }: { children: React.ReactNode }
 export function videoGuidance(mode: string): string {
   if (mode === 'off') return 'Video disabled.'
   return 'No video retained.'
-}
-
-export function StatusPill({ passed, status, current }: { passed?: boolean; status?: string; current?: boolean }) {
-  const displayStatus = current ? 'testing' : statusFromPlaybackResult({ status, passed })
-  return (
-    <span
-      // The tinted fill without its outline: the same chip face as a service's
-      // READY on the Overview, so one run speaks one state vocabulary.
-      className={`cl-status-chip ${statusPillClassForStatus(displayStatus)}`}
-      style={{ minWidth: '3.75rem' }}
-    >
-      {statusLabel(displayStatus)}
-    </span>
-  )
-}
-
-export function currentPlaybackIndex(tests: PlaybackTest[], runningName?: string): number {
-  if (!runningName) return -1
-  for (let i = tests.length - 1; i >= 0; i--) {
-    if (tests[i].name === runningName && !tests[i].endedAt) return i
-  }
-  for (let i = tests.length - 1; i >= 0; i--) {
-    if (tests[i].name === runningName) return i
-  }
-  return -1
 }
 
 export function isPlaywrightLifecyclePhase(phase: RunLifecycleEvent['phase']): boolean {

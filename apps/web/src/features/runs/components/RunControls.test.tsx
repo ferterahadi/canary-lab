@@ -598,7 +598,7 @@ describe('run overview', () => {
     })
 
     const healTab = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Heal agent')
+      .find((button) => button.textContent?.trim() === 'Heal Agent')
     expect(healTab).toBeTruthy()
 
     await act(async () => {
@@ -637,7 +637,7 @@ describe('run overview', () => {
     })
 
     const healTab = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Heal agent')
+      .find((button) => button.textContent?.trim() === 'Heal Agent')
     expect(healTab).toBeTruthy()
 
     await act(async () => {
@@ -670,7 +670,7 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
     await act(async () => {
-      clickButton('Heal agent')
+      clickButton('Heal Agent')
     })
 
     expect(container.querySelector('[data-testid="heal-empty"]')?.textContent).toContain('No repairs needed')
@@ -691,7 +691,7 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
     await act(async () => {
-      clickButton('Heal agent')
+      clickButton('Heal Agent')
     })
 
     expect(container.querySelector('[data-testid="heal-empty"]')).toBeNull()

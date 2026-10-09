@@ -55,7 +55,6 @@ const WORKSPACE_PANELS = [
 ] as const satisfies readonly PanelConfig[]
 
 export function App() {
-  const [specTotalTests, setSpecTotalTests] = useState(0)
   // The workspace's URL state, selection, suites and flights live in
   // WorkspaceProvider (mounted in main.tsx), which also fills the WorkState and
   // WorkspaceActions contexts the deeper leaves read. App lays the screen out
@@ -284,7 +283,6 @@ export function App() {
         currentTests={nav.currentTests}
         onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
         onReviewTest={reviewTest}
-        onTotalTestsChange={setSpecTotalTests}
         dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
       />
     ),
@@ -319,7 +317,6 @@ export function App() {
             onOpenPlaywrightSettings={(f) => openConfig(f, 'playwright')}
             onOpenSpecReview={openPendingReview}
             onOpenEvaluationReport={openEvaluationReport}
-            totalTests={specTotalTests}
             /* Honoured only when the focus belongs to the run being shown, so a
                stale pair from a previous selection can't scroll this one. */
             {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation } : {})}

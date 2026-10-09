@@ -13,7 +13,7 @@ interface Props {
   session?: ExternalHealSession
 }
 
-// The "Heal agent" tab when external heal mode is active. When an external
+// The "Heal Agent" tab when external heal mode is active. When an external
 // client has claimed the run, its transcript lives in the user's agent
 // session rather than Canary Lab. When no claim exists yet, this panel makes
 // that parked state explicit instead of rendering an empty local terminal.

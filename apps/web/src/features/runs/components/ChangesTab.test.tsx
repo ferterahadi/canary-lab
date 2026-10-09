@@ -221,7 +221,7 @@ describe('ChangesTab', () => {
     // and the green "all good" reading would be wrong for it.
     await render(<ChangesTab run={stoppedRun} runId="r1" healCycles={2} />)
     expect(text('changes-empty')).toContain('No code changes were captured')
-    expect(text('changes-empty')).toContain('Heal agent tab')
+    expect(text('changes-empty')).toContain('Heal Agent tab')
   })
 
   it('lands the repair in the repo BEFORE opening it', async () => {

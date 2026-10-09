@@ -77,7 +77,7 @@ green.** A test edited into passing is the exact failure this product exists to 
     that ended green — run `2026-09-04T0638-7rcl`). The line decides only when one
     file declares the same title more than once; with no roster to count against,
     the current spec source is counted instead, and when it can't tell, both lines
-    stay. The Tests panel (`TestCasesColumn`) and the Playwright tab follow the
+    stay. The Tests panel (`TestCasesColumn`) and Results & Fixes follow the
     same rule, so all three surfaces report the same count.
   - Status conflicts resolve **downward**: a per-test playback verdict beats the
     summary lists, and failed/skipped are checked before passed.

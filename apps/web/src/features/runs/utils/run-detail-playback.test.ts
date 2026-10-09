@@ -5,7 +5,6 @@ import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manif
 
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,
-  artifactsForPlayback,
   branchForService,
   branchLabel,
   branchTooltip,

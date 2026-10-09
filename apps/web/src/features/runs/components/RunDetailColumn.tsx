@@ -10,22 +10,21 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY, healNoTranscriptCopy, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
-import { ChangesTab } from './ChangesTab'
-import { JournalTab } from './JournalTab'
 import { RunQueueBanner } from './RunQueueBanner'
 import { TestReviewBanner } from './TestReviewBanner'
 import { ManualHealBanner } from './ManualHealBanner'
-import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
 import { RunPane } from './RunPane'
-import type { PlaywrightView } from './RunPlaybackPanels'
+import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
+import type { ResultsSelection } from '../utils/results-fixes'
+import { useResultsFocus } from '../state/use-results-focus'
 import { ServiceTabButton } from './RunServicePanels'
 import { Tab } from '@/shared/ui/Tab'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
 
-type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'changes' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'agent' | 'results'
 
 /** Why this run has no repair transcript. A run that passed never spawned an
  *  agent at all — saying so is the whole answer, where "no structured session
@@ -39,7 +38,6 @@ export function healEmptyCopy(status: RunStatus, healCycles: number): EmptyCopy 
 export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
-  totalTests,
   focusTest,
   focusTestId,
   focusTestLocation,
@@ -54,29 +52,32 @@ export function RunDetailColumn({
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
-  totalTests?: number
   /** R82: a failing test to land on — the run-summary failed-entry `name` a
-   *  flight's Test Run stage was clicked on. Opens the Playwright tab and scrolls
-   *  that test's card into view. Routed as `?run=…&test=…`, so a refresh or a
+   *  flight's Test Run stage was clicked on. Opens Results & Fixes with that
+   *  test's row expanded and scrolled into view. Routed as `?run=…&test=…`, so a refresh or a
    *  pasted link lands in the same place. */
   focusTest?: string
   focusTestId?: string
   focusTestLocation?: string
   /** Which tab to open on, when the view that linked here named one instead of a
    *  failing test — the flight's Test Run stage sends its captured fixes to
-   *  `changes`. Routed as `?run=…&runtab=…`, so a refresh lands the same way. */
+   *  `changes`, which is Results & Fixes' run-wide view. Routed as
+   *  `?run=…&runtab=…`, so a refresh lands the same way. */
   arriveTab?: RunArrivalTab
   /** The boot-failure detail dialog, routed as `?run=…&dialog=boot-failure`.
    *  Absent = the service card keeps the open state itself. */
   bootFailureOpen?: boolean
   onBootFailureOpenChange?: (open: boolean) => void
 }) {
-  // Arriving with a focused failure means the Playwright tab IS the destination —
+  // Arriving with a focused failure means Results & Fixes IS the destination —
   // opening on Overview would hide the thing that was clicked. A named arrival
   // tab is the same contract for a link that points at a pane rather than a test.
-  const [tab, setTab] = useState<Tab>(focusTest ? 'playwright' : arriveTab ?? 'overview')
+  const [tab, setTab] = useState<Tab>(focusTest || arriveTab ? 'results' : 'overview')
   const [serviceIdx, setServiceIdx] = useState(0)
-  const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
+  const [resultsView, setResultsView] = useState<ResultsView>(arriveTab === 'changes' && !focusTest ? 'run-wide' : 'tests')
+  // Owned here, not by the tab, so leaving Results & Fixes and coming back
+  // (from a linked service log, say) keeps the reader's case and cycle.
+  const [selection, setSelection] = useState<ResultsSelection>({ caseKey: null })
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
   const [agentPaneExited, setAgentPaneExited] = useState(false)
   const currentRunStatusRef = useRef<RunStatus | undefined>(undefined)
@@ -126,18 +127,27 @@ export function RunDetailColumn({
   const executionType = detail?.manifest.executionType ?? 'run'
   const isVerifyRun = executionType === 'verify'
   const isBootRun = executionType === 'boot'
+  // Another run's selection must never show under this one.
+  useEffect(() => {
+    setSelection({ caseKey: null })
+  }, [runId])
   // A later focus (clicking a second failure while this run is already open)
   // switches back to the tab that can show it.
   useEffect(() => {
-    if (focusTest) setTab('playwright')
+    if (!focusTest) return
+    setTab('results')
+    setResultsView('tests')
   }, [focusTest, focusTestId, focusTestLocation, runId])
+  useResultsFocus(runId, detail, { test: focusTest, testId: focusTestId, testLocation: focusTestLocation }, (caseKey) => setSelection({ caseKey }))
   // Same for a later arrival at a named tab (clicking the run's captured fixes
   // while that run is already open) — otherwise the click looks ignored.
   useEffect(() => {
-    if (arriveTab) setTab(arriveTab)
+    if (arriveTab !== 'changes') return
+    setTab('results')
+    setResultsView('run-wide')
   }, [arriveTab, runId])
   useEffect(() => {
-    if (isVerifyRun && tab !== 'overview' && tab !== 'playwright') setTab('overview')
+    if (isVerifyRun && tab !== 'overview' && tab !== 'results') setTab('overview')
     // A boot-only session has no Playwright / heal / journal — keep the user on
     // the tabs that exist (overview, run logs, services).
     if (isBootRun && tab !== 'overview' && tab !== 'run-logs' && tab !== 'services') setTab('overview')
@@ -202,17 +212,11 @@ export function RunDetailColumn({
           <Tab active={tab === 'overview'} onClick={() => setTab('overview')} className="shrink-0 whitespace-nowrap">Overview</Tab>
           {!isVerify && <Tab active={tab === 'run-logs'} onClick={() => setTab('run-logs')} className="shrink-0 whitespace-nowrap">Run Logs</Tab>}
           {!isVerify && <Tab active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0} className="shrink-0 whitespace-nowrap">Services</Tab>}
-          {!isBootRun && <Tab active={tab === 'playwright'} onClick={() => setTab('playwright')} className="shrink-0 whitespace-nowrap">Playwright</Tab>}
-          {!isVerify && !isBootRun && <Tab active={tab === 'agent'} onClick={() => setTab('agent')} className="shrink-0 whitespace-nowrap">Heal agent</Tab>}
-          {/* What the repair actually changed. Always openable, like Journal: a
-              run that changed nothing is a fact worth reading, and the tab's
-              own empty state says which kind of nothing it was. */}
-          {!isVerify && !isBootRun && (
-            <Tab active={tab === 'changes'} onClick={() => setTab('changes')} className="shrink-0 whitespace-nowrap">
-              Changes
-            </Tab>
-          )}
-          {!isVerify && !isBootRun && <Tab active={tab === 'journal'} onClick={() => setTab('journal')} className="shrink-0 whitespace-nowrap">Journal</Tab>}
+          {!isVerify && !isBootRun && <Tab active={tab === 'agent'} onClick={() => setTab('agent')} className="shrink-0 whitespace-nowrap">Heal Agent</Tab>}
+          {/* Every test's result and repair story, plus the run's own captured
+              changes, journal and Playwright terminal. Always openable: a run
+              that repaired nothing is a fact worth reading. */}
+          {!isBootRun && <Tab active={tab === 'results'} onClick={() => setTab('results')} className="shrink-0 whitespace-nowrap">Results &amp; Fixes</Tab>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
@@ -261,20 +265,16 @@ export function RunDetailColumn({
             )}
           </RunPane>
         )}
-        {tab === 'playwright' && (
-          <PlaywrightPanel
-            runId={m.runId}
-            view={playwrightView}
-            onViewChange={setPlaywrightView}
-            events={detail.playbackEvents}
-            playbackIdentity={detail.playbackIdentity}
-            artifactGroups={detail.playwrightArtifacts}
-            artifactPolicy={m.playwrightArtifacts}
-            onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
-            summary={detail.summary}
+        {!isBootRun && tab === 'results' && (
+          <ResultsFixesTab
+            detail={detail}
+            view={resultsView}
+            onViewChange={setResultsView}
+            selection={selection}
+            onSelectionChange={setSelection}
+            repairEvidence={!isVerify}
             diagnostics={m.verification?.diagnostics}
-            totalTests={totalTests}
-            {...(focusTest ? { focusTest, focusTestId, focusTestLocation } : {})}
+            {...(onOpenPlaywrightSettings ? { onOpenArtifactSettings: () => onOpenPlaywrightSettings(m.feature) } : {})}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
@@ -335,24 +335,6 @@ export function RunDetailColumn({
           </RunPane>
           )}
         </div>}
-        {!isVerify && !isBootRun && tab === 'changes' && (
-          // No wrapper scroller: the tab renders its own `RunPane`, the same
-          // frame every other tab uses. The extra `overflow-auto` div around it
-          // made this the one pane with two nested scrollers.
-          <ChangesTab
-            runId={m.runId}
-            healCycles={m.healCycles}
-            run={m}
-            fixCapture={m.fixCapture}
-            worktrees={m.worktrees}
-            proposedPrs={m.proposedPrs}
-            prAttempt={m.prAttempt}
-            repoBranches={repoBranches}
-          />
-        )}
-        {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} healCycles={m.healCycles} />
-        )}
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand
           an open dialog's route. */}

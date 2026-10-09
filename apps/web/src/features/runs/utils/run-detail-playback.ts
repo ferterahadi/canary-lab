@@ -1,6 +1,6 @@
 import { latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
 import { playbackAttempts } from '@shared/run-evidence'
-import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
+import type { PlaywrightArtifact, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
   PlaywrightArtifactPolicy,
@@ -77,13 +77,10 @@ export function playbackFocusCase(tests: readonly PlaybackCase[], target: Playba
   return target.id ? undefined : uniqueKey(tests.filter((test) => test.name === target.name))
 }
 
-export function artifactsForPlayback(
-  testName: string,
-  artifactGroups: PlaywrightArtifactGroup[] | undefined,
-  policy: PlaywrightArtifactPolicy | undefined,
-): PlaybackArtifacts {
+/** One attempt's (or one test's) retained files, as the suite's artifact
+ *  policy lets the evidence rail show them. */
+export function artifactsUnderPolicy(artifacts: readonly PlaywrightArtifact[], policy: PlaywrightArtifactPolicy | undefined): PlaybackArtifacts {
   const effective = policy ?? DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY
-  const artifacts = artifactGroups?.find((g) => g.testName === testName)?.artifacts ?? []
   return {
     screenshotMode: effective.screenshot,
     screenshots: effective.screenshot === 'off' ? [] : preferredScreenshots(artifacts),
@@ -156,7 +153,7 @@ interface MappedStep {
   title: string | null
 }
 
-function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
+export function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
   const mapped = steps.flatMap<MappedStep>((step) => {
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
@@ -222,7 +219,7 @@ function assertionRow(title: string, category: string): string | null | undefine
   return `Verified ${target} ${matcherPhrase(matcher[2], Boolean(matcher[1]))}`.trimEnd()
 }
 
-function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
+function preferredScreenshots(artifacts: readonly PlaywrightArtifact[]): PlaywrightArtifact[] {
   const screenshots = artifacts
     .filter((a) => a.kind === 'screenshot')
     .sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))

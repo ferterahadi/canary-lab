@@ -5,7 +5,7 @@ import type { JournalSection } from '@shared/run-detail'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { SourceModal } from '@/shared/ui/ActivityLogModal'
-import { RunPane } from './RunPane'
+import { Frame } from './RunPane'
 import {
   classifyOutcome,
   outcomeBadgeClass,
@@ -22,14 +22,16 @@ interface Props {
    *  because nothing needed repairing — a different fact from "the agent ran
    *  and wrote nothing", and the empty state says which. */
   healCycles?: number
+  /** False when embedded in a pane that already owns the frame and scroller. */
+  framed?: boolean
 }
 
-export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: Props) {
+export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0, framed = true }: Props) {
   const { value: entries, error } = useRunJournal(feature, runId, refreshKey)
   const occurrences = new Map<string, number>()
 
   return (
-    <RunPane padded>
+    <Frame framed={framed}>
       {error && (
         <div className="mb-3 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
           Failed to load journal: {error}
@@ -50,7 +52,7 @@ export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: P
           })}
         </ul>
       )}
-    </RunPane>
+    </Frame>
   )
 }
 
