@@ -70,6 +70,7 @@ function fakeStore(get: () => RunDetail | undefined) {
   return {
     logsDir,
     registry: { get: vi.fn((_runId: string): unknown => undefined) },
+    settleIfOrphaned: vi.fn((_runId: string) => false),
     get,
     onEvent: (l: RunStoreEventListener) => { listeners.add(l) },
     offEvent: (l: RunStoreEventListener) => { listeners.delete(l) },
@@ -333,6 +334,22 @@ describe('classifyWaitForHealTask', () => {
     })
   })
 
+  it('tells the agent a run ended because its server stopped, and how to restart it', () => {
+    const result = classify(runDetail({
+      status: 'aborted',
+      lifecycle: { phase: 'aborted', headline: 'Run aborted', updatedAt: '2026-10-09T06:00:00.000Z', abortReason: { reason: 'server-exited' } },
+    }))
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        type: 'failed', status: 'aborted',
+        serverExited: { message: expect.stringContaining('marked aborted'), nextSteps: [expect.stringContaining('start_run with run_ref "run-1"')] },
+      },
+    })
+    expect(classify(runDetail({ status: 'aborted' }))).not.toHaveProperty('value.serverExited')
+  })
+
   for (const status of ['passed', 'failed'] as const) {
     it(`reports a ${status} run that never wrote a summary as zero counts, not as a pass`, () => {
       // A run that died before the reporter wrote e2e-summary.json has no
@@ -446,6 +463,20 @@ describe('classifyWaitForHealTask', () => {
 })
 
 describe('waitForHealTask', () => {
+  it('settles a run whose server exited before waiting, so it never reads still_waiting forever', async () => {
+    let detail = runDetail({ status: 'healing', healMode: 'external' })
+    const store = fakeStore(() => detail)
+    store.settleIfOrphaned.mockImplementation(() => {
+      detail = runDetail({ status: 'aborted', healMode: 'external', lifecycle: { phase: 'aborted', headline: 'Run aborted', updatedAt: '2026-10-09T06:00:00.000Z', abortReason: { reason: 'server-exited' } } })
+      return true
+    })
+
+    const result = await waitForHealTask(asDeps({ store, broker: ownedBroker() }), 'run-1', 'sess-1', 'claude', 5000)
+
+    expect(store.settleIfOrphaned).toHaveBeenCalledWith('run-1')
+    expect(result).toMatchObject({ ok: true, value: { type: 'failed', status: 'aborted', serverExited: expect.any(Object) } })
+  })
+
   it('waits through the transient failed verdict into the next heal task', async () => {
     let detail = runDetail({ status: 'running', healMode: 'external' })
     const store = fakeStore(() => detail)

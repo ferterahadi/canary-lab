@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
-import type { RunStore } from '../logic/run-store'
+import { SERVER_EXITED_MESSAGE, type RunStore } from '../logic/run-store'
 import { findFeature } from '../../../shared/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
@@ -234,6 +234,10 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/pause-heal', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
+      if (deps.store.settleIfOrphaned(req.params.runId)) {
+        reply.code(409)
+        return { reason: 'server-exited', status: 'aborted', error: SERVER_EXITED_MESSAGE }
+      }
       reply.code(404)
       return { error: 'run not active' }
     }
@@ -248,10 +252,16 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
 
   // Cancel an in-flight heal cycle. SIGTERMs the agent pty, breaks the heal
   // loop, appends a journal entry. 404 when unknown, 409 with a reason when
-  // there's nothing to cancel, 202 on success.
+  // there's nothing to cancel, 202 on success. A heal whose server exited has
+  // already stopped: settling it records that and is the success the user asked
+  // for, so it answers 202 with the status the run actually reached.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/cancel-heal', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
+      if (deps.store.settleIfOrphaned(req.params.runId)) {
+        reply.code(202)
+        return { status: 'aborted', reason: 'server-exited' }
+      }
       reply.code(404)
       return { error: 'run not active' }
     }

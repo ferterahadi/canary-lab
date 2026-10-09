@@ -1192,6 +1192,21 @@ is finalized at the next boot and its Stop button works in the meantime. The abo
 route asks the scheduler before the store — only the scheduler can free a queue slot
 this process still holds.
 
+Heartbeat freshness alone cannot tell a dead server from a live peer: a server that
+restarts inside `HEARTBEAT_STALE_MS` would read its predecessor's run as someone
+else's and leave it `healing` with nothing driving it. So every heartbeat is signed
+with its server's pid and a per-start instance id (`manifest.heartbeatOwner`,
+written by `FileRunStateSink`), and `judgeRunOwnership`
+(`runs/logic/runtime/run-ownership.ts`) answers `this-server`,
+`other-live-server` or `gone`. Boot and shutdown reconcile spare only a live peer's
+row. While the server runs, `RunStore.settleIfOrphaned` settles a `gone` row
+`aborted` with a `server-exited` lifecycle record — from a 15-second sweep in
+`server.ts`, and wherever an action finds no orchestrator: run selection and
+`run_ref` resolution for `start_run`, Stop Heal and Pause (REST and MCP),
+`signal_run`, `abort_run` and `wait_for_heal_task`. At action time it needs positive
+evidence of death, so an unsigned fresh row still reads as a peer's until it goes
+stale. `start_run(run_ref)` then restarts the settled run in a fresh runner.
+
 ### Getting Started ownership
 
 Getting Started adds a workspace-level guard above normal subsystem admission.

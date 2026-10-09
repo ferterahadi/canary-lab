@@ -351,7 +351,10 @@ describe('RunStore', () => {
     const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'orphan')!
     expect(indexed.status).toBe('aborted')
     expect(indexed.endedAt).toBe(manifest.endedAt)
-    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }])
+    // The dead runner never wrote its ending, so the settle writes it: without
+    // that last lifecycle record the run read `aborted` under its live headline.
+    expect(manifest.lifecycle).toMatchObject({ phase: 'aborted', abortReason: { reason: 'server-exited' } })
+    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }, { kind: 'changed', runId: 'orphan' }])
   })
 
   it('abort finalizes a persisted running entry that has no manifest', async () => {

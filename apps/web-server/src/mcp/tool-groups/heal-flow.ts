@@ -17,6 +17,7 @@ import {
   errorResult,
   failureResult,
   hasText,
+  settledOrphanError,
 } from '../tool-support'
 import {
   WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS,
@@ -110,6 +111,8 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
       fixDescription: z.string().optional().describe('Required for restart/rerun. Concise summary of what the fix changed.'),
     },
   }, async ({ runId, kind, session_id, client_kind, hypothesis, fixDescription }) => {
+    const orphaned = settledOrphanError(deps, runId)
+    if (orphaned) return orphaned
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     if (!isActiveRunStatus(detail.manifest.status)) {

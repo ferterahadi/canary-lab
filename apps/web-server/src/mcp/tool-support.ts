@@ -20,6 +20,7 @@ import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive, McpStartRunOutcome } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
 import { errorMessage } from '../../../../shared/lib/error-message'
+import { SERVER_EXITED_MESSAGE } from '../features/runs/logic/run-store'
 
 /** The feature-authoring context an MCP tool passes to a shared writer. Built
  *  in one place because it carries `workspaceEvents` — the writers announce
@@ -125,16 +126,36 @@ export function resolveRunRef(
 ): RunRefResolution {
   const matches: RunDetail[] = []
   for (const entry of deps.store.list({ feature })) {
+    if (entry.runId !== ref && !entry.runId.endsWith(ref)) continue
+    // A referenced run whose server is gone settles to `aborted` before it is
+    // read, so the caller restarts it in a fresh runner instead of
+    // "continuing" a run nothing drives.
+    deps.store.settleIfOrphaned(entry.runId)
     const detail = deps.store.get(entry.runId)
     if (!detail) continue
     if (env && detail.manifest.env !== env) continue
-    if (detail.manifest.runId === ref || detail.manifest.runId.endsWith(ref)) {
-      matches.push(detail)
-    }
+    matches.push(detail)
   }
   if (matches.length === 0) return { kind: 'missing' }
   if (matches.length > 1) return { kind: 'ambiguous', candidates: matches }
   return { kind: 'resolved', detail: matches[0] }
+}
+
+/** How an agent recovers a run whose server stopped mid-run. */
+export function serverExitedGuidance(runId: string): { message: string; nextSteps: string[] } {
+  return {
+    message: SERVER_EXITED_MESSAGE,
+    nextSteps: [`start_run with run_ref "${runId}" restarts it in a fresh runner with its recorded suite and journal`],
+  }
+}
+
+/** Settle a run whose server is gone and say so; null while something drives
+ *  it. Run-control tools call this when no orchestrator answers, because the
+ *  alternative was accepting a signal nothing would ever read. */
+export function settledOrphanError(deps: CanaryLabMcpDeps, runId: string): CallToolResult | null {
+  if (!deps.store.settleIfOrphaned(runId)) return null
+  const { message, nextSteps } = serverExitedGuidance(runId)
+  return errorResult(`server-exited: ${message} Next: ${nextSteps.join('; ')}.`)
 }
 
 export function runCandidate(detail: RunDetail): Record<string, unknown> {

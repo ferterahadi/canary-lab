@@ -167,11 +167,12 @@ export function pauseHealRun(runId: string, opts?: ClientOptions): Promise<Pause
 }
 
 // Cancel an in-flight heal cycle. Server SIGTERMs the agent, breaks the
-// heal loop, and appends a journal entry. Resolves on 202; ApiError on 409
-// (no agent running / not currently healing) or 404 (run not active).
-export function cancelHealRun(runId: string, opts?: ClientOptions): Promise<{ status: 'cancelled' }> {
+// heal loop, and appends a journal entry. Resolves on 202 — `aborted` when the
+// heal's server had already exited and the run was settled instead; ApiError
+// on 409 (no agent running / not currently healing) or 404 (run not active).
+export function cancelHealRun(runId: string, opts?: ClientOptions): Promise<{ status: 'cancelled' | 'aborted' }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ status: 'cancelled' }>(
+  return request<{ status: 'cancelled' | 'aborted' }>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}/cancel-heal`,
     { method: 'POST' },
     fetchImpl,

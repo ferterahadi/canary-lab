@@ -48,7 +48,7 @@ export type IsAlive = (pid: number) => boolean
 // `kill(pid, 0)` probes without signalling: ESRCH means gone, EPERM means alive
 // but owned by another user (still a live server). Local-only, which is exactly
 // the scope of these records.
-function defaultIsAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -80,7 +80,7 @@ function writeFile(entries: ActiveServerEntry[], homeDir?: string): void {
 export function readActiveServers(
   opts: { homeDir?: string; isAlive?: IsAlive } = {},
 ): ActiveServerEntry[] {
-  const isAlive = opts.isAlive ?? defaultIsAlive
+  const isAlive = opts.isAlive ?? isProcessAlive
   return readRaw(opts.homeDir).filter((entry) => isAlive(entry.pid))
 }
 
@@ -90,7 +90,7 @@ export function registerActiveServer(
 ): void {
   const resolved = path.resolve(entry.projectRoot)
   const now = (opts.now ?? new Date()).toISOString()
-  const isAlive = opts.isAlive ?? defaultIsAlive
+  const isAlive = opts.isAlive ?? isProcessAlive
   const kept = readRaw(opts.homeDir).filter(
     (existing) =>
       existing.pid !== entry.pid &&

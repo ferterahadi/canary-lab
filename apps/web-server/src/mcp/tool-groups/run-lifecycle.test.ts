@@ -63,6 +63,7 @@ function storeOf(details: RunDetail[], over: Record<string, unknown> = {}): Reco
     })),
     get: (runId: string) => details.find((d) => d.manifest.runId === runId),
     registry: { get: () => undefined },
+    settleIfOrphaned: () => false,
     abort: async () => ({ ok: true }),
     ...over,
   }
@@ -1079,6 +1080,14 @@ describe('pause_run', () => {
     expect(await text('pause_run', { runId: 'run-1' })).toBe('run not active: run-1')
   })
 
+  it('settles a run whose server exited and tells the agent how to restart it', async () => {
+    const settleIfOrphaned = vi.fn(() => true)
+    const { text } = harness({ store: storeOf([], { settleIfOrphaned }) })
+
+    expect(await text('pause_run', { runId: 'run-1' })).toMatch(/^server-exited: .*marked aborted.*start_run with run_ref "run-1"/)
+    expect(settleIfOrphaned).toHaveBeenCalledWith('run-1')
+  })
+
   it('relays the orchestrator\'s refusal verbatim', async () => {
     const orch = { pauseAndHeal: async () => ({ ok: false, reason: 'tests already finished' }) }
     const { text } = harness({ store: storeOf([], { registry: { get: () => orch } }) })
@@ -1099,6 +1108,16 @@ describe('cancel_heal', () => {
     const { text } = harness()
 
     expect(await text('cancel_heal', { runId: 'run-1' })).toBe('run not active: run-1')
+  })
+
+  it('reports a heal whose server exited as stopped, with the run settled aborted', async () => {
+    const { call } = harness({ store: storeOf([], { settleIfOrphaned: () => true }) })
+
+    expect(await call('cancel_heal', { runId: 'run-1' })).toMatchObject({
+      status: 'aborted', reason: 'server-exited', runId: 'run-1',
+      message: expect.stringContaining('marked aborted'),
+      nextSteps: [expect.stringContaining('start_run with run_ref "run-1"')],
+    })
   })
 
   it('relays the orchestrator\'s refusal verbatim', async () => {
@@ -1123,6 +1142,14 @@ describe('abort_run', () => {
     // Not idempotent: a second abort has nothing left to kill, so a client that
     // retries on the hint alone would be told the run is still abortable.
     expect(configs.get('abort_run')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false })
+  })
+
+  it('records a run whose server exited without a stop form: nothing is left to stop', async () => {
+    const abort = vi.fn()
+    const { call } = harness({ store: storeOf([runDetail()], { abort, settleIfOrphaned: () => true }) }, eliciting)
+
+    expect(await call('abort_run', { runId: 'run-1', confirm: true })).toMatchObject({ aborted: true, runId: 'run-1', reason: 'server-exited' })
+    expect(abort).not.toHaveBeenCalled()
   })
 
   it('rejects unknown and terminal runs before asking the human to stop anything', async () => {

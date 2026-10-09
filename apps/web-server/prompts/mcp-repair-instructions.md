@@ -96,6 +96,8 @@ Dependency startup blocks carry context.dependencyBlockers on every needs_heal c
 
 Single-attempt suites are the exception to same-run verification. When context.singleAttempt.claimed is true, the suite's receipt says its external-effect budget was used. Follow the context's repair steps, then signal_run once: Canary records the journal and captured patch, finalizes the run failed/unverified, and returns newRunRequired from wait_for_heal_task. No service restart or Playwright rerun occurs. Do not use run_ref, Restart Heal, or handoff_heal to reuse this run. Review/promote the fix and obtain the suite's required approval before start_run creates a fresh run ID.
 
+A run whose Canary Lab server stopped mid-run lost its services and heal loop with it. Canary settles it aborted: wait_for_heal_task returns failed with serverExited, and signal_run, pause_run and cancel_heal answer server-exited. Nothing reads its signals any more, so relay serverExited.message and restart it with start_run(run_ref=<its run id>); the recorded suite and journal carry over.
+
 get_run_snapshot is for verbose debugging only, not for waiting. Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed.
 
 Two awareness signals can ride a run result. Neither changes the verdict, and you never edit the test files to clear either one.

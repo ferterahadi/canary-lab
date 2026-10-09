@@ -15,7 +15,7 @@ import {
 } from '../../../../shared/run-counts'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
-import { ensureExternalClaimForMcpCall } from './tool-support'
+import { ensureExternalClaimForMcpCall, serverExitedGuidance } from './tool-support'
 import { NEW_RUN_REQUIRED_NEXT_STEPS } from '../shared/single-attempt'
 
 // `timeout_ms` is the per-call block budget — how long ONE wait_for_heal_task
@@ -223,6 +223,7 @@ export function classifyWaitForHealTask(
             nextSteps: NEW_RUN_REQUIRED_NEXT_STEPS,
           },
         } : {}),
+        ...(detail.manifest.lifecycle?.abortReason?.reason === 'server-exited' ? { serverExited: serverExitedGuidance(runId) } : {}),
       },
     }
   }
@@ -281,6 +282,9 @@ export async function waitForHealTask(
   clientKind: ClientKind,
   timeoutMs: number,
 ): Promise<WaitForHealTaskResult> {
+  // A run whose server exited would otherwise read `still_waiting` forever:
+  // settle it so the classification below reports how it ended.
+  deps.store.settleIfOrphaned(runId)
   // A boot-only session never produces a heal task — return immediately instead
   // of claiming heal and blocking until timeout.
   const bootDetail = deps.store.get(runId)

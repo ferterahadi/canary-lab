@@ -20,6 +20,8 @@ import {
   findContinuingRunForFeature,
   resolveRunRef,
   runCandidate,
+  serverExitedGuidance,
+  settledOrphanError,
 } from '../tool-support'
 import { bootSessionValue, healWaitNext, isActiveBootRun } from '../heal-task-wait'
 import { readCoverageUpdate } from '../coverage-catchup'
@@ -536,7 +538,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const orch = deps.store.registry.get(runId)
-    if (!orch) return errorResult(`run not active: ${runId}`)
+    if (!orch) return settledOrphanError(deps, runId) ?? errorResult(`run not active: ${runId}`)
     const result = await orch.pauseAndHeal()
     if (!result.ok) return errorResult(`could not pause: ${result.reason}`)
     return asJsonResult({ status: 'healing', failureCount: result.failureCount })
@@ -547,7 +549,12 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const orch = deps.store.registry.get(runId)
-    if (!orch) return errorResult(`run not active: ${runId}`)
+    if (!orch) {
+      // A heal whose server exited has already stopped; settling records it.
+      return deps.store.settleIfOrphaned(runId)
+        ? asJsonResult({ status: 'aborted', reason: 'server-exited', runId, ...serverExitedGuidance(runId) })
+        : errorResult(`run not active: ${runId}`)
+    }
     const result = await orch.cancelHeal()
     if (!result.ok) return errorResult(`could not cancel: ${result.reason}`)
     return asJsonResult({ status: 'cancelled' })
@@ -565,6 +572,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const scope = ['abort-run', deps.projectRoot, runId]
     const completed = completedUserInput(request, scope)
     if (completed) return completed
+    // Nothing is left to stop on a run whose server exited, so recording that
+    // needs no human stop decision.
+    if (deps.store.settleIfOrphaned(runId)) {
+      return asJsonResult({ aborted: true, runId, reason: 'server-exited', ...serverExitedGuidance(runId) })
+    }
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     if (!isActiveRunStatus(detail.manifest.status)) return errorResult(`run not active: ${runId}`)

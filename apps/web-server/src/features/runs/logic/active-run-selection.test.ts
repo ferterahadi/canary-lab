@@ -17,6 +17,7 @@ function store(rows: RunIndexEntry[], details: RunDetail[]) {
   return {
     list: vi.fn(({ feature }: { feature?: string } = {}) => rows.filter((entry) => entry.feature === feature)),
     get: vi.fn((runId: string) => details.find((entry) => entry.runId === runId) ?? null),
+    settleIfOrphaned: vi.fn((_runId: string) => false),
   }
 }
 
@@ -58,6 +59,17 @@ describe('selectRunForFeature', () => {
     const rows = [row('stale'), row('first'), row('second')]
     expect(selectRunForFeature(store(rows, [stale, first, second]), 'checkout', undefined, healing, anyDetail)).toBe(first)
     expect(selectRunForFeature(store([row('stale')], [stale]), 'checkout', undefined, healing, anyDetail)).toBe(stale)
+  })
+
+  it('settles an eligible run whose server exited instead of handing it out', () => {
+    // start_run used to answer reused:true for a healing run nothing drove.
+    const orphan = detail('orphan', 'local', { lifecycle: { phase: 'waiting-for-signal', headline: 'Waiting', updatedAt: '2026-01-01' } })
+    const live = detail('live')
+    const source = store([row('orphan'), row('live'), row('done', { status: 'passed' })], [orphan, live])
+    source.settleIfOrphaned.mockImplementation((runId) => runId === 'orphan')
+    expect(selectRunForFeature(source, 'checkout', undefined, healing, anyDetail)).toBe(live)
+    expect(source.settleIfOrphaned.mock.calls).toEqual([['orphan'], ['live']])
+    expect(source.get).not.toHaveBeenCalledWith('orphan')
   })
 })
 

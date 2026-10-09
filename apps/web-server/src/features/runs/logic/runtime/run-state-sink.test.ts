@@ -71,6 +71,18 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].status).toBe('healing')
   })
 
+  it('signs every heartbeat it writes with its server instance, and leaves a heartbeat-less record unsigned', () => {
+    const owner = { pid: 4242, instanceId: 'server-a' }
+    const sink = new FileRunStateSink(logsDir, owner)
+    sink.bootstrap(manifest({ heartbeatAt: '2026-05-08T00:00:00.000Z' }))
+    expect(readManifest(sink.manifestPath('run-1'))?.heartbeatOwner).toEqual(owner)
+
+    sink.bootstrap(manifest({ runId: 'run-2' }))
+    expect(readManifest(sink.manifestPath('run-2'))?.heartbeatOwner).toBeUndefined()
+    sink.recordHeartbeat('run-2')
+    expect(readManifest(sink.manifestPath('run-2'))).toMatchObject({ heartbeatAt: expect.any(String), heartbeatOwner: owner })
+  })
+
   it('records lifecycle events in JSONL and mirrors the latest snapshot into the manifest', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerHealFlowTools } from './heal-flow'
+import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
 
@@ -54,6 +55,7 @@ function harness(over: Record<string, unknown> = {}) {
   const store = Object.assign({
     logsDir,
     registry: { get: () => undefined },
+    settleIfOrphaned: () => false,
     get: (): RunDetail | undefined => undefined,
     onEvent: () => undefined,
     offEvent: () => undefined,
@@ -200,6 +202,14 @@ describe('signal_run', () => {
   it('reports an unknown run by id', async () => {
     expect(await harness().text('signal_run', { runId: 'run-1', kind: 'rerun', client_kind: 'claude', ...DIAGNOSIS }))
       .toBe('run not found: run-1')
+  })
+
+  it('refuses a run whose server exited instead of writing a signal nothing will read', async () => {
+    const { text } = harness({ store: { get: () => runDetail({ healMode: 'external' }), settleIfOrphaned: () => true } })
+
+    expect(await text('signal_run', { runId: 'run-1', kind: 'rerun', client_kind: 'claude', ...DIAGNOSIS }))
+      .toMatch(/^server-exited: .*start_run with run_ref "run-1"/)
+    expect(fs.existsSync(runDirFor(logsDir, 'run-1'))).toBe(false)
   })
 
   it('refuses a run that has already finished', async () => {
