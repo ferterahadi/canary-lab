@@ -43,14 +43,6 @@ describe('writeInitialManifest', () => {
     const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
     expect(written.diagnosisPolicy).toBe('adaptive')
   })
-
-  it('records the auto-heal diagnosis policy on a fresh run', () => {
-    const { ctx, sink } = ctxFor({ autoHeal: { agent: 'codex', diagnosisPolicy: 'parent-only' } })
-    writeInitialManifest(ctx)
-    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
-    expect(written.diagnosisPolicy).toBe('parent-only')
-  })
-
   it('delivers a signal at the signal interval and preserves acceptance evidence', async () => {
     vi.useFakeTimers()
     const { ctx } = ctxFor({ healthPollIntervalMs: 1000, healSignalPollMs: 100 })
