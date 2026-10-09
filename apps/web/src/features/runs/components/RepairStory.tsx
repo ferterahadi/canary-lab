@@ -1,14 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
 import { journalDiffBlock, journalForCycle, mediaForAttempt, type CaseCycle, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { RunDetail } from '@shared/run-detail'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { formatLocalDateTime, shortTime } from '@/shared/lib/format'
-import { DiffView } from '@/shared/ui/DiffView'
 import { SourceModal } from '@/shared/ui/ActivityLogModal'
 import { StepStatusBadge } from '@/shared/ui/TestCodeBlock'
 import { useRunJournal } from '../state/use-run-journal'
-import { useCyclePatch } from '../state/use-cycle-patch'
+import { useCycleReview } from '../state/use-cycle-review'
 import { parseBodyFields } from '../utils/journal-utils'
 import { artifactsUnderPolicy, compactPlaybackSteps } from '../utils/run-detail-playback'
 import {
@@ -24,6 +24,7 @@ import {
 import { AssertionMessage, EmptyArtifactMessage, EvidenceRail } from './RunPlaybackPanels'
 import { ResultSection } from './ResultSection'
 import { ServiceLogsSection } from './ServiceLogExcerpt'
+import { CycleFileReview } from './CycleFileReview'
 
 type MediaDetail = Pick<RunDetail, 'attemptArtifacts' | 'playwrightArtifacts'>
 
@@ -223,30 +224,32 @@ function CodeChanges({ runId, cycle, section, runWide, loading, onOpenRunWide }:
   loading: boolean
   onOpenRunWide?: () => void
 }) {
-  const patch = useCyclePatch(runId, section?.iteration ?? null)
+  const review = useCycleReview(runId, section?.iteration ?? null)
   const inline = section ? journalDiffBlock(section.body) : undefined
+  const inlineDiff = inline?.diff
+  const inlineFiles = useMemo(() => inlineDiff === undefined ? undefined : cycleReviewFromPatch(inlineDiff), [inlineDiff])
   const runWideAction = onOpenRunWide && (
     <button type="button" className="cl-button px-2 py-0.5 text-[11px]" onClick={onOpenRunWide} data-testid="open-run-wide-changes">Run-wide changes</button>
   )
   const scope = runWide ? ' · run-wide: the edit is not attributed to one test' : ''
   let body: ReactNode
-  if (loading || (section && patch.value === null && !patch.error)) {
+  if (loading || (section && review.value === null && !review.error)) {
     body = <Muted>Reading this cycle&apos;s patch…</Muted>
   } else if (!section) {
     body = <Muted>No patch is attributed to repair cycle {cycle}. The run&apos;s captured changes stay under Run-wide changes.</Muted>
-  } else if (patch.value && patch.value !== 'missing') {
-    body = patch.value.diff.trim()
-      ? <><DiffView diff={patch.value.diff} /><Caption>This cycle&apos;s edits · {patch.value.patchPath}{scope}</Caption></>
+  } else if (review.value && review.value !== 'missing') {
+    body = review.value.files.length
+      ? <><CycleFileReview files={review.value.files} cycle={cycle} /><Caption>This cycle&apos;s edits · {review.value.patchPath}{scope}</Caption></>
       : <Muted>This cycle changed no tracked files.</Muted>
-  } else if (inline) {
+  } else if (inlineFiles?.length) {
     body = (
       <>
-        <DiffView diff={inline.diff} />
-        <Caption>From the journal entry&apos;s inline diff{inline.truncated ? ' · cut to the journal’s size cap; the full patch was not retained' : ''}{scope}</Caption>
+        <CycleFileReview files={inlineFiles} cycle={cycle} />
+        <Caption>From the journal entry&apos;s inline diff{inline!.truncated ? ' · cut to the journal’s size cap; the full patch was not retained' : ''}{scope}</Caption>
       </>
     )
   } else {
-    body = <Muted>{patch.error ? `Failed to load this cycle's patch: ${patch.error}` : 'This cycle recorded no diff.'}</Muted>
+    body = <Muted>{review.error ? `Failed to load this cycle's patch: ${review.error}` : 'This cycle recorded no diff.'}</Muted>
   }
   return (
     <ResultSection title="Code changes" context={`Repair cycle ${cycle}`} action={runWideAction} testId="section-changes">

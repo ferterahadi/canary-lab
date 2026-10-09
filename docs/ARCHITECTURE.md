@@ -733,10 +733,19 @@ constructs without concise wording. Conditions contain their actions directly;
 the redundant `then` story row is omitted, and `Else` aligns with its sibling `If`.
 `TestPresentation` renders every test view: `view: 'single'` is the Tests
 column and coverage card, `view: 'aligned'` is the "Compare test versions"
-review — one table, one scroller, rows paired across the two sides from
-`shared/test-view/render-model.ts`, sharing `ReadableStoryText`,
-`useCodeHighlight` (full-source Shiki tokenization) and the `TestLanguageSwitch`
-in its header with the ordinary test cards.
+review and Results & Fixes → Code changes — one table, one scroller, rows
+paired across the two sides from `shared/test-view/render-model.ts`, sharing
+`ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization) and the
+`TestLanguageSwitch` in its header with the ordinary test cards.
+Code changes reads `GET /api/runs/:runId/cycle-reviews/:iteration`, which parses
+`diffs/iteration-<n>.patch` with `shared/test-view/cycle-review.ts` into per-file
+rows carrying the hunks' line numbers, `gap` counts for the lines the patch leaves
+out, and each file's blob ids. A 404 falls back to the journal entry's inline diff
+through the same parser; the reader rides the `journal` topic, so a rewritten
+entry re-reads it. The view passes `marks: 'word'` (changed words marked inside
+Shiki tokens by `shared/test-view/token-marks.ts`) and `codeOnly`, because a patch
+holds no complete statement to translate; Compare test versions keeps whole-line
+marks.
 English sentences open Code mode at their source range, highlighting and focusing
 the chosen Before or After side. Clicking that code range returns to the saved
 English sentence, scroll position, and change cursor, even after browsing other
@@ -744,8 +753,8 @@ code changes. The English tab uses the same return action.
 The compact baseline selector
 and one editor action leave the wide dialog primarily for the comparison.
 Missing snapshots are disclosed rather than replaced with a different baseline.
-`ComparisonTable` also serves configuration previews and captured patches through
-`DiffView`. Red means removed and green means added, independently of execution.
+`ComparisonTable` also serves configuration previews and the run-wide captured
+patches through `DiffView`. Red means removed and green means added, independently of execution.
 The Tests header and suite review buttons open this dialog directly; its file, source line,
 language, and comparison baseline survive refresh in the URL. Modified cards show
 a small amber dot beside their title and keep their execution styling; review stays

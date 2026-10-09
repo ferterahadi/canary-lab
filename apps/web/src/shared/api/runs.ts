@@ -6,6 +6,7 @@ import type { StageModelChoice } from '@shared/agent-models'
 import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
 import type { AuditList } from './types-wizard'
 import type { RunIndexEntry } from '@shared/run-index'
+import type { RunCycleReview } from '@shared/test-view/cycle-review'
 import type { RunDetail, JournalSection, ServiceLogExcerpts, ServiceLogLines } from '@shared/run-detail'
 import type { ApplyFixesOutcome, GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
 export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
@@ -248,13 +249,13 @@ export function getRunFixPatch(runId: string, repoName: string, opts?: ClientOpt
   )
 }
 
-// One repair cycle's own diff by journal iteration. 404 when the run never
-// persisted it — the journal entry's inline block is then the only copy.
-export interface RunCyclePatch { iteration: number; patchPath: string; diff: string }
-export function getRunCyclePatch(runId: string, iteration: number, opts?: ClientOptions): Promise<RunCyclePatch> {
+// One repair cycle's files and rows by journal iteration. 404 when the run
+// never persisted the patch — the journal entry's inline block is then the
+// only copy.
+export function getRunCycleReview(runId: string, iteration: number, opts?: ClientOptions): Promise<RunCycleReview> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<RunCyclePatch>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/cycle-patches/${iteration}`,
+  return request<RunCycleReview>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/cycle-reviews/${iteration}`,
     { method: 'GET' },
     fetchImpl,
   )

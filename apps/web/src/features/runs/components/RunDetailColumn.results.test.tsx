@@ -13,7 +13,7 @@ vi.mock('../state/RunsContext', () => ({ useRun: vi.fn() }))
 vi.mock(import('@/shared/api/runs'), async (importOriginal) => ({
   ...(await importOriginal()),
   listJournal: vi.fn(async () => []),
-  getRunCyclePatch: vi.fn(async () => ({ iteration: 1, patchPath: '/p', diff: '' })),
+  getRunCycleReview: vi.fn(async () => ({ iteration: 1, patchPath: '/p', files: [] })),
   getRunServiceExcerpts: vi.fn(async (_runId: string, { execution }: { execution: number }) => ({
     execution,
     excerpts: [{ service: 'web', name: 'Web', execution, source: 'segment' as const, totalLines: 300, matchedBy: 'marker' as const, span: { startLine: 120, endLine: 124, closed: true }, window: { firstLine: 121, lines: ['POST /discount 500'], truncated: false } }],

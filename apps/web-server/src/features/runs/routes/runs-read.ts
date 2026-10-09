@@ -28,6 +28,8 @@ import { type RunProposedPr } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 import { notFound } from '../../../shared/http-error'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { readTextOrNull } from '../../../../../../shared/lib/read-file-or'
+import { cycleReviewFromPatch, type RunCycleReview } from '../../../../../../shared/test-view/cycle-review'
 
 const READABLE_LOGS_DIR = 'readable-logs'
 
@@ -192,10 +194,11 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   })
 
   // One journaled repair cycle's own diff (`diffs/iteration-<n>.patch`), as
-  // opposed to the run's cumulative capture above. Runs recorded before every
-  // cycle was persisted lack small ones; the journal entry's inline block is
-  // then the only copy, and 404 says so.
-  app.get<{ Params: { runId: string; iteration: string } }>('/api/runs/:runId/cycle-patches/:iteration', async (req, reply) => {
+  // opposed to the run's cumulative capture above, read into per-file rows
+  // with the hunks' line numbers. Runs recorded before every cycle was
+  // persisted lack small ones; the journal entry's inline block is then the
+  // only copy, and 404 says so. Nothing here reads or writes a repo.
+  app.get<{ Params: { runId: string; iteration: string } }>('/api/runs/:runId/cycle-reviews/:iteration', async (req, reply): Promise<RunCycleReview | { error: string }> => {
     if (!/^\d+$/.test(req.params.iteration)) {
       reply.code(400)
       return { error: 'invalid iteration' }
@@ -203,12 +206,12 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
     const iteration = Number(req.params.iteration)
     const patchPath = path.join(runDirFor(deps.store.logsDir, req.params.runId), 'diffs', `iteration-${iteration}.patch`)
-    try {
-      return { iteration, patchPath, diff: fs.readFileSync(patchPath, 'utf-8') }
-    } catch {
+    const diff = readTextOrNull(patchPath)
+    if (diff === null) {
       reply.code(404)
       return { error: 'no persisted patch for this cycle' }
     }
+    return { iteration, patchPath, files: cycleReviewFromPatch(diff) }
   })
 
   // One test attempt's service output: the span between its markers in the

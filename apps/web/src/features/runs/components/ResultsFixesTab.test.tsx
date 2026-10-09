@@ -7,13 +7,16 @@ import type { VerificationDiagnostics } from '@shared/verification'
 import { buildRunEvidence } from '@shared/run-evidence'
 import { evidenceCases, evidenceKnownTests, evidenceLifecycleEvents, evidencePlaybackEvents, stampedEvidenceLifecycleEvents, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
 import { ApiError } from '@/shared/api/internal'
+import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
+import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import type { InvalidationTopic } from '@/shared/state/invalidation-bus'
 import type { ResultsSelection } from '../utils/results-fixes'
 import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
 
 vi.mock(import('@/shared/api/runs'), async (importOriginal) => ({
   ...(await importOriginal()),
   listJournal: vi.fn(),
-  getRunCyclePatch: vi.fn(),
+  getRunCycleReview: vi.fn(),
 }))
 
 const paneTerminals = vi.hoisted(() => ({ props: [] as Array<{ paneId?: string }> }))
@@ -39,7 +42,7 @@ let runSeq = 0
 beforeEach(async () => {
   const runsApi = await import('@/shared/api/runs')
   vi.mocked(runsApi.listJournal).mockResolvedValue([])
-  vi.mocked(runsApi.getRunCyclePatch).mockRejectedValue(new ApiError(404, null))
+  vi.mocked(runsApi.getRunCycleReview).mockRejectedValue(new ApiError(404, null))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -398,19 +401,100 @@ describe('repair notes and code changes', () => {
     expect(button('Full run journal')).toBeUndefined()
   })
 
-  it('renders the cycle’s retained patch with the shared diff view', async () => {
+  it('shows the cycle’s retained patch file by file, with real line numbers and only the changed words marked', async () => {
     const runsApi = await import('@/shared/api/runs')
-    vi.mocked(runsApi.getRunCyclePatch).mockResolvedValue({ iteration: 2, patchPath: '/runs/r/diffs/iteration-2.patch', diff: patch('0.95', '0.9') })
+    const files = cycleReviewFromPatch(`${patch('0.95', '0.9')}\n${supportPatch()}`)
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/runs/r/diffs/iteration-2.patch', files })
     await mountStory({ journal: journalSections() })
-    expect(runsApi.getRunCyclePatch).toHaveBeenCalledWith(expect.any(String), 2)
-    expect(section('section-changes')?.textContent).toContain('Math.round(p * 0.9)')
-    expect(section('section-changes')?.textContent).toContain("This cycle's edits · /runs/r/diffs/iteration-2.patch")
+    expect(runsApi.getRunCycleReview).toHaveBeenCalledWith(expect.any(String), 2)
+    const changes = section('section-changes')!
+    const table = changes.querySelector('table[aria-label="Code changes before and after"]')!
+    expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before repair cycle 2', 'After repair cycle 2'])
+    expect([...table.querySelectorAll('[data-side="after"]')].map((line) => line.getAttribute('data-source-line'))).toEqual(['12'])
+    expect([...table.querySelectorAll('.cl-context-line')].map((cell) => cell.textContent)).toEqual(['12', '12'])
+    expect([...table.querySelectorAll('[data-side="after"] mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['9'])
+    expect(table.querySelector('.cl-comparison-section')?.textContent).toBe('11 unchanged lines not in this patch')
+    expect(changes.textContent).not.toContain('Empty value')
+    expect(changes.textContent).toContain("This cycle's edits · /runs/r/diffs/iteration-2.patch")
+    expect(changes.querySelector('.cl-lang-switch')?.getAttribute('aria-disabled')).toBe('true')
+
+    const picker = changes.querySelector<HTMLSelectElement>('select')!
+    expect([...picker.options].map((option) => option.textContent)).toEqual(['src/pricing.ts', 'e2e/support/staging.ts · added'])
+    await act(async () => {
+      picker.value = 'e2e/support/staging.ts'
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(changes.querySelector('[data-side="after"][data-source-line="1"]')?.textContent).toContain("BASE = 'http://127.0.0.1:4100'")
+    expect(changes.querySelector('[data-side="before"][data-source-line]')).toBeNull()
   })
 
-  it('falls back to the entry’s inline diff when no patch file was retained, and says it is run-wide', async () => {
+  it('keeps the chosen file when the cycle is read again, and falls back to the first when it is gone', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const both = cycleReviewFromPatch(`${patch('0.95', '0.9')}\n${supportPatch()}`)
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: both })
+    await mountStory({ journal: journalSections() })
+    const changes = section('section-changes')!
+    const choose = async (path: string) => act(async () => {
+      const picker = changes.querySelector<HTMLSelectElement>('select')!
+      picker.value = path
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await choose('e2e/support/staging.ts')
+    // What the journal's live topic does when the cycle's entry is rewritten.
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [both[1], both[0]] })
+    const runId = vi.mocked(runsApi.getRunCycleReview).mock.calls[0][0]
+    await act(async () => { invalidate('journal', runId); await new Promise((r) => setTimeout(r, 0)) })
+    expect(changes.querySelector<HTMLSelectElement>('select')?.value).toBe('e2e/support/staging.ts')
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [both[0]] })
+    await act(async () => { invalidate('journal', runId); await new Promise((r) => setTimeout(r, 0)) })
+    expect(changes.querySelector('select')).toBeNull()
+    expect(changes.querySelector('[data-side="after"][data-source-line="12"]')).not.toBeNull()
+  })
+
+  it('names a binary file or a bare rename instead of showing an empty table', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const files = cycleReviewFromPatch(['diff --git a/logo.png b/logo.png', 'Binary files a/logo.png and b/logo.png differ',
+      'diff --git a/a.ts b/b.ts', 'similarity index 100%', 'rename from a.ts', 'rename to b.ts', ''].join('\n'))
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files })
+    await mountStory({ journal: journalSections() })
+    const changes = section('section-changes')!
+    expect(changes.querySelector('[data-testid="cycle-file-without-rows"]')?.textContent).toBe('logo.png is a binary file; there is no text to compare.')
+    await act(async () => {
+      const picker = changes.querySelector<HTMLSelectElement>('select')!
+      picker.value = 'b.ts'
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(changes.querySelector('[data-testid="cycle-file-without-rows"]')?.textContent).toBe('b.ts was renamed from a.ts with no line edits.')
+  })
+
+  it('notes a renamed file and a missing final newline above its rows', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const files = cycleReviewFromPatch(['diff --git a/a.ts b/b.ts', 'rename from a.ts', 'rename to b.ts', '--- a/a.ts', '+++ b/b.ts',
+      '@@ -1 +1 @@', '-x = 1', '+x = 2', '\\ No newline at end of file', ''].join('\n'))
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files })
+    await mountStory({ journal: journalSections() })
+    expect(section('section-changes')?.textContent).toContain('Renamed from a.ts. No newline at the end of the file after this cycle.')
+  })
+
+  it('reads a cycle that changed no tracked files', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [] })
+    await mountStory({ journal: journalSections() })
+    expect(section('section-changes')?.textContent).toContain('This cycle changed no tracked files.')
+  })
+
+  it('falls back to the entry’s inline diff through the same view when no patch file was retained, and says it is run-wide', async () => {
     await mountStory({ journal: journalSections(), cycle: 1 })
-    expect(section('section-changes')?.textContent).toContain('Math.round(p * 0.95)')
-    expect(section('section-changes')?.textContent).toContain("From the journal entry's inline diff · run-wide: the edit is not attributed to one test")
+    const changes = section('section-changes')!
+    expect(changes.querySelector('table[aria-label="Code changes before and after"]')).not.toBeNull()
+    expect(changes.querySelector('[data-side="after"][data-source-line="12"]')?.textContent).toContain('Math.round(p * 0.95)')
+    expect(changes.textContent).toContain("From the journal entry's inline diff · run-wide: the edit is not attributed to one test")
+  })
+
+  it('says a cycle recorded no diff when neither a patch file nor an inline block names a file', async () => {
+    const [latest] = journalSections()
+    await mountStory({ journal: [{ ...latest, body: `${latest.body}\n### Diff\n\n\`\`\`diff\nnote: nothing captured\n\`\`\`\n` }] })
+    expect(section('section-changes')?.textContent).toContain('This cycle recorded no diff.')
   })
 
   it('names a cycle with no journal entry instead of inventing notes or a patch', async () => {
@@ -529,7 +613,12 @@ function artifact(kind: PlaywrightArtifact['kind'], name: string): PlaywrightArt
 }
 
 function patch(from: string, to: string): string {
-  return ['--- a/src/pricing.ts', '+++ b/src/pricing.ts', '@@ -1 +1 @@', `-export const total = (p: number) => Math.round(p * ${from})`, `+export const total = (p: number) => Math.round(p * ${to})`].join('\n')
+  return ['--- a/src/pricing.ts', '+++ b/src/pricing.ts', '@@ -12 +12 @@', `-export const total = (p: number) => Math.round(p * ${from})`, `+export const total = (p: number) => Math.round(p * ${to})`].join('\n')
+}
+
+function supportPatch(): string {
+  return ['diff --git a/e2e/support/staging.ts b/e2e/support/staging.ts', 'new file mode 100644', '--- /dev/null', '+++ b/e2e/support/staging.ts',
+    '@@ -0,0 +1 @@', "+export const BASE = 'http://127.0.0.1:4100'"].join('\n')
 }
 
 function journalSections(): JournalSection[] {
@@ -553,6 +642,9 @@ function detailOf({ manifest, ...over }: DetailOver): RunDetail {
     ...over,
   }
 }
+
+// What a workspace event does once it reaches the page: bump a live topic.
+let invalidate: (topic: InvalidationTopic, scope?: string) => void = () => {}
 
 async function mount(detail: RunDetail, opts: {
   view?: ResultsView
@@ -579,8 +671,12 @@ async function mount(detail: RunDetail, opts: {
       />
     )
   }
+  function Publisher() {
+    invalidate = useInvalidation().invalidate
+    return null
+  }
   await act(async () => {
-    root.render(<Harness />)
+    root.render(<InvalidationProvider><Publisher /><Harness /></InvalidationProvider>)
     await Promise.resolve()
   })
   // Journal and patch reads resolve on later ticks.

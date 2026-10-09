@@ -13,7 +13,7 @@ import {
   applyRunFixes,
   getGhStatus,
   getRunPrPreflight,
-  getRunCyclePatch,
+  getRunCycleReview,
   getRunServiceExcerpts,
   getRunServiceLogLines,
   getRunFixPatch,
@@ -345,11 +345,11 @@ describe('runs api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/service-logs/my%20api/lines?execution=1&from=1&count=50', { method: 'GET' })
   })
 
-  it('getRunCyclePatch GETs one repair cycle\'s own diff by iteration', async () => {
-    const body = { iteration: 2, patchPath: '/r/diffs/iteration-2.patch', diff: '+x\n' }
+  it('getRunCycleReview GETs one repair cycle\'s files by iteration', async () => {
+    const body = { iteration: 2, patchPath: '/r/diffs/iteration-2.patch', files: [] }
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
-    await expect(getRunCyclePatch('run 9', 2, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/cycle-patches/2', { method: 'GET' })
+    await expect(getRunCycleReview('run 9', 2, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/cycle-reviews/2', { method: 'GET' })
   })
 
   it('getRunFixPatch surfaces the 410 once the patch has been cleaned away', async () => {
