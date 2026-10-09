@@ -5,8 +5,8 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { TestFileReview, ReviewSource } from '../../../../../../shared/test-review'
 import { findFeature, listSpecFiles } from '../../../shared/feature-loader'
-import { extractTestsFromSource, extractTestPredicatesFromSource, extractTestMetadataFromSource } from '../../../shared/ast-extractor'
-import { translateReadableSource } from '../../../shared/readable-tests/translator'
+import { extractTestPredicatesFromSource, extractTestMetadataFromSource } from '../../../shared/ast-extractor'
+import { reviewSourceFor } from '../../../shared/readable-tests/review-source'
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
@@ -100,13 +100,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         const before = old?.toString('utf8') ?? ''
         const after = current?.toString('utf8') ?? ''
         if (req.query.summary === 'true') return { changed: before !== after, affectedTests: [], verdict: 'unclassifiable' }
-        const readableSource = (source: string): ReviewSource => {
-          if (!/\.[cm]?[jt]sx?$/.test(file)) return { source, tests: [] }
-          const parsed = extractTestsFromSource(file, source, feature.semanticRules)
-          return { source, tests: [], ...(!parsed.parseError
-            ? { story: translateReadableSource(file, source, feature.semanticRules) }
-            : { parseError: parsed.parseError }) }
-        }
+        const readableSource = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: false })
         return { file, currentPath, baseline: 'run-start', supportingFile: true,
           before: readableSource(before), after: readableSource(after),
           patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
@@ -147,14 +141,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         ).verdict,
       }
     }
-    const extract = (source: string): ReviewSource => {
-      const result = extractTestsFromSource(file, source, feature.semanticRules)
-      // `endLine` is optional on ExtractedTest only because the tests route
-      // emits helper-defined entries with no AST match; every test that comes
-      // out of `extractTestsFromSource` — the only producer here — carries one.
-      // A `?? test.line` fallback would be an arm nothing could reach.
-      return { source, ...(!result.parseError ? { story: translateReadableSource(file, source, feature.semanticRules) } : {}), tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine!, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
-    }
+    const extract = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true })
     const beforePredicates = extractTestPredicatesFromSource(file, beforeSource)
     const afterPredicates = extractTestPredicatesFromSource(file, afterSource)
     const pairs = pairTestDeclarations(extractTestMetadataFromSource(file, beforeSource).tests, extractTestMetadataFromSource(file, afterSource).tests)
