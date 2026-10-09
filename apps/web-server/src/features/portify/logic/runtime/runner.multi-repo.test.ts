@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
@@ -10,8 +9,12 @@ import { createPortifyRunner } from './runner'
 import { portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
 import { runPortifyAgent } from './agent'
 import { readOverlay } from './overlay'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { waitForStatus } from './__fixtures__/runner.part4-fixtures'
+
+const tempDir = trackTempDirs('portify-it-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -37,7 +40,7 @@ vi.mock('./agent', () => ({
 // would populate, so abort()'s child-kill loop is exercised on cancel. Tests
 // can override per-case (e.g. the retry case).
 async function defaultAgentEdit(opts: { cwd: string; children?: Set<unknown> }): Promise<void> {
-  opts.children?.add({ kill: () => {} })
+  opts.children?.add({ stop: () => {} })
   try {
     fs.mkdirSync(path.join(opts.cwd, 'src'), { recursive: true })
     fs.appendFileSync(path.join(opts.cwd, 'src', 'server.js'), '\n// port made injectable by agent\n')
@@ -61,13 +64,6 @@ const fakePtyFactory: PtyFactory = (): PtyHandle => ({
   write: () => {},
   resize: () => {},
   kill: () => {},
-})
-
-const roots: string[] = []
-
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
 })
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
@@ -132,22 +128,11 @@ function makeRunner(
   return { store, runner }
 }
 
-async function waitForStatus(store: PortifyRunStore, id: string, until: string[], timeoutMs = 8000): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const m = store.get(id)
-    if (m && until.includes(m.status)) return m.status
-    await new Promise((r) => setTimeout(r, 25))
-  }
-  return store.get(id)?.status ?? 'missing'
-}
-
 const TERMINAL = ['ready-to-save', 'failed', 'aborted']
 
 // Single-repo fixture (the common case).
 async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; appRepo: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-it-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'myfeat')
   const appRepo = path.join(root, 'app')
@@ -170,8 +155,7 @@ function readyManifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
 describe('createPortifyRunner (integration)', () => {
   describe('multi-repo', () => {
     it('handles two repos in DIFFERENT git roots (one worktree each)', async () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-multi-'))
-      roots.push(root)
+      const root = tempDir('portify-multi-')
       const featuresDir = path.join(root, 'features')
       const featureDir = path.join(featuresDir, 'myfeat')
       const appA = path.join(root, 'a')
@@ -205,8 +189,7 @@ describe('createPortifyRunner (integration)', () => {
     })
 
     it('handles two repos in the SAME git root (one shared worktree, no branch clash)', async () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-mono-'))
-      roots.push(root)
+      const root = tempDir('portify-mono-')
       const featuresDir = path.join(root, 'features')
       const featureDir = path.join(featuresDir, 'myfeat')
       const mono = path.join(root, 'mono')
@@ -237,8 +220,7 @@ describe('createPortifyRunner (integration)', () => {
 
   describe('start guards', () => {
     async function runnerWith(features: FeatureConfig[], pickAgent: () => 'claude' | null = () => 'claude') {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-guard-'))
-      roots.push(root)
+      const root = tempDir('portify-guard-')
       const store = new PortifyRunStore(path.join(root, 'logs'))
       return createPortifyRunner({
         logsDir: path.join(root, 'logs'), store, ptyFactory: fakePtyFactory,
@@ -261,14 +243,12 @@ describe('createPortifyRunner (integration)', () => {
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
     })
     it('409 when a repo is not a git repository', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nogit-'))
-      roots.push(dir)
+      const dir = tempDir('portify-nogit-')
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
     })
     it('409 when a repo has uncommitted changes', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-'))
-      roots.push(dir)
+      const dir = tempDir('portify-dirty-')
       fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
       initGitRepo(dir)
       fs.writeFileSync(path.join(dir, 'f.txt'), 'changed') // now dirty
@@ -276,8 +256,7 @@ describe('createPortifyRunner (integration)', () => {
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
     })
     it('retains the unreadable-repository refusal for a corrupt index before starting an agent', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-corrupt-'))
-      roots.push(dir)
+      const dir = tempDir('portify-corrupt-')
       fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
       initGitRepo(dir)
       fs.writeFileSync(path.join(dir, '.git', 'index'), 'corrupt index')
@@ -289,9 +268,8 @@ describe('createPortifyRunner (integration)', () => {
       expect(runPortifyAgent).not.toHaveBeenCalled()
     })
     it('names ALL dirty repos in one error, not just the first', async () => {
-      const a = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-a-'))
-      const b = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-b-'))
-      roots.push(a, b)
+      const a = tempDir('portify-dirty-a-')
+      const b = tempDir('portify-dirty-b-')
       for (const dir of [a, b]) {
         fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
         initGitRepo(dir)
@@ -314,42 +292,38 @@ describe('createPortifyRunner (integration)', () => {
 
   describe('save / cancel guards', () => {
     it('cancel 404s for an unknown workflow', async () => {
-      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-cc-')))
+      const { runner } = makeRunner('x', tempDir('portify-cc-'))
       await expect(runner.cancel('nope')).rejects.toMatchObject({ statusCode: 404 })
     })
 
     it('save 409s when the latest revise left verification failing', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-unproven-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-unproven-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest({ verification: { ok: false, instances: [], failureDetail: 'clash' } }))
       await expect(runner.save('w')).rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('revise 404s for an unknown workflow', async () => {
-      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rv-')))
+      const { runner } = makeRunner('x', tempDir('portify-rv-'))
       await expect(runner.revise('nope', 'do x')).rejects.toMatchObject({ statusCode: 404 })
     })
 
     it('revise 400s on empty feedback', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvb-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rvb-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest())
       await expect(runner.revise('w', '   ')).rejects.toMatchObject({ statusCode: 400 })
     })
 
     it('revise 409s when the workflow is not ready-to-save', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvs-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rvs-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest({ status: 'editing' }))
       await expect(runner.revise('w', 'do x')).rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('revise 409s when the worktree is no longer active (e.g. after a restart)', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rvi-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rvi-')
       const { store, runner } = makeRunner('x', logsDir)
       // Saved directly → never went through startPortify → not in the active map.
       store.save(readyManifest())
@@ -357,21 +331,19 @@ describe('createPortifyRunner (integration)', () => {
     })
 
     it('remove 404s for an unknown workflow', async () => {
-      const { runner } = makeRunner('x', fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rm404-')))
+      const { runner } = makeRunner('x', tempDir('portify-rm404-'))
       await expect(runner.remove('nope')).rejects.toMatchObject({ statusCode: 404 })
     })
 
     it('remove 409s for a non-terminal workflow', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmne-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rmne-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest()) // ready-to-save is non-terminal
       await expect(runner.remove('w')).rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('remove drops a terminal workflow from history', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmok-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rmok-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest({ status: 'saved', endedAt: 'now' }))
       expect(await runner.remove('w')).toEqual({ workflowId: 'w', removed: true })
@@ -379,8 +351,7 @@ describe('createPortifyRunner (integration)', () => {
     })
 
     it('remove still clears an orphaned row whose record dir was wiped (status from the index)', async () => {
-      const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-rmorphan-'))
-      roots.push(logsDir)
+      const logsDir = tempDir('portify-rmorphan-')
       const { store, runner } = makeRunner('x', logsDir)
       store.save(readyManifest({ status: 'failed', endedAt: 'now' }))
       // Wipe the record dir out-of-band — the index row lingers, get() now 404s.

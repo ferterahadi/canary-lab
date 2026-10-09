@@ -2,14 +2,14 @@
 
 import { act } from 'react'
 
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FlightCheckpoint } from '@shared/flights/types'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-import { InvalidationProvider } from '@/shared/state/invalidation'
 
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
@@ -25,44 +25,10 @@ vi.mock('@/features/portify/state/PortifyContext', async () => {
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
 // over the SAME api mocks the panel-local fetches used to consume — fixtures
 // keep working unchanged.
-vi.mock('@/features/runs/state/RunsContext', async () => {
-  const React = await import('react')
-  return {
-    useRun: (runId?: string | null) => {
-      const [detail, setDetail] = React.useState<unknown>(undefined)
-      React.useEffect(() => {
-        let alive = true
-        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
-        return () => { alive = false }
-      }, [runId])
-      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
-    },
-    useRuns: () => {
-      const [runs, setRuns] = React.useState<unknown[]>([])
-      React.useEffect(() => {
-        let alive = true
-        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
-        return () => { alive = false }
-      }, [])
-      return {
-        runs,
-        connection: 'live',
-        transients: {},
-        errors: {},
-        refresh: vi.fn(),
-        startRun: vi.fn(),
-        startVerification: vi.fn(),
-        abort: vi.fn(),
-        delete: vi.fn(),
-        pauseHeal: vi.fn(),
-        cancelHeal: vi.fn(),
-        clearError: vi.fn(),
-      }
-    },
-  }
-})
+vi.mock('@/features/runs/state/RunsContext', async () => (await import('./__fixtures__/flight-page-mocks')).runsContextMock(mocks))
 
 import { FlightPage } from './FlightPage'
+import { renderFlightPage } from './__fixtures__/FlightPageHarness'
 
 ;
 
@@ -151,11 +117,7 @@ vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: mocks.getRepoGitStatus,
   openEditor: mocks.openEditor,
 }))
-vi.mock('@/shared/api/internal', () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
-  },
-}))
+vi.mock('@/shared/api/internal', async () => (await import('./__fixtures__/flight-page-mocks')).apiInternalMock())
 
 // The agent timeline is its own tested component with live transports — stub it.
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
@@ -186,8 +148,6 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 }))
 
 ;
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -227,32 +187,14 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
 // remount key per call remounts FlightPage, which re-runs its fetch effect —
 // the same observable effect, without a prop lever.
-let renderSeq = 0
-
-async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
-  renderSeq += 1
-  await act(async () => {
-    root.render(
-      <InvalidationProvider>
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
-      </InvalidationProvider>,
-    )
-  })
-}
+const render = (flightId: string, extraProps?: Record<string, unknown>) => renderFlightPage(root, FlightPage, flightId, extraProps)
 
 describe('checkpoint display language (R71/W3)', () => {
   const parkedOn = (key: string, checkpoint: FlightCheckpoint) => manifest({
@@ -357,7 +299,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="empty-dropzone"]')).toBeNull()
   })
 
-  it('the distilled summary gets its own card — artifact pill, count, and a ledger drill', async () => {
+  it('the distilled summary roots the docs tree — artifact pill, count, nested sources, and a ledger drill', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'specs-coverage',
@@ -382,24 +324,24 @@ describe('checkpoint display language (R71/W3)', () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
 
     // The stage's OUTPUT is visible and openable, not just a status chip.
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Requirements found · 6')
-    expect(distilled?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')).toBeTruthy()
-    // The generated artifact stays OUT of the source-docs card — one card per half.
-    const sourceCard = container.querySelector('[data-testid="flight-docs-panel"] > div')
-    expect(sourceCard?.textContent).toContain('okr.md')
-    expect(sourceCard?.textContent).not.toContain('_prd-summary.md')
-    // The summary chip rides the card it describes, not the inputs card.
-    expect(distilled?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
-    expect(sourceCard?.querySelector('[data-testid="docs-summary-chip"]')).toBeNull()
+    const card = container.querySelector('[data-testid="flight-requirements-card"]')
+    expect(card?.textContent).toContain('Requirements found · 6')
+    expect(card?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
+    // One tree: the summary on top, the sources it came from nested under it
+    // and open by default — the same shape as the coverage rail.
+    const summaryPill = card?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')
+    expect(summaryPill?.textContent).toContain('Generated from 1 doc')
+    expect(card?.querySelector('[data-testid="summary-source-docs"] [data-testid="doc-pill-okr.md"]')).toBeTruthy()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="doc-disclosure-_prd-summary.md"]')?.click() })
+    expect(card?.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
     // Never dead-end: the stage drills to where the requirements are browsable,
     // from the SAME header slot every other stage's drill-through uses.
-    expect(distilled?.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
+    expect(card?.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-docs"]')?.click() })
     expect(onOpenCoverage).toHaveBeenCalledWith('checkout')
   })
 
-  it('while distilling, the output card holds the space instead of leaving a blank gap', async () => {
+  it('while distilling, the summary slot holds the space instead of leaving a blank gap', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'prd-summary',
@@ -418,11 +360,11 @@ describe('checkpoint display language (R71/W3)', () => {
     // Drill wired, so the gate below is what's under test — not a missing prop.
     await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Turning the docs into requirements')
+    const card = container.querySelector('[data-testid="flight-requirements-card"]')
+    expect(card?.querySelector('[data-testid="docs-summary-status"]')?.textContent).toContain('Turning the docs into requirements')
     // No count yet, and no drill to a ledger that has nothing in it — the docs
     // row is already `done` here, so only the folded summary can gate it.
-    expect(distilled?.textContent).not.toContain('·')
+    expect(card?.textContent).not.toContain('Requirements found')
     expect(container.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
   })
 
@@ -454,7 +396,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(summary?.textContent).not.toContain('Needs approval')
   })
 
-  it('once the agent is writing, the output card reports it and shows the words arriving', async () => {
+  it('once the agent is writing, the summary slot reports it and shows the words arriving', async () => {
     // The state the user shut their machine down in: the agent was two-thirds
     // through a 27k-character answer and the card said only "progress in
     // Activity below" — pointing at a panel that gains no row until the whole
@@ -479,7 +421,7 @@ describe('checkpoint display language (R71/W3)', () => {
     })
     await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
-    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
+    const distilled = container.querySelector('[data-testid="flight-requirements-card"]')
     expect(distilled?.textContent).toContain('Writing the answer — 27,627 characters so far')
     // The old copy promised progress somewhere it wasn't; it must not survive.
     expect(distilled?.textContent).not.toContain('progress in Activity below')

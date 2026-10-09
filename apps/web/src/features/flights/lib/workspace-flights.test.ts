@@ -1,3 +1,6 @@
+import { flightActivityCases } from '@shared/__fixtures__/flight-activity'
+import { isActiveFlightStatus } from '@shared/flights/types'
+import { summarizeFlightActivity } from '../components/FlightChipState'
 import { describe, expect, it } from 'vitest'
 import type { FlightIndexEntry } from '@shared/flights/types'
 import { coverageGeneratingFlight } from './workspace-flights'
@@ -36,4 +39,11 @@ describe('coverage generation in the workspace', () => {
     expect(coverageGeneratingFlight([waiting], 'checkout')?.stageStatus).toBe('running')
     expect(coverageGeneratingFlight([{ ...waiting, checkpointKind: 'prd-source' }], 'checkout')?.stageStatus).toBe('waiting-for-approval')
   })
+})
+
+it.each(flightActivityCases)('shares browser activity for $status', ({ status, active }) => {
+  const entry = flight({ status })
+  expect(isActiveFlightStatus(status)).toBe(active)
+  expect(coverageGeneratingFlight([entry], 'checkout') !== null).toBe(active)
+  expect(summarizeFlightActivity([entry], [], new Map()).activeFeatures.has('checkout')).toBe(active)
 })

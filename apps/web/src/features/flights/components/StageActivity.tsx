@@ -9,6 +9,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
 import { useEvaluationExportLog } from '@/features/evaluation/state/EvaluationExportContext'
 import { StageColumn } from './stage-meta'
+import { plural } from '@shared/lib/plural'
 
 interface StageActivityRailProps {
   stageKey: FlightStageKey
@@ -341,14 +342,9 @@ export function AgentBlock({ children }: { children: ReactNode }) {
   )
 }
 
-export function truncate(text: string, max: number): string {
-  const line = text.split('\n')[0] ?? ''
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line
-}
-
 /** What the live pass is doing right now, spelled out under its row. */
 export function specsPhaseSub(phase: SpecsCoverageProgressT['phase'], gapsOpen: number): string {
-  if (phase === 'authoring') return `writing tests to close the ${gapsOpen} open gap${gapsOpen === 1 ? '' : 's'}`
+  if (phase === 'authoring') return `writing tests to close the ${plural(gapsOpen, 'open gap')}`
   if (phase === 'validating') return 'validating the authored specs'
   return 'mapping the specs against the requirements'
 }
@@ -415,7 +411,7 @@ export function SpecsPassTimeline({ progress, live, failed }: {
               sub={
                 p.note
                   ? 'retried with the errors in the next prompt'
-                  : `${p.coveragePct}% covered · ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'} open`
+                  : `${p.coveragePct}% covered · ${plural(p.gapsOpen ?? 0, 'gap')} open`
               }
             />
           ))}

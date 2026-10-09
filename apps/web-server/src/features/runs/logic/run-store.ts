@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import {
   readManifest,
@@ -8,17 +9,19 @@ import {
   upsertRunsIndexEntry,
   writeRunsIndex,
 } from './runtime/manifest'
-import type { RunManifest } from '../../../../../../shared/run-manifest'
+import type { RunHeartbeatOwner, RunManifest } from '../../../../../../shared/run-manifest'
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
-import { runDirFor } from './runtime/run-paths'
+import { runDirFor, runManifestPath } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 import {
+  createRunLifecycleEvent,
   isActiveRunStatus,
-  isStaleHeartbeat,
   isUnsettledRunStatus,
   type RunLifecycleEvent,
   type ServiceStatus,
 } from '../../../../../../shared/run-state'
+import { isProcessAlive } from '../../../../../../shared/runtime/active-servers'
+import { judgeRunOwnership, type RunOwnership } from './runtime/run-ownership'
 import { trimRunArtifacts } from './run-artifacts'
 import {
   AbortAllResult,
@@ -57,7 +60,7 @@ export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexE
  *  envset rather than silently reading as "no envset". */
 function fillIndexProvenance(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
   if (entry.healCycles !== undefined && entry.healMode !== undefined && entry.env !== undefined) return entry
-  const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(logsDir, entry.runId)))
   if (!manifest) return entry
   return {
     ...entry,
@@ -85,7 +88,7 @@ export function renameRunFeature(logsDir: string, from: string, to: string): num
     entries.map((e) => (e.feature === from ? { ...e, feature: to } : e)),
   )
   for (const entry of matching) {
-    const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
+    const manifestPath = runManifestPath(runDirFor(logsDir, entry.runId))
     if (!fs.existsSync(manifestPath)) continue
     updateManifest(manifestPath, { feature: to })
   }
@@ -120,6 +123,38 @@ export interface RunStoreEvent {
 
 export type RunStoreEventListener = (e: RunStoreEvent) => void
 
+export interface RunStoreOptions {
+  /** This server's heartbeat signature; tests pin it to stage a peer. */
+  owner?: RunHeartbeatOwner
+  isProcessAlive?: (pid: number) => boolean
+}
+
+/** Why a run nobody drives any more was settled `aborted`, as its last
+ *  lifecycle record says it. `server-exited` is the honest account of an
+ *  orphan: the process that held its services and heal loop is gone. */
+interface OrphanSettlement {
+  reason: 'server-exited' | 'run-stopped'
+  headline: string
+  detail?: string
+  /** A boot-only session has no repair to continue, so it says less. */
+  bootDetail?: string
+}
+
+const SERVER_EXITED: OrphanSettlement = {
+  reason: 'server-exited',
+  headline: 'Run aborted — its Canary Lab server stopped',
+  detail: 'The server driving this run exited before the run finished, and its services and heal loop ended with it. Restart the run to continue repairing.',
+  bootDetail: 'The server holding these services exited, and they stopped with it.',
+}
+
+const RUN_STOPPED: OrphanSettlement = { reason: 'run-stopped', headline: 'Run aborted' }
+
+/** What an action on a just-settled orphan tells its caller, UI or agent. */
+export const SERVER_EXITED_MESSAGE = 'The Canary Lab server driving this run stopped before it finished, so the run is now marked aborted. Restart it to continue repairing.'
+
+/** How often a running server re-checks unsettled rows for a dead owner. */
+export const ORPHANED_RUN_SWEEP_MS = 15_000
+
 /**
  * Single owner of `logs/` mutations. Routes and the orchestrator both go
  * through this class — no other code should call `updateManifest` /
@@ -135,13 +170,16 @@ export type RunStoreEventListener = (e: RunStoreEvent) => void
  */
 export class RunStore extends EventEmitter implements RunStateSink {
   private readonly sink: FileRunStateSink
+  private readonly isProcessAlive: (pid: number) => boolean
 
   constructor(
     public readonly logsDir: string,
     public readonly registry: OrchestratorRegistry,
+    opts: RunStoreOptions = {},
   ) {
     super()
-    this.sink = new FileRunStateSink(logsDir)
+    this.sink = new FileRunStateSink(logsDir, opts.owner)
+    this.isProcessAlive = opts.isProcessAlive ?? isProcessAlive
   }
 
   /** Typed `on`/`off` for the single `event` channel we publish.
@@ -202,10 +240,9 @@ export class RunStore extends EventEmitter implements RunStateSink {
     this.emitEvent({ kind: 'journal-changed', runId })
   }
 
-  /** The Playwright reporter owns e2e-summary.json because it runs in a child
-   *  process. Its directory watcher calls this after an atomic summary write
-   *  so run-detail subscribers can read and push the new step immediately. */
-  notifySummaryChanged(runId: string): void {
+  /** External artifact writers notify subscribers to read the latest detail.
+   * This does not mutate the manifest, lifecycle or history index. */
+  notifyDetailChanged(runId: string): void {
     this.emitEvent({ kind: 'changed', runId })
   }
 
@@ -255,10 +292,13 @@ export class RunStore extends EventEmitter implements RunStateSink {
       this.registry.delete(runId)
       // Test doubles and failed stop paths may not write terminal state. If
       // the persisted row still reads unsettled, finalize it here.
-      this.finalizePersistedUnsettledRun(runId)
+      this.finalizePersistedUnsettledRun(runId, RUN_STOPPED)
       return { ok: true }
     }
-    return this.finalizePersistedUnsettledRun(runId)
+    // Stop on a row nobody drives records why it really ended; on a row a live
+    // peer still drives it remains the user's recovery lever.
+    const settlement = this.ownershipOf(this.get(runId)?.manifest, Date.now()) === 'gone' ? SERVER_EXITED : RUN_STOPPED
+    return this.finalizePersistedUnsettledRun(runId, settlement)
       ? { ok: true }
       : { ok: false, reason: 'not-active' }
   }
@@ -270,14 +310,16 @@ export class RunStore extends EventEmitter implements RunStateSink {
    *  The two loops answer different questions, and only the first one owns a
    *  process. Loop 1 stops the orchestrators THIS process is running — that is
    *  what shutdown needs, and their heartbeats are fresh by definition. Loop 2
-   *  repairs rows left behind on disk, which is a guess about a process we
-   *  cannot see, so it defers to the heartbeat: a row beating within
-   *  `HEARTBEAT_STALE_MS` belongs to a live server and is not ours to
-   *  finalize. Without that check, a second server booting against the same
-   *  logs dir marked a healing run `aborted` 3s into its repair cycle — it
-   *  could not stop the real heal loop (that lived in the owning process), so
-   *  the run kept healing for another 51s while every disk reader, the UI
-   *  included, was told it had already ended. */
+   *  repairs rows left behind on disk and spares only a row a live peer still
+   *  drives (`judgeRunOwnership`). Without that check, a second server booting
+   *  against the same logs dir marked a healing run `aborted` 3s into its
+   *  repair cycle — it could not stop the real heal loop (that lived in the
+   *  owning process), so the run kept healing for another 51s while every disk
+   *  reader, the UI included, was told it had already ended.
+   *
+   *  A row this server signed is claimable here, unlike in `settleIfOrphaned`:
+   *  at boot it is a previous life's, and at shutdown it is a queue slot about
+   *  to vanish with the process. */
   async abortAllActiveOrStale(): Promise<AbortAllResult> {
     const aborted = new Set<string>()
     for (const orch of this.registry.list()) {
@@ -288,29 +330,50 @@ export class RunStore extends EventEmitter implements RunStateSink {
     const now = Date.now()
     for (const entry of this.list()) {
       if (!isUnsettledRunStatus(entry.status)) continue
-      if (this.isOwnedByLiveProcess(entry.runId, now)) continue
-      const result = await this.abort(entry.runId)
-      if (result.ok) aborted.add(entry.runId)
+      if (this.ownershipOf(this.get(entry.runId)?.manifest, now) === 'other-live-server') continue
+      if (this.finalizePersistedUnsettledRun(entry.runId, SERVER_EXITED)) aborted.add(entry.runId)
     }
     return { aborted: [...aborted] }
   }
 
-  /** True when a persisted unsettled row is beating fast enough that some other
-   *  live process must own it. A manifest with no `heartbeatAt` at all predates
-   *  the field and carries no such evidence, so it stays claimable — the same
+  /** Settle one persisted unsettled run that no live server drives, so every
+   *  action and reader agrees it has ended. Returns true when it settled the
+   *  run. Callers run this wherever an action finds no orchestrator: otherwise
+   *  Stop Heal 404s, `start_run` reuses a corpse and `signal_run` writes a file
+   *  nothing reads.
+   *
+   *  It acts only on positive evidence of death — a heartbeat gone stale or
+   *  signed by an exited server. Rows this server registered, signed (a queued
+   *  slot) or that a live peer drives are left alone, and so is a row with no
+   *  heartbeat or no readable manifest: those predate the heartbeat, and boot
+   *  reconcile and Stop already settle them. */
+  settleIfOrphaned(runId: string, nowMs: number = Date.now()): boolean {
+    if (this.registry.get(runId)) return false
+    const manifest = this.get(runId)?.manifest
+    if (!manifest?.heartbeatAt || !isUnsettledRunStatus(manifest.status)) return false
+    if (this.ownershipOf(manifest, nowMs) !== 'gone') return false
+    return this.finalizePersistedUnsettledRun(runId, SERVER_EXITED)
+  }
+
+  /** Settle every orphan in the index. The periodic sweep that catches a peer
+   *  server dying, or a pre-owner record going stale, while no one acts on the
+   *  run. Reads the index file directly: it runs on a timer. */
+  settleOrphanedRuns(nowMs: number = Date.now()): string[] {
+    return readRunsIndex(this.logsDir)
+      .filter((entry) => isUnsettledRunStatus(entry.status) && this.settleIfOrphaned(entry.runId, nowMs))
+      .map((entry) => entry.runId)
+  }
+
+  /** Who drives a persisted row, by its heartbeat signature. A manifest with
+   *  no `heartbeatAt` predates the field and reads as `gone` — the same
    *  distinction `reapStaleRuns` draws.
    *
    *  A queued row only beats once, at enqueue: the 5s heartbeat timer belongs
-   *  to the orchestrator, which a queued run does not have yet. So a queued row
-   *  reads as owned for `HEARTBEAT_STALE_MS` after it was parked and claimable
-   *  after that. Both answers are the safe ones here — this runs at boot (where
-   *  a just-parked row means a server that died seconds ago, and Stop is the
-   *  recovery lever) and at shutdown (where the queue is being torn down
-   *  anyway). */
-  private isOwnedByLiveProcess(runId: string, nowMs: number): boolean {
-    const heartbeatAt = this.get(runId)?.manifest.heartbeatAt
-    if (!heartbeatAt) return false
-    return !isStaleHeartbeat(heartbeatAt, nowMs)
+   *  to the orchestrator, which a queued run does not have yet. Its signature
+   *  still names the server holding the queue slot, so a dead holder is
+   *  noticed at once; an unsigned queued row reads as a peer's until stale. */
+  private ownershipOf(manifest: RunManifest | undefined, nowMs: number): RunOwnership {
+    return judgeRunOwnership(manifest ?? {}, this.sink.owner, nowMs, this.isProcessAlive)
   }
 
   /** Hard-delete a terminal run from history. Refuses (`reason: 'active'`)
@@ -382,16 +445,28 @@ export class RunStore extends EventEmitter implements RunStateSink {
     if (before !== after) this.emitEvent({ kind: 'index-changed' })
   }
 
+  /** The final lifecycle record a dead runner could not write. Without it the
+   *  run reads `aborted` under its last live headline ("Waiting for signal"). */
+  private recordSettlement(runId: string, isBoot: boolean, settlement: OrphanSettlement): void {
+    this.recordLifecycleEvent(runId, createRunLifecycleEvent('aborted', isBoot ? 'Services stopped' : settlement.headline, {
+      id: randomUUID(),
+      severity: isBoot ? 'info' : 'warning',
+      detail: isBoot ? settlement.bootDetail : settlement.detail,
+      ...(isBoot ? {} : { abortReason: { reason: settlement.reason } }),
+    }))
+  }
+
   private emitEvent(event: RunStoreEvent): void {
     this.emit('event', event)
   }
 
-  private finalizePersistedUnsettledRun(runId: string): boolean {
+  private finalizePersistedUnsettledRun(runId: string, settlement: OrphanSettlement): boolean {
     const detail = this.get(runId)
     if (detail) {
       if (!isUnsettledRunStatus(detail.manifest.status)) return false
       try { cleanupSuiteRuntimeInputsForRun(runDirFor(this.logsDir, runId)) } catch { /* malformed metadata stays inspectable for manual cleanup */ }
       this.finalize(runId, 'aborted', new Date().toISOString(), detail.manifest.healCycles)
+      this.recordSettlement(runId, detail.manifest.executionType === 'boot', settlement)
       return true
     }
     // No manifest, but the run may still be listed as unsettled in the index

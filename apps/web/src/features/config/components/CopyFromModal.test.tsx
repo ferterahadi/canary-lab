@@ -1,22 +1,16 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import { CopyFromModal } from './CopyFromModal'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', () => ({
   getEnvsetSlot: vi.fn(async () => ({ entries: [{ key: 'PORT', value: '4000' }, { key: 'NEW', value: '' }] })),
 }))
 
-let container: HTMLDivElement
 let root: Root
-beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it('shows the actual selected result and applies exactly that result', async () => {
   const apply = vi.fn()

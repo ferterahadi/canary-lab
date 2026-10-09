@@ -1,3 +1,4 @@
+import type { PauseResult, CancelHealResult, InterjectResult, AdoptSpecEditsResult, RestoreSpecEditsResult } from './run-control-results'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { getRunDetail, readRunSummary } from './run-detail'
@@ -16,31 +17,6 @@ import type { TestReviewGitReceipt } from '../../../../../../shared/test-review'
 // `reapStaleRuns`, `readRunSummary`) remain exported so legacy callers and the
 // existing tests keep working; the class wraps them and emits events.
 
-// PauseResult is structurally compatible with RunOrchestrator.PauseResult —
-// duplicated here so the route layer doesn't need to import the orchestrator
-// concrete class.
-export type OrchestratorPauseResult =
-  | { ok: true; failureCount: number }
-  | { ok: false; reason: 'already-healing' | 'no-playwright-running' | 'no-failures-yet' }
-
-export type OrchestratorCancelHealResult =
-  | { ok: true }
-  | { ok: false; reason: 'not-healing' | 'no-agent-running' }
-
-/** Mirrors `AdoptSpecEditsResult` in `runtime/run-suite-snapshot.ts` for the
- *  same reason the pause/cancel results are duplicated here. */
-export type OrchestratorAdoptSpecEditsResult =
-  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
-
-export type OrchestratorRestoreSpecEditsResult =
-  | { ok: true; restored: string[] }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
-
-export type OrchestratorInterjectResult =
-  | { ok: true }
-  | { ok: false; reason: 'no-agent-running' }
-
 export type RestartHealResult =
   | { ok: true }
   | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'new-run-required' | 'manual-mode' | 'spawn-failed' }
@@ -52,16 +28,16 @@ export type RestartRunResult =
 export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>
-  pauseAndHeal(): Promise<OrchestratorPauseResult>
-  cancelHeal(): Promise<OrchestratorCancelHealResult>
+  pauseAndHeal(): Promise<PauseResult>
+  cancelHeal(): Promise<CancelHealResult>
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
-  adoptSpecEdits?(expectedRevision?: string, git?: TestReviewGitReceipt): Promise<OrchestratorAdoptSpecEditsResult>
+  adoptSpecEdits?(expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptSpecEditsResult>
   /** Includes in-memory approval signals, not just files awaiting the watcher. */
   isWaitingForHealSignal?(): boolean
   /** A human puts the live specs back to what the run executed. Human-only by
    *  construction, the same way as adopt. */
-  restoreSpecEdits?(expectedRevision?: string): OrchestratorRestoreSpecEditsResult
+  restoreSpecEdits?(expectedRevision?: string): RestoreSpecEditsResult
   /** A live spec of `feature` changed on disk: re-measure the run's pending
    *  edits now rather than at the next Playwright exit, so the run's own count
    *  (hero, chip, review) says what is pending while the run waits on a heal.
@@ -71,7 +47,7 @@ export interface OrchestratorLike {
   /** Interject — drop the user's text into the live REPL's stdin (Esc-then-
    *  text-then-Enter). Used by the HTTP fallback route. The bidirectional
    *  pane bypasses this and goes through `writeToHealAgent` instead. */
-  interjectHealAgent?(text: string): Promise<OrchestratorInterjectResult>
+  interjectHealAgent?(text: string): Promise<InterjectResult>
   /** Raw pty-stdin write for the heal agent. Used by the WS pane handler to
    *  forward keystrokes from xterm.js straight into the running REPL. No-op
    *  when no pty is attached. */

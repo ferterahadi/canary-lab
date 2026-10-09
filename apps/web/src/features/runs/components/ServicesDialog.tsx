@@ -5,6 +5,7 @@ import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
 import { StatusDot } from '@/shared/ui/atoms'
 import { ConfirmModal, Modal } from '@/shared/ui/Overlays'
 import { RunDetailColumn } from './RunDetailColumn'
+import { displayError } from '@/shared/api/error-message'
 
 interface Props {
   onClose: () => void
@@ -37,7 +38,7 @@ export function ServicesDialog({ onClose }: Props) {
       await Promise.all(stopIds.map((id) => abort(id)))
       setStopIds(null)
     } catch (error) {
-      setStopError(error instanceof Error ? error.message : 'Could not stop services')
+      setStopError(displayError(error, 'Could not stop services'))
     } finally { setStopping(false) }
   }
   const requestStop = (ids: string[]): void => { setStopError(null); setStopIds(ids) }

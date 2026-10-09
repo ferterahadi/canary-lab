@@ -4,7 +4,7 @@
 // the pause / cancel / restart controls the UI drives into it. Split out of
 // orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
-import type { CancelHealResult, PauseResult } from './run-orchestrator-types'
+import type { CancelHealResult, PauseResult } from '../run-control-results'
 import { waitForPlaywrightExit } from './run-playwright'
 import { recordHealEnd } from './run-heal-agent'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
@@ -49,11 +49,11 @@ export async function pauseAndHeal(ctx: RunContext, host: RunLoopHost): Promise<
   ctx.emit('paused-by-user', { failureCount: failed.length })
 
   const pty = ctx.playwrightPty
-  try { pty.kill('SIGTERM') } catch { /* already dead */ }
+  killTree(pty, 'SIGTERM')
   const exited = await waitForPlaywrightExit(ctx, 5000)
   if (!exited && ctx.playwrightPty) {
-    try { ctx.playwrightPty.kill('SIGKILL') } catch { /* already dead */ }
-    await waitForPlaywrightExit(ctx, 1000)
+    killTree(pty, 'SIGKILL')
+    if (ctx.playwrightPty === pty) await waitForPlaywrightExit(ctx, 1000)
   }
 
   return { ok: true, failureCount: failed.length }
@@ -108,10 +108,6 @@ export async function cancelHeal(ctx: RunContext, host: RunLoopHost): Promise<Ca
       signal: '.rerun',
       hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
       fixDescription: 'Cancelled by user — no changes were made.',
-      runId: ctx.runId,
-      manifestPath: ctx.paths.manifestPath,
-      summaryPath: ctx.paths.summaryPath,
-      journalPath: ctx.paths.diagnosisJournalPath,
     })
   } catch { /* journal append is best-effort */ }
 

@@ -1,16 +1,16 @@
 import ts from 'typescript'
 import type { RunDetail } from '../../../../../../../shared/run-detail'
-import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentsFor } from '../../../runs/pick-heal-agent'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
 import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
-import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { promptPath } from '../../../../shared/prompts'
 import { createFlowcharts } from './flowchart'
 import { buildTestReviewPacket } from './packet'
 import { applyEvaluationTextSlotRewrite, buildEvaluationLlmPrompt, deterministicEvaluationRewrite, evaluationTextSlots, normalizeEvaluationRewrite } from './rewrite'
 import type { AssertionHtmlOptions, EvaluationRewrite, EvaluationRewriteAgentOptions, EvaluationTextSlot } from './types'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 export async function generateEvaluationRewriteWithAgent(
   detail: RunDetail,
@@ -45,7 +45,7 @@ export async function generateEvaluationRewriteWithAgent(
       }
       recordFailure(`unparseable output: ${previewAgentOutput(output)}`)
     } catch (err) {
-      recordFailure(err instanceof Error ? err.message : String(err))
+      recordFailure(errorMessage(err))
     }
   }
   throw new Error(`evaluation rewrite failed with all available agents: ${failures.join(' | ')}`)
@@ -57,7 +57,7 @@ export const EVALUATION_REWRITE_SCHEMA_PATH = promptPath('evaluation-rewrite.sch
 
 export function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceAdapter']): HealAgent[] {
   if (adapter === 'deterministic') return []
-  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
+  return resolveAgentsFor(adapter)
 }
 
 export function evaluationAgentModel(models: StageModelChoice): string | null {

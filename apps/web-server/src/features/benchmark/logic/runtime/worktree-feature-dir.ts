@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import path from 'path'
 
 /**
@@ -32,6 +33,6 @@ export function worktreeFeatureDir(opts: {
   worktreeRepoPath: string
 }): string {
   const rel = path.relative(opts.repoLocalPath, opts.featureDir)
-  const insideRepo = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  const insideRepo = isPathUnder(opts.featureDir, opts.repoLocalPath, true)
   return insideRepo ? path.join(opts.worktreeRepoPath, rel) : opts.featureDir
 }

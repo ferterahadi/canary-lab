@@ -39,8 +39,8 @@ export async function requestBrokenDocumentPath(options: {
   const facts = ctx.clientFacts()
   return requestUserInput(request, facts, {
     scope, revision: [options.revision, before], mode: 'form',
-    message: `The source document ${doc.relPath} for ${feature} is unavailable. Previous path: ${doc.linkTarget ?? 'unknown'}. Where is the file now? Enter its new path on the machine running Canary Lab. This repairs the symlink without creating a recovery copy.`,
-    schema: z.object({ local_path: z.string().trim().min(1).max(4096).describe('New absolute or ~/ path to the moved source document on the Canary Lab server.') }),
+    message: `${feature} cannot find ${doc.relPath}. Where is the file now? Enter its path on the computer running Canary to reconnect it.`,
+    schema: z.object({ local_path: z.string().trim().min(1).max(4096).describe('File path starting with / or ~/ on the computer running Canary.') }),
     fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', feature, brokenDoc: doc, ...(url ? { url } : {}),
       next: `${elicitationAdviceFor(facts, 'form')} Ask the user to repair ${doc.relPath} with Relink in Canary Lab, then retry ${command} with the same arguments. Do not omit the missing source or create a recovery copy.` }),
   }, async ({ local_path }) => {

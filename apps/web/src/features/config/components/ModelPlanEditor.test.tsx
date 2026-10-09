@@ -1,29 +1,20 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
 import { StageChoiceGrid } from './ModelPlanEditor'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
   getAgentProbe: vi.fn(),
 }))
 
-let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 function setSelect(el: HTMLSelectElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set

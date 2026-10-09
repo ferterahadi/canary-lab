@@ -1,11 +1,13 @@
+import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
-import { createExternalHealSession } from './logic/heal/external-heal-session'
+import { createRestartedOrchestrator } from './logic/restart-orchestrator'
+import { createExternalHealSession, projectExternalHealMetadata } from './logic/heal/external-heal-session'
 // The dependency object the runs REST surface is registered with: every callback
 // the routes hand back into the run loop. Split out of index.ts, where it was a
 // 430-line object literal inline in `register` — the closures it is built from
 // now arrive as an explicit `parts` argument instead of being captured.
 import path from 'path'
-import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared/run-state'
+import { isActiveRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
@@ -13,7 +15,7 @@ import type { OrchestratorLike, StartRunOutcome } from './logic/run-registry'
 import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
-import { loadFeatures, findFeature } from '../../shared/feature-loader'
+import { findFeature } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
@@ -24,8 +26,7 @@ import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-co
 import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
 import { addWorktree, hydrateWorkingTreeDiff, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
-import { buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
-import { makeAgentSpawnCommandBuilder } from './logic/runtime/heal-agent-spawn'
+import { createAutoHealConfig } from './logic/runtime/auto-heal-config'
 import { resolveAgentBinary } from '../agent-sessions/logic/agent-binary'
 import { resolveRunModelPlan, reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import type { RunModelPlan } from '../../../../../shared/run-manifest'
@@ -34,7 +35,6 @@ import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../.
 import { assertStableSpecSelection } from '../../shared/playwright-config'
 import { assertNoPendingRunReview } from './logic/runtime/run-review-gate'
 import { RunnerLog } from './logic/runtime/runner-log'
-import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import {
   restore,
 } from './logic/runtime/env-switcher/switch'
@@ -43,7 +43,6 @@ import type { ExecutionType } from '../../../../../shared/verification'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
 import { settleOrchestratorRun } from './logic/settle-run'
-import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
 
 export interface RunsRouteDepsParts {
   attachRunStreams: ReturnType<typeof makeAttachRunStreams>
@@ -101,8 +100,7 @@ export function buildRunsRouteDeps(
       options?: StartRunOptions,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
-      const features = loadFeatures(featuresDir)
-      const feature = features.find((f) => f.name === featureName)
+      const feature = findFeature(featuresDir, featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
       if (!isBoot) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
       // A boot brings services up and runs no tests, so it declares no roster
@@ -227,20 +225,12 @@ export function buildRunsRouteDeps(
         // a restricted PATH (e.g. a Desktop-launched UI server).
         const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
         try {
-          autoHeal = {
-            agent: agentChoice,
-            buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              binaryPath: agentBinary,
-              models: models.heal,
-            }),
-            buildCyclePrompt: buildOrchestratorHealPrompt({
-              agent: agentChoice,
-              projectRoot: projectRoot,
-              runDir,
-              personalWikiPath: projectConfig.personalWikiPath,
-            }),
-          }
+          autoHeal = createAutoHealConfig({
+            agent: agentChoice, projectRoot, runDir,
+            binaryPath: agentBinary,
+            models: models.heal,
+            personalWikiPath: projectConfig.personalWikiPath,
+          })
         } catch (err) {
           runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
         }
@@ -321,12 +311,7 @@ export function buildRunsRouteDeps(
       // by passing it to the orchestrator constructor; this call ensures the
       // in-memory map agrees and the audit log records the claim.
       if (canClaim && healAgentReq) {
-        externalHealBroker.claim(runId, {
-          sessionId: healAgentReq.sessionId,
-          clientKind: healAgentReq.clientKind,
-          ...(healAgentReq.clientVersion ? { clientVersion: healAgentReq.clientVersion } : {}),
-          ...(healAgentReq.conversationName ? { conversationName: healAgentReq.conversationName } : {}),
-        })
+        externalHealBroker.claim(runId, projectExternalHealMetadata(healAgentReq, 'nonempty'))
       }
 
       attachRunStreams(orch, runnerLog, feature.name, backups)
@@ -380,13 +365,8 @@ export function buildRunsRouteDeps(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
-      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
-      if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
-      if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
-      if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
-      if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
-        return { ok: false, reason: 'new-run-required' as const }
-      }
+      const eligibility = checkRestartEligibility(manifest, runDirFor(logsDir, runId), 'run')
+      if (!eligibility.ok) return eligibility
 
       const feature = findFeature(featuresDir, manifest.feature)
       if (!feature) return { ok: false, reason: 'not-restartable' as const }
@@ -409,8 +389,6 @@ export function buildRunsRouteDeps(
         runnerLog.warn(`Run restart rejected: ${(prepared.error as Error).message}`)
         return { ok: false, reason: 'not-restartable' as const }
       }
-      const { portMap, backups, repoBranchSnapshots } = prepared
-
       const projectConfig = loadProjectConfig(projectRoot)
       const preserveExternal = manifest.healMode === 'external'
       const preserveManual = manifest.healMode === 'manual'
@@ -425,20 +403,12 @@ export function buildRunsRouteDeps(
           models = reuseRunModelPlan(agentChoice, manifest, projectConfig.agentModels)
           const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
           try {
-            autoHeal = {
-              agent: agentChoice,
-              buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
-                mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-                binaryPath: agentBinary,
-                models: models.heal,
-              }),
-              buildCyclePrompt: buildOrchestratorHealPrompt({
-                agent: agentChoice,
-                projectRoot: projectRoot,
-                runDir,
-                personalWikiPath: projectConfig.personalWikiPath,
-              }),
-            }
+            autoHeal = createAutoHealConfig({
+              agent: agentChoice, projectRoot, runDir,
+              binaryPath: agentBinary,
+              models: models.heal,
+              personalWikiPath: projectConfig.personalWikiPath,
+            })
           } catch (err) {
             runnerLog.warn(`Auto-heal disabled for run restart: ${(err as Error).message}`)
           }
@@ -447,34 +417,26 @@ export function buildRunsRouteDeps(
         }
       }
 
-      let orch: RunOrchestrator
-      try {
-        orch = new RunOrchestrator({
-          feature,
-          env,
-          runId,
-          runDir,
-          portMap,
-          ptyFactory,
-          runnerLog,
+      const restarted = createRestartedOrchestrator({
+        feature, env, runId, runDir,
+        initialHealCycles: manifest.healCycles,
+        resources: prepared,
+        ptyFactory, runnerLog,
+        runStateSink: runStore,
+        dirtySpecHooks: dirtySpecStore,
+        attachRunStreams,
+        failureLogPrefix: 'Run restart failed',
+        modeOptions: {
           autoHeal,
           manualHeal: preserveManual,
           externalHeal: preserveExternal,
           externalHealSession: preserveExternal ? manifest.externalHealSession : undefined,
           ...(models ? { models } : {}),
-          repoBranchSnapshots,
-          initialHealCycles: manifest.healCycles,
-          runStateSink: runStore,
-          dirtySpecHooks: dirtySpecStore,
           projectRoot,
-        })
-      } catch (err) {
-        if (backups) restore(backups)
-        runnerLog.warn(`Run restart failed: ${(err as Error).message}`)
-        return { ok: false, reason: 'spawn-failed' as const }
-      }
-
-      attachRunStreams(orch, runnerLog, feature.name, backups)
+        },
+      })
+      if (!restarted.ok) return restarted
+      const { orch } = restarted
       const broker = brokers.get(runId)!
       broker.push('agent', '\n[orchestrator] Retesting remaining failed, skipped, and pending tests...\n')
       registry.set(runId, orch)

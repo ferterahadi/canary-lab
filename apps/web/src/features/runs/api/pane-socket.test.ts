@@ -1,49 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { connectPane } from './pane-socket'
+import { FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 // Minimal fake WebSocket. Tracks instances so tests can drive the lifecycle
 // (message, close, error). Mirrors the surface area connectPane consumes.
-class FakeSocket {
-  static instances: FakeSocket[] = []
-  url: string
-  readyState = 0
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: (() => void) | null = null
-  closeCalls = 0
-  sent: string[] = []
-  constructor(url: string) {
-    this.url = url
-    FakeSocket.instances.push(this)
-  }
-  send(payload: string): void {
-    this.sent.push(payload)
-  }
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = 3
-  }
-  fire(msg: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent)
-  }
-  fireRaw(data: string): void {
-    this.onmessage?.({ data } as MessageEvent)
-  }
-  fireClose(): void {
-    this.readyState = 3
-    this.onclose?.()
-  }
-  fireOpen(): void {
-    this.readyState = 1
-    this.onopen?.()
-  }
-  fireError(): void {
-    this.onerror?.()
-  }
-}
 
-const reset = (): void => { FakeSocket.instances = [] }
+const reset = (): void => { FakeWebSocket.instances = [] }
 
 describe('connectPane', () => {
   it('builds the correct URL from runId/paneId and wsBase', () => {
@@ -52,10 +14,10 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'service:api',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
-    expect(FakeSocket.instances[0].url).toBe('ws://test/ws/run/r1/pane/service%3Aapi')
+    expect(FakeWebSocket.instances[0].url).toBe('ws://test/ws/run/r1/pane/service%3Aapi')
   })
 
   it('forwards data chunks to onData', () => {
@@ -65,10 +27,10 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'p',
       onData,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fire({ type: 'data', chunk: 'hello' })
+    FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'hello' })
     expect(onData).toHaveBeenCalledWith('hello')
   })
 
@@ -80,10 +42,10 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onOpen,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fireOpen()
+    FakeWebSocket.instances[0].fireOpen()
     expect(onOpen).toHaveBeenCalledOnce()
   })
 
@@ -95,10 +57,10 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onReset,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fire({ type: 'reset' })
+    FakeWebSocket.instances[0].fire({ type: 'reset' })
     expect(onReset).toHaveBeenCalledOnce()
   })
 
@@ -110,14 +72,14 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onExit,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    const sock = FakeSocket.instances[0]
+    const sock = FakeWebSocket.instances[0]
     sock.fire({ type: 'exit', code: 0 })
     expect(onExit).toHaveBeenCalledWith(0)
     sock.fireClose()
-    expect(FakeSocket.instances.length).toBe(1) // no reconnect
+    expect(FakeWebSocket.instances.length).toBe(1) // no reconnect
   })
 
   it('reconnects once on unexpected close (no exit seen)', () => {
@@ -126,14 +88,14 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'p',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fireClose()
-    expect(FakeSocket.instances.length).toBe(2)
+    FakeWebSocket.instances[0].fireClose()
+    expect(FakeWebSocket.instances.length).toBe(2)
     // Second close should not spawn a third.
-    FakeSocket.instances[1].fireClose()
-    expect(FakeSocket.instances.length).toBe(2)
+    FakeWebSocket.instances[1].fireClose()
+    expect(FakeWebSocket.instances.length).toBe(2)
   })
 
   it('forwards onError for error frames and socket errors', () => {
@@ -144,10 +106,10 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onError,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    const sock = FakeSocket.instances[0]
+    const sock = FakeWebSocket.instances[0]
     sock.fire({ type: 'error', error: 'unknown run' })
     sock.fireError()
     expect(onError).toHaveBeenCalledWith('unknown run')
@@ -160,13 +122,13 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'p',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
     conn.close()
-    FakeSocket.instances[0].fireClose()
-    expect(FakeSocket.instances.length).toBe(1)
-    expect(FakeSocket.instances[0].closeCalls).toBe(1)
+    FakeWebSocket.instances[0].fireClose()
+    expect(FakeWebSocket.instances.length).toBe(1)
+    expect(FakeWebSocket.instances[0].closeCalls).toBe(1)
   })
 
   it('does not close a socket that is already closing or closed', () => {
@@ -175,12 +137,12 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'p',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].readyState = 2
+    FakeWebSocket.instances[0].readyState = 2
     conn.close()
-    expect(FakeSocket.instances[0].closeCalls).toBe(0)
+    expect(FakeWebSocket.instances[0].closeCalls).toBe(0)
   })
 
   it('ignores malformed JSON frames silently', () => {
@@ -190,10 +152,10 @@ describe('connectPane', () => {
       runId: 'r1',
       paneId: 'p',
       onData,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fireRaw('not-json')
+    FakeWebSocket.instances[0].fireRaw('not-json')
     expect(onData).not.toHaveBeenCalled()
   })
 
@@ -221,9 +183,9 @@ describe('connectPane', () => {
         runId: 'r',
         paneId: 'p',
         onData: () => {},
-        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       })
-      expect(FakeSocket.instances[0].url.startsWith('wss://secure.example')).toBe(true)
+      expect(FakeWebSocket.instances[0].url.startsWith('wss://secure.example')).toBe(true)
     } finally {
       ;(globalThis as { location?: Location | undefined }).location = orig
     }
@@ -238,9 +200,9 @@ describe('connectPane', () => {
         runId: 'r',
         paneId: 'p',
         onData: () => {},
-        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       })
-      expect(FakeSocket.instances[0].url.startsWith('ws://127.0.0.1:7421')).toBe(true)
+      expect(FakeWebSocket.instances[0].url.startsWith('ws://127.0.0.1:7421')).toBe(true)
     } finally {
       ;(globalThis as { location?: Location | undefined }).location = orig
     }
@@ -253,10 +215,10 @@ describe('connectPane', () => {
       runId: 'r',
       paneId: 'p',
       onData,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].onmessage?.({ data: new ArrayBuffer(4) } as unknown as MessageEvent)
+    FakeWebSocket.instances[0].onmessage?.({ data: new ArrayBuffer(4) } as unknown as MessageEvent)
     expect(onData).not.toHaveBeenCalled()
   })
 
@@ -268,10 +230,10 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onError,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fire({ type: 'error' })
+    FakeWebSocket.instances[0].fire({ type: 'error' })
     expect(onError).toHaveBeenCalledWith('unknown error')
   })
 
@@ -283,29 +245,29 @@ describe('connectPane', () => {
       paneId: 'p',
       onData: () => {},
       onExit,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
-    FakeSocket.instances[0].fire({ type: 'exit' })
+    FakeWebSocket.instances[0].fire({ type: 'exit' })
     expect(onExit).not.toHaveBeenCalled()
   })
 
   it('close() swallows errors from underlying socket.close', () => {
     reset()
-    const orig = FakeSocket.prototype.close
-    FakeSocket.prototype.close = function () { throw new Error('already gone') }
+    const orig = FakeWebSocket.prototype.close
+    FakeWebSocket.prototype.close = function () { throw new Error('already gone') }
     try {
       const conn = connectPane({
         runId: 'r',
         paneId: 'p',
         onData: () => {},
-        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
         wsBase: 'ws://x',
       })
-      FakeSocket.instances[0].readyState = 1
+      FakeWebSocket.instances[0].readyState = 1
       expect(() => conn.close()).not.toThrow()
     } finally {
-      FakeSocket.prototype.close = orig
+      FakeWebSocket.prototype.close = orig
     }
   })
 
@@ -315,15 +277,15 @@ describe('connectPane', () => {
       runId: 'r',
       paneId: 'p',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
     conn.sendInput('before-open')
-    FakeSocket.instances[0].fireOpen()
+    FakeWebSocket.instances[0].fireOpen()
     conn.sendInput('a')
     conn.close()
     conn.sendInput('after-close')
-    expect(FakeSocket.instances[0].sent).toEqual([
+    expect(FakeWebSocket.instances[0].sent).toEqual([
       JSON.stringify({ type: 'pty-input', chunk: 'a' }),
     ])
   })
@@ -334,38 +296,38 @@ describe('connectPane', () => {
       runId: 'r',
       paneId: 'p',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://x',
     })
     conn.sendResize(80, 24)
-    FakeSocket.instances[0].fireOpen()
+    FakeWebSocket.instances[0].fireOpen()
     conn.sendResize(Number.NaN, 24)
     conn.sendResize(80, Number.POSITIVE_INFINITY)
     conn.sendResize(0, 24)
     conn.sendResize(80, -1)
     conn.sendResize(120, 30)
-    expect(FakeSocket.instances[0].sent).toEqual([
+    expect(FakeWebSocket.instances[0].sent).toEqual([
       JSON.stringify({ type: 'pty-resize', cols: 120, rows: 30 }),
     ])
   })
 
   it('swallows send failures for terminal input and resize', () => {
     reset()
-    const orig = FakeSocket.prototype.send
-    FakeSocket.prototype.send = function () { throw new Error('socket closed') }
+    const orig = FakeWebSocket.prototype.send
+    FakeWebSocket.prototype.send = function () { throw new Error('socket closed') }
     try {
       const conn = connectPane({
         runId: 'r',
         paneId: 'p',
         onData: () => {},
-        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
         wsBase: 'ws://x',
       })
-      FakeSocket.instances[0].fireOpen()
+      FakeWebSocket.instances[0].fireOpen()
       expect(() => conn.sendInput('a')).not.toThrow()
       expect(() => conn.sendResize(120, 30)).not.toThrow()
     } finally {
-      FakeSocket.prototype.send = orig
+      FakeWebSocket.prototype.send = orig
     }
   })
 
@@ -381,9 +343,9 @@ describe('connectPane', () => {
         runId: 'r1',
         paneId: 'p',
         onData: () => {},
-        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       })
-      expect(FakeSocket.instances[0].url).toBe('ws://127.0.0.1:7421/ws/run/r1/pane/p')
+      expect(FakeWebSocket.instances[0].url).toBe('ws://127.0.0.1:7421/ws/run/r1/pane/p')
     } finally {
       ;(globalThis as { location?: Location | undefined }).location = orig
     }
@@ -393,18 +355,18 @@ describe('connectPane', () => {
 it('survives malformed frames, preserves reset, and only stops reconnecting on a valid exit', () => {
   reset()
   const onData = vi.fn(); const onError = vi.fn(); const onReset = vi.fn()
-  connectPane({ runId: 'r', paneId: 'p', wsBase: 'ws://test', WebSocketImpl: FakeSocket as unknown as typeof WebSocket, onData, onError, onReset })
-  const first = FakeSocket.instances[0]
+  connectPane({ runId: 'r', paneId: 'p', wsBase: 'ws://test', WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket, onData, onError, onReset })
+  const first = FakeWebSocket.instances[0]
   for (const msg of [null, [], { type: 'exit', code: '0' }, { type: 'data', chunk: {} }]) first.fire(msg)
   first.fire({ type: 'error', error: {} })
   first.fire({ type: 'reset' })
   first.fireClose()
-  expect(FakeSocket.instances).toHaveLength(2)
-  const next = FakeSocket.instances[1]
+  expect(FakeWebSocket.instances).toHaveLength(2)
+  const next = FakeWebSocket.instances[1]
   next.fire({ type: 'data', chunk: 'recovered' })
   expect(onData).toHaveBeenCalledExactlyOnceWith('recovered')
   expect(onError).toHaveBeenCalledExactlyOnceWith('unknown error')
   expect(onReset).toHaveBeenCalledOnce()
   next.fire({ type: 'exit', code: 0 }); next.fireClose()
-  expect(FakeSocket.instances).toHaveLength(2)
+  expect(FakeWebSocket.instances).toHaveLength(2)
 })

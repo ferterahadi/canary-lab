@@ -1,64 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { PtySpawnOptions } from './pty-spawner'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
+import { makeFakePtyFactory, type FakePtyProcess } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -66,7 +17,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -75,28 +26,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.cancelHeal', () => {
   it('returns not-healing when status is not healing', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -111,9 +45,9 @@ describe('RunOrchestrator.cancelHeal', () => {
     // `waitForHealSignal` notices. The user's only way out is cancel — and
     // it MUST succeed (set the cancel flag, return ok) even when there's
     // no live pty to SIGTERM, so the loop bails on its next tick.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -125,11 +59,11 @@ describe('RunOrchestrator.cancelHeal', () => {
 
   it('SIGTERMs the heal-agent pty, breaks the loop, and stops the run as failed', async () => {
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -170,10 +104,10 @@ describe('RunOrchestrator.cancelHeal', () => {
     // SIGTERMs the playwright pty, and the loop's post-Playwright
     // `healCancelled` check finalizes the run as `failed`.
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -224,11 +158,11 @@ describe('RunOrchestrator.cancelHeal', () => {
 
   it('killTree sends SIGTERM to the process group (negative pid) before falling back', async () => {
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -266,9 +200,9 @@ describe('RunOrchestrator.cancelHeal', () => {
 
 describe('RunOrchestrator.interjectHealAgent', () => {
   it('returns no-agent-running when no heal pty is in flight', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -280,10 +214,10 @@ describe('RunOrchestrator.interjectHealAgent', () => {
 
   it('writes Esc + text + Enter to the live REPL stdin without respawning', async () => {
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -333,7 +267,7 @@ describe('RunOrchestrator.interjectHealAgent', () => {
     expect(readManifest(orch.paths.manifestPath)?.status).toBe('healing')
     expect(statusEvents).not.toContain('running')
     // The fake pty's write was called with the Esc preamble + text + \r.
-    // (FakeProcess uses `write: vi.fn()` so it captures every call.)
+    // (FakePtyProcess uses `write: vi.fn()` so it captures every call.)
     const ptyWrite = (orch as unknown as { ctx: { healAgentPty: { write: ReturnType<typeof vi.fn> } | null } }).ctx.healAgentPty?.write
     expect(ptyWrite).toBeDefined()
     const writeCalls = (ptyWrite as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]).join('')
@@ -347,10 +281,10 @@ describe('RunOrchestrator.interjectHealAgent', () => {
 
   it('preserves multi-line user interject text in the pane and transcript', async () => {
     fs.mkdirSync(runDir, { recursive: true })
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -391,10 +325,10 @@ describe('RunOrchestrator.interjectHealAgent', () => {
 
 describe('RunOrchestrator.restartHealFromFailure', () => {
   it('starts the heal agent without a fresh Playwright run and passes user guidance into the command builder', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let receivedGuidance: string | undefined
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,

@@ -1,51 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
-
-import { execFileSync } from 'child_process'
-
-// Transparent pass-through by default — every other test in this file spawns
-// real processes (fake npx/claude binaries on PATH). Only the one test below
-// that needs to control child-process event ordering deterministically
-// installs an override via setMockSpawn.
-const { getMockSpawn, setMockSpawn } = vi.hoisted(() => {
-  let impl: ((...args: unknown[]) => unknown) | null = null
-  return {
-    getMockSpawn: () => impl,
-    setMockSpawn: (fn: ((...args: unknown[]) => unknown) | null) => { impl = fn },
-  }
-})
-
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>()
-  return {
-    ...actual,
-    spawn: (...args: unknown[]) => {
-      const impl = getMockSpawn()
-      return impl ? impl(...args) : (actual.spawn as (...a: unknown[]) => unknown)(...args)
-    },
-  }
-})
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import type { FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx, stageDirs, stageDeps, stageManifest } from './__fixtures__/stage-context'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -56,78 +28,19 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
-  featuresDir = path.join(tmpDir, 'features')
-  logsDir = path.join(tmpDir, 'logs')
-  repoDir = path.join(tmpDir, 'product-repo')
-  fs.mkdirSync(featuresDir, { recursive: true })
-  fs.mkdirSync(logsDir, { recursive: true })
-  fs.mkdirSync(repoDir, { recursive: true })
+  ({ tmpDir, featuresDir, logsDir, repoDir } = stageDirs(tempDir()))
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
-  return {
-    featuresDir,
-    logsDir,
-    projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
-    ...over,
-  }
+  return stageDeps({ featuresDir, logsDir, projectRoot: tmpDir }, over)
 }
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl-test',
-    feature: 'checkout',
-    repoPaths: [repoDir],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'similarity',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
+  return stageManifest(repoDir, over)
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('docs stage', () => {
@@ -137,17 +50,12 @@ describe('docs stage', () => {
   })
 
   function initGitRepoWithDiff(): void {
-    const run = (args: string[]) => execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' })
-    run(['init', '-q', '-b', 'main'])
-    run(['config', 'user.email', 't@t.com'])
-    run(['config', 'user.name', 't'])
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'init'])
-    run(['checkout', '-qb', 'feature'])
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'checkout', '-qb', 'feature')
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\nworld\n'.repeat(5))
-    run(['add', '.'])
-    run(['commit', '-qm', 'change'])
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-qm', 'change')
   }
 
   it('checkpoint response: retry re-runs and re-parks when nothing changed', async () => {
@@ -374,6 +282,14 @@ describe('docs stage', () => {
     const parked = await adapter.run(ctx)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     expect((parked.checkpoint.data as { lastAttempt?: unknown }).lastAttempt).toBeUndefined()
+  })
+
+  it('counts every ready requirement document in the checkpoint', async () => {
+    for (const name of ['checkout.md', 'refunds.md']) fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', name), '# Requirement\n')
+    const { ctx } = ctxFor(manifest())
+    const parked = await docsStage(deps()).run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect(parked.checkpoint.message).toContain('2 requirement documents ready for "checkout".')
   })
 
   it('checkpoint response: description-only settles immediately', async () => {

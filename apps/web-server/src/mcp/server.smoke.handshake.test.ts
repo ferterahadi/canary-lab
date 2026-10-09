@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
 import Fastify from 'fastify'
 import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { connectSmokeClient, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-context-')
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -21,28 +24,6 @@ const inertPtyFactory: PtyFactory = () => ({
   resize: () => { /* noop */ },
   kill: () => { /* noop */ },
 })
-
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -140,12 +121,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('get_heal_context returns compact context and get_run_snapshot returns the full fallback', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-context-')))
+    const logsDir = tempDir()
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
 
       runStore.bootstrap({
         runId: 'context-map',
@@ -186,7 +167,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_heal_context',
         arguments: { runId: 'context-map', session_id: 'sess-context' },
       })
-      const body = JSON.parse(toolText(result))
+      const body = JSON.parse(smokeToolText(result))
 
       expect(body).toMatchObject({
         runId: 'context-map',
@@ -248,7 +229,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_run_snapshot',
         arguments: { runId: 'context-map' },
       })
-      const snapshot = JSON.parse(toolText(snapshotResult))
+      const snapshot = JSON.parse(smokeToolText(snapshotResult))
       expect(snapshot).toMatchObject({
         runId: 'context-map',
         summary: {
@@ -280,12 +261,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('get_run omits raw arrays by default and inlines them with includeRaw, list_runs honors limit', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-getrun-')))
+    const logsDir = tempDir('cl-mcp-getrun-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
 
       for (let i = 0; i < 3; i += 1) {
         runStore.bootstrap({
@@ -300,7 +281,7 @@ describe('MCP HTTP server (smoke)', () => {
       }
 
       // get_run: slim by default — raw arrays are absent, the omission is announced.
-      const slim = JSON.parse(toolText(await client.callTool({
+      const slim = JSON.parse(smokeToolText(await client.callTool({
         name: 'get_run',
         arguments: { runId: 'run-1' },
       })))
@@ -311,7 +292,7 @@ describe('MCP HTTP server (smoke)', () => {
       expect(slim.raw.omitted).toContain('lifecycleEvents')
 
       // includeRaw:true returns the full RunDetail (no `raw` envelope marker).
-      const full = JSON.parse(toolText(await client.callTool({
+      const full = JSON.parse(smokeToolText(await client.callTool({
         name: 'get_run',
         arguments: { runId: 'run-1', includeRaw: true },
       })))
@@ -320,7 +301,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       // list_runs: newest-first, capped by limit. Returned as a TOON table —
       // a `[N]{col,...}:` header (runId is the first column) then one row each.
-      const limitedText = toolText(await client.callTool({
+      const limitedText = smokeToolText(await client.callTool({
         name: 'list_runs',
         arguments: { feature: 'demo_catalog', limit: 2 },
       }))

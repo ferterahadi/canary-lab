@@ -1,21 +1,18 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { interpolateConfigTokens, interpolateFeatureTokens, makeTokenCache, resolvePortTokens } from './interpolate'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('interp-')
 let dir: string
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interp-'))
+  dir = tempDir()
   fs.mkdirSync(path.join(dir, 'local'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'local', 'api'), 'PORT=3030\nHOST=api.local\n')
   fs.mkdirSync(path.join(dir, 'prod'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'prod', 'api'), 'PORT=8080\nHOST=api.prod\n')
-})
-
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 describe('interpolateFeatureTokens', () => {

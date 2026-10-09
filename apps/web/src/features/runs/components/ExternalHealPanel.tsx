@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useNow } from '@/shared/state/use-now'
+import { useMemo } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, agentJobTone, pillPalette, useExternalClientAction, type PillPalette } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
@@ -12,18 +13,14 @@ interface Props {
   session?: ExternalHealSession
 }
 
-// The "Heal agent" tab when external heal mode is active. When an external
+// The "Heal Agent" tab when external heal mode is active. When an external
 // client has claimed the run, its transcript lives in the user's agent
 // session rather than Canary Lab. When no claim exists yet, this panel makes
 // that parked state explicit instead of rendering an empty local terminal.
 export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) {
-  const [now, setNow] = useState(() => Date.now())
-  const { opening, error: openError, open: onOpenAgent } = useOpenAgentApp()
+  const now = useNow()
+  const { action, error: openError } = useExternalClientAction({ clientKind: session?.clientKind ?? 'other' })
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
 
   const heartbeatMs = useMemo(() => {
     if (!session) return null
@@ -45,7 +42,6 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       session?.status === 'running-tests'
     )
   const clientKind = session?.clientKind ?? 'other'
-  const desktopAgent = session ? clientKindToDesktopAgent(session.clientKind) : null
 
   return (
     <ExternalAgentCard
@@ -87,11 +83,11 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
           : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
       }
-      action={desktopAgent && (
+      action={action?.kind === 'app' && (
         <ExternalClientCta
-          label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-          onClick={() => onOpenAgent(desktopAgent)}
-          busy={opening !== null}
+          label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
+          onClick={action.open}
+          busy={action.busy}
         />
       )}
     >
@@ -126,39 +122,14 @@ function sharedRunPresentation(status: PanelStatus) {
   return null
 }
 
-function statusPalette(status: PanelStatus): { fg: string; bg: string; border: string } {
+function statusPalette(status: PanelStatus): PillPalette {
   const runStatus = sharedRunPresentation(status)
-  if (runStatus) return {
-    fg: runStatus.tone,
-    bg: runStatus.background,
-    border: `color-mix(in srgb, ${runStatus.tone} 40%, transparent)`,
-  }
-  if (status === 'disconnected') {
-    return {
-      fg: 'var(--danger)',
-      bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-    }
-  }
-  if (status === 'paused') {
-    return {
-      fg: 'var(--warning)',
-      bg: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--warning) 40%, transparent)',
-    }
-  }
-  if (status === 'running-tests') {
-    return {
-      fg: 'var(--border-focus)',
-      bg: 'color-mix(in srgb, var(--border-focus) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--border-focus) 40%, transparent)',
-    }
-  }
-  return {
-    fg: 'var(--success)',
-    bg: 'color-mix(in srgb, var(--success) 12%, transparent)',
-    border: 'color-mix(in srgb, var(--success) 40%, transparent)',
-  }
+  // The run's own chip fill, so this pill and the run-detail chip match.
+  if (runStatus) return { ...pillPalette(runStatus.tone), bg: runStatus.background }
+  if (status === 'disconnected') return pillPalette('var(--danger)')
+  if (status === 'paused') return pillPalette('var(--warning)')
+  if (status === 'running-tests') return agentJobTone('running')
+  return pillPalette('var(--success)')
 }
 
 function terminalMessage(

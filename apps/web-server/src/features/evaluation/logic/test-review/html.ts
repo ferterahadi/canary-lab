@@ -1,9 +1,10 @@
+import { shortSourceLocation } from '../../../../../../../shared/lib/source-location'
 import path from 'path'
 import { codeToHtml } from 'shiki'
 import { formatCodeForDisplay } from '../../../../../../../shared/code-display-format'
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../../shared/coverage/types'
 import { qualitySummaryForAudience } from './assertions'
-import { displayCaseTitle, shortLocation, specFileLabel } from './audience'
+import { displayCaseTitle, specFileLabel } from './audience'
 import { createFlowcharts } from './flowchart'
 import { renderEnglishSource } from './english'
 import { statusBucket, testStatusCounts } from './packet'
@@ -11,7 +12,8 @@ import { ASSERTION_HTML_SCRIPT } from './report-script'
 import { ASSERTION_HTML_CSS } from './report-styles'
 import { THEME_BOOT_SCRIPT, THEME_SWITCH_HTML } from './report-theme'
 import { flattenHelpers } from './source-analysis'
-import { comparableTitle, dedupe, escapeAttr, escapeHtml, formatMs, inline, splitAnnotations, statusClass, titleCaseFeatureName, uniqueSectionIds } from './text'
+import { comparableTitle, dedupe, escapeAttr, escapeHtml, inline, splitAnnotations, statusClass, titleCaseFeatureName, uniqueSectionIds } from './text'
+import { formatMs } from '../../../../../../../shared/lib/format-units'
 import type { AssertionHtmlOptions, AssertionQuality, EvaluationRewrite, HelperDefinition, NavGroup, TestFlowchart, TestReviewAssertion, TestReviewCase, TestReviewPacket, TestStatusCounts } from './types'
 
 // Display labels for coverage's per-test STRENGTH (depth axis), used when a feature
@@ -84,7 +86,7 @@ export async function renderHtml(
           <dl class="facts">
             ${cov ? `<div><dt>Coverage strength</dt><dd>${renderCoverageStrength(cov)}</dd></div>` : ''}
             <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
-            ${test.location ? `<div><dt>Declared at</dt><dd><code>${escapeHtml(shortLocation(test.location))}</code></dd></div>` : ''}
+            ${test.location ? `<div><dt>Declared at</dt><dd><code>${escapeHtml(shortSourceLocation(test.location))}</code></dd></div>` : ''}
           </dl>
           <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
           ${bucket === 'notRun' ? NEVER_RAN_CALLOUT : ''}

@@ -1,3 +1,4 @@
+import { useApprovals } from './shared/state/use-approvals'
 import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { coverageGeneratingFlight as generatingFlightFor } from './features/flights/lib/workspace-flights'
 import { useCoverageRecalculation } from './shared/state/use-coverage-recalculation'
@@ -26,9 +27,6 @@ import { FlightStartDialog } from './features/flights/components/FlightStartDial
 import { runWaitingState } from './features/runs/utils/run-waiting-state'
 import { useRuns, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
-import { useWorkspaceFlights } from './features/flights/state/use-workspace-flights'
-import { resolveFeatureFlightTarget } from './features/flights/components/FlightChipState'
-import type { FeatureActivity } from './features/flights/state/feature-activity'
 import type { FlightsPillProps } from './features/flights/components/FlightsPill'
 import { TERMINAL_RUN_STATUSES } from '@shared/run-state'
 import {
@@ -39,13 +37,14 @@ import {
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { NotificationCenter } from './features/notifications/NotificationCenter'
 import { useInvalidation } from './shared/state/invalidation'
-import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
-import { useWorkspaceData } from './shared/state/use-workspace-data'
-import { useWorkspaceSelection } from './shared/state/use-workspace-selection'
-import { resolveActivityTarget } from './shared/state/nav-state'
-import type { FlightStageKey } from '@shared/flights/types'
+import { useWorkspace } from './WorkspaceProvider'
+import type { CoverageJobIndexEntry } from '@shared/coverage/types'
+import type { TestChangeKind } from '@shared/test-review'
+import type { TestReviewRequired } from './shared/api/runs'
+import type { RunOpenTarget } from './shared/lib/workspace-view-state'
 import type { ModelStageKey } from '@shared/agent-models'
 import type { NotificationTarget } from '@shared/notifications/types'
+import { plural } from '@shared/lib/plural'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
@@ -56,12 +55,12 @@ const WORKSPACE_PANELS = [
 ] as const satisfies readonly PanelConfig[]
 
 export function App() {
-  const [specTotalTests, setSpecTotalTests] = useState(0)
-  // Navigation — view / feature / run / flight + the routed dialogs, plus URL
-  // persistence, cross-tab sync, and the selection-mirror refs. Destructured so
-  // the rest of App keeps the same names; the logic lives in the hook (its
-  // non-trivial parts are covered by nav-state's pure tests).
-  const nav = useWorkspaceNavigation()
+  // The workspace's URL state, selection, suites and flights live in
+  // WorkspaceProvider (mounted in main.tsx), which also fills the WorkState and
+  // WorkspaceActions contexts the deeper leaves read. App lays the screen out
+  // from it; the names below are the ones App always used.
+  const workspace = useWorkspace()
+  const { nav, invalidateCoverage, openFlightStage, openFeatureStage, openPortifyStage, openActivity } = workspace
   const {
     view, setView,
     selectedFeature, setSelectedFeature,
@@ -69,61 +68,38 @@ export function App() {
     selectedFlightId, setSelectedFlightId,
     configFor, setConfigFor, openConfig, configTab, setConfigTab,
     verifyOpen, setVerifyOpen,
-    specReviewOpen, setSpecReviewOpen, reviewFocus, setReviewFocus,
+    specReviewOpen, setSpecReviewOpen, reviewFocus, setReviewFocus, openReview,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     demoOpen, setDemoOpen,
     settingsOpen, setSettingsOpen, modelsFor, setModelsFor,
     resumePlanTaskId, setResumePlanTaskId,
-    focusTest, runTab, bootFailureFor, setBootFailureFor,
+    focusTest, runTab, runLocation, setRunLocation, bootFailureFor, setBootFailureFor,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     flightStage, setFlightStage, flightLog, setFlightLog,
-    pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
   } = nav
 
-  // Runs come from the WebSocket-backed RunsProvider — no polling here. `runs` is
-  // the full index across all features; the per-feature filter happens at render.
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
   // Each suite row's last-run dot. Derived from the same live index, so a run
   // settling anywhere (GUI, MCP, CLI) repaints the column without a refetch.
   const lastRuns = useMemo(() => latestTerminalRunByFeature(allRuns, TERMINAL_RUN_STATUSES), [allRuns])
-  // Cross-feature refetch bus — the WS handler publishes topic invalidations that
-  // fetch-owning leaves subscribe to (replaces the drilled `*RefreshKey`s).
   const { invalidate } = useInvalidation()
 
   const {
     featureRuns, selectedRunForFeature, statusRunDetail, selectedRunEvidence,
-    onInitialFeatures, onFeaturesRefreshed, selectFeature, selectFeatureForReview,
-  } = useWorkspaceSelection({
-    allRuns, selectedFeature, selectedRunId, setSelectedFeature, setSelectedRunId,
-    selectedFeatureRef, selectedRunIdRef, pendingRunSelectionRef,
-  })
-
-  // The data hook owns fetches and workspace events; selection stays with
-  // the controller above so reconnects and manual navigation use one policy.
+    selectFeature, selectFeatureForReview,
+  } = workspace.selection
   const {
-    features, flights, flightDetails, flightsHydrated, forgetFlight, flightsRef, preFlights, versionStatus,
-    refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion,
-  } = useWorkspaceData({
-    invalidate,
-    onInitialFeatures,
-    onFeaturesRefreshed,
-    selectedFeatureRef,
-    selectedRunIdRef,
-    // A rename anywhere (this tab, another tab, an MCP client) must move the
-    // open config dialog with the suite instead of leaving it on a name the
-    // server no longer resolves.
-    onFeatureRenamed: (from, to) => { if (configFor === from) setConfigFor(to, configTab) },
-  })
+    features, flights, flightDetails, flightsHydrated, forgetFlight, flightsRef, versionStatus,
+    refreshFeatures, refreshFlights,
+  } = workspace.data
 
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
   const activeRunWaiting = runWaitingState(activeRunDetail ?? globalActiveRunEntry)
-  const invalidateCoverage = useCallback(() => invalidate('coverage'), [invalidate])
   const {
-    activity: featureActivity, externalHistory: featureExternalHistory,
-    coverageJobs, portifyWorkflows, derivedStages, selectedFeatureActivity,
-    flightAction, featuresWithPending, pickerFeatures, coverageGeneratingFlight,
-  } = useWorkspaceFlights({ features, flights, selectedFeature, refreshFeatures, invalidateCoverage })
+    activity: featureActivity, coverageJobs, selectedFeatureActivity,
+    flightAction, featuresWithPending, coverageGeneratingFlight,
+  } = workspace.work
   // Stable identity on purpose: FeaturesColumn holds this in a fetch effect's
   // dep list, and a fresh arrow per render made it refetch every feature's
   // coverage on every render. The column guards against that too — this keeps
@@ -133,17 +109,6 @@ export function App() {
   const openCoverageFor = useCallback((feature: string): void => {
     navigateToCoverage(feature)
   }, [navigateToCoverage])
-
-  const openFlightStage = useCallback((flightId: string, stage: FlightStageKey): void => {
-    openFlight(flightId)
-    // Opening a different flight resets its stage, so set the destination after.
-    setFlightStage(stage)
-  }, [openFlight, setFlightStage])
-
-  const openFeatureStage = useCallback((feature: string, stage: FlightStageKey): void => {
-    setSelectedFeature(feature)
-    openFlightStage(resolveFeatureFlightTarget(feature, flightsRef.current).flightId, stage)
-  }, [flightsRef, openFlightStage, setSelectedFeature])
 
   const openRecalculation = useCallback((feature: string) => {
     setFlightStartFor(null)
@@ -160,12 +125,6 @@ export function App() {
     && (flights.find((entry) => entry.flightId === selectedFlightId)?.feature
       ?? (selectedFlightId ? derivedFlightFeature(selectedFlightId) : null)) === recalculation.launch.feature
     ? recalculation.launch : null
-
-  // Portify is a Flight stage, regardless of whether a conductor record exists.
-  const openPortifyStage = useCallback((feature: string): void => {
-    setConfigFor(null)
-    openFeatureStage(feature, 'portify')
-  }, [openFeatureStage, setConfigFor])
 
   // Evaluation exports are reviewed on Flight's Report stage. A suite need not
   // have a conductor record: standalone work uses the same evidence-derived
@@ -189,15 +148,6 @@ export function App() {
       ?? derivedFlightFeature(returnFlight)
   }, [returnFlight, flights])
 
-  // Clicking a live activity row opens the activity's REAL surface. The routing
-  // decision is the pure `resolveActivityTarget`; App maps the target to nav.
-  const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
-    const target = resolveActivityTarget(feature, activity, flightsRef.current)
-    if (target.kind === 'run') navigateToRun(target.feature, target.runId)
-    else if (target.stage) openFlightStage(target.flightId, target.stage)
-    else openFlight(target.flightId)
-  }, [navigateToRun, openFlight, openFlightStage, flightsRef])
-
   // The run-start flow (collision prompt, branch-mismatch recovery, silent-
   // failure guard) lives in useRunStart — App just wires selection + the dialogs.
   const {
@@ -216,38 +166,77 @@ export function App() {
   const openPendingReview = useCallback((feature: string, runId: string): void => {
     setStartError(null)
     navigateToRun(feature, runId)
-    setReviewFocus({ baseline: 'run', mode: 'code' })
-    setSpecReviewOpen(true)
-  }, [setStartError, navigateToRun, setReviewFocus, setSpecReviewOpen])
+    openReview({ baseline: 'run', mode: 'code' })
+  }, [setStartError, navigateToRun, openReview])
 
-  const handleNotificationNavigate = (target: NotificationTarget): void => {
+  const handleNotificationNavigate = useCallback((target: NotificationTarget): void => {
     if (target.kind === 'flight') {
-      openFlight(target.flightId)
+      if (target.stage) openFlightStage(target.flightId, target.stage)
+      else openFlight(target.flightId)
     } else if (target.kind === 'coverage') {
       setSelectedFeature(target.feature)
       openFlightStage(target.flightId ?? derivedFlightToken(target.feature), target.stage)
     } else {
       if ('runId' in target && target.runId) navigateToRun(target.feature, target.runId)
       else { setSelectedFeature(target.feature); setSelectedRunId(null); setView('workspace') }
-      setReviewFocus(target.kind === 'test-review' && target.runId ? { baseline: 'run', mode: 'code' } : undefined)
-      setSpecReviewOpen(target.kind === 'test-review')
+      // Every other target closes a review left open, and drops its focus.
+      if (target.kind === 'test-review') openReview(target.runId ? { baseline: 'run', mode: 'code' } : undefined)
+      else { setReviewFocus(undefined); setSpecReviewOpen(false) }
     }
-  }
+  }, [navigateToRun, openFlight, openFlightStage, openReview, setReviewFocus, setSelectedFeature, setSelectedRunId, setSpecReviewOpen, setView])
+
+  const reviewTest = useCallback((file: string, line?: number, baseline?: 'run', change?: TestChangeKind, test?: string): void => {
+    openReview({ file, line, baseline, change, test, mode: 'english' })
+  }, [openReview])
+
+  // A Tests-column result badge opens that test in the run's Results & Fixes.
+  // It stays on the run the column shows; a test never borrows another run's result.
+  const openTestResult = useCallback((runId: string, target: RunOpenTarget): void => {
+    if (selectedFeature) navigateToRun(selectedFeature, runId, target)
+  }, [navigateToRun, selectedFeature])
+
+  const reviewStartError = useCallback((review: TestReviewRequired): void => {
+    openPendingReview(review.feature, review.runId)
+  }, [openPendingReview])
+
+  const runLatestTests = useCallback((feature: string): void => {
+    void handleStartRun(undefined, 'test', feature)
+  }, [handleStartRun])
+
+  const navigateCleanupRun = useCallback((feature: string, runId: string): void => {
+    navigateToRun(feature, runId)
+  }, [navigateToRun])
+
+  const openCoverageGeneration = useCallback((job: CoverageJobIndexEntry): void => {
+    invalidate('coverage')
+    openActivity(job.feature, { kind: job.kind === 'summary' ? 'condensing' : 'mapping', jobId: job.jobId })
+    // Follow the summary → mapping handoff in the Flight rail.
+    setFlightStage(null)
+  }, [invalidate, openActivity, setFlightStage])
+
+  const closeFlight = useCallback((): void => {
+    setSelectedFlightId(null)
+    setView('workspace')
+  }, [setSelectedFlightId, setView])
+
+  /* R82: `target` is where in the run detail to land — a failed entry's name
+     (the Playwright tab, at that failure) or a named tab (the stage's
+     captured-fixes link → Changes). R83: both flight drill-throughs pin the
+     open flight as the origin, so the destination knows where back is — the
+     run detail has no close of its own, so it gets a return chip in the top
+     bar instead. */
+  const openFlightRun = useCallback((feature: string, runId: string, target?: RunOpenTarget): void => {
+    navigateToRun(feature, runId, target, selectedFlightId)
+  }, [navigateToRun, selectedFlightId])
+
+  const openFlightCoverage = useCallback((feature: string): void => {
+    navigateToCoverage(feature, selectedFlightId)
+  }, [navigateToCoverage, selectedFlightId])
 
   const handleFlightsPickerOpenChange = useCallback((open: boolean): void => {
     if (open) { setSelectedFlightId(null); setView('flights') }
     else setView('workspace')
   }, [setSelectedFlightId, setView])
-
-  const handlePreFlightOpen = useCallback((taskId: string): void => {
-    setResumePlanTaskId(taskId)
-    setFlightStartNew(true)
-  }, [setResumePlanTaskId, setFlightStartNew])
-
-  const handleStartFlight = useCallback((feature: string): void => {
-    setSelectedFeature(feature)
-    setFlightStartFor(feature)
-  }, [setSelectedFeature, setFlightStartFor])
 
   // R40: the new-flight dialog's repo picker offers every repo the workspace
   // already knows (flattened from the features' configs, deduped by path).
@@ -279,7 +268,6 @@ export function App() {
         activeRunWaiting={activeRunWaiting}
         activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
         onSelectFeature={selectFeature}
-        onReviewFeature={(name) => { setSelectedFeature(name); setReviewFocus(undefined); setSpecReviewOpen(true) }}
         onOpenConfig={openConfig}
         versionStatus={versionStatus}
         onOpenCoverage={openCoverageFor}
@@ -300,8 +288,8 @@ export function App() {
         comparisonBaseline={selectedRunEvidence}
         currentTests={nav.currentTests}
         onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
-        onReviewTest={(file, line, baseline, change, test) => { setReviewFocus({ file, line, baseline, change, test, mode: 'english' }); setSpecReviewOpen(true) }}
-        onTotalTestsChange={setSpecTotalTests}
+        onReviewTest={reviewTest}
+        onOpenResult={openTestResult}
         dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
       />
     ),
@@ -334,14 +322,17 @@ export function App() {
           <RunDetailColumn
             runId={selectedRunId}
             onOpenPlaywrightSettings={(f) => openConfig(f, 'playwright')}
-            onOpenSpecReview={() => setSpecReviewOpen(true)}
+            onOpenSpecReview={openPendingReview}
             onOpenEvaluationReport={openEvaluationReport}
-            totalTests={specTotalTests}
             /* Honoured only when the focus belongs to the run being shown, so a
                stale pair from a previous selection can't scroll this one. */
-            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
+            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test, focusTestId: focusTest.testId, focusTestLocation: focusTest.testLocation, focusRequest: focusTest.request } : {})}
             /* Same pairing rule for the arrival tab a drill-through named. */
             {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
+            /* The reader's place inside the run, restored on a cold load and
+               reported back so the URL follows it. */
+            {...(runLocation && runLocation.runId === selectedRunId ? { location: runLocation.location } : {})}
+            onLocationChange={(location) => { if (selectedRunId) setRunLocation(selectedRunId, location) }}
             bootFailureOpen={bootFailureFor !== null && bootFailureFor === selectedRunId}
             onBootFailureOpenChange={(open) => setBootFailureFor(open ? selectedRunId : null)}
           />
@@ -350,21 +341,15 @@ export function App() {
     ),
   } satisfies Record<(typeof WORKSPACE_PANELS)[number]['id'], ReactNode>
 
+  // The picker's open-state is routed (`view=flights` with no flight selected);
+  // its rows read WorkState and WorkspaceActions.
   const flightPill: FlightsPillProps = {
-    flights,
-    preFlights,
-    activity: featureActivity,
-    features: pickerFeatures,
-    coverageJobs,
-    portifyWorkflows,
     open: view === 'flights' && !selectedFlightId,
     onOpenChange: handleFlightsPickerOpenChange,
-    onOpenFlight: openFlight,
-    onOpenActivity: openActivity,
-    onOpenPreFlight: handlePreFlightOpen,
-    onStartFlight: handleStartFlight,
   }
 
+  const approvals = useApprovals()
+  const pendingApprovals = approvals.items.filter((item) => item.status === 'pending')
   const review = {
     features,
     onFeaturesChanged: refreshFeatures,
@@ -383,17 +368,21 @@ export function App() {
       <GlobalStatusBar
         recordSyncControl={<WorkspaceRecordSyncStatus />}
         activeRunDetail={activeRunDetail}
-        onRunLatestTests={(feature) => { void handleStartRun(undefined, 'test', feature) }}
+        onRunLatestTests={runLatestTests}
         runStartPending={pendingStarts.length > 0 || !!modelsPrompt || !!collisionPrompt}
         onOpenCleanup={() => setView('cleanup')}
         flightPill={flightPill}
         review={review}
         gettingStarted={{ available: demo.available, unseen: demo.unseen, onOpen: openDemo }}
         returnToFlight={returnFlight ? { flightId: returnFlight, label: returnFlightLabel, onOpen: openFlight } : null}
-        onOpenPortify={openPortifyStage}
-        onNavigateToRun={navigateToRun}
-        notificationControl={<NotificationCenter open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
+        notificationControl={<NotificationCenter approvals={approvals} approvalFocus={nav.approval} open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
       />
+      {(pendingApprovals.length > 0 || approvals.error) && <div role="status" className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2 text-xs">
+        <span>{approvals.error ? 'Approval status unavailable. Retrying…' : `${plural(pendingApprovals.length, 'approval')} waiting for you`}</span>
+        {pendingApprovals.map((item) => <button key={item.id} className="cl-button px-2 py-1" onClick={() => { nav.setApproval(item.id); nav.setNotificationsOpen(true) }}>
+          Review approval{item.feature ? ` · ${item.feature}` : ''}
+        </button>)}
+      </div>}
       {pendingStarts.map((pending) => <PendingRunStartNotice key={pending.requestId} pending={pending}
         onDismiss={dismissPendingStart} onRunStarted={(runId) => navigateToRun(pending.feature, runId)}
         onReview={openPendingReview} />)}
@@ -404,8 +393,7 @@ export function App() {
         {view === 'cleanup'
           ? <LogCleanupPage
               onClose={() => setView('workspace')}
-              onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
-              onNavigateToPortify={openPortifyStage}
+              onNavigateToRun={navigateCleanupRun}
             />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage
@@ -421,12 +409,7 @@ export function App() {
               onOpenRecovery={(stage, models) => {
                 recalculation.start(selectedFeature, stage, models)
               }}
-              onOpenGeneration={(job) => {
-                invalidate('coverage')
-                openActivity(job.feature, { kind: job.kind === 'summary' ? 'condensing' : 'mapping', jobId: job.jobId })
-                // Follow the summary → mapping handoff in the Flight rail.
-                setFlightStage(null)
-              }}
+              onOpenGeneration={openCoverageGeneration}
             />
           : view === 'flights' && selectedFlightId
           ? <FlightPage
@@ -444,26 +427,15 @@ export function App() {
               // The index row seeds the header/strip/rail on a cold open of a
               // settled flight (which the push channel never snapshots).
               indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}
-              activity={featureActivity}
-              externalHistory={featureExternalHistory}
-              coverageJobs={coverageJobs}
-              derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the
               // durable `feature` param, so opening it for a flight's feature
               // while a DIFFERENT one is selected would deep-link to the wrong
               // suite. Same alignment onStartFlight already does below.
               onOpenConfig={openConfig}
               onSelectFlight={setSelectedFlightId}
-              onClose={() => { setSelectedFlightId(null); setView('workspace') }}
-              /* R82: `target` is where in the run detail to land — a failed
-                 entry's name (the Playwright tab, at that failure) or a named tab
-                 (the stage's captured-fixes link → Changes). navigateToRun does
-                 exactly what this handler used to inline, plus the run pairing.
-                 R83: both drill-throughs pin THIS flight as the origin, so the
-                 destination knows where back is — the run detail has no close of
-                 its own, so it gets a return chip in the top bar instead. */
-              onOpenRun={(feature, runId, target) => navigateToRun(feature, runId, target, selectedFlightId)}
-              onOpenCoverage={(feature) => navigateToCoverage(feature, selectedFlightId)}
+              onClose={closeFlight}
+              onOpenRun={openFlightRun}
+              onOpenCoverage={openFlightCoverage}
               /* The stage pick is routed (?stage=…) rather than local to the
                  detail: a drill-through replaces this whole view, so without an
                  owner above it the way back remounted the detail and re-ran its
@@ -474,11 +446,11 @@ export function App() {
                  a refresh or a shared link reopens the same entry. */
               log={flightLog}
               onOpenLog={setFlightLog}
-              onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
+              onStartFlight={workspace.startFlight}
               /* The run hero's "verdict from run-start snapshot · N pending
                  edits" link lands on the same review the status-bar pill
                  opens — one dialog, routed once (?dialog=tests-review). */
-              onOpenSpecReview={() => setSpecReviewOpen(true)}
+              onOpenSpecReview={openPendingReview}
             />
           : <ResizablePanels panels={WORKSPACE_PANELS} contentByPanel={contentByPanel} />}
         </Suspense>
@@ -567,7 +539,7 @@ export function App() {
           error={startError.error}
           feature={startError.feature}
           onRetry={() => { void retryStartError() }}
-          onReviewTests={(review) => openPendingReview(review.feature, review.runId)}
+          onReviewTests={reviewStartError}
           onSwitchBranches={switchBranchesAndRun}
           onPinCurrent={pinCurrentAndRun}
           onClose={() => setStartError(null)}

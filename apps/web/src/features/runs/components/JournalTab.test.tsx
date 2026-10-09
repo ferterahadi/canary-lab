@@ -1,10 +1,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatLocalDateTime } from '@/shared/lib/format'
 import { JournalTab } from './JournalTab'
 import type { JournalSection } from '@shared/run-detail'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('@/shared/api/runs', () => ({
   listJournal: vi.fn(),
@@ -38,6 +37,7 @@ describe('JournalTab live refresh', () => {
     })
 
     expect(container.textContent).toContain('first')
+    expect(container.textContent).toContain(formatLocalDateTime('2026-07-02T10:00:00.000Z'))
 
     await act(async () => {
       root.render(<JournalTab feature="checkout" runId="run-1" refreshKey={1} />)
@@ -123,3 +123,28 @@ function entry(iteration: number, hypothesis: string): JournalSection {
     body: `- hypothesis: ${hypothesis}`,
   }
 }
+
+it('reconciles settled journals while preserving cards, scroll and an open raw dialog', async () => {
+  vi.useFakeTimers()
+  const runsApi = await import('@/shared/api/runs')
+  const old = { ...entry(1, 'original'), outcome: 'all_tests_passed' }
+  vi.mocked(runsApi.listJournal).mockResolvedValue([old])
+  try {
+    await act(async () => root.render(<JournalTab feature="checkout" runId="completed-journal" />))
+    const card = container.querySelector('li')
+    const scroll = container.querySelector<HTMLElement>('.overflow-y-auto')!
+    scroll.scrollTop = 75
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="journal-raw-entry"]')!.click())
+    const modal = document.querySelector('[data-testid="journal-raw-modal"]')
+    vi.mocked(runsApi.listJournal).mockResolvedValue([{ ...entry(2, 'newer'), outcome: 'all_tests_passed' }, { ...old, body: '- hypothesis: revised' }])
+    await act(async () => vi.advanceTimersByTimeAsync(14_999))
+    expect(runsApi.listJournal).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(container.querySelectorAll('li')[1]).toBe(card)
+    expect(container.querySelector('.overflow-y-auto')).toBe(scroll)
+    expect(scroll.scrollTop).toBe(75)
+    expect(document.querySelector('[data-testid="journal-raw-modal"]')).toBe(modal)
+    expect(modal?.textContent).toContain('revised')
+    expect(container.textContent).toContain('newer')
+  } finally { vi.useRealTimers() }
+})

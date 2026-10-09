@@ -1,12 +1,14 @@
 import type { ExecutionType } from '@shared/verification'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
-import type { RunStatus } from '@shared/run-state'
+import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-state'
 import { presentRunStatus } from '../utils/run-presentation'
-import { shortTime } from '@/shared/lib/format'
+import { dayTime, durationBetween, formatDuration, shortTime } from '@/shared/lib/format'
+import { plural } from '@shared/lib/plural'
+import { normalizeRunCounts } from '@shared/run-counts'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
 // so the flight's run stage can render the same row as the runs list. Chrome
@@ -16,7 +18,7 @@ import { shortTime } from '@/shared/lib/format'
 const CHROME_CLASS = {
   row: 'rounded-md px-3 py-2 cl-hover-row',
   headline: 'pb-0.5',
-  item: 'py-1.5',
+  item: 'py-2',
 } as const
 
 function portsLabel(detail: RunDetail | undefined): string | null {
@@ -38,11 +40,14 @@ export function RunRow({
   detail,
   onSelect,
   primaryLabel,
-  marker,
   showPorts = true,
   passCount = 'meta',
   arrow = 'hover',
   chrome = 'row',
+  dot = 'always',
+  stamp = 'time',
+  showDuration = false,
+  showRepairs = false,
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
@@ -50,8 +55,6 @@ export function RunRow({
   /** Override the bold identity line (default `run.feature`). The Test Run
    *  hero passes "Run <ref>" so the run reads as an object, not a feature row. */
   primaryLabel?: string
-  /** Extra trailing meta segment (e.g. "run 2 of 2") — the hero's ordinal. */
-  marker?: string
   /** Show the allocated-ports meta segment. The hero hides it (ports belong on
    *  the Services tile's tooltip, not the identity line). */
   showPorts?: boolean
@@ -77,12 +80,28 @@ export function RunRow({
    *  INSIDE a card (the run stage's Previous runs): headline's flush edge and
    *  underline, with the vertical rhythm of the Failing tests rows beside it. */
   chrome?: 'row' | 'headline' | 'item'
+  /** 'always' (default) leads with the status dot. 'live' shows it only while
+   *  the run is still going, for a surface whose status chip already names a
+   *  finished run's outcome — dot and chip then said the same thing twice. A
+   *  live run keeps it because the pulse says "still moving", which the chip
+   *  cannot. A finished run reserves no lane, so its title sits flush on the
+   *  card's text column with the kicker above it. */
+  dot?: 'always' | 'live'
+  /** 'time' (default) is a clock time; 'day' adds the day unless it is today,
+   *  for a list whose rows span days. */
+  stamp?: 'time' | 'day'
+  /** Append how long a finished run took. A live run has no end yet and says
+   *  nothing rather than a number that is already wrong. */
+  showDuration?: boolean
+  /** Append the repair cycles the run consumed, when it consumed any. Off where
+   *  the same count is already stated (the hero's Repair cycles stat). */
+  showRepairs?: boolean
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
   const waiting = runWaitingState(detail ?? run)
   const presentation = presentRunStatus({ status: run.status, executionType: run.executionType, waiting })
-  const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
+  const meta: Array<{ text: string; mono?: boolean }> = [{ text: stamp === 'day' ? dayTime(run.startedAt) : shortTime(run.startedAt) }]
   // The envset sits next to the timestamp — when and where, before any outcome.
   // Spec selection cannot vary by envset, so sibling runs of one suite declare
   // the same roster and differ only in what the environment let execute: this is
@@ -90,9 +109,12 @@ export function RunRow({
   if (run.env) meta.push({ text: run.env })
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
-  if (marker) meta.push({ text: marker })
-  const summary = detail?.summary
-  const passLabel = summary && summary.total > 0 ? `${summary.passed}/${summary.total} passed` : null
+  const ms = showDuration ? durationBetween(run.startedAt, run.endedAt) : null
+  if (ms != null) meta.push({ text: formatDuration(ms) })
+  if (showRepairs && run.healCycles) meta.push({ text: plural(run.healCycles, 'repair') })
+  // The same counts the MCP tools report, so a row and an agent never disagree.
+  const counts = detail?.summary ? normalizeRunCounts(detail.summary) : null
+  const passLabel = counts && counts.totalKnown > 0 ? `${counts.passed}/${counts.totalKnown} passed` : null
   if (passLabel && passCount === 'meta') meta.push({ text: passLabel })
   return (
     <li>
@@ -102,7 +124,8 @@ export function RunRow({
         className={`group flex w-full items-center gap-2 text-left ${CHROME_CLASS[chrome]}`}
         title={`Go to run ${run.runId}`}
       >
-        <StatusDot state={presentation.dot} pulse={presentation.pulse} halo={presentation.pulse && presentation.dot !== 'booted'} className="shrink-0" />
+        {(dot === 'always' || !isTerminalRunStatus(run.status))
+          && <StatusDot state={presentation.dot} pulse={presentation.pulse} halo={presentation.pulse && presentation.dot !== 'booted'} className="shrink-0" />}
         <span className="flex min-w-0 flex-1 flex-col">
           <span
             className={`truncate text-[13px] ${chrome === 'row' ? '' : 'group-hover:underline'}`}
@@ -157,7 +180,7 @@ export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting
   const pending = pendingSpecEdits ?? 0
   return (
     <>
-      {pending > 0 && (
+      {pending > 0 && !isTerminalRunStatus(status) && (
         <Chip
           chrome="border"
           tone="var(--text-muted)"

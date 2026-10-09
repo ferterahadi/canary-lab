@@ -33,6 +33,13 @@ function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   } as FlightManifest
 }
 
+it('uses current attention evidence instead of claiming a displayed done mapping met the target', () => {
+  const stage: FlightStage = { key: 'specs-coverage', status: 'done' }
+  const attention = { state: 'actionable' as const, stage: 'specs-coverage' as const,
+    title: 'Flight paused', reason: 'Coverage mapping is stale; target is 100%.', revision: 'a', checkedAt: 'now' }
+  expect(stageStateLine(stage, flight({ attention }))).toBe(attention.reason)
+})
+
 /** A band-data coverage ledger. Only `totals` and `tests` drive the tiles under
  *  test, so the rest is a valid empty shell. */
 function ledger(over: Partial<CoverageLedger> = {}): CoverageLedger {
@@ -271,6 +278,7 @@ describe('healEndLine / healEndShort (R80)', () => {
   it('short form names the cause for a no-signal give-up', () => {
     expect(healEndShort(he({ reason: 'no-signal', agentCause: 'usage-limit' }))).toBe('stopped — usage limit')
     expect(healEndShort(he({ reason: 'no-signal', agentCause: 'unknown' }))).toBe('stopped — agent went quiet')
+    expect(healEndShort(he({ reason: 'no-signal', agentCause: 'cli-dialog' }))).toBe('stopped — blocked on an interactive CLI prompt')
     expect(healEndShort(he({ reason: 'max-cycles' }))).toBe('stopped — cycle limit')
     expect(healEndShort(he({ reason: 'cancelled' }))).toBe('stopped by you')
   })
@@ -1083,6 +1091,10 @@ describe('stageStateLine — external-work hand-off', () => {
 })
 
 describe('stageWorkMs / formatStageDuration — the work clock', () => {
+  it.each([[59_499, '59s'], [59_500, '1m 00s'], [3_599_500, '1h 00m']])('rounds %s ms before formatting the stage duration', (activeMs, expected) => {
+    expect(formatStageDuration({ activeMs })).toBe(expected)
+  })
+
   afterEach(() => vi.useRealTimers())
 
   it('prefers the banked work clock over the wall-clock span', () => {
@@ -1131,7 +1143,7 @@ describe('stageWorkMs / formatStageDuration — the work clock', () => {
 it('uses live Portify counts including zero instead of an old attempt diff, and reserves patch statistics for completed editing', () => {
   const stage: FlightStage = { key: 'portify', status: 'running', progress: { workflowId: 'wf', status: 'editing', editedFiles: 2 } }
   const files = (s: FlightStage, band?: StageBandData) => stageFacts(s, flight(), undefined, band).find((fact) => fact.label === 'Files edited')
-  const staleDiff: StageBandData = { portify: { workflowId: 'wf', feature: 'suite', agent: 'claude', branch: 'main', attempt: 1, maxAttempts: 3, startedAt: 'now', status: 'editing', repos: [], diff: 'diff --git a/old b/old\n--- a/old\n+++ b/old\n@@ -1 +1 @@\n-before\n+after\n' } }
+  const staleDiff: StageBandData = { portify: { workflowId: 'wf', feature: 'suite', featureDir: '/workspace/features/suite', agent: 'claude', branch: 'main', attempt: 1, maxAttempts: 3, startedAt: 'now', status: 'editing', repos: [], diff: 'diff --git a/old b/old\n--- a/old\n+++ b/old\n@@ -1 +1 @@\n-before\n+after\n' } }
   expect(files(stage, staleDiff)).toMatchObject({ value: '2', sub: 'current working-tree changes' })
   expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing', editedFiles: 0 } })).toMatchObject({ value: '0' })
   expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing' } })).toMatchObject({ awaiting: true })

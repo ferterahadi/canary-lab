@@ -1,18 +1,8 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import Fastify from 'fastify'
-import { runsRoutes } from './runs'
 import type { ExternalHealAgentRequest } from './runs-route-support'
-import { RunStore } from '../logic/run-store'
-import {
-  createRegistry,
-  type OrchestratorLike,
-  type RestartHealResult,
-  type RestartRunResult,
-} from '../logic/run-registry'
+import type { OrchestratorLike } from '../logic/run-registry'
 import type { ClaimInput } from '../logic/heal/external-heal-broker'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
@@ -20,8 +10,13 @@ import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
 
 import type { ExecutionType } from '../../../../../../shared/verification'
+import { writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildRunsApp, type RunsAppOptions } from './__fixtures__/runs-app'
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+const tempDir = trackTempDirs('cl-rroutes-')
+
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The PR routes are thin plumbing over these two — they're unit-tested in
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
@@ -39,7 +34,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -58,41 +53,10 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
 }
 
 function writeFeature(name: string): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: [] })
 }
 
-async function build(opts: {
-	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
-	  cancelQueuedRun?: (runId: string) => boolean
-	  broker?: Parameters<typeof runsRoutes>[1]['broker']
-	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-	  restartRun?: (runId: string) => Promise<RestartRunResult>
-  projectRoot?: string
-  events?: WorkspaceEvent[]
-  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
-} = {}) {
-  const registry = createRegistry()
-  const store = new RunStore(logsDir, registry)
-  const app = Fastify()
-  await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store,
-    broker: opts.broker,
-	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-	    cancelQueuedRun: opts.cancelQueuedRun,
-	    restartHeal: opts.restartHeal,
-    restartRun: opts.restartRun,
-    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
-	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-	  })
-  return { app, registry, store }
-}
+const build = (opts: RunsAppOptions = {}) => buildRunsApp({ logsDir, featuresDir }, opts)
 
 describe('healAgent request-body validation', () => {
   it('400s when healAgent is not an object', async () => {
@@ -165,7 +129,7 @@ describe('healAgent request-body validation', () => {
     expect(res.json().error).toContain('healAgent.clientKind must be one of')
   })
 
-  it('threads healAgent.clientVersion through to broker.claim on the reuse path', async () => {
+  it.each(['9.9.9', '', ' '] as const)('threads nonempty healAgent.clientVersion %j through to broker.claim on reuse', async (clientVersion) => {
     const dir = path.join(featuresDir, 'foo')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(
@@ -203,12 +167,12 @@ describe('healAgent request-body validation', () => {
       payload: {
         feature: 'foo',
         env: 'local',
-        healAgent: { kind: 'external', sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' },
+        healAgent: { kind: 'external', sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion },
       },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ runId: 'active-cv', reused: true, claimSuppressed: true, claimed: false })
-    expect(claim).toHaveBeenCalledWith('active-cv', { sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' })
+    expect(claim).toHaveBeenCalledWith('active-cv', { sessionId: 'sess-cv', clientKind: 'claude-pty', ...(clientVersion ? { clientVersion } : {}) })
   })
 })
 
@@ -341,7 +305,7 @@ describe('POST /api/runs/:runId/restart — default reason', () => {
 
 describe('POST /api/runs/:runId/agent-input — unexpected interject failure reason', () => {
   it('409s directly (without attempting restartHeal) when interjectHealAgent fails for a reason other than no-agent-running', async () => {
-    // OrchestratorInterjectResult's type only declares 'no-agent-running' as
+    // InterjectResult's type only declares 'no-agent-running' as
     // a failure reason; this exercises the route's defensive fallback for an
     // orchestrator implementation that returns something else.
     const stub: OrchestratorLike = {

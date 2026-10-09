@@ -1,10 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { buildRunPaths, runDirFor } from './run-paths'
 import { readManifest } from './manifest'
@@ -12,36 +9,19 @@ import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { addWorktree, type WorktreeHandle } from './repo-worktree'
 import { writeOverlay, captureTouchedFiles, overlayDir } from '../../../portify/logic/runtime/overlay'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // Phase C: the run-time apply-before-boot / reverse-at-teardown hook. These
 // drive a REAL git repo + worktree + saved overlay through the orchestrator's
 // start()/stop() and assert the worktree source is patched at boot, reverted at
 // teardown, and the worktree itself survives (it holds heal edits).
 
-function makeFakeFactory(): { factory: PtyFactory; spawned: PtySpawnOptions[] } {
-  const spawned: PtySpawnOptions[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    spawned.push(options)
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const pid = nextPid++
-    return {
-      get pid() { return pid },
-      onData: (cb) => { data.on('data', cb); return { dispose: () => data.off('data', cb) } },
-      onExit: (cb) => { exit.on('exit', cb); return { dispose: () => exit.off('exit', cb) } },
-      write: () => {},
-      resize: () => {},
-      kill: () => {},
-    }
-  }
-  return { factory, spawned }
-}
-
 const BASE = 'const PORT = 3007\nmodule.exports = { PORT }\n'
 
 const PORTED = 'const PORT = Number(process.env.PORT)\nmodule.exports = { PORT }\n'
 
+const tempDir = trackTempDirs('cl-port-')
 let tmpDir: string
 
 let repoRoot: string
@@ -50,13 +30,10 @@ let featureDir: string
 
 let runDir: string
 
-const cleanup: string[] = []
-
 const RUN_ID = '2026-06-14T1015-port'
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-port-')))
-  cleanup.push(tmpDir)
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
   featureDir = path.join(tmpDir, 'features', 'demo')
@@ -66,11 +43,6 @@ beforeEach(async () => {
   fs.mkdirSync(repoRoot, { recursive: true })
   fs.writeFileSync(path.join(repoRoot, 'app.js'), BASE)
   initGitRepo(repoRoot)
-})
-
-afterEach(() => {
-  for (const c of cleanup) { try { fs.rmSync(c, { recursive: true, force: true }) } catch { /* ignore */ } }
-  cleanup.length = 0
 })
 
 function makeFeature(): FeatureConfig {
@@ -112,7 +84,6 @@ async function saveOverlay(): Promise<void> {
 
 async function makeWorktree(): Promise<WorktreeHandle> {
   const handle = await addWorktree({ repoName: 'api', localPath: repoRoot, worktreesDir: path.join(runDir, 'worktrees') })
-  cleanup.push(handle.worktreeRoot)
   return handle
 }
 
@@ -124,7 +95,7 @@ describe('portified run: apply before boot, reverse at teardown', () => {
     const handle = await makeWorktree()
     expect(wtApp(handle)).toBe(BASE) // worktree starts at committed HEAD
 
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -153,7 +124,7 @@ describe('portified run: apply before boot, reverse at teardown', () => {
   it('preserves a heal edit that overlaps the patched line (reverse conflict) and keeps the worktree', async () => {
     await saveOverlay()
     const handle = await makeWorktree()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -182,7 +153,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
     // No overlay saved → non-portified: the worktree is torn down at teardown,
     // so the fix MUST be captured before removal. Baseline is taken in start().
     const handle = await makeWorktree()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -224,7 +195,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
     fs.writeFileSync(path.join(handle.worktreeRoot, 'wip-note.txt'), 'pre-existing WIP\n')
     fs.mkdirSync(path.join(handle.worktreeRoot, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(handle.worktreeRoot, 'docs', 'generated.md'), '# generated\n')
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
       worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
@@ -248,7 +219,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
 
   it('writes no fixCapture when the agent changed nothing', async () => {
     const handle = await makeWorktree()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -269,7 +240,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
   // untracked-delta guard closes the path that run took; this closes the class.
   it('writes no fixCapture when no heal cycle ran, even though the worktree changed', async () => {
     const handle = await makeWorktree()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -297,7 +268,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
     const handle = await makeWorktree()
     fs.rmSync(handle.worktreeRoot, { recursive: true, force: true })
     fs.mkdirSync(handle.worktreeRoot, { recursive: true }) // present, but not a work tree
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
       worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
@@ -312,7 +283,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
 
   it('captures nothing for a worktree that stops being readable mid-run', async () => {
     const handle = await makeWorktree()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
       worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
@@ -336,7 +307,7 @@ describe('portified run: fail loud, never boot un-portified', () => {
     await runGit(repoRoot, ['commit', '-aqm', 'drift', '--no-verify'])
     const handle = await makeWorktree()
 
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -355,7 +326,7 @@ describe('portified run: fail loud, never boot un-portified', () => {
 
   it('aborts when a portified repo has no per-run worktree', async () => {
     await saveOverlay()
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -380,7 +351,7 @@ describe('portified run: fail loud, never boot un-portified', () => {
     const handle = await makeWorktree()
     fs.rmSync(path.join(overlayDir(featureDir), 'api.patch'), { force: true })
 
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,
@@ -404,8 +375,7 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
     // the exact patched line (simulating stray drift) so its 3-way apply
     // conflicts. The orchestrator must reverse api's already-applied
     // overlay before throwing — it must never boot a half-portified run.
-    const repoRootB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-port-b-')))
-    cleanup.push(repoRootB)
+    const repoRootB = tempDir('cl-port-b-')
     fs.writeFileSync(path.join(repoRootB, 'app.js'), BASE)
     initGitRepo(repoRootB)
 
@@ -432,7 +402,6 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
 
     const handleA = await makeWorktree()
     const handleB = await addWorktree({ repoName: 'worker', localPath: repoRootB, worktreesDir: path.join(runDir, 'worktrees') })
-    cleanup.push(handleB.worktreeRoot)
 
     // worker's worktree already diverged on the exact patched line. Staged
     // (not just written) so `git apply --3way` reconstructs a real 3-way
@@ -444,7 +413,7 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
     )
     await runGit(handleB.worktreeRoot, ['add', 'app.js'])
 
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: {
         name: 'demo',
@@ -480,7 +449,7 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
     // (not `conflict`).
     fs.writeFileSync(path.join(overlayDir(featureDir), 'api.patch'), 'not a real patch\nnonsense\n')
 
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature(),
       runId: RUN_ID,

@@ -1,14 +1,16 @@
+import { downloadBlob } from '@/shared/lib/download'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   BenchmarkArm,
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
 import { FAILED, HEALED } from './BenchmarkDetail'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 
 export function ReportView({ m }: { m: BenchmarkManifest }) {
   const rep = m.report
@@ -114,7 +116,7 @@ export function CompareRow({ label, hValue, bValue, hText, bText, betterIsLower 
   const bBetter = !tie && !hBetter
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px', padding: '6px 0' }}>
-      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 600 }}>{label}</div>
+      <CapsLabel>{label}</CapsLabel>
       <Bar pct={hPct} color="var(--boot)" text={hText} better={hBetter} />
       <Bar pct={bPct} color="var(--assistant)" text={bText} better={bBetter} />
     </div>
@@ -172,15 +174,7 @@ export function fmtTokens(n: number): string {
 
 /** Trigger a client-side file download (no server round-trip). */
 export function downloadText(filename: string, text: string, mime: string): void {
-  const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  downloadBlob(new Blob([text], { type: mime }), filename)
 }
 
 /** Render the benchmark report as a shareable markdown artifact. */

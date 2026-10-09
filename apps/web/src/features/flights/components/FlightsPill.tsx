@@ -1,67 +1,38 @@
-import { useState } from 'react'
-import type {
-  FlightIndexEntry,
-  FlightStageKey,
-  FlightStageStatus,
-  PlanFeaturesTask,
-} from '@shared/flights/types'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { CoverageJobIndexEntry } from '@shared/coverage/types'
-import type { FeatureActivity } from '../state/feature-activity'
+import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
+import { flightNeedsAttention } from '@shared/flights/attention'
+import { useWorkspaceActions } from '@/shared/state/workspace-actions'
+import { useWorkState } from '@/shared/state/work-state'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState, summarizeFlightActivity } from './FlightChipState'
 import { FlightsPickerDialog } from './FlightPickerRows'
 import { flightAwaitsUser } from '../lib/external-work'
 import { FLIGHT_OVERVIEW } from './stage-meta'
+import { PlaneIcon } from '@/shared/ui/Icons'
 
 export interface FlightsPillProps {
-  flights: FlightIndexEntry[]
-  /** Pre-flight (plan-features) tasks in progress / awaiting review — rendered
-   *  as their own rows above the feature rows (they precede any feature). */
-  preFlights?: PlanFeaturesTask[]
-  /** Per-feature live activity (runs / portify / authoring) from the workspace Flight controller. */
-  activity?: Map<string, FeatureActivity>
-  coverageJobs?: CoverageJobIndexEntry[]
-  portifyWorkflows?: PortifyIndexEntry[]
-  /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
-   *  that declare a `group` under a disclosure (R55). `stages` is the feature's
-   *  evidence-derived rail (derived-stages.ts) for flightless rows. */
-  features?: Array<{ name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }>
   /** Controlled/uncontrolled hybrid (cl_route-every-surface): App drives the
    *  picker's open-state off the route (`view=flights` + no flight selected) so
    *  it's the same deep-linkable surface the URL addresses. Absent → the pill
    *  falls back to its own state (keeps this component's unit tests standalone). */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  onOpenFlight: (flightId: string | null) => void
-  /** Open the real surface behind an activity-only row (no flight record). */
-  onOpenActivity?: (feature: string, activity: FeatureActivity) => void
-  /** Open the flight launcher for a never-flown feature (R49). */
-  onStartFlight?: (feature: string) => void
-  /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
-  onOpenPreFlight?: (taskId: string) => void
 }
 
-export function FlightsPill({
-  flights,
-  preFlights = [],
-  activity = new Map(),
-  features = [],
-  coverageJobs = [],
-  portifyWorkflows = [],
-  open: controlledOpen,
-  onOpenChange,
-  onOpenFlight,
-  onOpenActivity,
-  onStartFlight,
-  onOpenPreFlight,
-}: FlightsPillProps) {
-  const [internalOpen, setInternalOpen] = useState(false)
-  const open = controlledOpen ?? internalOpen
-  const setOpen = (next: boolean): void => {
-    if (onOpenChange) onOpenChange(next)
-    else setInternalOpen(next)
-  }
+// The pill reads the workspace's live work (flights, pre-flights, activity,
+// coverage jobs, Portify workflows, and the picker's suite rows — R49, grouped
+// per R55) from WorkState, and its destinations from WorkspaceActions. An
+// absent action leaves its row inert, as an omitted prop did.
+export function FlightsPill({ open: controlledOpen, onOpenChange }: FlightsPillProps) {
+  const {
+    flights = [],
+    preFlights = [],
+    activity = new Map(),
+    pickerFeatures: features = [],
+    coverageJobs = [],
+    portifyWorkflows = [],
+  } = useWorkState()
+  const { openFlight, openActivity, startFlight, openPreFlight } = useWorkspaceActions()
+  const [open, setOpen] = useControlledBoolean(controlledOpen, onOpenChange)
   // Defensive: the server list is already scoped to running/done, but a stale
   // frame shouldn't render launched/failed rows.
   const { activeFeatures: attention, preFlightRows, activeCount } = summarizeFlightActivity(flights, preFlights, activity)
@@ -82,9 +53,7 @@ export function FlightsPill({
   // non-queued reason, OR a pre-flight settled and awaiting review. Independent
   // of any toast — it stays until the underlying state resolves.
   const waitingForReview = [...activity.values()].some((a) => a.waiting?.kind === 'test-review')
-  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some((f) =>
-    flightAwaitsUser(f)
-    || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
+  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some(flightNeedsAttention)
 
   const needsHuman = waitingForReview || waiting.length > 0 || preFlightReview.length > 0
   const tone = needsHuman ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
@@ -112,10 +81,7 @@ export function FlightsPill({
       <StatusPill
         dotState="running"
         icon={activeCount > 0 ? undefined : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-            <path d="M22 2 11 13" />
-            <path d="M22 2 15 22l-4-9-9-4Z" />
-          </svg>
+          <PlaneIcon className="shrink-0" />
         )}
         name={label}
         count={activeCount > 0 ? activeCount : undefined}
@@ -137,10 +103,10 @@ export function FlightsPill({
           features={features}
           coverageJobs={coverageJobs}
           portifyWorkflows={portifyWorkflows}
-          onPick={(id) => { setOpen(false); onOpenFlight(id) }}
-          onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
-          onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}
-          onPickPreFlight={(taskId) => { setOpen(false); onOpenPreFlight?.(taskId) }}
+          onPick={(id, stage) => { setOpen(false); if (stage) openFlight?.(id, stage); else openFlight?.(id) }}
+          onPickActivity={(feature, act) => { setOpen(false); openActivity?.(feature, act) }}
+          onStartFlight={(feature) => { setOpen(false); startFlight?.(feature) }}
+          onPickPreFlight={(taskId) => { setOpen(false); openPreFlight?.(taskId) }}
           onClose={() => setOpen(false)}
         />
       )}

@@ -1,7 +1,8 @@
+import { waitForRunCondition } from './wait-for-run-condition'
 import { isTerminalRunStatus } from '../../../../shared/run-state'
 import { suiteReviewRevision } from '../features/runs/logic/runtime/suite-review'
 import { suiteRuntimeInputTargetsForSnapshot } from '../features/runs/logic/runtime/suite-runtime-inputs'
-import type { RunStore, RunStoreEvent } from '../features/runs/logic/run-store'
+import type { RunStore } from '../features/runs/logic/run-store'
 
 export const TEST_REVIEW_WAIT_MS = 30_000
 
@@ -41,39 +42,23 @@ type ReviewWaitResult = NonNullable<ReturnType<typeof testReviewOutcome>> | {
 }
 
 export async function waitForTestReview(store: RunStore, runId: string, revision: string, timeoutMs = TEST_REVIEW_WAIT_MS): Promise<ReviewWaitResult> {
-  const immediate = testReviewOutcome(store, runId, revision)
-  if (immediate) return immediate
-  return new Promise<ReviewWaitResult>((resolve) => {
-    const finish = (result: ReviewWaitResult) => {
-      store.offEvent(onEvent)
-      clearTimeout(timer)
-      resolve(result)
-    }
-    const check = () => {
+  return waitForRunCondition({
+    store, runId,
+    read: () => testReviewOutcome(store, runId, revision),
+    timeoutMs, maxWaitMs: TEST_REVIEW_WAIT_MS,
+    onTimeout: () => {
       const result = testReviewOutcome(store, runId, revision)
-      if (result) finish(result)
-    }
-    const onEvent = (event: RunStoreEvent) => {
-      if (!event.runId || event.runId === runId) check()
-    }
-    const timer = setTimeout(() => {
-      const result = testReviewOutcome(store, runId, revision)
-      if (result) return finish(result)
+      if (result) return result
       const manifest = store.get(runId)!.manifest
       let unchanged = false
       try {
         unchanged = manifest.suiteSnapshot?.kind === 'taken' && !!manifest.featureDir
           && suiteReviewRevision(manifest.suiteSnapshot.dir, manifest.featureDir, suiteRuntimeInputTargetsForSnapshot(manifest.suiteSnapshot.dir)) === revision
       } catch { /* Missing source cannot be accepted as the reviewed revision. */ }
-      finish({ status: unchanged ? 'still_waiting' : 'review-changed', runId, review_revision: revision,
+      return { status: unchanged ? 'still_waiting' : 'review-changed', runId, review_revision: revision,
         next: unchanged
           ? 'No browser decision is recorded yet. Repeat review_test_changes with the same runId, review_revision, browser_wait_token and wait_for_decision:true. Do not click review controls yourself.'
-          : 'The suite changed without a decision for this revision. Fetch get_test_review and show the fresh diff before requesting another review.' })
-    }, Math.min(Math.max(timeoutMs, 1), TEST_REVIEW_WAIT_MS))
-    timer.unref()
-    store.onEvent(onEvent)
-    // Close the read/subscribe gap. During adoption the snapshot moves before
-    // its receipt is written; only the receipt may resolve the live wait.
-    check()
+          : 'The suite changed without a decision for this revision. Fetch get_test_review and show the fresh diff before requesting another review.' }
+    },
   })
 }

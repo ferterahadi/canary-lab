@@ -1,3 +1,6 @@
+import { expectTypeOf } from 'vitest'
+import type { ProjectConfig, ProjectConfigResponse } from '@shared/project-config'
+import type { AgentProbe, AgentProbeResponse, AgentProbeSnapshotResponse } from '@shared/agent-probe'
 import { describe, it, expect, vi } from 'vitest'
 import {
   getFeatureTests,
@@ -246,4 +249,22 @@ it('requests recorded tests for the selected run', async () => {
   const fetchImpl = vi.fn().mockResolvedValue(ok([]))
   await getFeatureTests('suite', { baseUrl: 'http://x', fetchImpl }, 'run 1')
   expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/suite/tests?runId=run%201', { method: 'GET' })
+})
+
+it('accepts older configuration and probe responses while keeping normalized server fields required', async () => {
+  type AddedConfigFields = 'agentModels' | 'askModelsOnLaunch' | 'autoProposePr' | 'showDemo'
+  expectTypeOf<Pick<ProjectConfig, AddedConfigFields>>().toEqualTypeOf<Required<Pick<ProjectConfig, AddedConfigFields>>>()
+  expectTypeOf<Pick<ProjectConfigResponse, AddedConfigFields>>().toEqualTypeOf<Partial<Pick<ProjectConfig, AddedConfigFields>>>()
+  expectTypeOf<ProjectConfigResponse['personalWikiPath']>().toEqualTypeOf<string | null>()
+  expectTypeOf<ProjectConfig['port']>().toEqualTypeOf<number | undefined>()
+  expectTypeOf<AgentProbe['models']>().toEqualTypeOf<NonNullable<AgentProbeResponse['models']>>()
+  const config: ProjectConfigResponse = { healAgent: 'auto', editor: 'system', personalWikiPath: null }
+  const probe: AgentProbeSnapshotResponse = {
+    probedAt: 'now',
+    claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', remedy: null },
+    codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, remedy: 'Install' },
+  }
+  const fetchImpl = vi.fn().mockResolvedValueOnce(ok(config)).mockResolvedValueOnce(ok(probe))
+  await expect(getProjectConfig({ fetchImpl })).resolves.toEqual(config)
+  await expect(getAgentProbe(false, { fetchImpl })).resolves.toEqual(probe)
 })

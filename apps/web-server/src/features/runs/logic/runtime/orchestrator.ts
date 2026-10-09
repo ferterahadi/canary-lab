@@ -1,3 +1,4 @@
+import type { InterjectResult } from '../run-control-results'
 import { createRunContext, type RunContext } from './run-context'
 import { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 import { recordFullSuiteTerminalRestartFallback, runPlaywright, runVerification, verificationPlanForSummary } from './run-playwright'
@@ -5,7 +6,6 @@ import { interjectHealAgent, runHealAgent, waitForHealSignal } from './run-heal-
 import type { StoppedEarlyReason } from '../../../../../../../shared/run-manifest'
 import { applyPortifyOverlay, captureFixBaseline, captureFixes, hydrateWorktreeEnvsets, reversePortifyOverlay, startLiveFixCapture } from './run-fix-capture'
 import { autoProposeFixes } from '../pr/auto-propose'
-import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -28,9 +28,10 @@ import type { PlaywrightSpawner } from './run-spawn'
 import { ensureServicesRunning } from './run-service-boot'
 import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits } from './run-suite-snapshot'
 import { removeSuiteRuntimeInputs } from './suite-runtime-inputs'
+import { preserveAndTruncateServiceLog } from './service-log-segments'
 import { markStoppedEarly, noteHealCycle, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import { prepareRunForExecution } from './run-setup'
-import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
+import type { OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
 export class RunOrchestrator extends EventEmitter {
   /** Every field this class used to declare. Shared by reference with the
@@ -227,13 +228,15 @@ export class RunOrchestrator extends EventEmitter {
     for (const svc of targets) {
       const pty = this.ctx.servicePtys.get(svc.name)
       if (pty) {
-        try { pty.kill('SIGTERM') } catch { /* already dead */ }
+        killTree(pty, 'SIGTERM')
         this.ctx.servicePtys.delete(svc.name)
       }
       this.ctx.logFiles.delete(this.ctx.paths.serviceLog(svc.safeName))
-      const p = this.ctx.paths.serviceLog(svc.safeName)
-      try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
+    // Every service's log rotates, kept ones included: a kept service's live
+    // log would otherwise run on into the next execution, and an excerpt read
+    // from it would hold two executions' output under one execution's name.
+    for (const svc of this.ctx.services) preserveAndTruncateServiceLog(this.ctx, svc.safeName)
     const started = new Set(await ensureServicesRunning(this.ctx))
     return {
       restarted: plan.toRestart.filter((safeName) => started.has(safeName)),
@@ -245,10 +248,7 @@ export class RunOrchestrator extends EventEmitter {
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the
   // consumer reruns Playwright on top.
   async rerun(): Promise<void> {
-    for (const svc of this.ctx.services) {
-      const p = this.ctx.paths.serviceLog(svc.safeName)
-      try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
-    }
+    for (const svc of this.ctx.services) preserveAndTruncateServiceLog(this.ctx, svc.safeName)
   }
 
   /**

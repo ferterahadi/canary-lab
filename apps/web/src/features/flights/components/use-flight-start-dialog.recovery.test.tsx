@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PlanFeaturesTask } from '@shared/flights/types'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useFlightStartDialog } from './use-flight-start-dialog'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ getPlanFeaturesTask: vi.fn(), getProjectConfig: vi.fn(), launchPlannedFeatures: vi.fn(), cancelPlanFeatures: vi.fn(), planFeatures: vi.fn() }))
 vi.mock('@/shared/api/flights', async (importOriginal) => ({
@@ -19,7 +21,6 @@ vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
   getProjectConfig: api.getProjectConfig,
 }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement
 let state: ReturnType<typeof useFlightStartDialog>
@@ -45,22 +46,16 @@ function proposal(taskId = id): PlanFeaturesTask {
     { name: 'one', description: 'First suite' }, { name: 'two', description: 'Second suite' },
   ] } } as PlanFeaturesTask
 }
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   id = `plan-recovery-${++sequence}`
   api.getProjectConfig.mockResolvedValue({})
   api.getPlanFeaturesTask.mockResolvedValue(task())
-  element = document.createElement('div')
-  document.body.appendChild(element)
-  root = createRoot(element)
 })
-afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container: element, root } = mounted) })
 
 it('rejects an older poll after accepting a proposal and stops periodic reads', async () => {
   const older = deferred<PlanFeaturesTask>()

@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { safeFilename, evaluationArchiveBase } from '../../../../../../shared/evaluation-archive-naming'
 import fs from 'fs'
 import path from 'path'
@@ -86,7 +87,7 @@ function assertionVideos(
     .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
     .map(({ artifact, testName }) => {
       const rel = path.relative(artifactsDir, path.resolve(artifactsDir, artifact.path))
-      const valid = !rel.startsWith('..') && !path.isAbsolute(rel)
+      const valid = isPathUnder(path.resolve(artifactsDir, artifact.path), artifactsDir, true)
       const filePath = valid ? fileAt(rel) : null
       return { artifact, filePath, testName, valid }
     })

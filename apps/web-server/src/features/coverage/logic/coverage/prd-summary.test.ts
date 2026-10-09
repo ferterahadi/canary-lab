@@ -9,6 +9,8 @@ import path from 'path'
 import { computeDocsHash, type DocsCollection } from './docs-collection'
 
 import { buildPrdSummaryPrompt, summarizePrd } from './prd-summary'
+import { documentHash, writeDocumentSelection } from './document-resolution'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 import {
   assembleSummary,
   parsePrdSummaryOutput,
@@ -29,6 +31,8 @@ import type { PrdSummary, Requirement } from '../../../../../../../shared/covera
 function collection(entries: { relPath: string; content: string }[]): DocsCollection {
   return { docsDir: '/tmp/docs', entries, docsHash: computeDocsHash(entries) }
 }
+
+const makeTempDir = trackTempDirs('cl-prd-source-selection-')
 
 function summary(requirements: Requirement[]): PrdSummary {
   return { requirements, docsHash: 'h', sourceDocs: [], generatedAt: '2026-01-01T00:00:00.000Z' }
@@ -380,6 +384,24 @@ describe('reconcileRequirementIds — id stability', () => {
 })
 
 describe('buildPrdSummaryPrompt', () => {
+  it('carries source-selection intent and only the sources present in the collection', () => {
+    const featureDir = makeTempDir()
+    const c = { ...collection([{ relPath: 'spec.md', content: 'Selected source' }]), docsDir: path.join(featureDir, 'docs') }
+    writeDocumentSelection(featureDir, {
+      reviewedDocsHash: c.docsHash, decisionKey: 'selected', intent: 'Verify checkout behavior', searched: ['docs'], excluded: [],
+      sources: [
+        { path: '/tmp/selected-spec.md', relPath: 'spec.md', sha256: documentHash('Selected source'), reason: 'Defines checkout requirements' },
+        { path: '/tmp/removed-spec.md', relPath: 'removed.md', sha256: documentHash('Removed source'), reason: 'REMOVED_SOURCE_REASON' },
+      ],
+    })
+    const prompt = buildPrdSummaryPrompt(c, [])
+    expect(prompt).toContain('Verify checkout behavior')
+    expect(prompt).toContain('"doc": "spec.md"')
+    expect(prompt).toContain('"relevance": "Defines checkout requirements"')
+    expect(prompt).not.toContain('REMOVED_SOURCE_REASON')
+    expect(prompt).not.toContain('removed.md')
+  })
+
   it('lists source doc paths to read (no inlined body) + previous requirement ids', () => {
     const c = collection([{ relPath: 'spec.md', content: '# X\nUNIQUE_DOC_BODY_TOKEN' }])
     const prompt = buildPrdSummaryPrompt(c, [{ id: 'R1', title: 'X', text: 'b', pathTypes: ['happy'] }])

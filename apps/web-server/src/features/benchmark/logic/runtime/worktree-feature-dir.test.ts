@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { worktreeFeatureDir } from './worktree-feature-dir'
 
 describe('worktreeFeatureDir', () => {
+  it('maps dot-prefixed descendants without mistaking them for traversal', () => {
+    expect(worktreeFeatureDir({ repoLocalPath: '/repo', featureDir: '/repo/..cache/suite', worktreeRepoPath: '/scratch/repo' }))
+      .toBe('/scratch/repo/..cache/suite')
+  })
   it('maps a self-contained feature dir (featureDir === repo) into the worktree', () => {
     // A hand-written feature whose localPath === featureDir === __dirname. The
     // public scaffold starts with no features, so this stays a generic fixture.

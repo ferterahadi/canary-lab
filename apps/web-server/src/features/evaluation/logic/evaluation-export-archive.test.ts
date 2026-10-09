@@ -1,18 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
 import type { RunDetail } from '../../../../../../shared/run-detail'
 import type { PlaywrightArtifact } from '../../../../../../shared/run-detail'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-let tmpDir: string | undefined
-
-afterEach(() => {
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
-  tmpDir = undefined
-})
+const tempDir = trackTempDirs('canary-eval-archive-')
 
 function writeTmpFeature(logsDir: string, featureName: string): string {
   const featuresDir = path.join(path.dirname(logsDir), 'features')
@@ -27,7 +22,7 @@ function writeTmpFeature(logsDir: string, featureName: string): string {
 
 describe('buildEvaluationExportArchive — coverage attachment', () => {
   it('skips coverage when featuresDir is absent', async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-nocov-'))
+    const tmpDir = tempDir('canary-eval-archive-nocov-')
     const logsDir = path.join(tmpDir, 'logs')
     fs.mkdirSync(logsDir, { recursive: true })
     // No featuresDir passed → options.featuresDir is undefined → coverage block skipped
@@ -37,7 +32,7 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
   })
 
   it('attaches coverage when the feature has a PRD summary with requirements (if-true branch)', async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-withreqs-'))
+    const tmpDir = tempDir('canary-eval-archive-withreqs-')
     const logsDir = path.join(tmpDir, 'logs')
     fs.mkdirSync(logsDir, { recursive: true })
     const featuresDir = writeTmpFeature(logsDir, 'Checkout Flow')
@@ -61,7 +56,7 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
   })
 
   it('skips coverage when feature has no PRD summary (0 requirements → if-false branch)', async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-zeroq-'))
+    const tmpDir = tempDir('canary-eval-archive-zeroq-')
     const logsDir = path.join(tmpDir, 'logs')
     fs.mkdirSync(logsDir, { recursive: true })
     // Feature exists (feature.config.cjs) but no _prd-summary.json → 0 requirements
@@ -75,7 +70,7 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
 
 describe('buildEvaluationExportArchive — the behavior certificate', () => {
   it('returns the certificate as a sidecar while the download contains only evaluation.html', async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-cert-'))
+    const tmpDir = tempDir('canary-eval-archive-cert-')
     const logsDir = path.join(tmpDir, 'logs')
     fs.mkdirSync(logsDir, { recursive: true })
 
@@ -91,7 +86,7 @@ describe('buildEvaluationExportArchive — the behavior certificate', () => {
 
 describe('buildEvaluationExportArchive', () => {
   it('includes retained videos, links them in the report, and skips unsafe or missing artifacts', async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-'))
+    const tmpDir = tempDir()
     const logsDir = path.join(tmpDir, 'logs')
     const runId = 'run id'
     const runPaths = buildRunPaths(runDirFor(logsDir, runId))

@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { portifyIndex, latestSavedWorkflowId } from './portify-state'
 import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry, PortifyManifest } from '@shared/portify-index'
 
 const { reducer: portifyReducer, initialState: initialPortifyState, frameToAction } = portifyIndex
 
@@ -10,6 +9,7 @@ function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'w1',
     feature: 'cns',
+    featureDir: '/workspace/features/cns',
     repos: [{ name: 'app', path: '~/app' }],
     agent: 'claude',
     branch: 'canary/dynamic-ports-cns',
@@ -94,7 +94,6 @@ describe('frameToAction', () => {
 
   it('maps removed and ignores unknown frames', () => {
     expect(frameToAction({ type: 'removed', workflowId: 'w1' })).toEqual({ type: 'removed', workflowId: 'w1' })
-    // @ts-expect-error — forwards-compat unknown frame
     expect(frameToAction({ type: 'nope' })).toBeNull()
   })
 })

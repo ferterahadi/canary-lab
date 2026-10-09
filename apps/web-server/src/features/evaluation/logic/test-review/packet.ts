@@ -1,3 +1,4 @@
+import { reconcilePlaybackCases, latestPlaybackAttempt, type PlaybackIdentity } from '../../../../../../../shared/playback-identity'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
 import { missingAssertionReason, unknownAssertion } from './assertions'
@@ -24,7 +25,7 @@ export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
   // the live dir an agent may have edited since — the report must show what ran.
   const sourceTests = loadSourceTests(suiteDirForReading(detail.manifest))
   const verdicts = runVerdicts(detail)
-  const tests = declaredRoster(detail, playbackTests(detail.playbackEvents ?? []), sourceTests).map(({ entry, attempt }) => {
+  const tests = declaredRoster(detail, playbackTests(detail.playbackEvents ?? [], detail.playbackIdentity), sourceTests).map(({ entry, attempt }) => {
     // The last attempt's position is the freshest one the run saw; the declared
     // one can predate a heal edit that moved the test.
     const location = attempt?.location ?? entry.location
@@ -93,55 +94,19 @@ export interface RosterCase {
  *  line folds only when the current spec source declares the title exactly once
  *  in that file; otherwise the two lines stay two cases, as they always were. */
 export function declaredRoster(detail: RunDetail, attempts: PlaybackAttempt[], sourceTests: Map<string, SourceTest>): RosterCase[] {
-  const out: RosterCase[] = []
-  const seen = new Set<string>()
-  const add = (entry: RosterEntry, declared: boolean, attempt?: PlaybackAttempt): void => {
-    const key = rosterKey(entry)
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push(attempt ? { entry, declared, attempt } : { entry, declared })
-  }
-  for (const known of detail.summary?.knownTests ?? []) {
-    add({
-      ...(known.id ? { id: known.id } : {}),
-      name: known.name,
-      title: known.title ?? known.name,
-      ...(known.location ? { location: known.location } : {}),
-    }, true)
-  }
-  for (const attempt of attempts) {
-    const owner = caseForAttempt(attempt, out, sourceTests)
-    // Append rather than replace: anything the run actually reported that the
-    // roster somehow misses is evidence, and evidence is never dropped.
-    if (!owner) {
-      add({ name: attempt.name, title: attempt.title, location: attempt.location }, false, attempt)
-      continue
-    }
-    if (!owner.attempt || attempt.endedAt >= owner.attempt.endedAt) owner.attempt = attempt
-  }
+  const out: RosterCase[] = reconcilePlaybackCases(detail.summary?.knownTests ?? [], attempts, [...sourceTests.values()]).map((item) => ({
+    entry: { ...item.entry, title: item.entry.title ?? item.entry.name },
+    declared: item.declared,
+    ...(item.attempts.length ? { attempt: latestPlaybackAttempt(item.attempts)! } : {}),
+  }))
   for (const passedName of detail.summary?.passedNames ?? []) {
     // Match on name first: a roster entry and a `passedNames` entry are the same
     // test when the names agree, even though the roster's title may carry
     // annotations that no longer slugify back to it.
     if (out.some(({ entry }) => entry.name === passedName || summaryEntryName(entry.title) === passedName || entry.title === passedName)) continue
-    add({ name: passedName, title: passedName }, false)
+    out.push({ entry: { name: passedName, title: passedName }, declared: false })
   }
   return out
-}
-
-/** The roster case an attempt belongs to: the case at the attempt's exact line
- *  when there is one, else the only case with that name in that spec file — the
- *  same test, moved. A declared case settles "only" by itself (the inventory is
- *  the run-time count of tests with that title in the file); an appended one has
- *  no inventory behind it, so it counts the current spec source instead. */
-function caseForAttempt(attempt: PlaybackAttempt, cases: RosterCase[], sourceTests: Map<string, SourceTest>): RosterCase | undefined {
-  const file = specFileOf(attempt.location)
-  const sameTest = cases.filter(({ entry }) => entry.name === attempt.name && entry.location !== undefined && specFileOf(entry.location) === file)
-  const exact = sameTest.find(({ entry }) => sourceKey(entry.location!) === sourceKey(attempt.location))
-  if (exact || sameTest.length !== 1) return exact
-  const [candidate] = sameTest
-  if (candidate.declared) return candidate
-  return sourceDeclarations(attempt, file, sourceTests).length === 1 ? candidate : undefined
 }
 
 /** The tests the current spec source declares under this attempt's title, in
@@ -215,6 +180,7 @@ export function statusBucket(status: string): keyof TestStatusCounts {
 
 /** The last recorded attempt at a test at one `file:line`. */
 export interface PlaybackAttempt {
+  caseKey?: string
   name: string
   title: string
   location: string
@@ -226,7 +192,7 @@ export interface PlaybackAttempt {
   error?: { message: string; snippet?: string }
 }
 
-export function playbackTests(events: PlaywrightPlaybackEvent[]): PlaybackAttempt[] {
+export function playbackTests(events: PlaywrightPlaybackEvent[], identity?: PlaybackIdentity): PlaybackAttempt[] {
   // One entry per (name, location). Retries and same-line reruns share both and
   // fold into the latest test-end; `declaredRoster` then folds attempts at
   // different lines of the same test. Two distinct tests that share a title
@@ -234,10 +200,12 @@ export function playbackTests(events: PlaywrightPlaybackEvent[]): PlaybackAttemp
   // live at different locations stay separate — the HTML export disambiguates
   // them via positional anchor IDs. Map preserves first-seen insertion order.
   const latest = new Map<string, PlaybackAttempt>()
-  for (const event of events) {
+  for (const [index, event] of events.entries()) {
     if (event.type !== 'test-end') continue
-    const key = `${event.test.name}@${event.test.location}`
-    latest.set(key, {
+    const caseKey = identity?.eventKeys.length === events.length ? identity.eventKeys[index]?.caseKey : undefined
+    const key = caseKey ?? `${event.test.name}@${event.test.location}`
+    const attempt: PlaybackAttempt = {
+      ...(caseKey ? { caseKey } : {}),
       name: event.test.name,
       title: event.test.title,
       location: event.test.location,
@@ -245,7 +213,8 @@ export function playbackTests(events: PlaywrightPlaybackEvent[]): PlaybackAttemp
       endedAt: event.time,
       durationMs: event.durationMs,
       ...(event.error ? { error: event.error } : {}),
-    })
+    }
+    latest.set(key, latestPlaybackAttempt([...(latest.has(key) ? [latest.get(key)!] : []), attempt])!)
   }
   return [...latest.values()]
 }

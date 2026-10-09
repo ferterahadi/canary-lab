@@ -125,8 +125,28 @@ Flights feature. It composes the existing activity and evidence readers for suit
 shortcuts, picker rails, pending suite rows, and the coverage ledger's generating
 state. Changes to the ordered coverage job IDs/statuses refresh suite metadata and
 invalidate coverage, including completion discovered by the existing 2.5-second
-active-job fallback. The controller adds no fetch loop or store; navigation,
-dialogs, and component composition remain in `App.tsx`.
+active-job fallback. The controller adds no fetch loop or store.
+
+**`WorkspaceProvider` builds the workspace state once, above `App`.**
+`apps/web/src/WorkspaceProvider.tsx`, mounted in `main.tsx` inside the store
+providers, runs navigation (the only URL writer), selection, workspace data and
+`useWorkspaceFlights` exactly once each, and owns the navigation actions that
+combine them. `App.tsx` reads it through `useWorkspace()` and keeps layout,
+dialogs, run starts, and the actions only it needs.
+
+**Deep consumers read two contexts instead of drilled props.** `WorkspaceProvider`
+fills `WorkStateProvider` (`apps/web/src/shared/state/work-state.tsx`) from its
+single `useWorkspaceFlights` call — the hook's coverage-job effect must run once
+per workspace, so leaves read the context rather than calling it again — and
+`WorkspaceActionsProvider` (`workspace-actions.tsx`) with its stable callbacks. Both values are memoised on the references they receive, so a
+consumer's own `useMemo`/effect re-runs exactly as it did with a prop. Every field
+is optional and the hooks return an empty object without a provider: an absent
+action hides its affordance, as an omitted prop did, so a component App never
+wires (the run detail inside Services or a benchmark arm) keeps its props instead
+of reading the context. `FlightPage` scopes the drill-throughs to the open flight
+with `FlightActionsProvider` (`features/flights/state/flight-actions.tsx`), built
+from its own props so App keeps binding the origin flight. Controlled open state
+stays a prop, and only `use-workspace-navigation.ts` writes the URL.
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
@@ -269,11 +289,16 @@ also settles the sidebar's Services badge and active-run consumers. Recovery
 stops once the detail settles; no additional index poll is introduced. Later
 stream observations and provider cleanup invalidate outstanding detail reads,
 preventing late responses from reverting newer state or restoring removed runs.
-Runs, Portify, and Benchmark share that per-record request guard in
+Runs, Flight, Portify, and Benchmark share that per-record request guard in
 `apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
-separate. Portify and Benchmark compose these guards with the reconnecting socket
+separate. Flight, Portify, and Benchmark compose these guards with the reconnecting socket
 through `apps/web/src/shared/state/record-stream.ts`, which owns connection labels,
-backoff, frame observation, and teardown. Their reducers and HTTP actions remain
+backoff, frame observation, and teardown. Flight retains its fixed 1.5-second reconnect
+delay and separate detail recovery. These three streams share snapshot, update, and
+removal reduction in `apps/web/src/shared/state/record-index-store.ts`, with domain
+row builders and ordering: Flight uses creation time; Portify and Benchmark use
+start time. Flight's five-second paused-attention reconciliation and local removals
+invalidate older reads through the same guard. Their HTTP actions remain
 feature-owned. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
 Portify and Benchmark detail demand belongs to the provider-owned
@@ -854,6 +879,22 @@ for existing callers. Once the signal gate accepts a file, it wakes the heal
 loop immediately. Timed wakeups still check cancellation and agent liveness,
 including the grace period for agents that write a signal just before exiting.
 
+The run launcher and standalone port verification share the readiness engine in
+`apps/web-server/src/features/runs/logic/runtime/service-readiness.ts`. Both
+check process failures before and after asynchronous probes, so a late healthy
+response cannot override an observed exit or completed compiler failure. Port
+verification probes its services concurrently and retains its own temporary
+process cleanup, dependency/port diagnostics, and solo-baseline triage. The run
+adapter retains manifest events, held boot sessions, and post-readiness monitoring.
+
+Coverage freshness, approvals, heal-task and test-review waits share subscription,
+settlement and timer disposal in `apps/web-server/src/shared/wait-for-condition.ts`.
+The run-specific adapter in `apps/web-server/src/mcp/wait-for-run-condition.ts`
+filters run events; approvals subscribe directly to approval records. Each caller
+supplies its outcome reader and timeout response. Coverage retains revision checks
+and shutdown cancellation, test approval still requires a durable receipt, and
+heal waits retain their immediate heartbeat, five-second cadence and bounded window.
+
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
 continues the same run until pass or terminal failure. At teardown, Canary Lab
@@ -878,8 +919,14 @@ guard remains the final barrier against another external effect.
 Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>/`:
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
 `external-commands.jsonl` (per-command audit for external heal), `fixes/` (captured
-repair diffs), `playwright-artifacts-keep/` (latest per-test artifacts across repair
-reruns), failure slices, and the manifest. There is no automatic retention/pruning:
+repair diffs, cumulative per run), `diffs/iteration-<n>.patch` (each journaled repair
+cycle's own diff), `playwright-artifacts-keep/` (latest per-test artifacts across repair
+reruns), `playwright-artifacts-history/execution-<n>/` (each Playwright execution's
+artifacts, never overwritten), `service-logs/<service>/execution-<n>.log` (what a
+service log held before a rerun or restart emptied it), failure slices, and the
+manifest. `manifest.playwrightExecutions` counts executions run-wide; the reporter
+stamps that number on each `test-begin`/`test-end` playback event, and the lifecycle
+records that start and end an execution carry it as `execution`. There is no automatic retention/pruning:
 runs persist on disk until removed manually via the Cleanup page's **Runs** tab
 (`GET /api/cleanup/runs`, backed by `RunStore.delete` / `trimArtifacts`), which deletes
 whole runs or trims Playwright artifacts while keeping the manifest and `runner.log`.
@@ -934,8 +981,21 @@ summary producer. Before accepting authored specs, the shared
 formats source, rejects unresolved syntax/comma-expression errors, and reports
 nested conditionals for review. External drafts and internal Flight authoring
 share this acceptance path; the `test-readability` CLI applies the same policy
-to existing source without modifying recorded run artifacts. Playwright listing
-and TypeScript validation run concurrently;
+to existing source without modifying recorded run artifacts.
+
+Spec inventory has one owner, `shared/spec-files.ts`. Suite consumers scan `e2e/`
+recursively for `.spec` and `.test` files ending in `.ts`, `.tsx`, `.js`, `.jsx`,
+`.mts`, `.cts`, `.mjs`, or `.cjs`. Evaluation and readability tools use the same
+scanner with their own selected roots. Descendant symlinks and generated trees
+are excluded. Playwright resolves runtime test names; its discovery cache hashes
+nested file paths and contents. The visible Tests column reconciles healthy
+workspace rosters every five seconds to recover missed file events; historical
+rosters stay event-driven and retain the existing error-retry policy. New snapshots and certificates record
+`specInventoryVersion: 2`; absent metadata retains the historical flat `.spec.ts`
+inventory and discloses that limitation. The standalone certificate checker is
+bundled from the shared scanner, with only Node built-ins in its output.
+
+Playwright listing and TypeScript validation run concurrently;
 both finish before mapping or another authoring pass. Flight mapping caches
 examined test/requirement pairs, including unmappable answers, and invalidates
 reuse when test bodies, shared helpers, support files, configuration, dependency
@@ -1075,6 +1135,9 @@ overlay + envset + WIP hydration. A worktree watcher publishes provisional diffs
 a periodic scan recovers missed file events. `captureFixes` writes the final diff before the
 worktree goes away. Changes shows provisional files immediately, but applying them to the
 source checkout or opening a PR waits until the run has stopped and finalized its patch.
+`shared/run-capture-state.ts` derives that finality for both HTTP guards and browser
+controls: terminal status, a recorded end time, and a non-provisional capture.
+Provisional worktree opening remains a separate read path.
 On this path, the heal agent does not mutate the source checkout;
 its edits reach the user as a patch file and, on a green healed run, may become a draft
 pull request (see [End-of-run pull request](#end-of-run-pull-request)). Non-portified
@@ -1128,6 +1191,21 @@ reconcile, `reapStaleRuns`, and `RunStore.abort` gate on, so an orphaned queued 
 is finalized at the next boot and its Stop button works in the meantime. The abort
 route asks the scheduler before the store — only the scheduler can free a queue slot
 this process still holds.
+
+Heartbeat freshness alone cannot tell a dead server from a live peer: a server that
+restarts inside `HEARTBEAT_STALE_MS` would read its predecessor's run as someone
+else's and leave it `healing` with nothing driving it. So every heartbeat is signed
+with its server's pid and a per-start instance id (`manifest.heartbeatOwner`,
+written by `FileRunStateSink`), and `judgeRunOwnership`
+(`runs/logic/runtime/run-ownership.ts`) answers `this-server`,
+`other-live-server` or `gone`. Boot and shutdown reconcile spare only a live peer's
+row. While the server runs, `RunStore.settleIfOrphaned` settles a `gone` row
+`aborted` with a `server-exited` lifecycle record — from a 15-second sweep in
+`server.ts`, and wherever an action finds no orchestrator: run selection and
+`run_ref` resolution for `start_run`, Stop Heal and Pause (REST and MCP),
+`signal_run`, `abort_run` and `wait_for_heal_task`. At action time it needs positive
+evidence of death, so an unsigned fresh row still reads as a peer's until it goes
+stale. `start_run(run_ref)` then restarts the settled run in a fresh runner.
 
 ### Getting Started ownership
 
@@ -1286,9 +1364,9 @@ Failure is recorded, never raised — a run's verdict must not depend on GitHub 
 reachable. Every outcome, success and failure, lands on `manifest.prAttempt` (`RunPrAttempt`
 in `shared/run-state.ts`: `at`, `auto`, and a per-repo `{ ok, url?, reason? }`), written
 through `stateSink.patchManifest` so the runs WebSocket pushes it live; successes also merge
-into `manifest.proposedPrs`. The web **Changes** tab
-(`apps/web/src/features/runs/components/ChangesTab.tsx`, a tab of `RunDetailColumn`, disabled
-rather than hidden when a run changed nothing) renders the captured diff per repo — served as
+into `manifest.proposedPrs`. The run-wide view of the web **Results & Fixes** tab
+(`apps/web/src/features/runs/components/ChangesTab.tsx`, inside `ResultsFixesTab`, always
+openable even when a run changed nothing) renders the captured diff per repo — served as
 text by `GET /api/runs/:runId/fixes/:repoName/patch`, which 404s when the run captured nothing
 for that repo and 410s once the Cleanup page trimmed the run directory away — next to the PR
 link, or the per-repo reason there is none.
@@ -1314,8 +1392,17 @@ link, or the per-repo reason there is none.
   legacy peers. Missing requirements, run/boot isolation, verification URLs,
   standalone portify review and unanswered flight checkpoints can elicit input.
   Existing explicit inputs and autopilot decisions bypass the ask. Unsupported
-  clients receive chat or UI-link recovery instructions; decline/cancel leaves
-  work pending. Form responses are validated and bound to their operation and
+  clients receive a browser link for form decisions. `approval-store.ts` persists
+  the shared question and receipt under workspace logs/approvals; Notifications
+  and the banner above Flight expose the same ID as the native chat form.
+  Browser answers replay the owning command's revision checks and share its
+  single-settlement receipt with native answers. `wait_for_approval` delivers
+  the original result to agents when the browser resolves the question.
+  Client decline/cancel keeps a browser-backed form pending. Some MCP hosts
+  leave a native form displayed after browser resolution; dismissing it returns
+  the receipt. The app refreshes open views through `approvals-changed`, with
+  periodic reconciliation for missed events. URL-mode checkpoints retain their
+  existing domain-owned UI and completion checks. Form responses are validated and bound to their operation and
   reviewed revision; in-process receipts prevent duplicate application on retry.
   Open requests expire after 30 minutes and across server restarts. URL-mode
   document input uses the coverage document rail. Secret entry uses a scoped,
@@ -1343,7 +1430,7 @@ link, or the per-repo reason there is none.
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
   no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
-  setup-installed default**: one always-loaded `exec` tool dispatching all 70 atomic
+  setup-installed default**: one always-loaded `exec` tool dispatching all registered atomic
   handlers). `lifecycle` and `full` remain direct-tool rollback/debug surfaces. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
@@ -1657,6 +1744,7 @@ procedure.
 | Auto-PR on a healed green run | `shouldAutoPropose` gate (`runs/logic/pr/auto-propose.ts`) ↔ `autoProposePr` default + parse (`runs/logic/runtime/launcher/project-config.ts`) + write validator (`config/routes/project-config.ts`) ↔ `RunPrAttempt` / `proposedPrs` on the manifest (`shared/run-state.ts`) ↔ the `fix` block on the `passed` result (`healFixOutcome`, `mcp/heal-task-wait.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "the run opens the draft PR; the agent reports it and opens none of its own". The rule is **not** in `REPAIR_INSTRUCTIONS`, so it reaches skill-less clients through the tool result alone: loosen the gate and the result text has to move with it, or an agent pushes a duplicate branch onto the one the run just opened. | `pr/auto-propose.test.ts` (gate + manifest writes) + `mcp/heal-fix-outcome.test.ts` (result shape); the skill prose is discipline only | `cl_sync-agent-surfaces` |
 | Read-only agent spawns keep both arms in step | the codex arm's `--sandbox read-only` ↔ the claude arm's `readOnly: true` (`buildClaudeAgenticArgs` → `--tools Read,Glob,Grep`, `agent-sessions/logic/agent-process.ts`) at all three read-only spawns: `coverage/logic/coverage/prd-summary.ts`, `coverage/logic/coverage/annotate-engine.ts`, `evaluation/logic/test-review/rewrite-agent.ts`. Headless agents must bypass permission prompts — `-p` has nobody to answer one — so the bound has to be a capability allowlist, not an approval; `--tools` and `--disallowedTools` are both evaluated ahead of the bypass. The resolver prefers claude, so an unflagged claude arm is the one that actually runs. **Still open:** the write-capable unattended spawns (flight `scout`/`docs`/`specs-coverage`, portify, benchmark sabotage) hold full filesystem and network reach for their whole window. | `agent-sessions/logic/agent-read-only-parity.test.ts` (fails when either arm drops its flag) | `cl_reuse-shared-logic` |
 | Heal workspace trust ↔ the folder-trust prompt | `healWorkspaceTrustRoot` + `ensureHealWorkspaceTrusted` (`runs/logic/runtime/run-heal-agent.ts`) ↔ Claude's persistent seed (`agent-sessions/logic/agent-workspace-trust.ts`) ↔ Codex's invocation-scoped whole-map `projects={...}` override plus `--disable hooks` (`runs/logic/runtime/heal-agent-spawn.ts`) ↔ the `trust-prompt` fingerprint (`runs/logic/runtime/heal-failure-classifier.ts`) ↔ `agentCause` (`shared/run-state.ts`) ↔ `healAgentCauseSuffix` + `HEAL_CAUSE_PHRASE` (`apps/web/.../StageStatusLines.tsx`). The heal REPL is the only agent spawned on an interactive TTY, so it is the only spawn either CLI's folder-trust prompt can stop. Claude trust inherits from the project root; Codex receives the same root only for that invocation, does not mutate `config.toml`, and cannot run unreviewed hooks. `CANARY_LAB_NO_WORKSPACE_TRUST=1` disables both paths. If trust setup ever stops running, the classifier keeps the stall from reading as "the agent tried and failed". | `agent-workspace-trust.test.ts` + `heal-workspace-trust.test.ts` + Codex command tests in `auto-heal.test.ts` + the real-tail cases in `heal-failure-classifier.test.ts` | `cl_locate-agent-session-logs` |
+| Unattended Claude spawns keep CLI dialogs off | `CLAUDE_UNATTENDED_SETTINGS` + `internalAgentInvocationArgs` (`agent-sessions/logic/agent-context-policy.ts`) ↔ `runAgentProcess` (every headless spawn) ↔ `buildAgentSpawnCommand` (heal REPL) ↔ `withClaudeUnattendedSettings` in `writeHealAgentIsolationSettings` (`runs/logic/runtime/heal-agent-isolation.ts`) ↔ the `cli-dialog` fingerprint (`runs/logic/runtime/heal-failure-classifier.ts`) ↔ `agentCause` (`shared/run-state.ts`) ↔ `healAgentCauseSuffix` + `HEAL_CAUSE_PHRASE`. The documented `skillOverrides: {"auto-mode-setup": "off"}` switch keeps the "Teach auto mode about your environment?" dialog from holding the heal REPL. Every claude spawn carries exactly ONE `--settings`: a second one replaces the first (measured, claude 2.1.286), so the heal isolation file carries the policy in place of the inline JSON. If the dialog still appears, the classifier names it instead of reporting a silent agent. | `agent-context-policy.test.ts` (incl. a real-shell round trip) + the single-`--settings` pins in `agent-process.test.ts` and `auto-heal.test.ts` + `heal-agent-isolation.test.ts` + the real-tail cases in `heal-failure-classifier.test.ts` | `cl_reuse-shared-logic` |
 | Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the six wired adapters (`scout.ts`, `docs.ts`, `prd-summary.ts`, `specs-coverage.ts` — which parks twice per pass: authoring, then mapping — `run.ts`, which parks ONCE while the client drives the standalone heal tools (`run.ts` starts the run external-heal UNCLAIMED via the runs route's `healAgent.claimable:false` hook), and `evaluation-export.ts`, whose localized mode is the external default) ↔ server-owned Parallel setup after the Report, plus the legacy external-work consumer in `portify.ts` ↔ `'external-work'` + `ExternalWorkCheckpointData` in `shared/flights/types.ts` ↔ `flightNext` steering + the oversized-payload fallback + immediate Report handoff (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` plus the nested run skill in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `stages.portify.test.ts` + `externalizable.test.ts` + `flight.stand-down.test.ts` + `flight.pipeline.test.ts` | `cl_sync-agent-surfaces` |
 | **An externally driven flight is read-only in the web UI, with one cooperative takeover path** | `isExternallyDriven` + `flightAwaitsUser` + `EXTERNAL_WORK_COPY` (`apps/web/.../flights/lib/external-work.ts`) ↔ the controls that consult them (`FlightDetail.tsx` header + Pause, `FlightControls.tsx` Continue/Abort, `CheckpointControls.tsx`, `RequirementsFork.tsx`, `FlightSummaryStrip.tsx` autopilot) ↔ `flightNeedsAttention` (`shared/flights/attention.ts`) and the slim consumers (pill, picker, `FeaturesColumn`) ↔ `stageProducer` mirrored onto `FlightIndexEntry` (`shared/flights/types.ts`, written in `flights/logic/store.ts`) ↔ the SERVER half, `rejectForeignFlightDecision` + `MCP_ORIGIN_HEADER` (`flights/routes/flight-decision-origin.ts`, wired into `flights-lifecycle.ts` and stamped by the `flightsRequest` inject in `server.ts`) ↔ the takeover request/force routes and conductor guard (`flights-lifecycle.ts`, `conductor.ts`) ↔ MCP result steering + the umbrella `canary-lab/SKILL.md` in all three channels. Hiding buttons is not enough: MCP drives the flight through the SAME `/api/flights/:id/*` routes the browser posts to, so only the origin header separates the driver from a bystander. The line is decisions vs unblocking — respond, pause, resume, redo and autopilot are the agent's; Abort, dirty-repo remedy, and the cooperative takeover handshake stay with the user. Force is confirm-gated because the external process cannot be interrupted. Live-only: once the flight settles the record is the UI's again. | `flight-decision-origin.test.ts` + takeover wiring in `flights-control.test.ts` + `flight.stand-down.test.ts` + `external-work.test.ts` + `FlightPage.checkpoints.test.tsx` + `FlightPage.controls.test.tsx` | `cl_sync-agent-surfaces` |
 | **A stage's work is stoppable — every stage, one contract** | `StageAdapter.teardown(ctx): StageJob \| null` (REQUIRED, `flights/logic/flight-stages.ts`) ↔ the four job factories (`flights/logic/stages/stage-jobs.ts`) ↔ `interruptStage` (awaited by `pauseFlight`/`abortFlight`) ↔ `stopAgentProcesses` scopes threaded through `stages/context.ts`, `coverage/.../feature-docs.ts` + `prd-summary.ts`, `coverage/.../coverage-engine.ts` + `annotate-engine.ts`. It replaced an OPTIONAL `interrupt?` hook that was silently skipped when absent, so ten of eleven adapters opted out with no compile error — a pause stopped the flight's *waiting* while the portify agent kept editing the user's repo. Required-ness is the invariant: a new stage cannot compile without answering. Portify's stop is deliberately state-aware (a verified `ready-to-save` review survives a pause, because resume re-adopts it). | `stage-jobs.test.ts` (incl. a table asserting all 11 adapters answer) + `conductor.pause.test.ts` (awaited order, live teardown ctx) | `cl_run-evidence-invariants` |
@@ -1672,3 +1760,19 @@ procedure.
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |
+
+### Flight attention ownership
+
+`apps/web-server/src/features/flights/logic/attention.ts` owns the read-time
+attention assessment. REST, the Flight stream, the notification runtime, and MCP
+reads consume it; the persisted flight remains its execution journal. Current
+requirements and target-aware coverage evidence can resolve an earlier failed
+Requirements or Tests & coverage stage without rewriting its error or starting
+work. Stages without equivalent completion checks remain actionable. Failed
+reads retain an unavailable assessment instead of claiming resolution.
+
+Workspace changes trigger reassessment, backed by five-second reconciliation.
+Paused-flight browser readers also reconcile every five seconds and reject reads
+superseded by a pushed update. Feature-change replies carry the same assessment;
+when this reader is configured their wait is bounded to ten seconds. Passive
+agent clients still need a tool response or an active wait to receive it.

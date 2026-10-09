@@ -1,9 +1,8 @@
 // Disk reclamation: run logs, worktrees, portify records, run artifacts.
 // Split out of client.ts; see that barrel for the shared surface.
 
-import type { CleanupWorktree } from './types-cleanup'
-import type { CleanupListing, PortifyCleanupListing } from '@shared/cleanup-listing'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import type { CleanupListing, CleanupWorktree, PortifyCleanupListing } from '@shared/cleanup-listing'
+import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
 
 // Disk-usage listing for the Log Cleanup page: every run + orphan dir with
 // folder/artifact byte sizes and reclaimable totals.
@@ -46,23 +45,13 @@ export function openWorktreePath(
   path: string,
   opts?: ClientOptions,
 ): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/cleanup/worktrees/open`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
-    fetchImpl,
-  )
+  return requestJson(`/api/cleanup/worktrees/open`, 'POST', { path }, opts)
 }
 
 // Remove one worktree via `git worktree remove` (+ prune). Server returns 409
 // when the worktree belongs to a still-active run/benchmark.
 export function removeWorktree(path: string, opts?: ClientOptions): Promise<{ removed: boolean; freedBytes: number }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/cleanup/worktrees`,
-    { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) },
-    fetchImpl,
-  )
+  return requestJson(`/api/cleanup/worktrees`, 'DELETE', { path }, opts)
 }
 
 // Reclaim a terminal run's Playwright artifacts (videos/traces) while keeping

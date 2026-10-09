@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { assertCoverageJobAvailable, createCoverageJobManifest } from './creation'
 import { regeneratePrdSummary, type RegeneratePrdSummaryResult } from '../feature-docs'
 import { runCoverageEngine, type RunCoverageEngineResult } from '../coverage-engine'
 import type { AnnotateAdapter } from '../annotate-engine'
@@ -10,19 +10,12 @@ import type {
   CoverageJobModels,
 } from '../../../../../../../../shared/coverage/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
+import { errorMessage } from '../../../../../../../../shared/lib/error-message'
 
 // Background driver + single-flight gate for coverage jobs. The start path
 // rejects a second job of the same kind for the same feature while one runs
 // (server-side guard — UI disabling is cosmetic). The actual work runs detached;
 // progress is streamed into the manifest log (saved on each chunk → WS/poll).
-
-export class CoverageJobConflictError extends Error {
-  readonly statusCode = 409
-  constructor(public readonly feature: string, public readonly kind: CoverageJobKind, public readonly existingJobId: string) {
-    super(`a ${kind} job is already running for ${feature}`)
-    this.name = 'CoverageJobConflictError'
-  }
-}
 
 export interface StartCoverageJobArgs {
   featuresDir: string
@@ -55,32 +48,20 @@ export interface StartCoverageJobResult {
   completion: Promise<void>
 }
 
-function defaultJobId(): string {
-  return `cj_${crypto.randomBytes(6).toString('hex')}`
-}
-
 export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRunnerDeps): StartCoverageJobResult {
   const now = deps.now ?? (() => new Date().toISOString())
-  const newJobId = deps.newJobId ?? defaultJobId
   const regenerate = deps.regenerate ?? regeneratePrdSummary
   const runEngine = deps.runEngine ?? runCoverageEngine
   const { store } = deps
 
-  // Single-flight: refuse a concurrent job of the same kind for this feature.
-  const active = store.activeFor(args.feature, args.kind)
-  if (active) throw new CoverageJobConflictError(args.feature, args.kind, active.jobId)
+  assertCoverageJobAvailable(store, args.feature, args.kind)
 
-  const jobId = newJobId()
   let manifest: CoverageJobManifest = {
-    jobId,
-    feature: args.feature,
-    kind: args.kind,
+    ...createCoverageJobManifest({ feature: args.feature, kind: args.kind, log: '' }, { now, newJobId: deps.newJobId }),
     ...(args.chainedFromJobId ? { chainedFromJobId: args.chainedFromJobId } : {}),
     ...(args.models ? { models: args.models } : {}),
-    status: 'running',
-    startedAt: now(),
-    log: '',
   }
+  const { jobId } = manifest
   store.save(manifest)
 
   const append = (chunk: string) => {
@@ -100,7 +81,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     store.save(manifest)
   }
   const finishErr = (err: unknown) => {
-    manifest = { ...manifest, status: 'failed', endedAt: now(), error: err instanceof Error ? err.message : String(err) }
+    manifest = { ...manifest, status: 'failed', endedAt: now(), error: errorMessage(err) }
     store.save(manifest)
   }
 
@@ -129,7 +110,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           )
           chainedJobId = chained.manifest.jobId
         } catch (chainErr) {
-          append(`[chain] coverage not started: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}\n`)
+          append(`[chain] coverage not started: ${errorMessage(chainErr)}\n`)
         }
         finishOk({ requirementCount: res.summary.requirements.filter((r) => !r.deprecated).length }, chainedJobId ? { chainedJobId } : undefined)
       } else {

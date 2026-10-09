@@ -1,3 +1,5 @@
+import type { AgentProcessHandle } from '../../../agent-sessions/logic/agent-process'
+import { realpathOrSelf } from '../../../../shared/realpath-or-self'
 // Validating and setting up one port-ification workflow: git prerequisites,
 // the scratch worktrees, the manifest, and the orchestrator with its injected
 // I/O. Split out of runner.ts, where it was a 280-line closure inside
@@ -6,7 +8,6 @@
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { readWorkingTree, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
 import { resolveRepoPath } from '../../../../shared/repo-identity'
@@ -20,7 +21,8 @@ import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, po
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { hasDeclaredPortInjection, verifyDoubleBoot } from './verify'
-import type { PortifyManifest, PortifyRepoState, PortifyProducer, PortifyExternalSession } from './types'
+import type { PortifyProducer, PortifyExternalSession } from './types'
+import type { PortifyManifest, PortifyRepoState } from '../../../../../../../shared/portify-index'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,
@@ -44,9 +46,9 @@ import {
   canonicalConfigDiff,
   captureOverlayRepos,
   readFileOrNull,
-  realpathOrSelf,
   restoreConfig,
 } from './portify-overlay-capture'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 export interface PrepareWorkflowContext {
   deps: PortifyRunnerDeps
@@ -145,7 +147,7 @@ export async function prepareWorkflow(
   deps.store.save(manifest)
 
   let aborted = false
-  const children = new Set<ChildProcess>()
+  const children = new Set<AgentProcessHandle>()
   // External edits happen in the user's own client — no local session to pin.
   const sessionId = opts.producer === 'internal' && agent === 'claude' ? randomUUID() : undefined
   const state: ActiveWorkflow = {
@@ -158,7 +160,7 @@ export async function prepareWorkflow(
     seededFrom: [],
     abort: () => {
       aborted = true
-      for (const c of children) { try { c.kill('SIGTERM') } catch { /* gone */ } }
+      for (const handle of children) handle.stop('SIGTERM')
     },
   }
   active.set(workflowId, state)
@@ -326,10 +328,7 @@ export async function prepareWorkflow(
         // Fresh config: the slots recorded alongside the patch must be the ones
         // this port-ification just declared, not the pre-edit set.
         const repos = await captureOverlayRepos(state, deps.loadFeatures().find((f) => f.name === feature.name) ?? feature)
-        fs.writeFileSync(
-          paths.pendingOverlayPath,
-          JSON.stringify({ version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig }, null, 2),
-        )
+        atomicWriteJson(paths.pendingOverlayPath, { version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig })
       } catch { /* best-effort — the live save path never needs the capture */ }
     },
 

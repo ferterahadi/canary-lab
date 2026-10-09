@@ -1,23 +1,7 @@
 import type { CoverageRecalculation } from '@/shared/state/use-coverage-recalculation'
 import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@shared/flights/types'
-import type { CoverageJobIndexEntry } from '@shared/coverage/types'
-import { useInvalidationKey } from '@/shared/state/invalidation'
-import type { FeatureActivity, FeatureExternalHistory } from '../state/feature-activity'
-import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import type { ConfigTab, RunOpenTarget } from '@/shared/lib/workspace-view-state'
-import { type DerivedStage } from '../lib/derived-stages'
+import { FlightActionsProvider, type FlightActions } from '../state/flight-actions'
 import { FlightDetail } from './FlightDetail'
-
-/** Drill-through targets: each stage view is a LENS onto the real underlying
- *  surface — the actual run detail, coverage ledger, or supporting config —
- *  never a re-implementation of them (R6). Parallel readiness itself stays in
- *  Flight; its optional drill opens Ports only as supporting configuration. */
-export interface FlightDrillThroughs {
-  /** `target` says where in the run detail to land — a failing test (Playwright)
-   *  or a named tab (the run's captured fixes go to Changes). */
-  onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
-  onOpenCoverage?: (feature: string) => void
-}
 
 export function FlightPage({
   flightId,
@@ -29,10 +13,6 @@ export function FlightPage({
   indexEntry,
   onSelectFlight,
   onClose,
-  activity,
-  externalHistory,
-  coverageJobs,
-  derivedStages,
   onStartFlight,
   onOpenConfig,
   onOpenSpecReview,
@@ -59,26 +39,6 @@ export function FlightPage({
   /** The flight's `/ws/flights` index row — seeds the header/strip/rail on a
    *  cold open of a settled flight, before its one-time REST read resolves. */
   indexEntry?: FlightIndexEntry | null
-  /** Per-feature live activity (runs / portify / authoring) — App owns it. */
-  activity?: Map<string, FeatureActivity>
-  /** Persistent external-work provenance by feature + stage. Unlike activity,
-   *  this remains after the task settles so Activity can explain who did it. */
-  externalHistory?: FeatureExternalHistory
-  coverageJobs?: CoverageJobIndexEntry[]
-  /** R81: evidence-derived rails per feature — App owns the one instance (same
-   *  ownership rule as `activity`). Supplies the stages for a derived token. */
-  derivedStages?: Map<string, DerivedStage[]>
-  /** Opens the flight launcher for this feature — the "Start fresh" handoff
-   *  (R75): full restart with editable intent + repos lives THERE, never in
-   *  the re-run dialog. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup, and
-   *  the Parallel-readiness drill-through (which aims at the Ports tab). */
-  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
-  /** Opens the changed-tests review — the run hero's "verdict from run-start
-   *  snapshot · N pending edits" link. Omitted, the hero states the fact
-   *  without a link. */
-  onOpenSpecReview?: () => void
   /** The routed stage selection (`?stage=…`) and its setter — App owns them so
    *  the pick survives a drill-through and a refresh. Pass both or neither. */
   stage?: FlightStageKey | null
@@ -86,13 +46,12 @@ export function FlightPage({
   /** The routed Activity log entry (`?log=…`) and its setter. Pass both or neither. */
   log?: string | null
   onOpenLog?: (id: string | null) => void
-} & FlightDrillThroughs) {
-  // The flight detail refetches on `flights-changed`; the setup digest on
-  // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
-  const refreshKey = useInvalidationKey('flights')
-  const configRefreshKey = useInvalidationKey('repos')
-  const docsRefreshKey = useInvalidationKey('coverage')
+} & FlightActions) {
+  // The live work snapshot (activity, provenance, coverage jobs, derived rails)
+  // reaches the detail through WorkState; this page scopes the drill-through
+  // actions to the open flight for every stage below it.
   return (
+    <FlightActionsProvider onOpenRun={onOpenRun} onOpenCoverage={onOpenCoverage} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} onStartFlight={onStartFlight}>
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
       {recalculation && recalculation.status !== 'started' && (
         <div role={recalculation.status === 'failed' ? 'alert' : 'status'} className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs">
@@ -100,7 +59,8 @@ export function FlightPage({
           {recalculation.status === 'failed' && <button type="button" className="cl-button" onClick={onRetryRecalculation}>Retry recalculation</button>}
         </div>
       )}
-      <FlightDetail activityRequest={recalculation?.request} flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} log={log} onOpenLog={onOpenLog} />
+      <FlightDetail activityRequest={recalculation?.request} flightId={flightId} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} stage={stage} onSelectStage={onSelectStage} log={log} onOpenLog={onOpenLog} />
     </div>
+    </FlightActionsProvider>
   )
 }

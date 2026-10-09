@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { RunStatus } from '@shared/run-state'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret } from '@/shared/ui/Icons'
 import { SlideOverPanel } from '@/shared/ui/Overlays'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { RunRow } from './RunRow'
@@ -95,13 +95,7 @@ export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
                     className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider cl-hover-row"
                     style={{ color: 'var(--text-muted)' }}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="inline-flex transition-transform duration-150"
-                      style={{ transform: finishedOpen ? 'rotate(90deg)' : 'none' }}
-                    >
-                      <ChevronRightIcon />
-                    </span>
+                    <DisclosureCaret open={finishedOpen} className="inline-flex" />
                     <span>Finished · {finishedRuns.length}</span>
                   </button>
                   {finishedOpen && (

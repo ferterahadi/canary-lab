@@ -1,3 +1,6 @@
+import { deriveRunCaptureState } from '../../../../../../shared/run-capture-state'
+import { isPathUnder } from '../../../shared/path-containment'
+import { resolveRunAgentSessionRef } from '../../agent-sessions/logic/run-agent-session-ref'
 import { proposalRecord } from '../logic/pr/proposal-record'
 // Runs REST — reads: index, detail, verification report, agent session, and the
 // Playwright artifact stream. Split out of runs.ts; handler bodies are unchanged.
@@ -6,7 +9,6 @@ import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
 import { updateManifest } from '../logic/runtime/manifest'
-import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { applyFixCapture, buildApplyPreflight } from '../logic/apply-fixes'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -19,22 +21,15 @@ import { EMPTY_AGENT_MODELS } from '../../../../../../shared/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { readableTerminalLog } from '../logic/runtime/log-enrichment'
-import {
-  locateMostRecentAgentSessionRef,
-  parseAgentSessionRefFile,
-  selectAgentSessionRef,
-} from '../../agent-sessions/logic/agent-session-log'
+import { WINDOW_MAX_LINES, serviceLogExcerpts, serviceLogLines } from '../logic/service-log-excerpts'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
-import { isTerminalRunStatus, type RunProposedPr } from '../../../../../../shared/run-state'
+import { type RunProposedPr } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 const READABLE_LOGS_DIR = 'readable-logs'
-
-function captureIsFinal(manifest: RunManifest): boolean {
-  return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
-}
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
@@ -48,6 +43,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
+    deps.runArtifactObserver?.observe(req.params.runId)
     const detail = deps.store.get(req.params.runId)
     if (!detail) return notFound(reply, 'run')
     return withSingleAttemptDetailState(detail, deps.store.logsDir)
@@ -67,7 +63,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes to apply' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before applying its changes' }
     }
@@ -95,7 +91,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before applying its changes' }
     }
@@ -131,7 +127,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     try {
       return { opened: true, path: target, editor: launchEditorDir(editor, target) }
     } catch (err) {
-      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: target, error: errorMessage(err) }
     }
   })
 
@@ -145,8 +141,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     const file = req.body?.file
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
     const relative = typeof file === 'string' && path.isAbsolute(file) ? path.relative(runDir, file) : ''
-    const inRun = (rel: string) => Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel)
-    if (!inRun(relative) || !relative.endsWith('.log') || relative.split(path.sep)[0] === READABLE_LOGS_DIR) {
+    if (!relative || !isPathUnder(file!, runDir, false) || !relative.endsWith('.log') || relative.split(path.sep)[0] === READABLE_LOGS_DIR) {
       reply.code(400)
       return { error: 'file must be a raw .log file inside this run' }
     }
@@ -154,7 +149,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     try {
       // The lexical check above names a run file; the real path must agree, so
       // a symlink placed in the run dir cannot read something outside it.
-      if (!inRun(path.relative(fs.realpathSync(runDir), fs.realpathSync(file!)))) {
+      if (!isPathUnder(fs.realpathSync(file!), fs.realpathSync(runDir), false)) {
         reply.code(400)
         return { error: 'file must be a raw .log file inside this run' }
       }
@@ -196,6 +191,58 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     }
   })
 
+  // One journaled repair cycle's own diff (`diffs/iteration-<n>.patch`), as
+  // opposed to the run's cumulative capture above. Runs recorded before every
+  // cycle was persisted lack small ones; the journal entry's inline block is
+  // then the only copy, and 404 says so.
+  app.get<{ Params: { runId: string; iteration: string } }>('/api/runs/:runId/cycle-patches/:iteration', async (req, reply) => {
+    if (!/^\d+$/.test(req.params.iteration)) {
+      reply.code(400)
+      return { error: 'invalid iteration' }
+    }
+    if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
+    const iteration = Number(req.params.iteration)
+    const patchPath = path.join(runDirFor(deps.store.logsDir, req.params.runId), 'diffs', `iteration-${iteration}.patch`)
+    try {
+      return { iteration, patchPath, diff: fs.readFileSync(patchPath, 'utf-8') }
+    } catch {
+      reply.code(404)
+      return { error: 'no persisted patch for this cycle' }
+    }
+  })
+
+  // One test attempt's service output: the span between its markers in the
+  // log that kept that execution. Bounded, so a large log never ships whole.
+  // `of` counts the attempts sharing `name` in that execution; absent, the
+  // attempt is the only one.
+  app.get<{ Params: { runId: string }; Querystring: { execution?: string; name?: string; occurrence?: string; of?: string } }>('/api/runs/:runId/service-excerpts', async (req, reply) => {
+    const { execution, name, occurrence = '0', of = '1' } = req.query
+    if (!execution || ![execution, occurrence, of].every((v) => /^\d+$/.test(v)) || !name || Number(occurrence) >= Number(of)) {
+      reply.code(400)
+      return { error: 'execution, name and an occurrence below of are required' }
+    }
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return notFound(reply, 'run')
+    const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    return { execution: Number(execution), excerpts: serviceLogExcerpts(runDir, detail.manifest, Number(execution), name, { occurrence: Number(occurrence), of: Number(of) }) }
+  })
+
+  // A window of one service's retained log, for the anchored full-log view.
+  app.get<{ Params: { runId: string; service: string }; Querystring: { execution?: string; from?: string; count?: string } }>('/api/runs/:runId/service-logs/:service/lines', async (req, reply) => {
+    const { execution, from = '1', count = String(WINDOW_MAX_LINES) } = req.query
+    if (!execution || ![execution, from, count].every((v) => /^\d+$/.test(v))) {
+      reply.code(400)
+      return { error: 'execution, from and count must be numbers' }
+    }
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return notFound(reply, 'run')
+    const service = detail.manifest.services.find((s) => s.safeName === req.params.service)
+    if (!service) return notFound(reply, 'service')
+    const window = serviceLogLines(runDirFor(deps.store.logsDir, req.params.runId), detail.manifest, service, Number(execution), Number(from), Number(count))
+    if (!window) return notFound(reply, 'service log for this execution')
+    return window
+  })
+
   // Can we open a PR from this run's captured fix? Per-repo origin + default
   // branch + push rights (side-effect-free). The PR dialog re-runs this on open
   // (auth changes outside the app). 404/409 mirror apply-fixes.
@@ -207,7 +254,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before opening a pull request' }
     }
@@ -226,7 +273,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
-    if (!captureIsFinal(detail.manifest)) {
+    if (!deriveRunCaptureState(detail.manifest).finalCapture) {
       reply.code(409)
       return { error: 'wait for the run to stop before opening a pull request' }
     }
@@ -301,18 +348,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       return { reason: 'run-not-found' }
     }
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-    // Prefer the most-recently-modified agent JSONL on disk over the
-    // orchestrator-written ref file. The ref file is only updated when the
-    // heal loop's cleanup runs cleanly — a SIGKILL'd server or a one-off
-    // locator miss leaves it pointing at a stale agent (e.g. claude) even
-    // when codex has since produced newer cycles for the same runDir. Fall
-    // back to the ref file when no on-disk logs are locatable.
-    const refPath = buildRunPaths(runDir).agentSessionRefPath
-    let raw: string | null = null
-    try { raw = fs.readFileSync(refPath, 'utf-8') } catch { /* missing or unreadable */ }
-    const parsed = raw ? parseAgentSessionRefFile(raw) : null
-    const ref = locateMostRecentAgentSessionRef(runDir)
-      ?? (parsed ? selectAgentSessionRef(parsed) : null)
+    const ref = resolveRunAgentSessionRef(runDir)
     if (!ref) {
       reply.code(404)
       return { reason: 'no-session-ref' }
@@ -337,7 +373,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     for (const base of bases) {
       const requested = path.resolve(base, req.params['*'])
       const rel = path.relative(base, requested)
-      if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+      if (!isPathUnder(requested, base, true)) continue
       validRel = rel
       try {
         const stat = fs.statSync(requested)
@@ -351,6 +387,29 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(400)
       return { error: 'invalid artifact path' }
     }
+    return notFound(reply, 'artifact')
+  })
+
+  // One execution's immutable artifact copy (`playwright-artifacts-history/
+  // execution-<n>/`). Separate from the route above because that one answers
+  // "the latest copy", which is exactly what a before-repair screenshot is not.
+  app.get<{ Params: { runId: string; execution: string; '*': string } }>('/api/runs/:runId/execution-artifacts/:execution/*', async (req, reply) => {
+    if (!/^\d+$/.test(req.params.execution)) {
+      reply.code(400)
+      return { error: 'invalid execution' }
+    }
+    const base = path.join(buildRunPaths(runDirFor(deps.store.logsDir, req.params.runId)).playwrightArtifactsHistoryDir, `execution-${req.params.execution}`)
+    const requested = path.resolve(base, req.params['*'])
+    if (!isPathUnder(requested, base, true)) {
+      reply.code(400)
+      return { error: 'invalid artifact path' }
+    }
+    try {
+      if (fs.statSync(requested).isFile()) {
+        reply.type(contentTypeFor(requested))
+        return reply.send(fs.createReadStream(requested))
+      }
+    } catch { /* not retained: answered below */ }
     return notFound(reply, 'artifact')
   })
 }

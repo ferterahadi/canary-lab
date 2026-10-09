@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore } from './store'
 import { startFlight, respondToFlightCheckpoint, type FlightConductorDeps } from './conductor'
@@ -10,6 +9,9 @@ import { buildFlightStageAdapters } from './stages/index'
 import type { FlightStageDeps } from './stages/context'
 import { writeEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import type { FlightOptions } from '../../../../../../shared/flights/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-e2e-')
 
 // Integration proof over the real fixture repo (tools/fixtures/first-flight-app):
 // the REAL conductor + REAL stage adapters (similarity scan, scout validation,
@@ -29,7 +31,7 @@ let repoDir: string
 let store: FlightRunStore
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-e2e-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'first-flight-app')
@@ -38,7 +40,6 @@ beforeEach(() => {
   fs.cpSync(FIXTURE, repoDir, { recursive: true })
   store = new FlightRunStore(logsDir)
 })
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 function scoutAnswer(feature: string, repo: string): string {
   const config = [

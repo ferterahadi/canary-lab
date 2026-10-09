@@ -12,6 +12,8 @@ import { enrichSummaryWithLogs, stripAnsi } from './log-enrichment'
 import { classifyJournalOutcome, updateLatestPendingJournalOutcome } from './heal-journal'
 import { writeHealIndex } from './heal-index'
 import { getSummaryPath } from './paths'
+import { buildRunPaths } from './run-paths'
+import { appendJsonLine } from '../../../../shared/json-lines'
 import { extractTraceSummary } from './trace-enrichment'
 import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
 import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
@@ -23,6 +25,10 @@ class SummaryReporter implements Reporter {
   private readonly environment = process.env.CANARY_LAB_ENV
   private readonly exclusionsAtStart = new Map<string, EnvironmentExclusion>()
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
+  // Which run-wide Playwright invocation this reporter process belongs to. The
+  // event stream is shared by every execution of the run, so without it a
+  // reader can only bracket attempts by lifecycle timestamps.
+  private readonly execution = executionFromEnv(process.env.CANARY_LAB_EXECUTION)
   private readonly initialSummary = readExistingSummary()
   private results: TestEntry[] = []
   private knownTests: KnownTestEntry[] = knownTestsFromExistingSummary(this.initialSummary)
@@ -494,10 +500,10 @@ class SummaryReporter implements Reporter {
   }
 
   private writePlaybackEvent(event: PlaybackEvent): void {
-    const summaryPath = getSummaryPath()
-    const eventPath = path.join(path.dirname(summaryPath), 'playwright-events.jsonl')
-    fs.mkdirSync(path.dirname(eventPath), { recursive: true })
-    fs.appendFileSync(eventPath, JSON.stringify(event) + '\n')
+    const stamped = this.execution !== undefined && (event.type === 'test-begin' || event.type === 'test-end')
+      ? { ...event, execution: this.execution }
+      : event
+    appendJsonLine(buildRunPaths(path.dirname(getSummaryPath())).playwrightEventsPath, stamped)
   }
 
   private reconcileJournalOutcome(): void {
@@ -514,6 +520,13 @@ class SummaryReporter implements Reporter {
       // reconciliation is best-effort when the file is absent or mid-edit.
     }
   }
+}
+
+/** A positive integer, or nothing: a hand-run `npx playwright test` against
+ *  this reporter has no orchestrator numbering its executions. */
+function executionFromEnv(raw: string | undefined): number | undefined {
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 export default SummaryReporter

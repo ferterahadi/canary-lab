@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { formatBytes } from '@/shared/lib/format'
 import { Tooltip } from '@/shared/ui/Tooltip'
+import { DisclosureCaret } from '@/shared/ui/Icons'
+import { activateOnKey } from '@/shared/ui/keyboard'
+import type { DocDisclosure } from '@/shared/ui/DocTree'
 import { DocRelink } from './DocRelink'
 
 export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken, onRelink, disclosure }: {
@@ -21,7 +24,7 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
   onRelink?: (targetPath: string) => Promise<void>
   /** Turns the pill into a disclosure over the docs it was generated from: the
    *  caret toggles them, the rest of the pill still opens the file. */
-  disclosure?: { expanded: boolean; onToggle: () => void; sourceCount: number }
+  disclosure?: DocDisclosure
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -35,7 +38,7 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
         role="button"
         tabIndex={broken ? -1 : 0}
         aria-disabled={broken || undefined}
-        onKeyDown={(e) => { if (!broken && e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen() } }}
+        onKeyDown={broken ? undefined : activateOnKey(onOpen, { ownTargetOnly: true })}
         title={broken ? 'Source unavailable' : `Open ${dirPrefix}${relPath} in editor`}
         style={{
           padding: '9px 11px',
@@ -57,10 +60,7 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
             className="cl-icon-button -mr-1 h-6 w-5 shrink-0"
             style={{ color: 'var(--text-muted)' }}
           >
-            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ transform: disclosure.expanded ? 'rotate(90deg)' : undefined, transition: 'transform 120ms' }}>
-              <path d="M9 18l6-6-6-6" />
-            </svg>
+            <DisclosureCaret open={disclosure.expanded} className="inline-flex" strokeWidth={2} />
           </button>
         )}
         <span

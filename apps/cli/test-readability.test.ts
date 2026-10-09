@@ -1,19 +1,19 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkTestFiles, main } from './test-readability'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-readability-')
 let root: string
 let exitCode: typeof process.exitCode
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-readability-'))
+  root = tempDir()
   exitCode = process.exitCode
 })
 afterEach(() => {
   process.exitCode = exitCode
   vi.restoreAllMocks()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 function write(relative: string, content = 'const first = 1, second = first + 1\n'): string {

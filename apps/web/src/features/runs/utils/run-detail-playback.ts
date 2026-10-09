@@ -1,4 +1,6 @@
-import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
+import { latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
+import { playbackAttempts } from '@shared/run-evidence'
+import type { PlaywrightArtifact, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
   PlaywrightArtifactPolicy,
@@ -6,6 +8,7 @@ import type {
   PlaywrightScreenshotMode,
 } from '@shared/configs/playwright-modes'
 import { parseLocation } from '@/shared/test-numbering'
+import { plural } from '@shared/lib/plural'
 
 export interface PlaybackTest {
   name: string
@@ -22,6 +25,12 @@ export interface PlaybackTest {
   steps: Array<{ title: string; category: string; ended: boolean }>
 }
 
+export interface PlaybackCase extends PlaybackTest {
+  caseKey: string
+  ids: string[]
+  locations: string[]
+}
+
 export interface PlaybackArtifacts {
   screenshots: PlaywrightArtifact[]
   links: PlaywrightArtifact[]
@@ -34,78 +43,44 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   trace: 'retain-on-failure',
 }
 
-export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[] {
-  const tests = new Map<string, PlaybackTest>()
-  const activeKeyByName = new Map<string, string>()
-  const latestKeyByName = new Map<string, string>()
-  // Tracks the `location` (file:line) for each attempt's key — only test-begin
-  // and test-end events carry location, so we record it as we see them.
-  const locationByKey = new Map<string, string>()
-  for (const event of events ?? []) {
-    let key = activeKeyByName.get(event.test.name) ?? latestKeyByName.get(event.test.name) ?? event.test.name
-    if (event.type === 'test-begin') {
-      key = `${event.test.name}:${event.time}`
-      activeKeyByName.set(event.test.name, key)
-      latestKeyByName.set(event.test.name, key)
-    }
-    if ((event.type === 'test-begin' || event.type === 'test-end') && event.test.location) {
-      locationByKey.set(key, event.test.location)
-    }
-    const current = tests.get(key) ?? { name: event.test.name, title: event.test.title, steps: [] }
-    current.title = event.test.title || current.title
-    if (event.type === 'test-begin') current.startedAt = event.time
-    if (event.type === 'step-begin') {
-      current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
-    }
-    if (event.type === 'step-end') {
-      const open = [...current.steps].reverse().find((s) => s.title === event.step.title && !s.ended)
-      if (open) open.ended = true
-      else current.steps.push({ title: event.step.title, category: event.step.category, ended: true })
-    }
-    if (event.type === 'test-end') {
-      current.status = event.status
-      current.passed = event.passed
-      current.durationMs = event.durationMs
-      current.retry = event.retry
-      current.error = event.error
-      current.endedAt = event.time
-      activeKeyByName.delete(event.test.name)
-    }
-    tests.set(key, current)
-    latestKeyByName.set(event.test.name, key)
-  }
-  // Collapse attempts to one entry per (name, spec file). Retries and
-  // heal-cycle reruns fold into the latest attempt — the line number is
-  // deliberately ignored because heal edits shift a test's line between
-  // cycles (e.g. :205 → :222) while it stays the same test. Two distinct
-  // tests that happen to share a title (and therefore a `name`) but live in
-  // different files stay as separate entries — the export HTML disambiguates
-  // them via positional anchor IDs. Map preserves first-seen identity order,
-  // last write wins so the latest attempt is kept.
-  // Carries the test alongside its key: every entry here comes straight out of
-  // `tests`, so re-looking it up afterwards only added a `has`/`get` pair whose
-  // miss arm nothing could reach.
-  const latestByIdentity = new Map<string, { key: string; test: PlaybackTest }>()
-  for (const [key, test] of tests.entries()) {
-    const file = parseLocation(locationByKey.get(key))?.file ?? ''
-    const identity = `${test.name}@${file}`
-    latestByIdentity.set(identity, { key, test })
-  }
-  return [...latestByIdentity.values()]
-    .map(({ key, test }) => ({
-      ...test,
-      location: test.location ?? locationByKey.get(key),
-      steps: compactPlaybackSteps(test.steps),
-    }))
+export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackCase[] {
+  const { attempts, caseEvidence } = playbackAttempts(events, identity, known)
+  const byCase = new Map<string, typeof attempts>()
+  for (const attempt of attempts) byCase.set(attempt.caseKey, [...(byCase.get(attempt.caseKey) ?? []), attempt])
+  return [...byCase.entries()].map(([caseKey, own]) => {
+    // Every case in the map holds at least the attempt that created it.
+    const { attemptKey: _attemptKey, caseKey: _caseKey, execution: _execution, ...test } = latestPlaybackAttempt(own)!
+    const evidence = caseEvidence.get(caseKey)!
+    return { ...test, caseKey, ids: [...evidence.ids], locations: [...evidence.locations], steps: compactPlaybackSteps(test.steps) }
+  })
 }
 
-export function artifactsForPlayback(
-  testName: string,
-  artifactGroups: PlaywrightArtifactGroup[] | undefined,
-  policy: PlaywrightArtifactPolicy | undefined,
-): PlaybackArtifacts {
+/** Focus belongs to a case, including earlier attempts whose ids/lines moved. */
+export function playbackFocusCase(tests: readonly PlaybackCase[], target: PlaybackCaseEntry, known: readonly PlaybackCaseEntry[] = []): string | undefined {
+  const uniqueKey = (matches: readonly PlaybackCase[]) => matches.length === 1 ? matches[0].caseKey : undefined
+  if (target.id) {
+    const identified = tests.filter((test) => test.ids.includes(target.id!))
+    if (identified.length) {
+      const key = uniqueKey(identified)
+      const conflictingLocation = target.location && tests.some((test) => test.caseKey !== key &&
+        test.locations.some((location) => playbackLocationKey(location) === playbackLocationKey(target.location!)))
+      return conflictingLocation ? undefined : key
+    }
+  }
+  if (target.location) {
+    const located = tests.filter((test) => test.name === target.name && test.locations.some((location) =>
+      playbackLocationKey(location) === playbackLocationKey(target.location!)))
+    if (located.length) return uniqueKey(located)
+    const resolved = reconcilePlaybackCases(known, [target]).find((item) => item.attempts.length)
+    return resolved?.declared ? uniqueKey(tests.filter((test) => test.caseKey === playbackCaseKey(resolved.entry))) : undefined
+  }
+  return target.id ? undefined : uniqueKey(tests.filter((test) => test.name === target.name))
+}
+
+/** One attempt's (or one test's) retained files, as the suite's artifact
+ *  policy lets the evidence rail show them. */
+export function artifactsUnderPolicy(artifacts: readonly PlaywrightArtifact[], policy: PlaywrightArtifactPolicy | undefined): PlaybackArtifacts {
   const effective = policy ?? DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY
-  const artifacts = artifactGroups?.find((g) => g.testName === testName)?.artifacts ?? []
   return {
     screenshotMode: effective.screenshot,
     screenshots: effective.screenshot === 'off' ? [] : preferredScreenshots(artifacts),
@@ -178,7 +153,7 @@ interface MappedStep {
   title: string | null
 }
 
-function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
+export function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
   const mapped = steps.flatMap<MappedStep>((step) => {
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
@@ -200,7 +175,7 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
       // A tally is only finished when every assertion under it is: one still
       // open must not be reported as done.
       ended: pending.every((step) => step.ended),
-      title: `Verified ${pending.length} assertion${pending.length === 1 ? '' : 's'}`,
+      title: `Verified ${plural(pending.length, 'assertion')}`,
     })
     pending.length = 0
   }
@@ -244,7 +219,7 @@ function assertionRow(title: string, category: string): string | null | undefine
   return `Verified ${target} ${matcherPhrase(matcher[2], Boolean(matcher[1]))}`.trimEnd()
 }
 
-function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
+function preferredScreenshots(artifacts: readonly PlaywrightArtifact[]): PlaywrightArtifact[] {
   const screenshots = artifacts
     .filter((a) => a.kind === 'screenshot')
     .sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))

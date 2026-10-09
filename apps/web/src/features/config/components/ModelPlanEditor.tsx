@@ -1,5 +1,6 @@
+import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
 import type { ReactNode } from 'react'
-import type { AgentProbeSnapshot } from '@/shared/api/config'
+
 import {
   EFFORT_LEVELS,
   KNOWN_MODEL_OPTIONS,
@@ -39,7 +40,7 @@ const TEXT_ACTION_CLASS = 'cl-icon-button cl-type-meta h-6 shrink-0 px-2'
 
 function ProbeLine({ agent, probe, busy, onRetry }: {
   agent: ModelAgentKind
-  probe: AgentProbeSnapshot | null
+  probe: AgentProbeSnapshotResponse | null
   busy: boolean
   onRetry: () => void
 }) {

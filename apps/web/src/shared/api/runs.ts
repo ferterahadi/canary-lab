@@ -6,9 +6,10 @@ import type { StageModelChoice } from '@shared/agent-models'
 import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
 import type { AuditList } from './types-wizard'
 import type { RunIndexEntry } from '@shared/run-index'
-import type { RunDetail, JournalSection } from '@shared/run-detail'
-import type { RunProposedPr } from '@shared/run-state'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import type { RunDetail, JournalSection, ServiceLogExcerpts, ServiceLogLines } from '@shared/run-detail'
+import type { ApplyFixesOutcome, GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
+export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
+import { requestJson, ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 export function listRuns(
   query: { feature?: string } = {},
@@ -137,7 +138,6 @@ export function startRun(
     models?: { heal?: StageModelChoice; commit?: StageModelChoice }
   },
 ): Promise<{ runId: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { feature }
   if (opts?.env) body.env = opts.env
   if (opts?.isolation) body.isolation = opts.isolation
@@ -145,15 +145,7 @@ export function startRun(
   if (opts?.models) body.models = opts.models
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   if (opts?.gettingStartedWorkflow) body.gettingStartedWorkflow = opts.gettingStartedWorkflow
-  return request<{ runId: string }>(
-    `${baseUrl}/api/runs`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ runId: string }>(`/api/runs`, 'POST', body, opts)
 }
 
 // Mid-Run Heal: ask the server to interrupt a running test and start the heal
@@ -175,11 +167,12 @@ export function pauseHealRun(runId: string, opts?: ClientOptions): Promise<Pause
 }
 
 // Cancel an in-flight heal cycle. Server SIGTERMs the agent, breaks the
-// heal loop, and appends a journal entry. Resolves on 202; ApiError on 409
-// (no agent running / not currently healing) or 404 (run not active).
-export function cancelHealRun(runId: string, opts?: ClientOptions): Promise<{ status: 'cancelled' }> {
+// heal loop, and appends a journal entry. Resolves on 202 — `aborted` when the
+// heal's server had already exited and the run was settled instead; ApiError
+// on 409 (no agent running / not currently healing) or 404 (run not active).
+export function cancelHealRun(runId: string, opts?: ClientOptions): Promise<{ status: 'cancelled' | 'aborted' }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ status: 'cancelled' }>(
+  return request<{ status: 'cancelled' | 'aborted' }>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}/cancel-heal`,
     { method: 'POST' },
     fetchImpl,
@@ -191,16 +184,7 @@ export function sendAgentInput(
   data: string,
   opts?: ClientOptions,
 ): Promise<{ status: 'sent' | 'restarted' }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ status: 'sent' | 'restarted' }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/agent-input`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ data }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ status: 'sent' | 'restarted' }>(`/api/runs/${encodeURIComponent(runId)}/agent-input`, 'POST', { data }, opts)
 }
 
 export function restartRun(
@@ -218,23 +202,13 @@ export function restartRun(
 // Apply a run's captured heal fixes (R80) into the real product repos. Returns
 // a per-repo result; a 3-way conflict comes back as `ok:false` with a reason,
 // not an error. 409 (no captured fixes) rejects.
-export interface ApplyFixResult { repoName: string; ok: boolean; reason?: string }
 export function applyRunFixes(
   runId: string,
   /** One repo, or every captured repo when omitted. */
   repoName?: string,
   opts?: ClientOptions,
-): Promise<{ results: ApplyFixResult[]; allOk: boolean }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ results: ApplyFixResult[]; allOk: boolean }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-fixes`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(repoName === undefined ? {} : { repoName }),
-    },
-    fetchImpl,
-  )
+): Promise<ApplyFixesOutcome> {
+  return requestJson<ApplyFixesOutcome>(`/api/runs/${encodeURIComponent(runId)}/apply-fixes`, 'POST', repoName === undefined ? {} : { repoName }, opts)
 }
 
 // What applying would land on, per captured repo, read live. `foreignDirty`
@@ -259,16 +233,7 @@ export function openRunRepo(
   repoName: string,
   opts?: ClientOptions,
 ): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ opened: boolean; path: string; editor?: string; error?: string }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/open-repo`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ repoName }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ opened: boolean; path: string; editor?: string; error?: string }>(`/api/runs/${encodeURIComponent(runId)}/open-repo`, 'POST', { repoName }, opts)
 }
 
 // The captured patch as text, for the Changes tab's inline diff. 404 when the
@@ -283,23 +248,48 @@ export function getRunFixPatch(runId: string, repoName: string, opts?: ClientOpt
   )
 }
 
+// One repair cycle's own diff by journal iteration. 404 when the run never
+// persisted it — the journal entry's inline block is then the only copy.
+export interface RunCyclePatch { iteration: number; patchPath: string; diff: string }
+export function getRunCyclePatch(runId: string, iteration: number, opts?: ClientOptions): Promise<RunCyclePatch> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<RunCyclePatch>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/cycle-patches/${iteration}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+// One test attempt's output in each service, from the log that kept that
+// execution: `occurrence` picks among spans sharing the marker name.
+export function getRunServiceExcerpts(runId: string, query: ServiceExcerptQuery, opts?: ClientOptions): Promise<ServiceLogExcerpts> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = new URLSearchParams({ execution: String(query.execution), name: query.name, occurrence: String(query.occurrence), of: String(query.of) })
+  return request<ServiceLogExcerpts>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/service-excerpts?${qs}`, { method: 'GET' }, fetchImpl)
+}
+
+/** One attempt's place among the `of` attempts sharing its marker name in
+ *  one execution. */
+export interface ServiceExcerptQuery {
+  execution: number
+  name: string
+  occurrence: number
+  of: number
+}
+
+// A window of one service's retained log for one execution.
+export function getRunServiceLogLines(runId: string, service: string, query: { execution: number; from: number; count: number }, opts?: ClientOptions): Promise<ServiceLogLines> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = new URLSearchParams({ execution: String(query.execution), from: String(query.from), count: String(query.count) })
+  return request<ServiceLogLines>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/service-logs/${encodeURIComponent(service)}/lines?${qs}`, { method: 'GET' }, fetchImpl)
+}
+
 // gh (GitHub CLI) connection status — detect-and-instruct only.
-export interface GhStatus { installed: boolean; authenticated: boolean; account?: string; host?: string }
 export function getGhStatus(opts?: ClientOptions): Promise<GhStatus> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<GhStatus>(`${baseUrl}/api/gh/status`, { method: 'GET' }, fetchImpl)
 }
 
-export type PrBlockedReason = 'no-origin' | 'not-github' | 'gh-missing' | 'not-authed' | 'wrong-account'
-export interface PrRepoPreflight {
-  repoName: string
-  repoRoot: string
-  origin: { owner: string; name: string; host: string } | null
-  base: string | null
-  pushable: boolean
-  blocked?: { reason: PrBlockedReason; detail?: string }
-}
-export interface PrPreflight { gh: GhStatus; repos: PrRepoPreflight[]; anyPushable: boolean }
 
 // Side-effect-free "can we open a PR from this run's fix?" check, per repo.
 export function getRunPrPreflight(runId: string, opts?: ClientOptions): Promise<PrPreflight> {
@@ -307,7 +297,6 @@ export function getRunPrPreflight(runId: string, opts?: ClientOptions): Promise<
   return request<PrPreflight>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/pr-preflight`, { method: 'GET' }, fetchImpl)
 }
 
-export interface ProposePrResult { repoName: string; ok: boolean; pr?: RunProposedPr; reason?: string }
 // Open a PR from the captured fix, per pushable repo (on demand). Idempotent.
 export function proposeRunPr(runId: string, opts?: ClientOptions): Promise<{ results: ProposePrResult[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -332,29 +321,18 @@ export function adoptSpecEdits(
   | { status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
   | { status: 'approved-for-new-run'; review_revision: string; newRunRequired: true }
 > {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, {
-    method: 'POST',
-    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, 'POST', opts?.expectedRevision ? { expectedRevision: opts.expectedRevision } : undefined, opts)
 }
 
 export function acceptRunTestReview(runId: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/accept-test-review`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/accept-test-review`, 'POST', { expectedRevision }, opts)
 }
 
 export function restoreSpecEdits(
   runId: string,
   opts?: TestReviewDecisionOptions,
 ): Promise<{ status: 'restored'; restored: string[] } | TestReviewReceipt> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, {
-    method: 'POST',
-    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
-  }, fetchImpl)
+  return requestJson(`/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, 'POST', opts?.expectedRevision ? { expectedRevision: opts.expectedRevision } : undefined, opts)
 }
 
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,
@@ -405,14 +383,5 @@ export function createReadableRunLog(
   file: string,
   opts?: ClientOptions,
 ): Promise<{ path: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ path: string }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/readable-log`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ file }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/readable-log`, 'POST', { file }, opts)
 }

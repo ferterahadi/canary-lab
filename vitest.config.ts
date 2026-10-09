@@ -64,7 +64,7 @@ export default defineConfig({
           exclude: [
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
             // Needs real localStorage, not a stub — see the dom project below.
-            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/group-open-state.test.ts',
             'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'node',
@@ -74,11 +74,11 @@ export default defineConfig({
         resolve: { alias: webAliases },
         test: {
           name: 'dom',
-          setupFiles: ['./vitest.setup.ts'],
+          setupFiles: ['./vitest.setup.ts', './apps/web/src/test-helpers/dom-setup.ts'],
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
-            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/group-open-state.test.ts',
             'apps/web/src/features/getting-started/state/demo-launcher.test.ts',
           ],
           environment: 'happy-dom',
@@ -148,14 +148,22 @@ export default defineConfig({
         'shared/flights/**/*.ts',
         'shared/launcher/**/*.ts',
         'shared/lib/**/*.ts',
+        // The story→source map and the test-view row model: pure data behind
+        // the Tests column, the coverage cards, the before/after review and the
+        // server report. Enumerated by file because `shared/readable-tests/`
+        // also holds the translator's types and the ungated source-lines helper.
+        'shared/readable-tests/story-source-map.ts',
+        'shared/test-view/**/*.ts',
         'shared/robustness/**/*.ts',
         'shared/runtime/**/*.ts',
         'shared/agent-models.ts',
         'shared/code-display-format.ts',
         'shared/feature-scaffold.ts',
         'shared/portify-overlay.ts',
+        'shared/run-counts.ts',
         'shared/run-mode.ts',
         'shared/run-state.ts',
+        'shared/run-evidence.ts',
         'shared/repository-observation.ts',
         'shared/verification.ts',
         // Frontend non-component modules: the API client, the pure utilities,
@@ -208,6 +216,12 @@ export default defineConfig({
         'apps/web/src/features/evaluation/api/**/*.ts',
         'apps/web/src/features/runs/api/**/*.ts',
         'apps/web/src/shared/shell/McpPromoContext.tsx',
+        // The workspace state above App and the contexts it fills: JSX only for
+        // the provider elements, so the `.ts` globs above miss them.
+        'apps/web/src/WorkspaceProvider.tsx',
+        'apps/web/src/shared/state/work-state.tsx',
+        'apps/web/src/shared/state/workspace-actions.tsx',
+        'apps/web/src/features/flights/state/flight-actions.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
         'apps/cli/upgrade-migration.ts',
         'apps/cli/upgrade-known-prompts.ts',

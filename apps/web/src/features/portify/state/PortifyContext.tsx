@@ -2,8 +2,7 @@ import { createContext, useCallback, useContext, useMemo, type ReactNode } from 
 import * as portifyApi from '@/shared/api/portify'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import { useRecordDetail, useRecordIndexStore } from '@/shared/state/record-index-store'
-import type { PortifyManifest } from '@/shared/api/portify'
-import type { PortifyIndexEntry } from '@shared/portify-index'
+import type { PortifyManifest, PortifyIndexEntry } from '@shared/portify-index'
 import { portifyIndex } from './portify-state'
 import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 

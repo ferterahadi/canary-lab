@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { openPortifyProject } from '@/shared/api/cleanup'
+import { displayError } from '@/shared/api/error-message'
 
 export function useOpenPortifyProject(workflowId: string) {
   const [openError, setOpenError] = useState<string | null>(null)
@@ -9,7 +10,7 @@ export function useOpenPortifyProject(workflowId: string) {
       const res = await openPortifyProject(workflowId)
       if (!res.opened) setOpenError(res.error ?? 'Failed to open editor')
     } catch (e) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
+      setOpenError(displayError(e, 'Failed to open editor'))
     }
   }
   return { openError, openProject }

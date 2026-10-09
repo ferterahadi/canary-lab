@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  newestFirst,
-  filterEntries,
   parseBodyFields,
   classifyOutcome,
   outcomeBadgeClass,
@@ -9,80 +7,6 @@ import {
   formatJournalFieldKey,
   presentJournalFields,
 } from './journal-utils'
-import type { JournalSection } from '@shared/run-detail'
-
-const entry = (overrides: Partial<JournalSection>): JournalSection => ({
-  iteration: 1,
-  timestamp: 't',
-  feature: null,
-  run: null,
-  outcome: null,
-  hypothesis: null,
-  body: '',
-  ...overrides,
-})
-
-describe('newestFirst', () => {
-  it('sorts by iteration descending', () => {
-    const out = newestFirst([entry({ iteration: 1 }), entry({ iteration: 3 }), entry({ iteration: 2 })])
-    expect(out.map((e) => e.iteration)).toEqual([3, 2, 1])
-  })
-
-  it('sinks entries with null iteration to the bottom', () => {
-    const out = newestFirst([entry({ iteration: null }), entry({ iteration: 5 })])
-    expect(out.map((e) => e.iteration)).toEqual([5, null])
-  })
-
-  it('treats missing iteration like null when sorting', () => {
-    const missingIteration = entry({}) as JournalSection
-    delete (missingIteration as { iteration?: number | null }).iteration
-
-    const out = newestFirst([missingIteration, entry({ iteration: 2 })])
-    expect(out.map((e) => e.iteration ?? null)).toEqual([2, null])
-  })
-
-  it('sinks null iteration when the null entry is already last', () => {
-    // V8's sort calls compare(arr[i+1], arr[i]), so we need the nullish
-    // entry as the *later* element to exercise the `a.iteration ?? ...`
-    // nullish arm (as opposed to `b.iteration ?? ...` which fires when
-    // the null entry is first).
-    const out = newestFirst([entry({ iteration: 5 }), entry({ iteration: null })])
-    expect(out.map((e) => e.iteration)).toEqual([5, null])
-  })
-
-  it('treats equal iterations as stable (returns 0)', () => {
-    const out = newestFirst([
-      entry({ iteration: 2, hypothesis: 'a' }),
-      entry({ iteration: 2, hypothesis: 'b' }),
-    ])
-    expect(out).toHaveLength(2)
-  })
-})
-
-describe('filterEntries', () => {
-  const data = [
-    entry({ iteration: 1, feature: 'foo', run: 'r1' }),
-    entry({ iteration: 2, feature: 'bar', run: 'r2' }),
-    entry({ iteration: 3, feature: 'foo', run: 'r2' }),
-  ]
-
-  it('returns all when filter is empty', () => {
-    expect(filterEntries(data, {})).toHaveLength(3)
-  })
-
-  it('filters by feature', () => {
-    expect(filterEntries(data, { feature: 'foo' }).map((e) => e.iteration)).toEqual([1, 3])
-  })
-
-  it('filters by run', () => {
-    expect(filterEntries(data, { run: 'r2' }).map((e) => e.iteration)).toEqual([2, 3])
-  })
-
-  it('combines feature and run filters', () => {
-    expect(filterEntries(data, { feature: 'foo', run: 'r2' }).map((e) => e.iteration)).toEqual([3])
-  })
-})
-
 describe('parseBodyFields', () => {
   it('extracts key/value field lines', () => {
     const body = `## Iteration 1\n\n- feature: foo\n- run: r1\n- fix.file: src/a.ts\n\nfree text`

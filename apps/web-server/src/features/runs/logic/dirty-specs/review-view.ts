@@ -1,3 +1,4 @@
+import { readLiveSource } from '../read-live-source'
 // The dirty summary folded into each `/api/features` row — what the three
 // review surfaces (status-bar pill, features-column badge, review dialog)
 // render from. The record's `strength` verdict ships whole so the dialog can
@@ -5,8 +6,6 @@
 // ids the live spec gives it, so a reader sees WHICH requirement an edit
 // touched, not just which file. Advisory throughout (D13): nothing here is read
 // by a verdict.
-import fs from 'fs'
-import path from 'path'
 import type { TestChange } from '../../../../../../../shared/verification-strength/types'
 import type { DirtySpec, SpecStrength } from '../../../../../../../shared/run-manifest'
 import { testRequirementsReader } from './test-requirements'
@@ -35,7 +34,7 @@ export function dirtySummaryView(
 function dirtySpecView(spec: DirtySpec, featureDir: string): DirtySpecView {
   const base = { file: spec.file, affectedTests: spec.affectedTests }
   if (!spec.strength) return base
-  const requirementsOf = testRequirementsReader(spec.file, (rel) => readLive(featureDir, rel))
+  const requirementsOf = testRequirementsReader(spec.file, (rel) => readLiveSource(featureDir, rel))
   return {
     ...base,
     strength: {
@@ -45,13 +44,5 @@ function dirtySpecView(spec: DirtySpec, featureDir: string): DirtySpecView {
         return requirements ? { ...test, requirements } : test
       }),
     },
-  }
-}
-
-function readLive(featureDir: string, rel: string): string | undefined {
-  try {
-    return fs.readFileSync(path.join(featureDir, rel), 'utf8')
-  } catch {
-    return undefined // deleted since the baseline — the test then carries no @req ids
   }
 }

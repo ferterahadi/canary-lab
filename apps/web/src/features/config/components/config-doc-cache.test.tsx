@@ -1,27 +1,22 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConfigDocCacheProvider, useCachedDoc } from './config-doc-cache'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 
 afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 /** Records the `loading` flag of EVERY render, not just the settled one — the
  *  whole point of the cache is that a second mount never renders a loading

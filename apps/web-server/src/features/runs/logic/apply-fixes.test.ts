@@ -1,30 +1,28 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { applyFixCapture, buildApplyPreflight } from './apply-fixes'
 import { porcelainPath } from '../../../shared/git-status-path'
 import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('apply-fix-')
 
 let root: string
 let repo: string
 let fixesDir: string
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-fix-'))
+  root = tempDir()
   repo = path.join(root, 'repo')
   fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
   initGitRepo(repo)
   fixesDir = path.join(root, 'fixes')
   fs.mkdirSync(fixesDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 /** Build a real patch that turns app.js `x = 1` → `x = 2`, from a scratch clone. */

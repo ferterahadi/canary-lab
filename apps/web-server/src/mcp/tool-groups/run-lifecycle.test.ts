@@ -10,6 +10,11 @@ import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/s
 import type { McpClientFacts } from '../client-surface'
 import { registerRunLifecycleTools } from './run-lifecycle'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { withApprovals } from '../approval-context'
+import { ApprovalStore } from '../approval-store'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const approvalTemp = trackTempDirs('run-approvals-')
 
 // The run-lifecycle tools: start_run's four-way entrypoint (continue a healing
 // run / resolve a run_ref / restart a failed run / start fresh), boot_services,
@@ -58,6 +63,7 @@ function storeOf(details: RunDetail[], over: Record<string, unknown> = {}): Reco
     })),
     get: (runId: string) => details.find((d) => d.manifest.runId === runId),
     registry: { get: () => undefined },
+    settleIfOrphaned: () => false,
     abort: async () => ({ ok: true }),
     ...over,
   }
@@ -125,7 +131,7 @@ describe.each([
       isolation ? { kind: 'started', runId, booted: true } : collision)
     const { raw } = harness({ startRun }, eliciting)
     const opened = await raw(tool, args, context()) as InputRequiredResult
-    expect(opened.inputRequests).toMatchObject({ answer: { params: { message: expect.stringContaining('run-9 is using /repo/shop'), requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } })
+    expect(opened.inputRequests).toMatchObject({ answer: { params: { message: expect.stringContaining('"search" is already using this app'), requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } })
     expect(startRun.mock.calls.every((callArgs) => callArgs[3] === undefined)).toBe(true)
 
     const answered = await raw(tool, args, context(opened.requestState, { action: 'accept', content: { isolation: 'worktree' } }))
@@ -469,7 +475,7 @@ describe('start_run: starting fresh', () => {
 
     const opened = await raw('start_run', START, context()) as InputRequiredResult
     expect(opened.inputRequests).toMatchObject({ answer: { params: {
-      message: expect.stringContaining('Previous coverage percentages do not describe the current tests'),
+      message: expect.stringContaining('The coverage report may not match the current tests'),
       requestedSchema: { properties: { choice: { enum: ['Update coverage first', 'Run now with stale coverage'] } } },
     } } })
     const answered = await raw('start_run', START, context(opened.requestState, {
@@ -532,6 +538,30 @@ describe('start_run: starting fresh', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('sends the caller back to get_flight when the owning Flight could not be verified', async () => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    const flightAttention = { state: 'unavailable', stage: 'specs-coverage', title: 'Flight paused: Coverage failed',
+      reason: 'Could not verify current state: disk unavailable', checkedAt: '2026-01-01T00:00:00Z', revision: 'a' }
+    const { raw } = harness({
+      startRun,
+      coverageRequest: coverageRequest(coverageChange('stale', 'coverage-flight-unverified', { flightId: 'flight-1', flightStatus: 'paused', flightAttention })),
+    }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Update coverage first' },
+    }))
+
+    const result = JSON.parse(toolResultText(answered))
+    expect(result).toMatchObject({
+      type: 'coverage_update_required', runStarted: false, flightId: 'flight-1', flightStatus: 'paused',
+      message: 'Run not started. Could not verify current Flight state. Read get_flight again before choosing a recovery action.',
+      nextSteps: ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'],
+    })
+    // The coverage reply carries only the attention facts an agent acts on.
+    expect(result.flightAttention).toEqual({ state: 'unavailable', reason: flightAttention.reason })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it.each(['decline', 'cancel'])('starts nothing when the client answers %s on the stale-coverage question', async (action) => {
     const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
@@ -587,6 +617,27 @@ describe('start_run: starting fresh', () => {
     })
     expect(startRun).toHaveBeenCalledTimes(2)
     expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('resumes both real start_run questions from the browser and delivers the final result to an agent wait', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+    const approvals = new ApprovalStore(approvalTemp())
+    const invoke = withApprovals('start_run', (args, ctx) => raw('start_run', args, ctx),
+      { approvals, getUiUrl: () => 'http://localhost:1234' } as CanaryLabMcpDeps)
+    const first = await invoke(START, context()) as InputRequiredResult
+    const firstId = String(first.requestState)
+    await approvals.answer(firstId, { choice: 'Run now with stale coverage' })
+    const next = JSON.parse(toolResultText(await approvals.wait(firstId, 0)))
+    expect(next).toMatchObject({ status: 'needs-input', reviewUrl: expect.stringContaining('approval=') })
+    expect(next.approvalId).not.toBe(firstId)
+    const waiting = approvals.wait(next.approvalId, 30_000)
+    await approvals.answer(next.approvalId, { isolation: 'worktree' })
+    expect(JSON.parse(toolResultText(await waiting))).toMatchObject({ runId: 'run-new', coverageStale: true })
+    expect(startRun).toHaveBeenCalledTimes(2)
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+    expect(approvals.list().every((r) => r.status === 'answered')).toBe(true)
   })
 
   it('rejects an approval when the coverage revision changes while the form is open', async () => {
@@ -878,7 +929,7 @@ describe('start_run: a suite that boots nothing and targets a deployed host', ()
     const { raw, startRun } = remote({}, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
     expect(opened.inputRequests).toMatchObject({ answer: { params: {
-      message: expect.stringContaining('targets deployed hosts (https://api.staging.example.com)'),
+      message: expect.stringContaining('targets https://api.staging.example.com (staging)'),
       requestedSchema: { properties: { choice: { enum: ['Verify the deployed target', 'Run with repair anyway'] } } },
     } } })
 
@@ -1029,6 +1080,14 @@ describe('pause_run', () => {
     expect(await text('pause_run', { runId: 'run-1' })).toBe('run not active: run-1')
   })
 
+  it('settles a run whose server exited and tells the agent how to restart it', async () => {
+    const settleIfOrphaned = vi.fn(() => true)
+    const { text } = harness({ store: storeOf([], { settleIfOrphaned }) })
+
+    expect(await text('pause_run', { runId: 'run-1' })).toMatch(/^server-exited: .*marked aborted.*start_run with run_ref "run-1"/)
+    expect(settleIfOrphaned).toHaveBeenCalledWith('run-1')
+  })
+
   it('relays the orchestrator\'s refusal verbatim', async () => {
     const orch = { pauseAndHeal: async () => ({ ok: false, reason: 'tests already finished' }) }
     const { text } = harness({ store: storeOf([], { registry: { get: () => orch } }) })
@@ -1049,6 +1108,16 @@ describe('cancel_heal', () => {
     const { text } = harness()
 
     expect(await text('cancel_heal', { runId: 'run-1' })).toBe('run not active: run-1')
+  })
+
+  it('reports a heal whose server exited as stopped, with the run settled aborted', async () => {
+    const { call } = harness({ store: storeOf([], { settleIfOrphaned: () => true }) })
+
+    expect(await call('cancel_heal', { runId: 'run-1' })).toMatchObject({
+      status: 'aborted', reason: 'server-exited', runId: 'run-1',
+      message: expect.stringContaining('marked aborted'),
+      nextSteps: [expect.stringContaining('start_run with run_ref "run-1"')],
+    })
   })
 
   it('relays the orchestrator\'s refusal verbatim', async () => {
@@ -1073,6 +1142,14 @@ describe('abort_run', () => {
     // Not idempotent: a second abort has nothing left to kill, so a client that
     // retries on the hint alone would be told the run is still abortable.
     expect(configs.get('abort_run')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false })
+  })
+
+  it('records a run whose server exited without a stop form: nothing is left to stop', async () => {
+    const abort = vi.fn()
+    const { call } = harness({ store: storeOf([runDetail()], { abort, settleIfOrphaned: () => true }) }, eliciting)
+
+    expect(await call('abort_run', { runId: 'run-1', confirm: true })).toMatchObject({ aborted: true, runId: 'run-1', reason: 'server-exited' })
+    expect(abort).not.toHaveBeenCalled()
   })
 
   it('rejects unknown and terminal runs before asking the human to stop anything', async () => {

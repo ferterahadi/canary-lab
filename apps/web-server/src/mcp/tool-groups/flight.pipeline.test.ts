@@ -1,3 +1,4 @@
+import { flightActivityCases } from '../../../../../shared/__fixtures__/flight-activity'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   flightHarness,
@@ -22,6 +23,17 @@ vi.mock('../../features/flights/logic/stage-remedy', () => ({
 
 beforeEach(() => {
   remedy.answer = null
+})
+
+it('carries the central assessment into agent reads without recommending automatic recovery of a resolved failure', async () => {
+  const attention = { state: 'resolved', stage: 'specs-coverage', title: 'Earlier failure resolved by current evidence.',
+    reason: 'Remaining: Evaluation report. Nothing has been started.', checkedAt: 'now', revision: 'a' }
+  const { call, requests } = flightHarness({ reply: { statusCode: 200,
+    body: plainFlight('paused', { attention, pauseReason: 'stage-failed', error: 'Historical launch error' }),
+  } })
+  const result = await call('get_flight', { flightId: 'fl-1' })
+  expect(result).toMatchObject({ attention, error: 'Historical launch error', next: expect.stringContaining('Do not resume automatically') })
+  expect(requests.every((request) => request.method === 'GET')).toBe(true)
 })
 
 /** `start_flight` reads the index first, then acts. Routes both legs. */
@@ -585,6 +597,21 @@ describe('get_flight — a hand-off nobody is working', () => {
     expect(String(second.next)).not.toContain('STALLED HAND-OFF')
   })
 
+  it.each(['pause', 'abort'])('clears contact only after a successful %s', async (action) => {
+    let statusCode = 409
+    const { call, text } = flightHarness({ reply: (req) => req.method === 'POST'
+      ? { statusCode, body: statusCode === 200 ? plainFlight(action === 'pause' ? 'paused' : 'aborted') : { error: 'refused' } }
+      : { statusCode: 200, body: handOff() } })
+    await call('get_flight', { flightId: 'fl-1' })
+    expect(await text(`${action}_flight`, { flightId: 'fl-1', confirm: true })).toBe(`${action} failed (409): refused`)
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toBeUndefined()
+    statusCode = 200
+    await call(`${action}_flight`, { flightId: 'fl-1', confirm: true })
+    // The fixture returns the same old hand-off again to expose whether the
+    // successful stop forgot its contact; a failed stop must keep that contact.
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toMatchObject({ neverPolled: true })
+  })
+
   it('leaves a fresh hand-off alone', async () => {
     const { call } = flightHarness({
       reply: { statusCode: 200, body: handOff({ updatedAt: new Date().toISOString() }) },
@@ -1129,5 +1156,38 @@ describe('respond_flight_checkpoint — what rides the response', () => {
     // `data !== undefined` rather than a truthiness check: null is a submitted
     // result, not an omitted one.
     expect(requests[0].payload).toEqual({ response: { choice: 'submit', data: null } })
+  })
+})
+
+it.each(flightActivityCases)('follows active flights without restarting for $status', async ({ status, active }) => {
+  const { call, requests } = flightHarness({ reply: startRoutes({
+    flights: [{ flightId: 'fl-existing', status, repoPaths: ['/repo/shop'] }],
+    detail: { statusCode: 200, body: plainFlight(status, { flightId: 'fl-existing' }) },
+  }) })
+  const result = await call('start_flight', { repoPaths: ['/repo/shop'], description: 'checkout' })
+  if (active) {
+    expect(result.note).toBe('a flight is already active for these repos — following it')
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
+  } else if (status === 'paused') {
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', url: '/api/flights/fl-existing/resume' })
+  } else {
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', url: '/api/flights' })
+  }
+})
+
+it('preserves list attention and does not invent next steps for a failed flight without a remedy', async () => {
+  const attention = { state: 'unavailable', reason: 'Source unavailable' }
+  const listing = flightHarness({ reply: { statusCode: 200, body: { flights: [plainFlight('failed', { attention })] } } })
+  expect(await listing.call('get_flight', {})).toMatchObject({ flights: [{ attention }] })
+  const detail = flightHarness({ reply: { statusCode: 200, body: plainFlight('failed') } })
+  expect(await detail.call('get_flight', { flightId: 'fl-1' })).toMatchObject({ status: 'failed', next: '' })
+})
+
+it('requires a fresh evidence read before recommending recovery when attention is unavailable', async () => {
+  const { call } = flightHarness({ reply: { statusCode: 200,
+    body: plainFlight('failed', { attention: { state: 'unavailable', reason: 'Source unavailable' } }),
+  } })
+  expect(await call('get_flight', { flightId: 'fl-1' })).toMatchObject({
+    next: 'Source unavailable Retry get_flight to confirm the current evidence before recommending recovery.',
   })
 })

@@ -18,6 +18,10 @@ describe('healAgentCauseSuffix', () => {
     // repair, so the wording has to say the work survived rather than imply the
     // cycle achieved nothing.
     expect(healAgentCauseSuffix('approval-prompt')).toContain('still on disk')
+    // The dialog ends a turn without saying how the turn went, so the line
+    // names the dialog and points at the pane rather than guessing.
+    expect(healAgentCauseSuffix('cli-dialog')).toContain('interactive CLI dialog')
+    expect(healAgentCauseSuffix('cli-dialog')).toContain('agent pane')
   })
 
   it('stays silent when the cause was not recognized', () => {

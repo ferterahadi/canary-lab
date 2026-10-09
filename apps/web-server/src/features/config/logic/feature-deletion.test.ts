@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { deleteSuite } from './feature-deletion'
@@ -7,6 +6,9 @@ import { deleteFeature } from './feature-authoring'
 import { FlightRunStore } from '../../flights/logic/store'
 import { removeFlightRecordsForFeature } from '../../flights/logic/flight-queue'
 import type { FlightManifest } from '../../../../../../shared/flights/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('suite-deletion-')
 
 let dir: string
 let featuresDir: string
@@ -24,7 +26,7 @@ function config(featureDir: string | undefined): void {
 }
 
 beforeEach(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'suite-deletion-')))
+  dir = tempDir()
   featuresDir = path.join(dir, 'features')
   suite = path.join(featuresDir, 'checkout')
   fs.mkdirSync(suite, { recursive: true })
@@ -40,7 +42,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 it.each([

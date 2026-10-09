@@ -1,8 +1,11 @@
+import { isPathUnder } from '../../../shared/path-containment'
+import { readSpecSource } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
 import { listSpecFiles } from '../../../shared/feature-loader'
 import type { PlaywrightListEntry } from './playwright-list'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 
 export const SUITE_TEST_ROSTER_FILE = '.canary-suite-tests.json'
 
@@ -10,10 +13,10 @@ export const SUITE_TEST_ROSTER_FILE = '.canary-suite-tests.json'
  * The reporter enriches this inventory; its execution selection never owns it. */
 export function sourceTestRoster(dir: string): PlaywrightListEntry[] {
   return listSpecFiles(dir).flatMap((file) => {
-    if (!fs.realpathSync(file).startsWith(`${fs.realpathSync(dir)}${path.sep}`)) {
+    if (!isPathUnder(fs.realpathSync(file), fs.realpathSync(dir), false)) {
       throw Object.assign(new Error('Test source is outside the suite.'), { statusCode: 409 })
     }
-    const source = fs.readFileSync(file, 'utf8')
+    const source = readSpecSource(file)
     return extractTestMetadataFromSource(file, source, { expandParametrised: true }).tests.map((test) => ({
       file, line: test.line, title: test.name, originFile: file, originLine: test.line,
       ...(test.unresolvedTitle ? { unresolvedTitle: true } : {}),
@@ -26,7 +29,7 @@ export function saveSuiteTestRoster(dir: string): void {
   const tests = sourceTestRoster(dir).map((test) => ({
     ...test, file: path.relative(dir, test.file), originFile: path.relative(dir, test.originFile),
   }))
-  fs.writeFileSync(path.join(dir, SUITE_TEST_ROSTER_FILE), JSON.stringify(tests))
+  atomicWriteJson(path.join(dir, SUITE_TEST_ROSTER_FILE), tests)
 }
 
 export function savedSuiteTestRoster(dir: string): PlaywrightListEntry[] {
@@ -38,8 +41,8 @@ export function savedSuiteTestRoster(dir: string): PlaywrightListEntry[] {
     const file = path.resolve(dir, test.file)
     const originFile = path.resolve(dir, test.originFile)
     for (const candidate of [file, originFile]) {
-      if (!candidate.startsWith(`${dir}${path.sep}`)
-        || (fs.existsSync(candidate) && !fs.realpathSync(candidate).startsWith(`${dir}${path.sep}`))) {
+      if (!isPathUnder(candidate, dir, false)
+        || (fs.existsSync(candidate) && !isPathUnder(fs.realpathSync(candidate), dir, false))) {
         throw Object.assign(new Error('Recorded test source is outside the saved suite.'), { statusCode: 409 })
       }
     }

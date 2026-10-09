@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
 import { resolveRepoPath } from '../../../../shared/repo-identity'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 /**
  * Per-run git worktree isolation. Created only when the user opts in after a
@@ -92,7 +93,7 @@ export function linkNodeModules(handle: Pick<WorktreeHandle, 'sourceRoot' | 'wor
     if (fs.existsSync(src) && !fs.existsSync(dst)) fs.symlinkSync(src, dst, 'dir')
     return {}
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) }
+    return { error: errorMessage(err) }
   }
 }
 

@@ -1,13 +1,14 @@
+import { coverageJsonDigest } from './json-digest'
 import path from 'path'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { FEATURE_CONFIG_NAMES } from '../../../../shared/config-file'
 import { readRunsIndex } from '../../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath, runSummaryPath } from '../../../runs/logic/runtime/run-paths'
+import { dirtySpecRecordPath } from '../../../runs/logic/dirty-specs/store'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import { computeFeatureCoverage, FeatureNotFoundError } from './service'
 import { coverageJobStore } from './jobs/store'
-import { coverageRevision } from './freshness'
 import { CoverageInputReads, type InputReadMemo } from './input-reads'
 
 type Paths = { featuresDir: string; logsDir: string }
@@ -45,7 +46,7 @@ export class CoverageSnapshotCache {
 
   private metadata(feature: string, context: Context): string {
     // A different suite's new run/job must not invalidate this suite's ledger.
-    return coverageRevision([
+    return coverageJsonDigest([
       context.runs.filter((run) => run.feature === feature && !isAuxiliaryExecution(run.executionType)),
       context.jobs.filter((job) => job.feature === feature && job.status === 'running'),
     ])
@@ -54,7 +55,7 @@ export class CoverageSnapshotCache {
   get(feature: string, featureDir?: string, context = this.context()): CoverageLedger {
     const dir = featureDir ?? this.features().find((item) => item.name === feature)?.featureDir
     if (!dir) throw new FeatureNotFoundError(feature)
-    const metadata = coverageRevision([dir, this.metadata(feature, context)])
+    const metadata = coverageJsonDigest([dir, this.metadata(feature, context)])
     const previous = this.snapshots.get(feature)
     if (previous?.metadata === metadata && previous.inputs.unchanged(context.memo)) {
       // Renew only after reading authoritative inputs, not merely serving cache.
@@ -65,11 +66,11 @@ export class CoverageSnapshotCache {
     const inputs = new CoverageInputReads()
     inputs.tree(path.join(dir, 'docs'), false)
     inputs.tree(path.join(dir, 'e2e'), true)
-    inputs.optional(path.join(this.paths.logsDir, 'dirty-specs', feature, 'dirty.json'))
+    inputs.optional(dirtySpecRecordPath(this.paths.logsDir, feature))
     for (const run of context.runs) {
       if (run.feature !== feature || isAuxiliaryExecution(run.executionType)) continue
-      inputs.optional(path.join(runDirFor(this.paths.logsDir, run.runId), 'e2e-summary.json'))
-      inputs.optional(path.join(runDirFor(this.paths.logsDir, run.runId), 'manifest.json'))
+      inputs.optional(runSummaryPath(runDirFor(this.paths.logsDir, run.runId)))
+      inputs.optional(runManifestPath(runDirFor(this.paths.logsDir, run.runId)))
     }
     const ledger = computeFeatureCoverage({ ...this.paths, feature, featureDir: dir, inputReads: inputs })
     // An editor/runner can write during synchronous calculation from another

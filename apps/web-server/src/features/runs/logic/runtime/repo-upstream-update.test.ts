@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import {
@@ -10,34 +9,26 @@ import {
   updateReposToUpstream,
   type RepoUpdateReport,
 } from './repo-upstream-update'
-import { git } from '../../../../../../../tools/test-helpers/git-repo'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The per-run policy over `fastForwardToUpstream`: which repos, what an active
 // run means, and the one 409 that names every refusal. The git edge cases
 // themselves are `shared/git-upstream.test.ts`'s subject; here one behind
 // checkout and one dirty checkout are enough to drive every arm.
 
-const made: string[] = []
-
-afterEach(() => {
-  for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('cl-repo-update-')
 
 /** A clone one commit behind its bare origin. */
 function behindClone(): { clone: string; from: string; to: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-repo-update-')))
-  made.push(root)
+  const root = tempDir()
   const origin = path.join(root, 'origin.git')
   const seed = path.join(root, 'seed')
   const clone = path.join(root, 'clone')
   git(root, 'init', '-q', '--bare', '-b', 'main', origin)
   fs.mkdirSync(seed)
-  git(seed, 'init', '-q', '-b', 'main')
-  git(seed, 'config', 'user.email', 'test@example.com')
-  git(seed, 'config', 'user.name', 'Test')
   fs.writeFileSync(path.join(seed, 'README.md'), 'hello\n')
-  git(seed, 'add', '-A')
-  git(seed, 'commit', '-qm', 'init')
+  initGitRepo(seed, { branch: 'main' })
   git(seed, 'remote', 'add', 'origin', origin)
   git(seed, 'push', '-q', '-u', 'origin', 'main')
   git(root, 'clone', '-q', origin, clone)

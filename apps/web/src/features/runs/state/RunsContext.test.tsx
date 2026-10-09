@@ -30,8 +30,7 @@ import {
   type UseRunResult,
   type UseRunsResult,
 } from './RunsContext'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
@@ -47,26 +46,6 @@ vi.mock('@/shared/api/verification', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/verification')>()),
   executeVerification: vi.fn(),
 }))
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: unknown }) => void) | null = null
-  onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
-  closed = false
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closed = true
-    this.readyState = 3
-    this.onclose?.()
-  }
-}
 
 let container: HTMLDivElement
 
@@ -215,7 +194,7 @@ describe('RunsProvider', () => {
       if (refreshed.verdict === 'incompatible') expect(container.textContent).toContain('validation command failed')
       else expect(container.querySelector('[data-testid="service-dependency-blocker"]')).toBeNull()
     }
-    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('shows a confirmed service failure in an open Overview from a run stream update', () => {
@@ -245,7 +224,7 @@ describe('RunsProvider', () => {
       } },
     }) }))
     expect(container.querySelector('[data-testid="service-failure-evidence"]')?.textContent).toContain('Watch compiler reported a failed build.')
-    expect(runsClient.getRunDetail).not.toHaveBeenCalled()
+    expect(runsClient.getRunDetail).toHaveBeenCalledTimes(1)
   })
 
   it('opens the run stream, applies frames, and exposes active run state', () => {
@@ -282,6 +261,8 @@ describe('RunsProvider', () => {
 
     act(() => {
       socket.onmessage?.({ data: 'not json' })
+      socket.onmessage?.({ data: 'null' })
+      socket.onmessage?.({ data: '42' })
       socket.onmessage?.({ data: { toString: () => JSON.stringify({ type: 'list-changed', runs: [] }) } })
       socket.onmessage?.({
         data: JSON.stringify({
@@ -611,4 +592,16 @@ describe('RunsProvider', () => {
     expect(captured.active?.runId).toBe('active-no-detail')
     expect(captured.active?.detail).toBeNull()
   })
+})
+
+it('does not overwrite newer stream state with a late index-read error', async () => {
+  let rejectRead: (error: Error) => void = () => {}
+  const captured = renderProbe(null)
+  vi.mocked(runsClient.listRuns).mockImplementationOnce(() => new Promise((_, reject) => { rejectRead = reject }))
+  let pending: Promise<void> | undefined
+  act(() => { pending = captured.runs!.refresh() })
+  act(() => { FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: {} }) }) })
+  await act(async () => { rejectRead(new Error('stale failure')); await pending })
+  expect(captured.runs!.indexError).toBeNull()
+  expect(captured.runs!.runs.map((run) => run.runId)).toEqual(['r1'])
 })

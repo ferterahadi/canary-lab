@@ -2,21 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
-import Fastify, { type FastifyInstance } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 
-import { flightsRoutes } from './flights'
-
-import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
+import { FlightRunStore, type FlightStoreEvent } from '../logic/store'
 
 import type { StageAdapters } from '../logic/flight-stages'
 
-import type { FlightAgentSpawner } from '../logic/stages/context'
+import { type FlightManifest } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { buildFlightsApp, waitForFlightStatus } from './__fixtures__/flights-app'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
@@ -24,38 +23,14 @@ let repoDir: string
 
 let app: FastifyInstance
 
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
-
-async function buildApp(
-  adapters: StageAdapters,
-  flightStore?: FlightStore,
-  planAgent?: FlightAgentSpawner,
-): Promise<FastifyInstance> {
-  const instance = Fastify({ logger: false })
-  await instance.register(flightsRoutes, {
-    featuresDir: path.join(tmpDir, 'features'),
-    logsDir: tmpDir,
-    projectRoot: tmpDir,
-    adapters,
-    ...(flightStore ? { flightStore } : {}),
-    ...(planAgent ? { planAgent } : {}),
-  })
-  return instance
-}
-
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -65,20 +40,9 @@ const startBody = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3000): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const resp = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
-    const manifest = resp.json() as Record<string, unknown>
-    if (statuses.includes(String(manifest.status))) return manifest
-    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
 describe('flight entry modes (continue / redo / jump)', () => {
   it('rejects malformed external-session metadata before attempting a resume', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
 
     const resumed = await app.inject({
       method: 'POST',
@@ -91,7 +55,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
   })
 
   it('400s an invalid mode and an invalid fromStage', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const badMode = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ mode: 'sideways' }) })
     expect(badMode.statusCode).toBe(400)
     expect((badMode.json() as { error: string }).error).toMatch(/invalid mode/)
@@ -102,10 +66,10 @@ describe('flight entry modes (continue / redo / jump)', () => {
   })
 
   it('409s flight_exists_requires_choice on a modeless re-start, and redo reuses the record', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const first = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (first.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const again = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     expect(again.statusCode).toBe(409)
@@ -119,17 +83,17 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect((redo.json() as { flightId: string }).flightId).toBe(flightId)
     const listed = await app.inject({ method: 'GET', url: '/api/flights' })
     expect((listed.json() as { flights: unknown[] }).flights).toHaveLength(1)
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
   })
 
   // Reachable on the start route, not only on /:id/redo, because an externally
   // driven flight re-enters a stage through start_flight — and without this the
   // agent could repeat a step but never say what was wrong with the last try.
   it('stores a re-entry feedback note sent with a redo, scoped to the entry stage', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const first = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (first.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const redo = await app.inject({
       method: 'POST',
@@ -142,7 +106,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
   })
 
   it('rejects a jump whose prerequisites are missing, naming the first missing artifact', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({
       method: 'POST',
       url: '/api/flights',
@@ -162,7 +126,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
 
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({
       method: 'POST',
       url: '/api/flights',
@@ -173,11 +137,11 @@ describe('flight entry modes (continue / redo / jump)', () => {
     const scout = manifest.stages.find((s) => s.key === 'scout')!
     expect(scout.status).toBe('skipped')
     expect(scout.skipReason).toBe('stage-entry')
-    await waitForStatus(manifest.flightId, ['done'])
+    await waitForFlightStatus(app, manifest.flightId, ['done'])
   })
 
   it('rejects a heal entry point outright', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'heal' }) })
     expect(jump.statusCode).toBe(400)
     expect((jump.json() as { error: string }).error).toMatch(/start from Test run instead/)
@@ -196,7 +160,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '')
     expect(fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))).toBe(false)
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'run' }) })
     expect(jump.statusCode).toBe(201)
   })
@@ -208,7 +172,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
     fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'run' }) })
     expect(jump.statusCode).toBe(400)
     const body = jump.json() as { type: string; error: string }
@@ -231,7 +195,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     )
     expect(fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))).toBe(false)
     expect(fs.existsSync(path.join(featureDir, 'e2e'))).toBe(false)
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'evaluation-export' }) })
     expect(jump.statusCode).toBe(201)
     expect((jump.json() as FlightManifest).links?.runId).toBe('2026-07-01T0245-o456')
@@ -241,7 +205,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     const featureDir = path.join(tmpDir, 'features', 'checkout')
     fs.mkdirSync(featureDir, { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'evaluation-export' }) })
     expect(jump.statusCode).toBe(400)
     const body = jump.json() as { type: string; error: string }
@@ -253,25 +217,25 @@ describe('flight entry modes (continue / redo / jump)', () => {
     const featureDir = path.join(tmpDir, 'features', 'checkout')
     fs.mkdirSync(featureDir, { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'env-capture' }) })
     expect(jump.statusCode).toBe(201)
-    await waitForStatus((jump.json() as { flightId: string }).flightId, ['done'])
+    await waitForFlightStatus(app, (jump.json() as { flightId: string }).flightId, ['done'])
   })
 })
 
 describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
   const hangingScout = (): StageAdapters => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     return adapters
   }
 
   it('pause parks an active flight with pauseReason user; 409 on a settled one; 404 unknown', async () => {
-    app = await buildApp(hangingScout())
+    app = await buildFlightsApp(tmpDir, hangingScout())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['running'])
+    await waitForFlightStatus(app, flightId, ['running'])
 
     const paused = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
     expect(paused.statusCode).toBe(200)
@@ -285,22 +249,22 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
   })
 
   it('redo restarts the same record from stage 1 (201); 409 while active', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const redone = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
     expect(redone.statusCode).toBe(201)
     expect((redone.json() as { flightId: string }).flightId).toBe(flightId)
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
   })
 
   it('R75: mid-pipeline re-entry keeps the freeze (409 flight_frozen); a full redo ACCEPTS new values', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     // Jump = partial re-entry → frozen, 409.
     const intentChange = await app.inject({
@@ -321,14 +285,14 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
     const body = redone.json() as { flightId: string; description: string }
     expect(body.flightId).toBe(flightId)
     expect(body.description).toBe('a different intent')
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
   })
 
   it('a mode-carrying POST may omit repos + description — the stored values are reused', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const redone = await app.inject({
       method: 'POST',
@@ -340,14 +304,14 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
     expect(body.flightId).toBe(flightId)
     expect(body.repoPaths).toEqual([repoDir])
     expect(body.description).toBe('checkout flow')
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
   })
 
   it('DELETE removes a settled record (feature returns to not-flown); 409 while active; 404 unknown', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const deleted = await app.inject({ method: 'DELETE', url: `/api/flights/${flightId}` })
     expect(deleted.statusCode).toBe(200)
@@ -358,7 +322,7 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
     const unknown = await app.inject({ method: 'DELETE', url: `/api/flights/${flightId}` })
     expect(unknown.statusCode).toBe(404)
 
-    const activeApp = await buildApp(hangingScout())
+    const activeApp = await buildFlightsApp(tmpDir, hangingScout())
     const started2 = await activeApp.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const activeId = (started2.json() as { flightId: string }).flightId
     const whileActive = await activeApp.inject({ method: 'DELETE', url: `/api/flights/${activeId}` })
@@ -369,12 +333,12 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
 
 describe('flight agent (R79)', () => {
   it('agent rides the start body into the manifest opts (invalid values dropped)', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ agent: 'codex' }) })
     expect(started.statusCode).toBe(201)
     expect((started.json() as { opts: { agent?: string } }).opts.agent).toBe('codex')
 
-    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+    await waitForFlightStatus(app, (started.json() as { flightId: string }).flightId, ['done'])
     const otherRepo = path.join(path.dirname(repoDir), 'product-repo-b')
     fs.mkdirSync(otherRepo, { recursive: true })
     const other = await app.inject({

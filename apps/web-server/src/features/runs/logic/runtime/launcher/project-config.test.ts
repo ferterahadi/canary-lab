@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import type { ProjectConfig } from '../../../../../../../../shared/project-config'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -11,16 +12,10 @@ import {
   projectConfigPath,
   resolveProjectPort,
   saveProjectConfig,
-  type ProjectConfig,
 } from './project-config'
+import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-
-function mkProject(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-project-config-')))
-  tmpDirs.push(dir)
-  return dir
-}
+const mkProject = trackTempDirs('cl-project-config-')
 
 // The shipped defaults, spread into per-test variants so a new config field
 // changes exactly one place.
@@ -33,12 +28,6 @@ const DEFAULTS: ProjectConfig = {
   autoProposePr: true,
   showDemo: true,
 }
-
-afterEach(() => {
-  while (tmpDirs.length) {
-    fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-  }
-})
 
 describe('project config', () => {
   it('returns defaults when the config file is missing or unreadable JSON', () => {
@@ -270,4 +259,21 @@ describe('project config', () => {
     expect(resolveProjectPort(DEFAULTS)).toBe(DEFAULT_PORT)
     expect(DEFAULT_PORT).toBe(7421)
   })
+})
+
+it('does not create a missing workspace when saving configuration', () => {
+  const missing = path.join(mkProject(), 'missing')
+  expect(() => saveProjectConfig(missing, DEFAULTS)).toThrow(/ENOENT/)
+  expect(fs.existsSync(missing)).toBe(false)
+})
+
+it('preserves a linked project configuration and target permissions', () => {
+  const root = mkProject()
+  const target = path.join(root, 'settings.json')
+  fs.writeFileSync(target, '{}', { mode: 0o640 })
+  fs.symlinkSync('settings.json', projectConfigPath(root))
+  saveProjectConfig(root, DEFAULTS)
+  expect(fs.readlinkSync(projectConfigPath(root))).toBe('settings.json')
+  expect(fs.readFileSync(target, 'utf8')).toBe(JSON.stringify(DEFAULTS, null, 2) + '\n')
+  expect(fs.statSync(target).mode & 0o777).toBe(0o640)
 })

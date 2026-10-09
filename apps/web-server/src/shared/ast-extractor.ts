@@ -1,3 +1,6 @@
+import { readDisplayTestTitle } from './test-title'
+import { unwrapExpression } from './unwrap-expression'
+import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from './test-tags'
 import { declarationModifier, getCalleeChain, isTestCall, TEST_DECLARATORS, type TestModifier as DeclarationModifier } from './test-declaration'
 export type TestModifier = DeclarationModifier
 import ts from 'typescript'
@@ -15,6 +18,7 @@ import {
 import { parseSource } from './controlled-english/compiler-context'
 import { compileSemanticSource } from './controlled-english/semantic-context'
 import type { ExtractedStep, ExtractedTest } from '../../../../shared/extracted-test'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 export interface ExtractResult {
   file: string
@@ -37,25 +41,6 @@ export interface ExtractMetadataResult {
   file: string
   tests: ExtractedTestMetadata[]
   parseError?: string
-}
-
-function getStringArg(node: ts.CallExpression, src?: ts.SourceFile): string | null {
-  const arg = node.arguments[0]
-  if (!arg) return null
-  // isStringLiteralLike covers both string literals and no-substitution
-  // template literals (`` `plain title` ``).
-  if (ts.isStringLiteralLike(arg)) return arg.text
-  // Template literal with substitutions, e.g. `redeems ${key} voucher`.
-  // Reconstruct the raw template text with `${expr}` placeholders preserved
-  // so loop-generated tests at least surface a recognisable name when the
-  // Playwright `--list` enrichment isn't available.
-  if (ts.isTemplateExpression(arg) && src) {
-    // A template expression's source text is always backtick-delimited;
-    // strip the surrounding backticks, keeping `${...}` segments verbatim.
-    const raw = arg.getText(src)
-    return raw.slice(1, -1)
-  }
-  return null
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {
@@ -104,7 +89,7 @@ export function extractTestMappingContext(file: string, source: string): string 
 }
 
 function getTestNameArg(call: ts.CallExpression, src: ts.SourceFile, body: ts.Node | null): string | null {
-  const staticName = getStringArg(call, src)
+  const staticName = readDisplayTestTitle(call, src)
   if (staticName !== null) return staticName
   const arg = call.arguments[0]
   if (!arg || !body) return null
@@ -205,34 +190,13 @@ export function parseTestTagList(tags: string[]): TestAnnotations {
   }
 }
 
-// Pull the string values out of a `tag` property in the test's details object
-// (`test('…', { tag: '@req-R1' }, …)` or `{ tag: ['@req-R1', '@path-happy'] }`).
-function readTagPropertyStrings(value: ts.Expression): string[] {
-  const out: string[] = []
-  if (ts.isStringLiteralLike(value)) {
-    out.push(value.text)
-  } else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) {
-      if (ts.isStringLiteralLike(el)) out.push(el.text)
-    }
-  }
-  return out
-}
-
 // Read coverage tags from a `test(...)` call's Playwright details object (the
 // argument that is an object literal). Absent / non-object → no tags.
 function parseTestTags(call: ts.CallExpression): TestAnnotations {
-  const detail = call.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-    | ts.ObjectLiteralExpression
-    | undefined
+  const detail = findTestDetails(call)
   if (!detail) return {}
-  for (const prop of detail.properties) {
-    if (!ts.isPropertyAssignment(prop)) continue
-    const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : ''
-    if (key !== 'tag' && key !== 'tags') continue
-    return parseTestTagList(readTagPropertyStrings(prop.initializer))
-  }
-  return {}
+  const prop = findTestTagProperty(detail)
+  return prop ? parseTestTagList(readTagPropertyStrings(prop.initializer)) : {}
 }
 
 // Union two annotation sources (Playwright tags take precedence in order, then
@@ -355,7 +319,7 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
   const out: ExtractedStep[] = []
   function visit(n: ts.Node, collector: ExtractedStep[]): void {
     if (ts.isCallExpression(n) && isTestStepCall(n)) {
-      const label = getStringArg(n, src)
+      const label = readDisplayTestTitle(n, src)
       if (label !== null) {
         const body = getStepBody(n)
         const step: ExtractedStep = {
@@ -408,15 +372,6 @@ interface LoopLevel {
 /** The literal each bound name takes under one iteration. */
 type IterationBindings = Map<string, ts.Expression>
 
-function unwrapExpression(node: ts.Expression): ts.Expression {
-  let current = node
-  while (
-    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isSatisfiesExpression(current)
-    || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)
-  ) current = current.expression
-  return current
-}
-
 function encloses(scope: ts.Node, node: ts.Node): boolean {
   return scope.pos <= node.pos && node.end <= scope.end
 }
@@ -448,7 +403,7 @@ function literalElements(
   src: ts.SourceFile,
   seen: Set<ts.VariableDeclaration>,
 ): ts.Expression[] | undefined {
-  const unwrapped = unwrapExpression(expr)
+  const unwrapped = unwrapExpression(expr, { unwrapAwait: false })
   if (ts.isArrayLiteralExpression(unwrapped)) {
     return unwrapped.elements.some(ts.isSpreadElement) ? undefined : [...unwrapped.elements]
   }
@@ -503,7 +458,7 @@ function propertyValue(object: ts.ObjectLiteralExpression, name: string): ts.Exp
 // A pattern the element's shape cannot satisfy binds nothing.
 function bindingsFor(binding: ts.BindingName, element: ts.Expression): IterationBindings {
   const bound: IterationBindings = new Map()
-  const value = unwrapExpression(element)
+  const value = unwrapExpression(element, { unwrapAwait: false })
   if (ts.isIdentifier(binding)) {
     bound.set(binding.text, value)
   } else if (ts.isObjectBindingPattern(binding) && ts.isObjectLiteralExpression(value)) {
@@ -534,7 +489,7 @@ function interpolated(expr: ts.Expression, bound: IterationBindings, src: ts.Sou
     value = bound.get(expr.text)
   } else if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
     const object = bound.get(expr.expression.text)
-    const unwrapped = object ? unwrapExpression(object) : undefined
+    const unwrapped = object ? unwrapExpression(object, { unwrapAwait: false }) : undefined
     value = unwrapped && ts.isObjectLiteralExpression(unwrapped) ? propertyValue(unwrapped, expr.name.text) : undefined
   }
   if (!value) return undefined
@@ -643,7 +598,7 @@ export function extractTestMetadataFromSource(file: string, source: string, opti
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -764,7 +719,7 @@ export function extractTestPredicatesFromSource(file: string, source: string): E
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -815,7 +770,7 @@ export function extractTestsFromSource(
     return {
       file,
       tests: [],
-      parseError: err instanceof Error ? err.message : String(err),
+      parseError: errorMessage(err),
     }
   }
 }
@@ -842,6 +797,6 @@ export function extractCoverageTestsFromSource(file: string, source: string): {
       assertions: body ? collectAssertionSnippets(body, sourceFile) : [],
     })) }
   } catch (error) {
-    return { file, tests: [], parseError: error instanceof Error ? error.message : String(error) }
+    return { file, tests: [], parseError: errorMessage(error) }
   }
 }

@@ -1,15 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { ensureHealWorkspaceTrusted, healWorkspaceTrustRoot } from './run-heal-agent'
 import type { RunContext } from './run-context'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The heal REPL is the only agent canary spawns on an interactive TTY, so it is
 // the only one Claude Code's folder-trust prompt can stop. These pin the seam
 // that settles it before the spawn, and — just as important — that the user is
 // TOLD, because it edits their CLI config.
 
+const tempDir = trackTempDirs('cl-heal-trust-')
 let dir: string
 let workspace: string
 let runDir: string
@@ -27,7 +28,7 @@ function mkCtx(over: Partial<RunContext> = {}) {
 }
 
 beforeEach(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-trust-')))
+  dir = tempDir()
   workspace = path.join(dir, 'workspace')
   runDir = path.join(workspace, 'logs', 'runs', 'r1')
   fs.mkdirSync(runDir, { recursive: true })
@@ -36,7 +37,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true })
   delete process.env.CLAUDE_CONFIG_DIR
   delete process.env.CANARY_LAB_NO_WORKSPACE_TRUST
 })

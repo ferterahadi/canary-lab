@@ -4,7 +4,7 @@ import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedStep } from '@shared/extracted-test'
 import * as workspaceApi from '../api/workspace'
 import { useCodeHighlight } from './use-code-highlight'
-import type { StoryCodeLineNumber } from './readable-story-sequence'
+import type { StoryCodeLineNumber } from '@shared/readable-tests/story-source-map'
 import {
   colorClassForStatus,
   statusLabel,
@@ -13,6 +13,7 @@ import {
   type TestExecutionHighlightKind,
 } from '@/features/runs/utils/test-step-status'
 import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
+import { displayError } from '@/shared/api/error-message'
 
 interface SourceLocation {
   file: string
@@ -56,8 +57,8 @@ export function ShikiCode({
    * present, continuation and structural source rows intentionally stay blank. */
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
   /** 1-indexed displayed rows to tint as changed — the diff-against-HEAD cue
-   *  for a dirty test's body. This remains visually stronger than an execution
-   *  highlight when both refer to the same row. */
+   *  for a dirty test's body. Execution highlights take precedence when both
+   *  refer to the same row. */
   changedLines?: Set<number>
 }) {
   const html = useCodeHighlight(source)?.html ?? null
@@ -129,20 +130,11 @@ function FallbackCodeLines({
   const shownStorySequences = new Set<string>()
   return source.split('\n').map((line, index) => {
     const lineNumber = index + 1
-    const mapped = sourceMappingForDisplayLine(lineNumber, startLine, sourceLineMap)
-    const number = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
-    const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
-    const changed = changedLines?.has(lineNumber) === true
-    const active = lineHighlight?.lines.has(lineNumber) === true
-    const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
-    const executionLabel = active && lineHighlight?.kind === 'failed' ? 'FAILED HERE' : undefined
-    const style = active && highlightColors
-      ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
-      : changed
-        ? { background: 'color-mix(in srgb, var(--warning) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--warning)' }
-        : selected
-          ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
-          : undefined
+    const { mapped, number, selected, changed, active, executionKind, executionLabel, style } = codeLinePresentation(
+      lineNumber,
+      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers },
+      shownStorySequences,
+    )
     return (
       <span
         key={index}
@@ -154,7 +146,7 @@ function FallbackCodeLines({
         data-selected-line={selected ? 'true' : undefined}
         data-changed-line={changed ? 'true' : undefined}
         data-active-line={active ? 'true' : undefined}
-        data-execution-highlight={active ? lineHighlight?.kind : undefined}
+        data-execution-highlight={executionKind}
         title={number.title}
         style={style}
       >
@@ -183,7 +175,7 @@ export function SourceOpenShell({
     try {
       await workspaceApi.openEditor({ file: sourceLocation.file, line, column: 1 })
     } catch (e: unknown) {
-      setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
+      setOpenError(displayError(e, 'Failed to open editor'))
     }
   }
   const content = typeof children === 'function' ? children(openAt) : children
@@ -231,22 +223,14 @@ function decorateShikiLines(
   const shownStorySequences = new Set<string>()
   const decorated = html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
-    const mapped = sourceMappingForDisplayLine(lineNo, startLine, sourceLineMap)
-    const number = codeLineNumber(lineNo, mapped.sourceLines, storyLineNumbers, shownStorySequences)
-    const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
+    const { mapped, number, selected, changed, active, executionKind, executionLabel, style } = codeLinePresentation(
+      lineNo,
+      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers },
+      shownStorySequences,
+    )
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
-    if (lineHighlight?.lines.has(lineNo)) {
-      const colors = codeLineHighlightColors(lineHighlight.kind)
-      const executionLabel = lineHighlight.kind === 'failed' ? ' data-execution-label="FAILED HERE"' : ''
-      return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}"${executionLabel} style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
-    }
-    if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--warning) 16%, transparent);box-shadow:inset 2px 0 0 var(--warning)"`
-    }
-    if (selected) {
-      return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
-    }
-    return `${match}${attrs}`
+    const flags = `${changed ? ' data-changed-line="true"' : ''}${active ? ` data-active-line="true" data-execution-highlight="${executionKind}"` : ''}${executionLabel ? ` data-execution-label="${executionLabel}"` : ''}`
+    return `${match}${attrs}${flags}${style ? ` style="background:${style.background};box-shadow:${style.boxShadow}"` : ''}`
   })
   // A dedicated content cell keeps wrapped source aligned after the number
   // gutter. Shiki keeps each source line on one HTML line, so the final closing
@@ -261,6 +245,42 @@ function decorateShikiLines(
     // Grid rows make Shiki's separator newlines visible under pre-wrap; the
     // source rows themselves already preserve every authored newline.
     .replace(/\n(?=<span class="line")/g, '')
+}
+
+interface CodeLinePresentationOptions {
+  lineHighlight?: CodeLineHighlight
+  startLine?: number
+  sourceLineMap?: readonly FormattedDisplayLine[]
+  changedLines?: ReadonlySet<number>
+  selectedSourceRange?: { startLine: number; endLine: number }
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+}
+
+function codeLinePresentation(
+  lineNumber: number,
+  options: CodeLinePresentationOptions,
+  shownStorySequences: Set<string>,
+) {
+  const { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers } = options
+  const mapped = sourceMappingForDisplayLine(lineNumber, startLine, sourceLineMap)
+  const number = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
+  const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
+  const changed = changedLines?.has(lineNumber) === true
+  const executionKind = lineHighlight?.lines.has(lineNumber) ? lineHighlight.kind : undefined
+  const colors = executionKind
+    ? codeLineHighlightColors(executionKind)
+    : changed
+      ? { background: 'color-mix(in srgb, var(--warning) 16%, transparent)', bar: 'var(--warning)' }
+      : selected
+        ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', bar: 'var(--accent)' }
+        : undefined
+  return {
+    mapped, number, selected, changed,
+    active: executionKind !== undefined,
+    executionKind,
+    executionLabel: executionKind === 'failed' ? 'FAILED HERE' : undefined,
+    style: colors ? { background: colors.background, boxShadow: `inset 2px 0 0 ${colors.bar}` } : undefined,
+  }
 }
 
 function codeLineHighlightColors(kind: TestExecutionHighlightKind): { background: string; bar: string } {

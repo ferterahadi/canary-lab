@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageJobManifest } from '@shared/coverage/types'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // AgentSessionView pulls a REST snapshot and (when live) opens a WS. Stub both so
 // the mount is inert — we only assert that the pane reaches into AgentSessionView.
@@ -23,24 +22,19 @@ const BASE_JOB: CoverageJobManifest = {
   feature: 'checkout',
   kind: 'coverage',
   status: 'running',
-  startedAt: '2026-01-01T00:00:00Z',
+  // Recent on purpose: the elapsed clock hides a start more than a day old as a
+  // clock disagreement, so a fixed calendar date would stop rendering it.
+  startedAt: new Date(Date.now() - 12_000).toISOString(),
   log: 'booting agent\nmapping coverage',
 }
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function render(job: CoverageJobManifest): void {
   act(() => {
@@ -53,7 +47,7 @@ describe('CoverageGeneratingPane', () => {
     render(BASE_JOB)
     expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="generating-elapsed"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="generating-elapsed"]')?.textContent).toMatch(/^· 1[23]s$/)
   })
 
   it('always mounts the AgentSessionView — no Hide/Show button, no Live/Timeline toggle, no raw log (items 3+4)', () => {
@@ -88,4 +82,18 @@ describe('CoverageGeneratingPane', () => {
     expect(container.textContent).not.toContain('Open Claude')
     expect(container.textContent).not.toContain('Open Codex')
   })
+})
+
+it('preserves coverage whitespace and the mounted log scroller across updates', () => {
+  render({ ...BASE_JOB, producer: 'external', log: '   ' })
+  const wrapper = container.querySelector('[data-testid="coverage-external-monitor"]')!
+  const log = container.querySelector('pre')!
+  expect(log.textContent).toBe('   ')
+  log.scrollTop = 32
+  render({ ...BASE_JOB, producer: 'external', kind: 'summary', log: 'next line' })
+  expect(container.querySelector('[data-testid="coverage-external-monitor"]')).toBe(wrapper)
+  expect(container.querySelector('pre')).toBe(log)
+  expect(log.scrollTop).toBe(32)
+  expect(log.textContent).toBe('next line')
+  expect(container.textContent).toContain('Summarizing')
 })

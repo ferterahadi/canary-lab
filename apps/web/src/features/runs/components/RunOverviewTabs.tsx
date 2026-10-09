@@ -1,3 +1,5 @@
+import { clientLabel } from '@/shared/ui/external-client-branding'
+import { RecordedTestChanges } from './RecordedTestChanges'
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useMemo } from 'react'
 import type { RepoBranchSnapshot, ServiceManifestEntry, RunManifest } from '@shared/run-manifest'
@@ -5,12 +7,12 @@ import type { RunSummary } from '@shared/run-detail'
 import { useExternalAudit } from '../state/use-external-audit'
 import { openRunLog } from '../utils/open-run-log'
 import { BootEvidenceRows, bootEvidenceLabel } from '@/shared/ui/BootEvidence'
-import { formatDuration, durationBetween } from '@/shared/lib/format'
+import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { buildTimelineRows } from '../utils/run-timeline'
 import { branchForService, branchLabel } from '../utils/run-detail-playback'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus, type RunStatus } from '@shared/run-state'
-import { RecoveryTimeline, alertClass, formatLifecycleDate, formatLifecycleTime, useTimelineNow } from './RunDiagnosticsPanels'
+import { RecoveryTimeline, alertClass, formatLifecycleDate, useTimelineNow } from './RunDiagnosticsPanels'
 import { plural } from '@shared/lib/plural'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -65,6 +67,7 @@ export interface RunOverviewTabProps {
   view: RunViewModel
   services: ServiceManifestEntry[]
   repoBranches: RepoBranchSnapshot[]
+  onCompareTests?: () => void
   onOpenEvaluationReport?: (feature: string) => void
   /** Opens the boot-failure dialog from the failing service's card. */
   onOpenBootFailure?: () => void
@@ -75,6 +78,7 @@ export function RunOverviewTab({
   view,
   services,
   repoBranches,
+  onCompareTests,
   onOpenEvaluationReport,
   onOpenBootFailure = () => {},
 }: RunOverviewTabProps) {
@@ -126,6 +130,7 @@ export function RunOverviewTab({
           {runFacts(manifest, duration).map((fact) => <RunFactRow key={fact.label} fact={fact} />)}
         </dl>
       </section>
+      <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
       {/* For a boot-only session the held-state message is the point of the
           screen, so surface it on the overview (normal runs keep it in the
           Run Logs timeline only). */}
@@ -205,7 +210,7 @@ export function runFacts(manifest: RunManifest, duration: number | null): RunFac
 }
 
 function timestampFact(label: string, iso: string): RunFact {
-  return { label, value: formatLifecycleTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
+  return { label, value: shortTime(iso), sub: formatLifecycleDate(iso), title: iso, mono: true }
 }
 
 /** A row of the facts list: the rubric label in the left column, the value
@@ -279,7 +284,7 @@ function ServiceFailureEvidence({ runId, failure }: { runId: string; failure: No
 
 export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   if (manifest.healMode === 'external' && manifest.externalHealSession) {
-    return externalHealClientLabel(manifest.externalHealSession.clientKind)
+    return clientLabel(manifest.externalHealSession.clientKind, 'External agent session')
   }
   if (manifest.healAgent === 'claude') return 'Claude'
   if (manifest.healAgent === 'codex') return 'Codex'
@@ -289,22 +294,14 @@ export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   return null
 }
 
-export function externalHealClientLabel(kind: NonNullable<RunManifest['externalHealSession']>['clientKind']): string {
-  switch (kind) {
-    case 'claude': return 'Claude'
-    case 'codex': return 'Codex'
-    case 'claude-pty': return 'Claude (runner)'
-    case 'codex-pty': return 'Codex (runner)'
-    case 'other': return 'External agent session'
-  }
-}
-
 export function VerifyOverviewTab({
   manifest,
   view,
+  onCompareTests,
 }: {
   manifest: RunManifest
   view: RunViewModel
+  onCompareTests?: () => void
 }) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const verification = manifest.verification
@@ -329,6 +326,7 @@ export function VerifyOverviewTab({
           </>
         )}
       </dl>
+      <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
       {view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}

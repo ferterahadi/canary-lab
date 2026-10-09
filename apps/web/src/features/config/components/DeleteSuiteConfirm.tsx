@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import * as flightsApi from '@/shared/api/flights'
 import * as configApi from '@/shared/api/config'
+import { displayError } from '@/shared/api/error-message'
 
 /** R76: the one type-name destructive confirm, opened from Advanced setup and
  *  the flight page's ⋯ menu. A scaffolded suite removes its folder and history;
@@ -44,7 +45,7 @@ export function DeleteSuiteConfirm({
       setConfirmName('')
       onDeleted()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Delete failed')
+      setError(displayError(err, 'Delete failed'))
       setDeleting(false)
     }
   }

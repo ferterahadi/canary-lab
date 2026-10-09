@@ -5,6 +5,7 @@ describe('isWithin', () => {
   it('is true for the root itself and for descendants', () => {
     expect(isWithin('/a/b', '/a/b')).toBe(true)
     expect(isWithin('/a/b', '/a/b/c/d')).toBe(true)
+    expect(isWithin('/a/b', '/a/b/..cache/doc.md')).toBe(true)
   })
 
   it('is false for a sibling, an ancestor, or an unrelated absolute path', () => {

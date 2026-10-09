@@ -1,8 +1,7 @@
 // Tests that require vi.mock to control proposeCoverageMappings output.
 // Kept in a separate file because vi.mock is file-scoped and module-hoisted.
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { vi, describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 // Mock the annotate-engine module so we can return proposals without `file`.
@@ -18,6 +17,10 @@ import { runCoverageEngine } from './coverage-engine'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs'
 import { proposeCoverageMappings } from './annotate-engine'
 import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-mocked-')
 
 // Summary is LLM-only; inject the fake summarizer. (proposeCoverageMappings is
 // vi.mocked above, so runCoverageEngine's mapping side is already controlled.)
@@ -29,16 +32,12 @@ let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-mocked-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
   vi.mocked(proposeCoverageMappings).mockReset()
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const SPEC = `
@@ -49,16 +48,10 @@ const SPEC = `
 `
 
 function writeFeature(name: string): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item')
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, {
+    specs: { 'a.spec.ts': SPEC },
+    docs: { 'spec.md': '# Create todo\na user can create a new todo item' },
+  })
 }
 
 describe('runCoverageEngine — agent proposal file backfill', () => {

@@ -5,8 +5,8 @@ import type {
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 
 // Lifecycle → stepper index. 0 Sabotage (config) · 1 Progress (sabotaging) ·
 // 2 Race (running) · 3 Report (terminal).

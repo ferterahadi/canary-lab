@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -12,11 +13,11 @@ vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
 const { registerCanaryLabMcp: register, resolveMcpInvocation, isEphemeralNpxInstall, isTempInstallPath } = await import('./mcp-registration')
 
+const tempDir = trackTempDirs('cl-mcp-registration-')
 let homeDir: string
 function registerCanaryLabMcp(target: 'codex' | 'claude', opts: Parameters<typeof register>[1] = {}) {
   return register(target, { ...opts, homeDir })
 }
-afterEach(() => fs.rmSync(homeDir, { recursive: true, force: true }))
 
 const lookup = process.platform === 'win32' ? 'where' : 'which'
 
@@ -38,7 +39,7 @@ function claudeAddJsonArgs(command: string, cliPath: string): string[] {
 
 beforeEach(() => {
   mocks.execFileSync.mockReset()
-  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-registration-'))
+  homeDir = tempDir()
 })
 
 function cliAvailable(command: string, outputByGet?: string): void {
@@ -468,6 +469,15 @@ describe('isTempInstallPath', () => {
   it('flags the realpath form of the temp dir, not just the raw one', () => {
     const real = fs.realpathSync(os.tmpdir())
     expect(isTempInstallPath(path.join(real, 'canary-lab-smoke-x', 'smoke-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js'))).toBe(true)
+  })
+
+  // Observed live: `init` in a Claude Code scratchpad (`/private/tmp/claude-<uid>/…`)
+  // wrote its cli.js into the global Desktop, Claude Code, and Codex configs —
+  // macOS's os.tmpdir() is `/var/folders/…/T`, so `/tmp` was never checked.
+  it.skipIf(process.platform === 'win32')('flags an install under /tmp in either spelling', () => {
+    const tail = path.join('scratchpad', 'project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
+    expect(isTempInstallPath(path.join('/private/tmp/claude-0', tail))).toBe(true)
+    expect(isTempInstallPath(path.join('/tmp/claude-0', tail))).toBe(true)
   })
 
   it('leaves a durable install alone', () => {

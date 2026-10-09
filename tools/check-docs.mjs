@@ -16,9 +16,8 @@
 // ago. The judgement half stays in the skill.
 import { readFileSync, readdirSync, existsSync } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { REPO as repoRoot } from './lib/fs.mjs'
 
-const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const docs = ['README.md', ...readdirSync(path.join(repoRoot, 'docs'))
   .filter((f) => f.endsWith('.md'))
   .map((f) => `docs/${f}`)]

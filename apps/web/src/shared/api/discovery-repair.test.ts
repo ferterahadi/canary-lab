@@ -28,7 +28,7 @@ describe('discovery-repair api', () => {
       ['/api/features/shop%2Feu/discovery-repairs', { method: 'GET' }],
       // `kind: 'internal'` is what makes the server spawn Canary's own agent
       // instead of parking the repair for an external editor.
-      ['/api/features/shop%2Feu/discovery-repairs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"kind":"internal"}' }],
+      ['/api/features/shop%2Feu/discovery-repairs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"kind":"internal"}' }],
       ['/api/discovery-repairs/dr%201/agent-session', { method: 'GET' }],
     ])
   })

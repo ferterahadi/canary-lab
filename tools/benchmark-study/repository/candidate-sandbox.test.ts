@@ -1,15 +1,14 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { command } from '../files'
 import { candidateSandboxProfile, prepareCandidateSandbox } from './candidate-sandbox'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('candidate-sandbox-')
 
 function fixture() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'candidate-sandbox-'))); roots.push(root)
+  const root = tempDir()
   const work = path.join(root, 'work')
   const privateDir = path.join(root, 'private')
   const cache = path.join(root, 'cache')

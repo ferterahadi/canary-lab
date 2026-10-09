@@ -5,6 +5,8 @@ import { checkoutBranch, findRepo, type GitStatus } from '../../../shared/git-re
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { describeFastForward, describeRepoCheckout, fastForwardToUpstream, type RepoCheckoutStatus } from '../../../shared/git-upstream'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { statusCodeOf } from '../../../shared/http-error'
 
 export interface FeatureRepoDeps {
   repositoryObserver?: RepositoryObserver
@@ -60,8 +62,8 @@ export async function checkoutFeatureRepo(deps: FeatureRepoDeps, target: RepoTar
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
-      statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number' ? (err as { statusCode: number }).statusCode : 500,
+      error: errorMessage(err),
+      statusCode: statusCodeOf(err),
     }
   }
 }

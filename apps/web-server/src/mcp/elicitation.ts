@@ -1,8 +1,12 @@
+import type { Approval } from '../../../../shared/approval'
+import { approvalContext } from './approval-context'
+import type { ApprovalStore } from './approval-store'
 import { createHash, randomUUID } from 'crypto'
 import { inputRequired, type CallToolResult, type ElicitRequestFormParams, type InputRequiredResult, type ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import type { McpClientFacts } from './client-surface'
 import { asJsonResult, errorResult } from './tool-support'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 type ToolResult = CallToolResult | InputRequiredResult
 /** Everything needed to recognise an answer to a question already asked. */
@@ -18,6 +22,7 @@ interface PendingInput {
   scope: string
   revision: string
   expiresAt: number
+  browser?: { store: ApprovalStore; id: string; url: string }
   result?: Promise<ToolResult>
   url?: { spec: InputSpec<never> & { mode: 'url' }; complete: () => Promise<ToolResult> }
 }
@@ -108,20 +113,41 @@ async function applyAnswer<T>(
   const entry = typeof state === 'string' ? pending.get(state) : undefined
   if (!entry || entry.scope !== inputFingerprint([ctx?.sessionId, spec.scope])) return inputPending('The input request expired or belongs to a different operation. Nothing was applied.')
   if (entry.result) return entry.result
-  if (entry.revision !== inputFingerprint(spec.revision)) return inputPending('The work changed while the question was open. Nothing was applied; review its current state before resuming.')
+  if (entry.browser && entry.browser.store.get(entry.browser.id)?.status !== 'pending') {
+    return inputPending('This approval is no longer pending. Ask the requesting chat to resume.')
+  }
+  if (entry.revision !== inputFingerprint(spec.revision)) {
+    entry.browser?.store.update(entry.browser.id, { status: 'expired', error: 'The work changed. Ask the requesting chat to review the current state and resume.' })
+    return inputPending('The work changed while the question was open. Nothing was applied; review its current state before resuming.')
+  }
   const response = z.object({ action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }).safeParse(ctx?.mcpReq.inputResponses?.answer)
   if (!response.success) return errorResult('Invalid elicitation response. Nothing was applied.')
   if (response.data.action !== 'accept') {
     const reason = clientAnswerReport(response.data.action)
+    if (entry.browser) return browserHandoff(entry.browser.id, entry.browser.url, reason)
     entry.result = Promise.resolve(spec.onNonAccept?.(reason) ?? inputPending(reason))
   } else if (spec.mode === 'form') {
     const parsed = spec.schema.safeParse(response.data.content)
-    if (!parsed.success) return errorResult('The submitted input does not match the requested fields. Nothing was applied.')
+    if (!parsed.success) {
+      entry.browser?.store.update(entry.browser.id, { error: 'Choose a valid answer for every required field.' })
+      return errorResult('The submitted input does not match the requested fields. Nothing was applied.')
+    }
+    entry.browser?.store.update(entry.browser.id, { status: 'answering', answer: parsed.data as Record<string, unknown>, error: undefined })
     entry.result = Promise.resolve().then(() => apply(parsed.data))
   } else {
     // URL-mode carries no input data. Completion must be checked in the
     // existing domain store by apply(), never inferred from opening a URL.
     entry.result = Promise.resolve().then(() => apply(undefined as T))
+  }
+  if (entry.browser && entry.result) {
+    const { store, id } = entry.browser
+    entry.result = entry.result.then((result) => {
+      store.update(id, { status: 'isError' in result && result.isError ? 'failed' : 'answered', result })
+      return result
+    }, (error: unknown) => {
+      store.update(id, { status: 'failed', error: errorMessage(error) })
+      throw error
+    })
   }
   return entry.result
 }
@@ -186,22 +212,41 @@ function openUserInput<T>(
   const scope = inputFingerprint([ctx?.sessionId, spec.scope])
   const revision = inputFingerprint(spec.revision)
   const supported = facts.elicitation?.[spec.mode] === true
-  if (!ctx || !supported) return spec.fallback()
+  const browser = spec.mode === 'form' ? approvalContext.getStore() : undefined
+  if (!ctx || (!supported && !browser)) return spec.fallback()
   if (pending.size >= MAX_PENDING_INPUTS) return inputPending('Too many open input requests. Resume after an earlier request expires.')
-  const id = randomUUID()
-  pending.set(id, {
+  const existing = browser ? [...pending.entries()].find(([, entry]) => entry.scope === scope && entry.revision === revision
+    && entry.browser?.store === browser.store && browser.store.get(entry.browser.id)?.status === 'pending') : undefined
+  const id = existing?.[0] ?? randomUUID()
+  const url = browser ? `${browser.uiUrl}/?dialog=notifications&approval=${encodeURIComponent(id)}` : undefined
+  if (!existing) pending.set(id, {
     scope, revision, expiresAt: now + INPUT_TTL_MS,
+    ...(browser && url ? { browser: { store: browser.store, id, url } } : {}),
     ...(spec.mode === 'url' ? { url: { spec, complete: () => apply!(undefined as T) } } : {}),
   })
+  if (browser && url && spec.mode === 'form') {
+    if (!existing) browser.store.open({ id, reviewUrl: url, command: browser.command, feature: browser.feature, message: spec.message,
+      schema: z.toJSONSchema(spec.schema) as Approval['schema'], status: 'pending', startedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + INPUT_TTL_MS).toISOString(),
+    }, async (answer) => browser.resume(id, answer))
+    if (!supported) return browserHandoff(id, url, 'This client cannot display the native approval form.')
+  }
   return inputRequired({
     requestState: id,
     inputRequests: {
       answer: spec.mode === 'url'
         ? inputRequired.elicitUrl({ message: spec.message, url: spec.url })
         : inputRequired.elicit({
-            message: spec.message,
+            message: spec.message + (url ? `\n\nOr [answer in Canary](${url}). If you do, close this prompt.` : ''),
             requestedSchema: z.toJSONSchema(spec.schema) as ElicitRequestFormParams['requestedSchema'],
           }),
     },
+  })
+}
+
+function browserHandoff(approvalId: string, reviewUrl: string, reason: string): CallToolResult {
+  return asJsonResult({ status: 'needs-input', approvalId, reviewUrl, reason,
+    next: 'Show the linked approval to the human. It is also in Canary Notifications and the banner above Flight. Do not answer it yourself or recreate the options in chat. Call wait_for_approval with this approvalId to receive the original command result; repeat on still_waiting.',
+    nextSteps: ['wait_for_approval'],
   })
 }

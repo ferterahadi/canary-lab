@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The stoppedEarly tests below drive writeHealIndex through its DEFAULT target
 // — the hard-coded HEAL_INDEX_PATH from './paths' — because that fallback is
@@ -32,6 +33,7 @@ vi.mock('./paths', () => ({
 // a static import is hoisted above them and would hit the TDZ.
 const { writeHealIndex } = await import('./heal-index')
 
+const tempDir = trackTempDirs('cl-le-')
 let tmpDir: string
 
 beforeEach(() => {
@@ -40,7 +42,7 @@ beforeEach(() => {
   // straight at a mkdtemp dir makes that the SYSTEM temp root, so the scan walks
   // every other test's leftovers: non-deterministic, and seconds slow once the
   // suite has been running a while.
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-')))
+  const root = tempDir()
   tmpDir = path.join(root, 'runs', '2026-01-01T0000-heal')
   fs.mkdirSync(tmpDir, { recursive: true })
 })

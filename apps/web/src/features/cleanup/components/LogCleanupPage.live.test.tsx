@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as runsApi from '@/shared/api/runs'
@@ -10,8 +10,9 @@ import type { InvalidationTopic } from '@/shared/state/invalidation-bus'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { CLEANUP_RECONCILE_MS } from '../state/use-cleanup-inventory'
 import { LogCleanupPage } from './LogCleanupPage'
+import { advanceAct } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/cleanup', () => ({ cleanupRuns: vi.fn(), cleanupWorktrees: vi.fn(), cleanupPortify: vi.fn(), trimRun: vi.fn(), removeWorktree: vi.fn(), openWorktreePath: vi.fn() }))
 vi.mock('@/shared/api/runs', () => ({ deleteRun: vi.fn() }))
 vi.mock('@/shared/api/portify', () => ({ removePortify: vi.fn() }))
@@ -43,16 +44,12 @@ beforeEach(() => {
   ], totalBytes: 150 })
   vi.mocked(runsApi.deleteRun).mockResolvedValue(undefined)
   vi.mocked(portifyApi.removePortify).mockResolvedValue({ removed: true, workflowId: 'p-one' })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 async function mount() {
   await act(async () => root.render(<InvalidationProvider><Harness /></InvalidationProvider>))
@@ -65,7 +62,62 @@ function button(label: string, parent: ParentNode = container) {
 }
 async function click(element: HTMLElement) { await act(async () => element.click()) }
 async function changed(resource = 'runs') { await act(async () => invalidate('cleanup', resource)) }
-async function tick() { await act(async () => { await vi.advanceTimersByTimeAsync(CLEANUP_RECONCILE_MS) }) }
+async function tick() { await advanceAct(CLEANUP_RECONCILE_MS) }
+
+function inventoryCase<T>(tab: string, read: () => Promise<T>, empty: T, loading: string, failure: string, emptyTitle: string) {
+  return {
+    tab, loading, failure, emptyTitle,
+    defer() {
+      let reject!: (error: Error) => void
+      const pending = new Promise<T>((_resolve, fail) => { reject = fail })
+      vi.mocked(read).mockReturnValueOnce(pending)
+      return reject
+    },
+    returnEmpty() { vi.mocked(read).mockImplementation(async () => empty) },
+    failNext() { vi.mocked(read).mockRejectedValueOnce(new Error('offline')) },
+  }
+}
+
+const inventoryCases = [
+  inventoryCase('Runs', cleanupApi.cleanupRuns, { runs: [], orphans: [], totals: { totalBytes: 0, reclaimableDeleteBytes: 0, reclaimableTrimBytes: 0 } }, 'Computing folder sizes…', "Couldn't load cleanup data", 'No runs on disk'),
+  inventoryCase('Worktrees', cleanupApi.cleanupWorktrees, { worktrees: [] }, 'Scanning worktrees…', "Couldn't load worktrees", 'No worktrees on disk'),
+  inventoryCase('Portify', cleanupApi.cleanupPortify, { workflows: [], totalBytes: 0 }, 'Loading Portify records…', "Couldn't load Portify records", 'No Portify records'),
+]
+
+it.each(inventoryCases)('$tab renders loading, initial failure, retry and empty inventory', async (scenario) => {
+  const reject = scenario.defer()
+  await mount()
+  if (scenario.tab !== 'Runs') await click(button(scenario.tab))
+  expect(container.textContent).toContain(scenario.loading)
+  expect(container.querySelector('table')).toBeNull()
+  await act(async () => reject(new Error('offline')))
+  expect(container.textContent).toContain(scenario.failure)
+  expect(container.textContent).toContain('offline')
+  scenario.returnEmpty()
+  await click(button('Retry'))
+  expect(container.textContent).toContain(scenario.emptyTitle)
+  expect(container.textContent).not.toContain(scenario.failure)
+  expect(container.querySelector('table')).toBeNull()
+})
+
+it.each(inventoryCases)('$tab retains table, selection and scroll through a failed refresh', async (scenario) => {
+  await mount()
+  if (scenario.tab !== 'Runs') await click(button(scenario.tab))
+  const table = container.querySelector('table')!
+  const scroller = table.parentElement!
+  const selected = table.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  await click(selected)
+  scroller.scrollTop = 70
+  scenario.failNext()
+  await tick()
+  expect(container.querySelector('table')).toBe(table)
+  expect(scroller.scrollTop).toBe(70)
+  expect(selected.checked).toBe(true)
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('outdated: offline')
+  await tick()
+  expect(container.querySelector('[role="alert"]')).toBeNull()
+  expect(container.querySelector('table')).toBe(table)
+})
 
 it('makes four reconciliation reads per idle visible minute and refreshes on focus', async () => {
   await mount()

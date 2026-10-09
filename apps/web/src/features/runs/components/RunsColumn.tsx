@@ -4,9 +4,10 @@ import { deriveRunViewModel } from '../utils/run-view-model'
 import { useRunDetails } from '../state/RunsContext'
 import { useRunsColumn } from './use-runs-column'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { ConfirmModal } from '@/shared/ui/Overlays'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { VerificationDialog } from '@/features/coverage/components/VerificationDialog'
-import { ActionButton, ConfirmDialog, DeleteIconButton, ExecutionTypeBadge, RetestIconButton, RunActionsKebab } from './RunActionsKebab'
+import { ActionButton, DeleteIconButton, ExecutionTypeBadge, RetestIconButton, RunActionsKebab } from './RunActionsKebab'
 import { ICON_PAUSE, ICON_STOP, RunLaunchControl } from './RunLaunchControl'
 
 interface Props {
@@ -352,9 +353,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         )}
       </div>
       {pendingPause && (
-        <ConfirmDialog
+        <ConfirmModal open position="absolute"
           title="Pause and start heal?"
-          description={`Playwright will be terminated for run ${pendingPause.runId}. Pending tests are skipped, and the heal agent starts immediately on whatever has failed so far.`}
+          message={`Playwright will be terminated for run ${pendingPause.runId}. Pending tests are skipped, and the heal agent starts immediately on whatever has failed so far.`}
           confirmLabel="Pause & Heal"
           variant="warning"
           onCancel={() => setPendingPause(null)}
@@ -363,18 +364,18 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       )}
       {pendingStop && (
         pendingStop.executionType === 'boot' ? (
-          <ConfirmDialog
+          <ConfirmModal open position="absolute"
             title="Stop these services?"
-            description={`This stops all services for boot session ${pendingStop.runId} and reverts the envset. No test results are affected.`}
+            message={`This stops all services for boot session ${pendingStop.runId} and reverts the envset. No test results are affected.`}
             confirmLabel="Stop Services"
             variant="danger"
             onCancel={() => setPendingStop(null)}
             onConfirm={confirmStop}
           />
         ) : (
-          <ConfirmDialog
+          <ConfirmModal open position="absolute"
             title="Stop this run?"
-            description={`This will abort all running processes for run ${pendingStop.runId}. Results collected so far are preserved.`}
+            message={`This will abort all running processes for run ${pendingStop.runId}. Results collected so far are preserved.`}
             confirmLabel="Stop Run"
             variant="danger"
             onCancel={() => setPendingStop(null)}
@@ -383,9 +384,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         )
       )}
       {pendingDelete && (
-        <ConfirmDialog
+        <ConfirmModal open position="absolute"
           title="Delete this run?"
-          description={`Run ${pendingDelete.runId} and all its logs will be permanently removed from disk. This cannot be undone.`}
+          message={`Run ${pendingDelete.runId} and all its logs will be permanently removed from disk. This cannot be undone.`}
           confirmLabel="Delete Run"
           variant="danger"
           onCancel={() => setPendingDelete(null)}
@@ -393,9 +394,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         />
       )}
       {pendingCancelHeal && (
-        <ConfirmDialog
+        <ConfirmModal open position="absolute"
           title="Stop the heal cycle?"
-          description={`The heal agent for ${pendingCancelHeal.runId} will be terminated. The run will be marked failed and a journal entry will record the cancellation.`}
+          message={`The heal agent for ${pendingCancelHeal.runId} will be terminated. The run will be marked failed and a journal entry will record the cancellation.`}
           confirmLabel="Stop Heal"
           variant="danger"
           onCancel={() => setPendingCancelHeal(null)}

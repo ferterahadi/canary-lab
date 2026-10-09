@@ -1,6 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createNotificationRuntime, NOTIFICATION_RECOVERY_MS } from './notification-runtime'
@@ -10,6 +9,9 @@ import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { FlightRunStore } from '../../flights/logic/store'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('notification-runtime-')
 
 let dir: string
 let runtime: ReturnType<typeof createNotificationRuntime>
@@ -21,7 +23,7 @@ let flight: FlightManifest
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 beforeEach(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notification-runtime-')))
+  dir = tempDir()
   const featuresDir = path.join(dir, 'features')
   fs.mkdirSync(featuresDir)
   const logsDir = path.join(dir, 'logs')
@@ -44,20 +46,30 @@ beforeEach(() => {
 afterEach(async () => {
   await runtime.dispose()
   vi.restoreAllMocks()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 it('starts reconciliation explicitly and settles the inbox from a Flight store event without a read request', async () => {
   expect(runtime.store.list()).toEqual([])
   runtime.start()
   const [active] = runtime.store.list()
-  expect(active.target).toEqual({ kind: 'flight', flightId: 'f1' })
+  expect(active.target).toEqual({ kind: 'flight', flightId: 'f1', stage: 'run' })
   expect(active.resolvedAt).toBeUndefined()
   await flush()
   const publish = vi.spyOn(events, 'publish')
   flights.save({ ...flight, status: 'done', pauseReason: undefined })
   expect(runtime.store.list()).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
   expect(publish).toHaveBeenCalledWith({ type: 'notifications-changed' })
+})
+
+it('re-reads Flights when a Flight notice is refreshed after its store event was missed', async () => {
+  runtime.start()
+  const [active] = runtime.store.list()
+  await flush()
+  const settled = flights.list().map((entry) => ({ ...entry, status: 'done' as const, pauseReason: undefined }))
+  vi.spyOn(flights, 'list').mockReturnValue(settled)
+  expect(runtime.store.list()[0].resolvedAt).toBeUndefined()
+  await runtime.refreshAction(active.id)
+  expect(runtime.store.list()).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
 })
 
 it('reconciles run and dirty-store events but ignores its own workspace events', async () => {
@@ -74,6 +86,15 @@ it('reconciles run and dirty-store events but ignores its own workspace events',
   }
   await flush()
   expect(reconcile).not.toHaveBeenCalled()
+})
+
+it('creates an unavailable assessment notice without hiding the uncertainty', () => {
+  const attention = { state: 'unavailable' as const, stage: 'run' as const, title: 'Flight paused',
+    reason: 'Could not verify current state', checkedAt: 'now', revision: 'a' }
+  vi.spyOn(flights, 'list').mockImplementation(() => [{ ...flight, id: 'f1', attention }])
+  runtime.start()
+  expect(runtime.store.list()[0].body).toBe('Could not verify current state')
+  expect(runtime.store.list()[0].resolvedAt).toBeUndefined()
 })
 
 it.each<WorkspaceEvent>([

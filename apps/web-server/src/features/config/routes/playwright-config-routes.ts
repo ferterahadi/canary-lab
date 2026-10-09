@@ -1,10 +1,10 @@
-import { resolveConfigDocument, readConfigDocument } from './config-document'
+import { resolveConfigDocument, readConfigDocument, writeConfigDocument } from './config-document'
 // Feature-config REST — the playwright.config.{ts,js,cjs} document.
 // Split out of feature-config.ts; handler bodies are unchanged.
 import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
-import fs from 'fs'
-import { readPlaywrightConfig, writePlaywrightConfig, type ConfigValue } from '../../../shared/config-ast'
+import { readPlaywrightConfig, writePlaywrightConfig } from '../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../shared/config-value'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
 import { notFound } from '../../../shared/http-error'
@@ -25,18 +25,13 @@ export async function registerPlaywrightConfigRoutes(app: FastifyInstance, deps:
       const document = resolveConfigDocument(deps.featuresDir, req.params.name, PLAYWRIGHT_CONFIG_NAMES, 'playwright config')
       if (!document.ok) return notFound(reply, document.missing)
       const { cfg } = document
-      const source = fs.readFileSync(cfg.path, 'utf-8')
-      let next: string
-      try {
-        next = writePlaywrightConfig(source, req.body.value)
-      } catch (err) {
+      const written = writeConfigDocument(cfg, req.body.value, writePlaywrightConfig, readPlaywrightConfig)
+      if (!written.ok) {
         reply.code(400)
-        return { error: (err as Error).message }
+        return { error: written.error }
       }
-      fs.writeFileSync(cfg.path, next)
-      const parsed = readPlaywrightConfig(next)
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-      return { path: cfg.path, format: cfg.format, content: next, parsed }
+      return written.document
     },
   )
 }

@@ -1,5 +1,6 @@
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@shared/launcher/types'
 import { Section } from '@/shared/ui/atoms'
 import { FieldRow, TextInput, Textarea } from '@/shared/ui/FormFields'
@@ -7,6 +8,7 @@ import { HintIcon } from '@/shared/ui/Icons'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 interface Slice {
   name: string
@@ -64,10 +66,10 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
   })
 
   if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
+    return <ConfigLoadGuard error={ed.error} />
   }
   if (ed.loading || !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <ConfigLoadGuard />
   }
 
   return (

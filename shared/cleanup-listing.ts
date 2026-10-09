@@ -1,3 +1,4 @@
+import type { WorktreeEntry } from './worktree-inventory'
 // The cleanup dialog's listings of runs and portify workflows, as the cleanup
 // routes return them.
 import type { PortifyStatus } from './portify-index'
@@ -61,4 +62,9 @@ export interface PortifyCleanupEntry {
 export interface PortifyCleanupListing {
   workflows: PortifyCleanupEntry[]
   totalBytes: number
+}
+
+export interface CleanupWorktree extends WorktreeEntry {
+  /** Owner run/benchmark is still running — removal is refused. */
+  active: boolean
 }

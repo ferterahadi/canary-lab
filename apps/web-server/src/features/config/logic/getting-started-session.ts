@@ -2,6 +2,8 @@ import type { GettingStartedWorkflow, GettingStartedOwner, GettingStartedTarget,
 import fs from 'fs'
 import path from 'path'
 import { isUnsettledRunStatus } from '../../../../../../shared/run-state'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { newTimedTaskId } from '../../../shared/task-id'
 
 /** Resolves a claim's linked record to its live status. One method pair over
  *  the target union (rather than one pair per kind) so adding a target kind is
@@ -49,10 +51,7 @@ function readState(file: string): GettingStartedSessionState {
 }
 
 function writeState(file: string, state: GettingStartedSessionState): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
-  fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-  fs.renameSync(tmp, file)
+  atomicWriteJson(file, state, undefined, { uniqueTemporary: true })
 }
 
 /**
@@ -99,7 +98,7 @@ export class GettingStartedSessionStore {
     if (state.active) throw new GettingStartedBusyError(state.active)
     const timestamp = this.now()
     const active: GettingStartedActiveSession = {
-      sessionId: `gs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId: newTimedTaskId('gs'),
       workflow,
       owner,
       target: null,

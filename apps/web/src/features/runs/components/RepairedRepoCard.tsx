@@ -10,6 +10,7 @@ import { fileCountLabel, groupByDirectory, isTestPath } from '../utils/repair-fi
 import { prBlockedLine } from '../utils/pr-blocked-copy'
 import { CopyIconButton } from './RunServicePanels'
 import { RepairPatchDialog } from './RepairPatchDialog'
+import { displayError } from '@/shared/api/error-message'
 
 // One repo of a run's repair, as a card — the unit both the Changes tab and the
 // flight's Test Run stage render, so the two surfaces can't drift apart again
@@ -40,11 +41,11 @@ type OpenState =
  * and because the confirm is modal — two cards must never each own a copy of
  * it. Callers render `confirm` once and spread `cardProps(repoName)` per card.
  */
-export function useRepoOpener(runId: string, enabled: boolean, provisional = false) {
-  const preflight = useApplyPreflight(runId, enabled && !provisional)
+export function useRepoOpener(runId: string, finalCapture: boolean, provisional = false) {
+  const preflight = useApplyPreflight(runId, finalCapture)
   const targets = preflight.value?.targets
   const refreshPreflight = preflight.refresh
-  const identity = JSON.stringify([runId, provisional, enabled])
+  const identity = JSON.stringify([runId, provisional, finalCapture])
   const current = useRef({ identity, generation: 0 })
   if (current.current.identity !== identity) current.current = { identity, generation: current.current.generation + 1 }
   const generation = current.current.generation
@@ -87,7 +88,7 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
         ? { kind: 'done', ...(opened.editor ? { editor: opened.editor } : {}) }
         : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })
     } catch (err) {
-      update({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) })
+      update({ kind: 'failed', reason: displayError(err) })
     } finally {
       if (alive() && !provisional) refreshPreflight()
     }
@@ -167,7 +168,7 @@ export function RepairedRepoCard({
   auto,
   provisional = false,
   liveWorktreeRoot,
-  runStopped = true,
+  canUseFinalCapture,
   onProposeClick,
 }: {
   runId: string
@@ -184,7 +185,7 @@ export function RepairedRepoCard({
   auto: boolean
   provisional?: boolean
   liveWorktreeRoot?: string
-  runStopped?: boolean
+  canUseFinalCapture: boolean
   onProposeClick: () => void
 }) {
   const [patchOpen, setPatchOpen] = useState(false)
@@ -203,7 +204,6 @@ export function RepairedRepoCard({
   // rolled up — and it isn't for a capture recorded before file names were kept
   // either, which is the case that must not lose its way to the patch.
   const listedEverything = !rolled && names.length >= (repo?.files ?? 0)
-  const canPropose = runStopped && !provisional
   const waitForStop = 'Available after this run stops and captures its final changes.'
 
   return (
@@ -320,22 +320,22 @@ export function RepairedRepoCard({
                 type="button"
                 data-testid={`changes-open-repo-${repoName}`}
                 onClick={onOpen}
-                disabled={openState.kind === 'working' || (!provisional && (!runStopped || preflight?.confirmed === false))}
+                disabled={openState.kind === 'working' || (!provisional && (!canUseFinalCapture || preflight?.confirmed === false))}
                 title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
                 className="cl-button cl-button-accent px-2.5 py-1 text-[11px]"
               >
                 {openState.kind === 'working' ? 'Opening…' : 'Open in editor'}
               </button>
             )}
-            <span title={canPropose ? undefined : waitForStop} className={`inline-flex ${canPropose ? '' : 'cursor-not-allowed'}`}>
+            <span title={canUseFinalCapture ? undefined : waitForStop} className={`inline-flex ${canUseFinalCapture ? '' : 'cursor-not-allowed'}`}>
               <button
                 type="button"
                 data-testid={`changes-propose-${repoName}`}
                 onClick={onProposeClick}
-                disabled={!canPropose}
-                aria-label={canPropose ? 'Commit and open PR' : `Commit and open PR. ${waitForStop}`}
+                disabled={!canUseFinalCapture}
+                aria-label={canUseFinalCapture ? 'Commit and open PR' : `Commit and open PR. ${waitForStop}`}
                 className="cl-button px-2.5 py-1 text-[11px] disabled:pointer-events-none disabled:opacity-50"
-                title={canPropose ? 'Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff' : undefined}
+                title={canUseFinalCapture ? 'Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff' : undefined}
               >
                 Commit &amp; open PR…
               </button>

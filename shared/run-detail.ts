@@ -1,9 +1,13 @@
+import type { PlaybackIdentity } from './playback-identity'
+import type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
+export type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
 // What GET /api/runs/:id returns: the manifest plus the reporter's summary,
 // playback events and artifacts. Shared so the web UI reads the server's own
 // declaration instead of a mirror.
 import type { PathType } from './coverage/types'
 import type { EnvironmentExclusion } from './run-applicability'
 import type { RunManifest } from './run-manifest'
+import type { RunIndexEntry } from './run-index'
 import type { RunLifecycleEvent } from './run-state'
 
 export interface RunSummaryFailedEntry {
@@ -39,13 +43,6 @@ export interface RunSummaryFailedEntry {
    *  `TestEntry` in `runtime/summary-types.ts`; this interface is the read-side
    *  projection of it and must only ever be a subset. */
   traceSummaryFile?: string
-}
-
-export interface RunSummaryRunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
 }
 
 export interface RunSummary {
@@ -93,30 +90,6 @@ export interface RunSummary {
   failed: RunSummaryFailedEntry[]
 }
 
-export type PlaywrightPlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { name: string; title: string }
-      step: RunSummaryRunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }
-
 export interface RunDetail {
   runId: string
   manifest: RunManifest
@@ -124,7 +97,14 @@ export interface RunDetail {
   newRunRequired?: true
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
+  playbackIdentity?: PlaybackIdentity
   playwrightArtifacts?: PlaywrightArtifactGroup[]
+  /** Each stamped attempt's own retained media, keyed by
+   *  `PlaybackEventKey.attemptKey`. Unlike `playwrightArtifacts` (the latest
+   *  copy per test name), a later execution never replaces these. */
+  attemptArtifacts?: Record<string, PlaywrightArtifact[]>
+  /** Retained per-execution media no attempt claims. */
+  unassignedArtifacts?: RunExecutionArtifact[]
   lifecycleEvents?: RunLifecycleEvent[]
 }
 
@@ -138,6 +118,50 @@ export interface PlaywrightArtifact {
   contentType?: string
   sizeBytes: number
   mtimeMs: number
+}
+
+export interface RunExecutionArtifact extends PlaywrightArtifact {
+  execution: number
+}
+
+/** Where one execution's service output is kept: the immutable per-execution
+ *  segment, or the live log while that execution is the latest. */
+export type ServiceLogSource = 'segment' | 'live'
+
+/** Lines `startLine`…`endLine` (1-based, inclusive) of a retained service log,
+ *  between one test attempt's `<name>`…`</name>` markers. `closed: false` = the
+ *  close marker never arrived (the attempt is running, or it was cut short), so
+ *  the span runs to the end of the file. */
+export interface ServiceLogSpan { startLine: number; endLine: number; closed: boolean }
+
+/** A bounded, plain-text window of a retained service log. */
+export interface ServiceLogWindow { firstLine: number; lines: string[]; truncated: boolean }
+
+/** One service's output for one test attempt. `matchedBy: 'order'` = the log
+ *  holds several spans under the same marker name (retries, or tests sharing
+ *  a title), and this one was chosen by its position. */
+export interface ServiceLogExcerpt {
+  service: string
+  name: string
+  execution: number
+  source?: ServiceLogSource
+  totalLines?: number
+  span?: ServiceLogSpan
+  matchedBy?: 'marker' | 'order'
+  window?: ServiceLogWindow
+  /** Why there is no span: the execution's output was not retained, or the
+   *  service printed no marker for this attempt. */
+  missing?: 'not-retained' | 'no-marker'
+}
+
+export interface ServiceLogExcerpts { execution: number; excerpts: ServiceLogExcerpt[] }
+
+/** A window of one service's retained log for the anchored full-log view. */
+export interface ServiceLogLines extends ServiceLogWindow {
+  service: string
+  execution: number
+  source: ServiceLogSource
+  totalLines: number
 }
 
 export interface PlaywrightArtifactGroup {
@@ -156,5 +180,32 @@ export interface JournalSection {
   run: string | null
   outcome: string | null
   hypothesis: string | null
+  /** The cycle's input failures, by summary name (title slugs — two cases
+   *  that share a title share a name). Absent when the entry lists none. */
+  failingTests?: string[]
+  /** Run-wide repair cycle and the execution it started from. Absent on
+   *  entries written before they were stamped. */
+  cycle?: number
+  inputExecution?: number
   body: string
 }
+
+// `/ws/runs` frames. Stable: the web client treats unknown `type` values as
+// no-ops, so adding fields is non-breaking; renaming a frame type IS
+// breaking. Keep additive.
+export type RunsStreamFrame =
+  /** Sent once when the connection opens. Carries everything the client
+   *  needs to render its initial UI without making any HTTP calls. */
+  | { type: 'snapshot'; runs: RunIndexEntry[]; details: Record<string, RunDetail> }
+  /** A single run changed (created, status flipped, finalized). The client
+   *  patches `state.details[runId]` with `detail` and inserts/updates the
+   *  matching `state.runs` entry. */
+  | { type: 'update'; runId: string; detail: RunDetail }
+  /** A run was removed from history (DELETE on a terminal run). The client
+   *  drops it from both `state.runs` and `state.details`. */
+  | { type: 'removed'; runId: string }
+  /** A list-level change with no specific runId (today: the boot-time
+   *  reaper). The client refreshes its `state.runs` snapshot from the
+   *  attached payload and reconciles details for any newly-active rows
+   *  via the next `update` frame. */
+  | { type: 'list-changed'; runs: RunIndexEntry[] }

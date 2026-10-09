@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../shared/getting-started-claim'
 // MCP tools — the external test-authoring draft lifecycle.
 // Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
@@ -35,36 +36,38 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
     // demo can't slip in between; attach right after the write links the claim.
     const claim = deps.gettingStartedDemo?.claim('author', feature) ?? null
     if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
-    const draftId = newDraftId()
-    const record = createDraft(deps.store.logsDir, {
-      draftId,
-      prdText: `External agent session is authoring tests for ${feature}.`,
-      prdDocuments: [],
-      repos: (featureConfig.repos ?? []).map((repo) => ({
-        name: repo.name,
-        localPath: repo.localPath,
-        ...(repo.branch ? { branch: repo.branch } : {}),
-      })),
-      featureName: feature,
-      producer: 'external',
-      externalStage: stage as ExternalDraftStage,
-      externalClientKind: client_kind,
-      externalSessionId: session_id,
-      ...(conversation_name ? { externalConversationName: conversation_name } : {}),
-      ...(external_session_url ? { externalSessionUrl: external_session_url } : {}),
-    })
-    const next: DraftRecord = {
-      ...record,
-      status: statusForExternalStage(stage as ExternalDraftStage),
-      updatedAt: new Date().toISOString(),
-    }
-    writeDraft(deps.store.logsDir, next)
-    if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'draft', id: draftId, feature })
-    return asJsonResult({
-      ...externalDraftView(next),
-      canaryLabBehavior: 'tracking-only',
-      statusMeaning: 'External agent session is authoring tests; Canary Lab is not running an internal wizard agent.',
-      nextSteps: externalDraftAuthoringNextSteps(feature),
+    return withGettingStartedClaim(gettingStartedClaim(deps.gettingStartedDemo, claim?.sessionId ?? null), (attach) => {
+      const draftId = newDraftId()
+      const record = createDraft(deps.store.logsDir, {
+        draftId,
+        prdText: `External agent session is authoring tests for ${feature}.`,
+        prdDocuments: [],
+        repos: (featureConfig.repos ?? []).map((repo) => ({
+          name: repo.name,
+          localPath: repo.localPath,
+          ...(repo.branch ? { branch: repo.branch } : {}),
+        })),
+        featureName: feature,
+        producer: 'external',
+        externalStage: stage as ExternalDraftStage,
+        externalClientKind: client_kind,
+        externalSessionId: session_id,
+        ...(conversation_name ? { externalConversationName: conversation_name } : {}),
+        ...(external_session_url ? { externalSessionUrl: external_session_url } : {}),
+      })
+      const next: DraftRecord = {
+        ...record,
+        status: statusForExternalStage(stage as ExternalDraftStage),
+        updatedAt: new Date().toISOString(),
+      }
+      writeDraft(deps.store.logsDir, next)
+      attach({ kind: 'draft', id: draftId, feature })
+      return asJsonResult({
+        ...externalDraftView(next),
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'External agent session is authoring tests; Canary Lab is not running an internal wizard agent.',
+        nextSteps: externalDraftAuthoringNextSteps(feature),
+      })
     })
   })
 

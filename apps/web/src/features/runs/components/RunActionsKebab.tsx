@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import type { ExecutionType } from '@shared/verification'
 import { type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { PauseIcon, StopIcon } from './RunLaunchControl'
+import { activateOnKey } from '@/shared/ui/keyboard'
 
 export function RunActionsKebab({
   view,
@@ -89,11 +91,7 @@ export function RunActionsKebab({
               label={isStopping ? 'Stopping...' : 'Stop'}
               variant="danger"
               disabled={isStopping}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                </svg>
-              )}
+              icon={<StopIcon size={11} />}
               onClick={() => { onStop(); onClose() }}
             />
           )}
@@ -102,12 +100,7 @@ export function RunActionsKebab({
               label={isPausing ? 'Pausing...' : 'Pause & Heal'}
               variant="warning"
               disabled={isPausing}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="3" height="10" rx="1" />
-                  <rect x="10" y="3" width="3" height="10" rx="1" />
-                </svg>
-              )}
+              icon={<PauseIcon size={11} />}
               onClick={() => { onPause(); onClose() }}
             />
           )}
@@ -116,11 +109,7 @@ export function RunActionsKebab({
               label={isCancellingHeal ? 'Cancelling...' : 'Stop Heal'}
               variant="danger"
               disabled={isCancellingHeal}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                </svg>
-              )}
+              icon={<StopIcon size={11} />}
               onClick={() => { onCancelHeal(); onClose() }}
             />
           )}
@@ -212,13 +201,37 @@ export function ActionButton({
       tabIndex={0}
       aria-disabled={disabled}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(e as unknown as React.MouseEvent) }
-      }}
+      onKeyDown={activateOnKey((e) => onClick(e as unknown as React.MouseEvent), { stopPropagation: true })}
       className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors duration-150 ${tone} ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
     >
       <span aria-hidden="true" className="inline-flex h-3 w-3 items-center justify-center">{icon}</span>
       {label}
+    </span>
+  )
+}
+
+function RunIconAction({ disabled, label, onClick, className, children }: {
+  disabled: boolean
+  label: string
+  onClick: (e: React.MouseEvent) => void
+  className: string
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        if (disabled) { e.stopPropagation(); return }
+        onClick(e)
+      }}
+      onKeyDown={disabled ? undefined : activateOnKey((e) => onClick(e as unknown as React.MouseEvent), { stopPropagation: true })}
+      className={className}
+    >
+      {children}
     </span>
   )
 }
@@ -249,23 +262,7 @@ export function RetestIconButton({
     ? 'Retesting remaining tests…'
     : 'Retest remaining: reruns failed, skipped, and pending tests'
   return (
-    <span
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        if (disabled) { e.stopPropagation(); return }
-        onClick(e)
-      }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation()
-          onClick(e as unknown as React.MouseEvent)
-        }
-      }}
+    <RunIconAction disabled={disabled} label={label} onClick={onClick}
       className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         spinning
           ? 'cursor-wait text-accent/70'
@@ -287,7 +284,7 @@ export function RetestIconButton({
         <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
         <path d="M13.5 2v3.5H10" />
       </svg>
-    </span>
+    </RunIconAction>
   )
 }
 
@@ -301,23 +298,9 @@ export function DeleteIconButton({
   onClick: (e: React.MouseEvent) => void
 }) {
   return (
-    <span
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      aria-label={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
-      title={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
-      onClick={(e) => {
-        if (disabled) { e.stopPropagation(); return }
-        onClick(e)
-      }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation()
-          onClick(e as unknown as React.MouseEvent)
-        }
-      }}
+    <RunIconAction disabled={disabled}
+      label={disabled ? (disabledReason ?? 'Delete unavailable') : 'Delete run'}
+      onClick={onClick}
       className={`ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         disabled
           ? 'cursor-not-allowed text-idle/50'
@@ -327,57 +310,6 @@ export function DeleteIconButton({
       <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
         <path d="M5.5 2h5l.5 1H14v1H2V3h3l.5-1zM3.5 5h9l-.7 8.2a1.5 1.5 0 0 1-1.5 1.3H5.7a1.5 1.5 0 0 1-1.5-1.3L3.5 5zm2.5 2v6h1V7H6zm3 0v6h1V7H9z" />
       </svg>
-    </span>
-  )
-}
-
-export function ConfirmDialog({
-  title,
-  description,
-  confirmLabel,
-  variant,
-  onCancel,
-  onConfirm,
-}: {
-  title: string
-  description: string
-  confirmLabel: string
-  variant: 'warning' | 'danger'
-  onCancel: () => void
-  onConfirm: () => void
-}) {
-  const isDanger = variant === 'danger'
-  const confirmStyle: React.CSSProperties = isDanger
-    ? { background: 'var(--danger)', borderColor: 'var(--danger)' }
-    : { background: 'var(--warning)', borderColor: 'var(--warning)' }
-  return (
-    <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center p-6">
-      <div className="cl-modal w-[440px] p-5">
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
-        <p
-          className="mt-1.5 text-[13px] leading-relaxed"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {description}
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="cl-button px-3 py-1.5"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="cl-button-primary px-3 py-1.5"
-            style={confirmStyle}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    </RunIconAction>
   )
 }

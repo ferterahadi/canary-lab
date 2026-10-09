@@ -1,11 +1,13 @@
+import { buildPlaybackIdentity, reconcilePlaybackCases } from '../../../../../../shared/playback-identity'
+import { readPlaybackSourceDeclarations } from '../../../shared/playback-source-declarations'
 import { testLogicalKey } from './test-identity'
 import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
-import path from 'path'
-import { readManifest } from './runtime/manifest'
+import { readManifest, suiteDirForReading } from './runtime/manifest'
 import type { RunLifecycleEvent } from '../../../../../../shared/run-state'
-import { buildRunPaths, runDirFor } from './runtime/run-paths'
-import { indexPlaywrightArtifacts } from './run-artifacts'
+import { buildRunPaths, runDirFor, runManifestPath, runSummaryPath } from './runtime/run-paths'
+import { readJsonOr } from '../../../../../../shared/lib/read-file-or'
+import { indexAttemptArtifacts, indexPlaywrightArtifacts } from './run-artifacts'
 import type { RunSummary, PlaywrightPlaybackEvent, RunDetail } from '../../../../../../shared/run-detail'
 
 export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | undefined {
@@ -18,20 +20,9 @@ export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | un
 // Read e2e-summary.json if present. Returns undefined when absent or
 // unreadable — the caller should treat that as "no per-test results yet".
 export function readRunSummary(runDir: string): RunSummary | undefined {
-  const p = path.join(runDir, 'e2e-summary.json')
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  try {
-    const parsed = JSON.parse(raw) as RunSummary
-    if (typeof parsed !== 'object' || parsed === null) return undefined
-    return normalizeRunSummary(parsed)
-  } catch {
-    return undefined
-  }
+  const parsed = readJsonOr<RunSummary | undefined>(runSummaryPath(runDir), undefined)
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  return normalizeRunSummary(parsed)
 }
 
 /** The run's score, straight off the summary artifact — `passed` and `total` are
@@ -106,20 +97,29 @@ export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlayback
 
 export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const dir = runDirFor(logsDir, runId)
-  const manifestPath = path.join(dir, 'manifest.json')
+  const manifestPath = runManifestPath(dir)
   if (!fs.existsSync(manifestPath)) return null
   const m = readManifest(manifestPath)
   if (!m) return null
   const summary = readRunSummary(dir)
   const playbackEvents = readPlaywrightPlaybackEvents(dir)
+  // Only undeclared cases need source hints. A complete recorded roster is sufficient.
+  const known = summary?.knownTests ?? []
+  const eventTests = (playbackEvents ?? []).filter((event) => event.type === 'test-begin' || event.type === 'test-end').map((event) => event.test)
+  const needsSource = reconcilePlaybackCases(known, eventTests).some((item) => !item.declared)
+  const sources = needsSource ? readPlaybackSourceDeclarations(suiteDirForReading(m)) : []
+  const playbackIdentity = playbackEvents?.length ? buildPlaybackIdentity(playbackEvents, known, sources) : undefined
   const playwrightArtifacts = indexPlaywrightArtifacts(runId, dir, playbackEvents)
+  const { byAttempt, unassigned } = indexAttemptArtifacts(runId, dir, playbackEvents ?? [], playbackIdentity ?? { eventKeys: [] })
   const lifecycleEvents = readRunLifecycleEvents(dir)
   return {
     runId,
     manifest: m,
     ...(summary ? { summary } : {}),
-    ...(playbackEvents?.length ? { playbackEvents } : {}),
+    ...(playbackEvents?.length ? { playbackEvents, playbackIdentity } : {}),
     ...(playwrightArtifacts?.length ? { playwrightArtifacts } : {}),
+    ...(Object.keys(byAttempt).length ? { attemptArtifacts: byAttempt } : {}),
+    ...(unassigned.length ? { unassignedArtifacts: unassigned } : {}),
     ...(lifecycleEvents?.length ? { lifecycleEvents } : {}),
   }
 }

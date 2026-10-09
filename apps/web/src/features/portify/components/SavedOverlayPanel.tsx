@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useOpenPortifyProject } from '../state/use-open-portify-project'
 import { unifiedDiffLines } from '@shared/lib/unified-diff'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { DiffView } from '@/shared/ui/DiffView'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 import { patchFileName } from '@shared/portify-overlay'
 
 // The one rendering of a feature's SAVED port overlay — the captured diff, the
@@ -102,8 +103,8 @@ export function SavedOverlayPanel({
         <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', padding: '13px 15px', marginTop: 12 }}>
           <div style={{ ...sectionLabel, marginBottom: 8 }}>Stored in</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 16, rowGap: 5, alignItems: 'baseline' }}>
-            <span style={colHeader}>Service</span>
-            <span style={colHeader}>Patch file</span>
+            <CapsLabel as="span">Service</CapsLabel>
+            <CapsLabel as="span">Patch file</CapsLabel>
             {m.repos.map((r) => (
               <PerServiceRow key={r.name} feature={m.feature} repoName={r.name} />
             ))}
@@ -194,7 +195,3 @@ const sectionLabel: React.CSSProperties = {
   letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 500,
 }
 
-const colHeader: React.CSSProperties = {
-  fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px',
-  color: 'var(--text-muted)', fontWeight: 600,
-}

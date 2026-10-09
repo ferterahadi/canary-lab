@@ -99,10 +99,3 @@ export function specFileLabel(location: string): string {
   const file = sourceKey(location).replace(/:\d+$/, '')
   return file.split(/[\\/]/).pop() || file
 }
-
-/** `/very/long/abs/path/e2e/foo.spec.ts:138` → `e2e/foo.spec.ts:138`. The absolute
- *  prefix is machine-specific noise in a document meant to be read by a person. */
-export function shortLocation(location: string): string {
-  const parts = location.split(/[\\/]/)
-  return parts.slice(-2).join('/')
-}

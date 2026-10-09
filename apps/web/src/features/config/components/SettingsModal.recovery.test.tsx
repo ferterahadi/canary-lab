@@ -1,3 +1,4 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -6,6 +7,7 @@ import * as configApi from '@/shared/api/config'
 import * as runsApi from '@/shared/api/runs'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { SettingsModal } from './SettingsModal'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -21,13 +23,13 @@ let root: Root
 let element: HTMLDivElement
 let invalidate: () => void
 const close = vi.fn()
-const config: configApi.ProjectConfig = { healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: false, agentModels: { claude: {}, codex: {} }, port: 7421 }
+const config: ProjectConfigResponse = { healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: false, agentModels: { claude: {}, codex: {} }, port: 7421 }
 function Capture() { const bus = useInvalidation(); invalidate = () => bus.invalidate('project-config'); return <SettingsModal onClose={close} /> }
 const render = () => act(async () => { root.render(<InvalidationProvider><Capture /></InvalidationProvider>) })
 const input = (name: string) => element.querySelector<HTMLInputElement>(`[data-testid="${name}"]`)!
 const save = () => [...element.querySelectorAll('button')].find((b) => b.textContent === 'Save')!
 const codex = () => element.querySelector<HTMLInputElement>('input[name="healAgent"][value="codex"]')!
-function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks()
   element = document.createElement('div'); document.body.appendChild(element); root = createRoot(element)
@@ -63,7 +65,7 @@ it('preserves dirty fields and rebases untouched fields after a missed event', a
 })
 
 it.each(['failed', 'hung'])('recovers a %s initial read and rejects superseded results', async (mode) => {
-  const old = deferred<configApi.ProjectConfig>()
+  const old = deferred<ProjectConfigResponse>()
   if (mode === 'hung') vi.mocked(configApi.getProjectConfig).mockReturnValueOnce(old.promise)
   else vi.mocked(configApi.getProjectConfig).mockRejectedValueOnce(new Error('offline'))
   vi.mocked(configApi.getProjectConfig).mockResolvedValue({ ...config, askModelsOnLaunch: true })
@@ -79,8 +81,8 @@ it.each(['failed', 'hung'])('recovers a %s initial read and rejects superseded r
 })
 
 it('accepts saves over delayed reads, keeps newer edits, and closes only after they are saved', async () => {
-  const writing = deferred<configApi.ProjectConfig>()
-  const reading = deferred<configApi.ProjectConfig>()
+  const writing = deferred<ProjectConfigResponse>()
+  const reading = deferred<ProjectConfigResponse>()
   await render()
   await act(async () => { codex().click() })
   vi.mocked(configApi.putProjectConfig).mockReturnValueOnce(writing.promise)
@@ -105,7 +107,7 @@ it('retains failed drafts and rejects late saves and reader work after teardown'
   await act(async () => { save().click() })
   expect(codex().checked).toBe(true)
   expect(element.textContent).toContain('read only')
-  const writing = deferred<configApi.ProjectConfig>()
+  const writing = deferred<ProjectConfigResponse>()
   vi.mocked(configApi.putProjectConfig).mockReturnValueOnce(writing.promise)
   await act(async () => { save().click() })
   await act(async () => { root.render(null) })

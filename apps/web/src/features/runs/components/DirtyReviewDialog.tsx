@@ -1,3 +1,5 @@
+import { normalizeRunTestReview } from '@shared/test-review'
+import { isActiveRunStatus, isTerminalRunStatus } from '@shared/run-state'
 import { useEffect, useRef, useState } from 'react'
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import type { RunDetail } from '@shared/run-detail'
@@ -28,6 +30,7 @@ import { featureTone, pendingFileScope, specTone } from '../utils/spec-integrity
 import { SpecToneChip } from './SpecToneChip'
 import { FullTestReview } from './FullTestReview'
 import type { ReviewFocus } from '../../../shared/lib/workspace-view-state'
+import { displayError } from '@/shared/api/error-message'
 
 interface Props {
   features: Feature[]
@@ -94,7 +97,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const act = async (action: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
     setError(null)
-    try { await action() } catch (err) { setError(err instanceof Error ? err.message : 'Action failed') }
+    try { await action() } catch (err) { setError(displayError(err, 'Action failed')) }
     finally { setBusy(false) }
   }
   const choose = (feature: string, file: string): void => {
@@ -151,7 +154,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     leaseMs: 15000,
     refreshKey: reviewRefreshKey,
   })
-  const reviewState = runReview.value?.reviewState ?? (runReview.value?.canAdopt && run && ['running', 'healing'].includes(run.status) ? 'pending-active' : undefined)
+  const normalizedReview = normalizeRunTestReview(runReview.value ?? {})
+  // Legacy inferred capabilities still need the browser's current-run race guard.
+  const reviewState = runReview.value?.reviewState || (run && isActiveRunStatus(run.status)) ? normalizedReview.reviewState : undefined
   const pendingRunReview = reviewState === 'pending-active' || reviewState === 'pending-terminal'
   // A decision must display the same recorded-run boundary its exact revision
   // will settle. Otherwise a cold pending-review link can show Git changes
@@ -163,13 +168,13 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     leaseMs: 15000,
   })
   const reviewStateMatchesRun = reviewState === 'pending-active'
-    ? !!run && ['running', 'healing'].includes(run.status)
+    ? !!run && isActiveRunStatus(run.status)
     : reviewState === 'pending-terminal'
-      ? !!run && ['passed', 'failed', 'aborted'].includes(run.status)
+      ? !!run && isTerminalRunStatus(run.status)
       : false
   const reviewRun = run && reviewStateMatchesRun && (!useRunBaseline || run.runId === comparisonRunId)
     && runReview.value?.files.length
-    && (runReview.value.allowedActions ?? (runReview.value.canAdopt ? ['adopt-and-rerun', 'restore'] : []))
+    && normalizedReview.allowedActions
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
   const comparisonAllowsAction = !comparisonRunId || !snapshotDir || sourceComparison.confirmed

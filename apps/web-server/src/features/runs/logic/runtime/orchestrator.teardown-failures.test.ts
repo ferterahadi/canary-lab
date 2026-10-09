@@ -5,14 +5,14 @@
 // best-effort: a failure there must never change the run's verdict or leave the
 // run un-finalised. Each collaborator is mocked to reject so that promise is
 // actually exercised rather than assumed.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 import type { RunContext } from './run-context'
 import { RunnerLog } from './runner-log'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   ensureServicesRunning: vi.fn(),
@@ -53,11 +53,12 @@ vi.mock('./suite-runtime-inputs', async (importOriginal) => ({
 
 const { RunOrchestrator } = await import('./orchestrator')
 
+const tempDir = trackTempDirs('cl-teardown-')
 let tmpDir: string
 const RUN_ID = '2026-08-03T1100-tear'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-teardown-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   h.ensureServicesRunning.mockResolvedValue([])
   h.waitForHealth.mockResolvedValue(undefined)
@@ -67,10 +68,6 @@ beforeEach(() => {
   h.removeWorktree.mockResolvedValue(undefined)
   h.autoProposeFixes.mockResolvedValue(undefined)
   h.removeSuiteRuntimeInputs.mockResolvedValue(undefined)
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 /** A real RunnerLog (the orchestrator also calls `recordEvent` on it) with its

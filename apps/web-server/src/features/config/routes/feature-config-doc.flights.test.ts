@@ -1,11 +1,13 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
+const tempDir = trackTempDirs('cl-fcfg-fl-')
 
 // Deletion and rename are the two places a suite's IDENTITY moves, so both have
 // to carry its flight history with them. These are the arms where that handoff
@@ -39,7 +41,7 @@ async function makeApp(opts: {
       // Conditional SPREAD, like the two deps above it. `workspaceEvents: undefined`
       // is not the same as an absent key when the dep is declared optional, and
       // passing the explicit undefined is what made this argument unassignable.
-      ...(opts.events ? { workspaceEvents: { publish: (event: WorkspaceEvent) => { opts.events!.push(event) } } } : {}),
+      ...(opts.events ? { workspaceEvents: captureEvents(opts.events) } : {}),
     })
   })
   await app.ready()
@@ -47,13 +49,9 @@ async function makeApp(opts: {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fcfg-fl-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 describe('PUT config-doc rename without a flight store wired', () => {

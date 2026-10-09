@@ -12,6 +12,7 @@ import { Modal } from '@/shared/ui/Overlays'
 import { agentTitle } from './settings-options'
 import { ModelPlanEditor } from './ModelPlanEditor'
 import { choiceText, toLaunchOverride, useModelPlanDraft } from './model-plan-draft'
+import { plural } from '@shared/lib/plural'
 
 // The launch gate (2.2.0 model cockpit): the last look at the model plan before
 // an expensive spawn, at the three GUI spawn points — flight start, suite run,
@@ -79,7 +80,7 @@ export function savedModelsSummary(
     if (group) group.count += 1
     else groups.push({ model, count: 1 })
   }
-  return groups.map((g) => `${g.model} on ${g.count} step${g.count === 1 ? '' : 's'}`).join(' · ')
+  return groups.map((g) => `${g.model} on ${plural(g.count, 'step')}`).join(' · ')
 }
 
 export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, onConfirm, confirmLabel }: ModelLaunchGateProps) {

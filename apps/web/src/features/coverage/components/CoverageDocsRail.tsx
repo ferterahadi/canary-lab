@@ -3,8 +3,12 @@ import * as coverageApi from '@/shared/api/coverage'
 import * as workspaceApi from '@/shared/api/workspace'
 import type { FeatureDoc, FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { DocPill, EmptyDropzone } from './DocPill'
+import { DocTree } from '@/shared/ui/DocTree'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { displayError } from '@/shared/api/error-message'
+import { joinNatural } from '@/shared/lib/format'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -105,12 +109,6 @@ interface Props {
   recovery?: { onClick: () => void; disabledReason?: string }
 }
 
-/** Joins names the way a sentence would: "a", "a and b", "a, b and c". */
-function joinNatural(items: string[]): string {
-  if (items.length < 2) return items.join('')
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-}
-
 // CoverageDocsRail — a collapsible LEFT RAIL that owns ONLY source-doc CRUD for a
 // feature (list / import / delete / clear the generated PRD artifact). The parent
 // (CoverageLedgerPage) owns the generation job lifecycle; this rail merely fires
@@ -129,7 +127,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   const load = useCallback((keepError = false) => {
     coverageApi.listFeatureDocs(feature)
       .then((data) => { setListing(data); if (!keepError) setError(null) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
   }, [feature])
 
   // Re-list on mount, on feature change, and whenever the parent bumps reloadKey
@@ -153,7 +151,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         await coverageApi.importFeatureDoc(feature, { filename: file.name, contentType: file.type || undefined, base64 })
         imported += 1
       } catch (e: unknown) {
-        failures.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+        failures.push(`${file.name} (${displayError(e)})`)
       }
     }
     if (failures.length > 0) {
@@ -170,7 +168,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setBusy(true)
     coverageApi.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onDocsChanged() })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(displayError(e)))
       .finally(() => setBusy(false))
   }, [feature, load, onDocsChanged])
 
@@ -178,7 +176,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // use). Best-effort — surface a failure in the docs error slot.
   const openDoc = useCallback((absPath: string) => {
     workspaceApi.openEditor({ file: absPath })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to open in editor'))
+      .catch((e: unknown) => setError(displayError(e, 'Failed to open in editor')))
   }, [])
 
   // "Redo from the start" — a full reset to a blank slate: drop the generated PRD
@@ -191,10 +189,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
     setError(null)
     const failures: string[] = []
     try {
-      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${e instanceof Error ? e.message : String(e)})`) }
+      try { await coverageApi.clearPrdSummary(feature) } catch (e) { failures.push(`summary (${displayError(e)})`) }
       for (const d of listing?.docs ?? []) {
         if (d.generated) continue // already removed by clearPrdSummary
-        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${e instanceof Error ? e.message : String(e)})`) }
+        try { await coverageApi.deleteFeatureDoc(feature, d.relPath) } catch (e) { failures.push(`${d.relPath} (${displayError(e)})`) }
       }
     } finally {
       if (failures.length) setError(`Reset incomplete: ${failures.join(', ')}`)
@@ -222,16 +220,6 @@ export function CoverageDocsRail(props: Props): JSX.Element {
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
-
-  // The generated summary is distilled from the source docs, so once it exists
-  // they nest under it as a collapsible group. Before that the docs are still
-  // being edited and stay a flat list. A broken source stays visible — its
-  // Relink affordance must never hide behind a collapsed caret.
-  const sourceDocs = listing?.docs.filter((d) => !d.generated) ?? []
-  const nestSources = !summaryAbsent && sourceDocs.length > 0
-  const [summaryDoc, ...otherGeneratedDocs] = nestSources ? listing?.docs.filter((d) => d.generated) ?? [] : []
-  const [sourcesOpen, setSourcesOpen] = useState(false)
-  const sourcesExpanded = sourcesOpen || sourceDocs.some((d) => d.broken)
 
   const renderPill = (d: FeatureDoc, disclosure?: ComponentProps<typeof DocPill>['disclosure']) => (
     <DocPill
@@ -282,9 +270,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             {sourceCount}
           </span>
           <span aria-hidden="true" style={{ marginTop: 'auto', color: 'var(--text-muted)' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
+            <ChevronRightIcon size={14} strokeWidth={2} />
           </span>
         </button>
       </div>
@@ -384,24 +370,10 @@ export function CoverageDocsRail(props: Props): JSX.Element {
           listing.docs.length === 0 ? (
             <EmptyDropzone onPick={() => fileInputRef.current?.click()} dragging={dragging} busy={locked} />
           ) : (
-            <div className="flex flex-col" style={{ gap: 8 }}>
-              {summaryDoc ? (
-                <>
-                  {renderPill(summaryDoc, { expanded: sourcesExpanded, onToggle: () => setSourcesOpen(!sourcesExpanded), sourceCount: sourceDocs.length })}
-                  {sourcesExpanded && (
-                    <div
-                      data-testid="summary-source-docs"
-                      className="flex flex-col"
-                      style={{ gap: 8, marginLeft: 13, paddingLeft: 10, borderLeft: '1px solid var(--border-default)' }}
-                    >
-                      {sourceDocs.map((d) => renderPill(d))}
-                    </div>
-                  )}
-                  {otherGeneratedDocs.map((d) => renderPill(d))}
-                </>
-              ) : (
-                listing.docs.map((d) => renderPill(d))
-              )}
+            <div className="flex flex-col gap-2">
+              {/* The generated summary is distilled from the source docs, so
+                  once it exists they nest under it. */}
+              <DocTree docs={listing.docs} nest={!summaryAbsent} renderPill={renderPill} />
               {!docsReadOnly && (
                 <AddDocsTile onPick={() => fileInputRef.current?.click()} disabled={locked} />
               )}

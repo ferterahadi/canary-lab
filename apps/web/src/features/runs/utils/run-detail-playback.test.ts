@@ -5,7 +5,6 @@ import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manif
 
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,
-  artifactsForPlayback,
   branchForService,
   branchLabel,
   branchTooltip,
@@ -55,6 +54,7 @@ describe('playbackTests', () => {
 
     expect(playbackTests(events)).toEqual([
       {
+        caseKey: 'auth.spec.ts:login@auth.spec.ts:1', ids: [], locations: ['auth.spec.ts:1'],
         name: 'auth.spec.ts:login',
         title: 'logs in after retry',
         location: 'auth.spec.ts:1',
@@ -145,7 +145,7 @@ describe('playbackTests', () => {
       },
     ]
 
-    expect(playbackTests(events)).toEqual([
+    expect(playbackTests(events, undefined, [{ name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' }])).toEqual([
       expect.objectContaining({
         name: 'cleanup',
         status: 'passed',
@@ -242,6 +242,7 @@ describe('playbackTests', () => {
 
     expect(playbackTests(events)).toEqual([
       {
+        caseKey: 'setup.spec.ts:seed@setup.spec.ts:1', ids: [], locations: ['setup.spec.ts:1'],
         name: 'setup.spec.ts:seed',
         title: 'seeds data',
         location: 'setup.spec.ts:1',

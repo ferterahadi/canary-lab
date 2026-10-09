@@ -1,35 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { connectEvaluationExport } from './evaluation-export-socket'
+import { FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
-class FakeSocket {
-  static instances: FakeSocket[] = []
-  url: string
-  readyState = 0
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: (() => void) | null = null
-  closeCalls = 0
-  constructor(url: string) {
-    this.url = url
-    FakeSocket.instances.push(this)
-  }
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = 3
-  }
-  fire(msg: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent)
-  }
-  fireClose(): void {
-    this.readyState = 3
-    this.onclose?.()
-  }
-  fireError(): void {
-    this.onerror?.()
-  }
-}
-
-const reset = (): void => { FakeSocket.instances = [] }
+const reset = (): void => { FakeWebSocket.instances = [] }
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -41,10 +14,10 @@ describe('connectEvaluationExport', () => {
     connectEvaluationExport({
       taskId: 'task/1',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
-    expect(FakeSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/task%2F1')
+    expect(FakeWebSocket.instances[0].url).toBe('ws://test/ws/evaluation-exports/task%2F1')
   })
 
   it('derives ws:// from the page location when no wsBase is provided', () => {
@@ -53,9 +26,9 @@ describe('connectEvaluationExport', () => {
     connectEvaluationExport({
       taskId: 'task-x',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     })
-    expect(FakeSocket.instances[0].url).toBe('ws://example.test:1234/ws/evaluation-exports/task-x')
+    expect(FakeWebSocket.instances[0].url).toBe('ws://example.test:1234/ws/evaluation-exports/task-x')
   })
 
   it('forwards data and exit messages', () => {
@@ -66,17 +39,17 @@ describe('connectEvaluationExport', () => {
       taskId: 'task',
       onData,
       onExit,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
 
-    FakeSocket.instances[0].fire({ type: 'data', chunk: 'hello' })
-    FakeSocket.instances[0].fire({ type: 'exit', code: 0 })
-    FakeSocket.instances[0].fireClose()
+    FakeWebSocket.instances[0].fire({ type: 'data', chunk: 'hello' })
+    FakeWebSocket.instances[0].fire({ type: 'exit', code: 0 })
+    FakeWebSocket.instances[0].fireClose()
 
     expect(onData).toHaveBeenCalledWith('hello')
     expect(onExit).toHaveBeenCalledWith(0)
-    expect(FakeSocket.instances).toHaveLength(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
   it('reconnects once after an unexpected close', () => {
@@ -84,14 +57,14 @@ describe('connectEvaluationExport', () => {
     connectEvaluationExport({
       taskId: 'task',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
 
-    FakeSocket.instances[0].fireClose()
-    FakeSocket.instances[1].fireClose()
+    FakeWebSocket.instances[0].fireClose()
+    FakeWebSocket.instances[1].fireClose()
 
-    expect(FakeSocket.instances).toHaveLength(2)
+    expect(FakeWebSocket.instances).toHaveLength(2)
   })
 
   it('reports stream errors', () => {
@@ -101,12 +74,12 @@ describe('connectEvaluationExport', () => {
       taskId: 'task',
       onData: () => {},
       onError,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
 
-    FakeSocket.instances[0].fire({ type: 'error', error: 'missing task' })
-    FakeSocket.instances[0].fireError()
+    FakeWebSocket.instances[0].fire({ type: 'error', error: 'missing task' })
+    FakeWebSocket.instances[0].fireError()
 
     expect(onError).toHaveBeenCalledWith('missing task')
     expect(onError).toHaveBeenCalledWith('socket error')
@@ -114,12 +87,12 @@ describe('connectEvaluationExport', () => {
 
   it('uses default websocket bases and the global WebSocket fallback', () => {
     reset()
-    vi.stubGlobal('WebSocket', FakeSocket)
+    vi.stubGlobal('WebSocket', FakeWebSocket)
     vi.stubGlobal('location', { protocol: 'https:', host: 'secure.example' })
 
     connectEvaluationExport({ taskId: 'task', onData: () => {} })
 
-    expect(FakeSocket.instances[0].url).toBe('wss://secure.example/ws/evaluation-exports/task')
+    expect(FakeWebSocket.instances[0].url).toBe('wss://secure.example/ws/evaluation-exports/task')
   })
 
   it('falls back to the local web UI socket base when location is absent', () => {
@@ -129,10 +102,10 @@ describe('connectEvaluationExport', () => {
     connectEvaluationExport({
       taskId: 'task',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     })
 
-    expect(FakeSocket.instances[0].url).toBe('ws://127.0.0.1:7421/ws/evaluation-exports/task')
+    expect(FakeWebSocket.instances[0].url).toBe('ws://127.0.0.1:7421/ws/evaluation-exports/task')
   })
 
   it('throws when no websocket implementation is available', () => {
@@ -153,15 +126,15 @@ describe('connectEvaluationExport', () => {
       onData,
       onExit,
       onError,
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
 
-    FakeSocket.instances[0].onmessage?.({ data: 'not json' } as MessageEvent)
-    FakeSocket.instances[0].onmessage?.({ data: new Uint8Array() } as MessageEvent)
-    FakeSocket.instances[0].fire({ type: 'data' })
-    FakeSocket.instances[0].fire({ type: 'exit', code: '0' })
-    FakeSocket.instances[0].fire({ type: 'noop' })
+    FakeWebSocket.instances[0].onmessage?.({ data: 'not json' } as MessageEvent)
+    FakeWebSocket.instances[0].onmessage?.({ data: new Uint8Array() } as MessageEvent)
+    FakeWebSocket.instances[0].fire({ type: 'data' })
+    FakeWebSocket.instances[0].fire({ type: 'exit', code: '0' })
+    FakeWebSocket.instances[0].fire({ type: 'noop' })
 
     expect(onData).not.toHaveBeenCalled()
     expect(onExit).not.toHaveBeenCalled()
@@ -173,14 +146,14 @@ describe('connectEvaluationExport', () => {
     connectEvaluationExport({
       taskId: 'task',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
       maxReconnects: 0,
     })
 
-    FakeSocket.instances[0].fireClose()
+    FakeWebSocket.instances[0].fireClose()
 
-    expect(FakeSocket.instances).toHaveLength(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
   it('closes only open sockets and swallows close errors', () => {
@@ -188,37 +161,37 @@ describe('connectEvaluationExport', () => {
     const open = connectEvaluationExport({
       taskId: 'task-open',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
-    FakeSocket.instances[0].close = vi.fn(() => { throw new Error('already gone') })
+    FakeWebSocket.instances[0].close = vi.fn(() => { throw new Error('already gone') })
     open.close()
-    expect(FakeSocket.instances[0].close).toHaveBeenCalled()
+    expect(FakeWebSocket.instances[0].close).toHaveBeenCalled()
 
     const closed = connectEvaluationExport({
       taskId: 'task-closed',
       onData: () => {},
-      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
       wsBase: 'ws://test',
     })
-    FakeSocket.instances[1].readyState = 2
+    FakeWebSocket.instances[1].readyState = 2
     closed.close()
-    expect(FakeSocket.instances[1].closeCalls).toBe(0)
+    expect(FakeWebSocket.instances[1].closeCalls).toBe(0)
   })
 })
 
 it('survives malformed frames and ignores pane reset without losing reconnect recovery', () => {
   reset()
   const onData = vi.fn(); const onError = vi.fn()
-  connectEvaluationExport({ taskId: 'task', wsBase: 'ws://test', WebSocketImpl: FakeSocket as unknown as typeof WebSocket, onData, onError })
-  const first = FakeSocket.instances[0]
+  connectEvaluationExport({ taskId: 'task', wsBase: 'ws://test', WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket, onData, onError })
+  const first = FakeWebSocket.instances[0]
   for (const msg of [null, [], { type: 'reset' }, { type: 'exit', code: '0' }, { type: 'data', chunk: {} }]) first.fire(msg)
   first.fire({ type: 'error', error: 1 }); first.fireClose()
-  expect(FakeSocket.instances).toHaveLength(2)
-  const next = FakeSocket.instances[1]
+  expect(FakeWebSocket.instances).toHaveLength(2)
+  const next = FakeWebSocket.instances[1]
   next.fire({ type: 'data', chunk: 'recovered' })
   expect(onData).toHaveBeenCalledExactlyOnceWith('recovered')
   expect(onError).toHaveBeenCalledExactlyOnceWith('unknown error')
   next.fire({ type: 'exit', code: 0 }); next.fireClose()
-  expect(FakeSocket.instances).toHaveLength(2)
+  expect(FakeWebSocket.instances).toHaveLength(2)
 })

@@ -1,6 +1,5 @@
 import { runIndexEntry, type RunIndexEntry } from '../../../../../../../shared/run-index'
 import fs from 'fs'
-import path from 'path'
 import {
   updateAllServicesStatus,
   updateManifest,
@@ -10,8 +9,10 @@ import {
   writeManifest,
   readManifest,
 } from './manifest'
-import type { RunManifest } from '../../../../../../../shared/run-manifest'
-import { buildRunPaths, runDirFor } from './run-paths'
+import type { RunHeartbeatOwner, RunManifest } from '../../../../../../../shared/run-manifest'
+import { newHeartbeatOwner } from './run-ownership'
+import { buildRunPaths, runDirFor, runManifestPath, runSummaryPath } from './run-paths'
+import { appendJsonLine } from '../../../../shared/json-lines'
 import {
   reduceRunLifecycleSnapshot,
   type RunLifecycleEvent,
@@ -74,16 +75,22 @@ export interface RunStateSink {
  *  sink is injected (e.g. unit tests and the CLI shim). The web-server's
  *  `RunStore` extends this class to add event emission. */
 export class FileRunStateSink implements RunStateSink {
-  constructor(public readonly logsDir: string) {}
+  /** Every heartbeat this sink writes is signed with `owner`, so a server that
+   *  restarts can tell its dead predecessor's runs from a live peer's. */
+  constructor(
+    public readonly logsDir: string,
+    public readonly owner: RunHeartbeatOwner = newHeartbeatOwner(),
+  ) {}
 
   manifestPath(runId: string): string {
-    return path.join(runDirFor(this.logsDir, runId), 'manifest.json')
+    return runManifestPath(runDirFor(this.logsDir, runId))
   }
 
   bootstrap(manifest: RunManifest): void {
     const mp = this.manifestPath(manifest.runId)
-    writeManifest(mp, manifest)
-    upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(manifest, manifest.status))
+    const signed = manifest.heartbeatAt ? { ...manifest, heartbeatOwner: this.owner } : manifest
+    writeManifest(mp, signed)
+    upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(signed, signed.status))
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {
@@ -106,7 +113,7 @@ export class FileRunStateSink implements RunStateSink {
     const mp = this.manifestPath(runId)
     updateAllServicesStatus(mp, 'stopped')
     updateManifest(mp, { status, endedAt, healCycles })
-    clearRunningFromSummary(path.join(runDirFor(this.logsDir, runId), 'e2e-summary.json'))
+    clearRunningFromSummary(runSummaryPath(runDirFor(this.logsDir, runId)))
     const m = readManifest(mp)
     if (m) {
       upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(m, status, endedAt))
@@ -128,7 +135,7 @@ export class FileRunStateSink implements RunStateSink {
   }
 
   recordHeartbeat(runId: string): void {
-    updateManifest(this.manifestPath(runId), { heartbeatAt: new Date().toISOString() })
+    updateManifest(this.manifestPath(runId), { heartbeatAt: new Date().toISOString(), heartbeatOwner: this.owner })
   }
 
   patchManifest(runId: string, patch: Partial<RunManifest>): void {
@@ -155,8 +162,7 @@ export class FileRunStateSink implements RunStateSink {
       ...event,
       updatedAt: event.updatedAt || new Date().toISOString(),
     }
-    fs.mkdirSync(path.dirname(eventPath), { recursive: true })
-    fs.appendFileSync(eventPath, JSON.stringify(stamped) + '\n')
+    appendJsonLine(eventPath, stamped)
     const previous = readManifest(manifestPath)?.lifecycle
     updateManifest(manifestPath, { lifecycle: reduceRunLifecycleSnapshot(previous, stamped) })
   }

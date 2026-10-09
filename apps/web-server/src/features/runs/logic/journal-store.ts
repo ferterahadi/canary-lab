@@ -49,6 +49,11 @@ export function splitJournalSections(raw: string): JournalSection[] {
     else if (key === 'run') current.run = value
     else if (key === 'outcome') current.outcome = value
     else if (key === 'hypothesis') current.hypothesis = value
+    else if (key === 'failingTests') {
+      const names = value.split(',').map((name) => name.trim()).filter(Boolean)
+      if (names.length > 0) current.failingTests = names
+    } else if (key === 'cycle' && /^\d+$/.test(value)) current.cycle = Number(value)
+    else if (key === 'inputExecution' && /^\d+$/.test(value)) current.inputExecution = Number(value)
   }
   flush()
   return sections
@@ -67,16 +72,6 @@ export function filterSections(
     if (filter.feature && s.feature !== filter.feature) return false
     if (filter.run && s.run !== filter.run) return false
     return true
-  })
-}
-
-// Newest first — sort by iteration number descending. Sections without an
-// iteration number sink to the bottom (unlikely in practice).
-export function newestFirst(sections: readonly JournalSection[]): JournalSection[] {
-  return [...sections].sort((a, b) => {
-    const ai = a.iteration ?? -Infinity
-    const bi = b.iteration ?? -Infinity
-    return bi - ai
   })
 }
 

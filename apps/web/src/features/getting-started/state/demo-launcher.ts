@@ -1,4 +1,4 @@
-import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@shared/getting-started'
+import type { GettingStartedRunWorkflow, GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@shared/getting-started'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as configApi from '@/shared/api/config'
 
@@ -9,6 +9,7 @@ import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { useProjectConfig } from '@/shared/state/use-project-config'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useLiveResource } from '@/shared/state/use-live-resource'
+import { readStored, writeStored } from '@/shared/state/browser-storage'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
 // and exact fixture actions that still exist in this workspace.
@@ -41,8 +42,6 @@ export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {
   author: 'specs-coverage',
   portify: 'portify',
 }
-
-type GettingStartedRunWorkflow = 'run' | 'heal'
 
 /** Resolve a suite to the server-owned Getting Started run workflow that names
  *  it. The run-index reader separately excludes boot, verify, and benchmark
@@ -195,19 +194,12 @@ export function demoFlightLaunch(
 /** Whether the chooser has ever been opened. One flag, not per-option: opening it
  *  is what retires the prompt, regardless of which demo (if any) was picked. */
 export function readDemoSeen(): boolean {
-  try {
-    return window.localStorage.getItem(SEEN_KEY) === '1'
-  } catch {
-    return false
-  }
+  return readStored(SEEN_KEY) === '1'
 }
 
+/** Private-mode / quota drops the write — the dot just comes back next load. */
 export function writeDemoSeen(): void {
-  try {
-    window.localStorage.setItem(SEEN_KEY, '1')
-  } catch {
-    // Private-mode / quota — the dot just comes back next load. Not worth failing over.
-  }
+  writeStored(SEEN_KEY, '1')
 }
 
 export interface DemoInput {

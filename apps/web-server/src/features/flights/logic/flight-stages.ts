@@ -1,5 +1,5 @@
 import { sameRepoSet as compareRepoSets } from '../../../shared/repo-identity'
-import crypto from 'crypto'
+import { newTaskId } from '../../../shared/task-id'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -123,7 +123,7 @@ export type StageAdapters = Partial<Record<FlightStageKey, StageAdapter>>
 export type FlightEntryMode = 'continue' | 'redo' | 'jump'
 
 export function defaultFlightId(): string {
-  return `fl_${crypto.randomBytes(6).toString('hex')}`
+  return newTaskId('fl')
 }
 
 /** In-flight drive cancellation, keyed by flightId. One controller per drive

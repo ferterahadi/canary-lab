@@ -1,3 +1,5 @@
+import { isPathUnder } from '../../../shared/path-containment'
+import { readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
@@ -8,12 +10,13 @@ import { translateReadableSource } from '../../../shared/readable-tests/translat
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath } from '../../runs/logic/runtime/run-paths'
 import { suiteReviewFiles } from '../../runs/logic/runtime/suite-review'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
 import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from '../logic/test-declaration-changes'
+import { notFound } from '../../../shared/http-error'
 
 /** Resolve existing parents too: a deleted file behind a symlink must not
  * bypass the same boundary as a readable file. */
@@ -23,12 +26,12 @@ function confinedFile(root: string, relative: string): string {
   let parent = target
   while (!fs.existsSync(parent)) parent = path.dirname(parent)
   const realTarget = path.resolve(fs.realpathSync(parent), path.relative(parent, target))
-  if (!realTarget.startsWith(`${realRoot}${path.sep}`)) throw new Error('Test file is outside the suite')
+  if (!isPathUnder(realTarget, realRoot, false)) throw new Error('Test file is outside the suite')
   return realTarget
 }
 
 function readSource(file: string): string {
-  try { return fs.readFileSync(file, 'utf8') } catch (error) {
+  try { return readSpecSource(file) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
     throw error
   }
@@ -36,7 +39,7 @@ function readSource(file: string): string {
 
 function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | undefined): { dir: string } | { status: number; error: string } {
   if (!deps.logsDir || !runId || !/^[\w.-]+$/.test(runId) || runId === '.' || runId === '..') return { status: 400, error: 'Invalid run' }
-  const manifest = readManifest(path.join(runDirFor(deps.logsDir, runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(deps.logsDir, runId)))
   if (!manifest || manifest.feature !== feature) return { status: 404, error: 'Run not found for this suite' }
   if (manifest.suiteSnapshot?.kind !== 'taken' || !fs.existsSync(manifest.suiteSnapshot.dir)) return { status: 409, error: 'This run’s test snapshot is unavailable. Choose committed changes or open the file in your editor.' }
   return { dir: manifest.suiteSnapshot.dir }
@@ -45,7 +48,7 @@ function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | u
 export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/test-source-comparison', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const snapshot = runSnapshot(deps, feature.name, req.query.runId)
     if ('error' in snapshot) return reply.code(snapshot.status).send({ error: snapshot.error })
     const relativeFiles = (root: string) => listSpecFiles(root).map((file) => path.relative(root, file))
@@ -70,9 +73,9 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
   })
   app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string; summary?: string } }>('/api/features/:name/test-review', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const file = req.query.file
-    const supportingFile = !!file && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)
+    const supportingFile = !!file && !isSpecFile(file)
     if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || (supportingFile && !req.query.runId)) {
       return reply.code(400).send({ error: 'A suite-relative test file is required' })
     }

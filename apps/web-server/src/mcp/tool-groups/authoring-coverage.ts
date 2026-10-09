@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../shared/getting-started-claim'
 // MCP tools — the externally-driven PRD-summary and coverage-mapping passes.
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
@@ -5,7 +6,7 @@ import { resolveDocuments } from '../document-resolution'
 import { documentResolutionInput } from '../../features/coverage/logic/coverage/document-resolution'
 import { FeatureNotFoundError } from '../../features/coverage/logic/coverage/service'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
-import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/runner'
+import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/creation'
 import {
   startExternalCoverage,
   submitExternalCoverage,
@@ -60,39 +61,36 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       // re-claims — a brief settled state between the two is accepted by design.
       const claim = deps.gettingStartedDemo?.claim('coverage', feature) ?? null
       if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
-      const abandonClaim = (): void => {
-        if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
-      }
       try {
-        const res = startExternalSummary(
-          {
-            featuresDir: deps.featuresDir,
-            logsDir: deps.store.logsDir,
-            feature,
-            sessionId: session_id,
-            clientKind: client_kind,
-            ...(conversation_name ? { conversationName: conversation_name } : {}),
-            ...(external_session_url ? { sessionUrl: external_session_url } : {}),
-          },
-          { store: coverageJobStore(deps.store.logsDir) },
-        )
-        if (res.kind === 'needs-docs') {
-          abandonClaim()
-          return asJsonResult({ status: 'needs-document-discovery', feature,
-            next: 'The selected documents are no longer available. Rediscover the source material and retry start_external_summary with document_resolution. Never invent requirements.' })
-        }
-        if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
-        return asJsonResult({
-          jobId: res.manifest.jobId,
-          status: res.manifest.status,
-          canaryLabBehavior: 'tracking-only',
-          statusMeaning: 'You read the source docs and propose requirements using context.prompt; Canary spawns no agent — submit_external_summary reconciles ids and writes the summary.',
-          context: res.context,
-          nextSteps: ['submit_external_summary'],
-          next: `Follow context.prompt: read each doc in context.docs, extract requirements (reuse a context.previousRequirementIds id to preserve it), then call submit_external_summary with jobId "${res.manifest.jobId}" and requirements[].`,
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStartedDemo, claim?.sessionId ?? null), (attach) => {
+          const res = startExternalSummary(
+            {
+              featuresDir: deps.featuresDir,
+              logsDir: deps.store.logsDir,
+              feature,
+              sessionId: session_id,
+              clientKind: client_kind,
+              ...(conversation_name ? { conversationName: conversation_name } : {}),
+              ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+            },
+            { store: coverageJobStore(deps.store.logsDir) },
+          )
+          if (res.kind === 'needs-docs') {
+            return asJsonResult({ status: 'needs-document-discovery', feature,
+              next: 'The selected documents are no longer available. Rediscover the source material and retry start_external_summary with document_resolution. Never invent requirements.' })
+          }
+          attach({ kind: 'coverage-job', id: res.manifest.jobId, feature })
+          return asJsonResult({
+            jobId: res.manifest.jobId,
+            status: res.manifest.status,
+            canaryLabBehavior: 'tracking-only',
+            statusMeaning: 'You read the source docs and propose requirements using context.prompt; Canary spawns no agent — submit_external_summary reconciles ids and writes the summary.',
+            context: res.context,
+            nextSteps: ['submit_external_summary'],
+            next: `Follow context.prompt: read each doc in context.docs, extract requirements (reuse a context.previousRequirementIds id to preserve it), then call submit_external_summary with jobId "${res.manifest.jobId}" and requirements[].`,
+          })
         })
       } catch (err) {
-        abandonClaim()
         // No FeatureNotFoundError arm: `resolve()` runs first and already
         // returned "feature not found" on the same lookup, so `begin` only ever
         // runs for a feature that exists. The other three tools here call their
@@ -152,42 +150,39 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
     // Second half of the coverage demo — re-claims after the summary job settled.
     const claim = deps.gettingStartedDemo?.claim('coverage', feature) ?? null
     if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
-    const abandonClaim = (): void => {
-      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
-    }
     try {
-      const res = startExternalCoverage(
-        {
-          featuresDir: deps.featuresDir,
-          logsDir: deps.store.logsDir,
-          feature,
-          sessionId: session_id,
-          clientKind: client_kind,
-          ...(conversation_name ? { conversationName: conversation_name } : {}),
-          ...(external_session_url ? { sessionUrl: external_session_url } : {}),
-        },
-        { store: coverageJobStore(deps.store.logsDir) },
-      )
-      if (res.kind === 'needs-summary') {
-        abandonClaim()
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStartedDemo, claim?.sessionId ?? null), (attach) => {
+        const res = startExternalCoverage(
+          {
+            featuresDir: deps.featuresDir,
+            logsDir: deps.store.logsDir,
+            feature,
+            sessionId: session_id,
+            clientKind: client_kind,
+            ...(conversation_name ? { conversationName: conversation_name } : {}),
+            ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+          },
+          { store: coverageJobStore(deps.store.logsDir) },
+        )
+        if (res.kind === 'needs-summary') {
+          return asJsonResult({
+            status: 'needs-summary',
+            feature,
+            next: `No PRD summary for "${feature}". Call start_external_summary with feature "${feature}" and a stable session_id first (read the docs, submit_external_summary), then call start_external_coverage with that same session_id.`,
+          })
+        }
+        attach({ kind: 'coverage-job', id: res.manifest.jobId, feature })
         return asJsonResult({
-          status: 'needs-summary',
-          feature,
-          next: `No PRD summary for "${feature}". Call start_external_summary with feature "${feature}" and a stable session_id first (read the docs, submit_external_summary), then call start_external_coverage with that same session_id.`,
+          jobId: res.manifest.jobId,
+          status: res.manifest.status,
+          canaryLabBehavior: 'tracking-only',
+          statusMeaning: 'You do the mapping using context.prompt; Canary spawns no agent — submit_external_coverage writes the tags + recomputes the ledger.',
+          context: res.context,
+          nextSteps: ['submit_external_coverage'],
+          next: `Follow context.prompt: group context.tests by their \`file\` and dispatch one read-only subagent per group in a single parallel round (up to 5 at once) when there is more than one group to read, otherwise read them yourself. Decide each test's requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" — every test in mappings[] or unmappable[].`,
         })
-      }
-      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
-      return asJsonResult({
-        jobId: res.manifest.jobId,
-        status: res.manifest.status,
-        canaryLabBehavior: 'tracking-only',
-        statusMeaning: 'You do the mapping using context.prompt; Canary spawns no agent — submit_external_coverage writes the tags + recomputes the ledger.',
-        context: res.context,
-        nextSteps: ['submit_external_coverage'],
-        next: `Follow context.prompt: group context.tests by their \`file\` and dispatch one read-only subagent per group in a single parallel round (up to 5 at once) when there is more than one group to read, otherwise read them yourself. Decide each test's requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" — every test in mappings[] or unmappable[].`,
       })
     } catch (err) {
-      abandonClaim()
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
       throw err

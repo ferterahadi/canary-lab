@@ -1,13 +1,16 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fixBranchName, proposeFixesForRun } from './propose-fixes'
 import { runGit, type GitResult } from '../../../../shared/git-repo'
 import type { GhResult } from '../../../../shared/gh-cli'
 import type { PrPreflight } from './pr-preflight'
 import type { RunFixCapture } from '../../../../../../../shared/run-state'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pr-realgit-')
 
 // Real git, stubbed gh. A `git init --bare` directory stands in for GitHub, so
 // worktree add → fetch → checkout -B → apply → commit → push all execute for
@@ -23,11 +26,6 @@ import type { RunFixCapture } from '../../../../../../../shared/run-state'
 // passes and only a later run can expose a regression. Test 2 reproduces that
 // state deliberately; test 3 removes the guard and shows the push rejected.
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots.splice(0)) fs.rmSync(r, { recursive: true, force: true })
-})
-
 const BRANCH = fixBranchName('checkout', 'svc')
 
 interface Fixture {
@@ -40,20 +38,16 @@ interface Fixture {
 /** A product repo wired to a bare origin, plus two successive repair patches
  *  written out the way `captureFixes` writes them. */
 function fixture(): Fixture {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pr-realgit-')))
-  roots.push(root)
+  const root = tempDir()
   const origin = path.join(root, 'origin.git')
   const product = path.join(root, 'product')
   const fixesDir = path.join(root, 'fixes')
   fs.mkdirSync(fixesDir)
   execFileSync('git', ['init', '--bare', '-q', '-b', 'main', origin])
-  execFileSync('git', ['init', '-q', '-b', 'main', product])
-  const git = (args: string[]): string => execFileSync('git', args, { cwd: product, encoding: 'utf-8' })
-  git(['config', 'user.email', 'proof@local'])
-  git(['config', 'user.name', 'proof'])
+  fs.mkdirSync(product)
   fs.writeFileSync(path.join(product, 'server.js'), 'const PORT = 3000\n')
-  git(['add', '-A'])
-  git(['commit', '-qm', 'init'])
+  initGitRepo(product, { branch: 'main' })
+  const git = (args: string[]): string => execFileSync('git', args, { cwd: product, encoding: 'utf-8' })
   git(['remote', 'add', 'origin', origin])
   git(['push', '-q', '-u', 'origin', 'main'])
   const baseSha = git(['rev-parse', 'HEAD']).trim()

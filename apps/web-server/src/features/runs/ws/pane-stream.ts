@@ -1,10 +1,9 @@
 import fs from 'fs'
-import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { PaneBroker, PaneId, PaneSubscriber } from '../logic/pane-broker'
 import type { OrchestratorRegistry } from '../logic/run-registry'
 import { readManifest } from '../logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor, runManifestPath } from '../logic/runtime/run-paths'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { sendFrame } from '../../../shared/ws/record-stream'
 
@@ -99,7 +98,7 @@ export async function paneStreamRoutes(
 
       // Fallback: replay the on-disk log file for finished/historical runs.
       if (!replayLogFile(socket, deps.logsDir, runId, paneId)) {
-        socket.send(JSON.stringify({ type: 'error', error: 'unknown pane' }))
+        sendFrame(socket, { type: 'error', error: 'unknown pane' })
         socket.close()
       }
     },
@@ -107,7 +106,7 @@ export async function paneStreamRoutes(
 }
 
 export function shouldReplayLogFile(logsDir: string, runId: string): boolean {
-  const manifest = readManifest(path.join(runDirFor(logsDir, runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(logsDir, runId)))
   return manifest ? isTerminalRunStatus(manifest.status) : false
 }
 
@@ -119,7 +118,7 @@ export function shouldPreferLogReplay(
   return !hasActiveOrchestrator && shouldReplayLogFile(logsDir, runId)
 }
 
-function replayLogFile(
+export function replayLogFile(
   socket: { send: (message: string) => void; close: () => void },
   logsDir: string,
   runId: string,
@@ -127,14 +126,14 @@ function replayLogFile(
 ): boolean {
   const filePath = resolveLogPath(logsDir, runId, paneId)
   if (!filePath) return false
+  // Sends go through `sendFrame` so only the file read can reach the catch: a
+  // socket that closed mid-replay must not trigger a second send that throws.
   try {
     const chunk = formatHistoricalPaneReplay(paneId, fs.readFileSync(filePath, 'utf-8'))
-    if (chunk.length > 0) {
-      socket.send(JSON.stringify({ type: 'data', chunk }))
-    }
-    socket.send(JSON.stringify({ type: 'exit', code: 0 }))
+    if (chunk.length > 0) sendFrame(socket, { type: 'data', chunk })
+    sendFrame(socket, { type: 'exit', code: 0 })
   } catch {
-    socket.send(JSON.stringify({ type: 'error', error: 'log not available' }))
+    sendFrame(socket, { type: 'error', error: 'log not available' })
   } finally {
     socket.close()
   }
@@ -168,7 +167,7 @@ export function resolveLogPath(logsDir: string, runId: string, paneId: string): 
     if (!safeName) return null
     // Confirm the service exists in the manifest — defensive: pane ids are
     // arbitrary strings and we don't want to expose arbitrary file reads.
-    const manifest = readManifest(path.join(runDir, 'manifest.json'))
+    const manifest = readManifest(paths.manifestPath)
     if (!manifest) return null
     const found = manifest.services.find((s) => s.safeName === safeName)
     if (!found) return null

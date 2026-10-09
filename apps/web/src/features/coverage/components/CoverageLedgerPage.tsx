@@ -1,6 +1,6 @@
 import { useFeatureTestRoster } from '@/shared/state/use-feature-test-roster'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useEscapeToClose } from '@/shared/ui/Overlays'
+import { FullScreenPage } from '@/shared/ui/PageHeader'
 import * as coverageApi from '@/shared/api/coverage'
 import * as internalApi from '@/shared/api/internal'
 import * as configApi from '@/shared/api/config'
@@ -26,12 +26,14 @@ import { CoverageDocsRail } from './CoverageDocsRail'
 import { buildTestNumbering, testNumberKey } from '@/shared/test-numbering'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequirements } from './CoverageCards'
-import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
+import { CoverageEmptyMain, CoverageHeader, HeadlinePill, RAIL_PREF_ENCODING, RAIL_PREF_KEY } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
 import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import type { CoverageRecoveryStage } from '@shared/coverage/freshness'
 import type { CoverageLaunchModels } from '@/shared/state/use-coverage-recalculation'
+import { displayError } from '@/shared/api/error-message'
+import { usePersistedFlag } from '@/shared/state/browser-storage'
 
 // The two stages a coverage generation spawns (the summary job chains the
 // mapping engine) — the models gate scopes its rows to them.
@@ -71,7 +73,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const focusNonce = useRef(0)
   // R22: one unified view (no tabs). Docs is a collapsible left rail; its
   // open/closed state persists across refresh (R12).
-  const [railOpen, setRailOpen] = useState<boolean>(() => readRailPref())
+  const [railOpen, setRailOpen] = usePersistedFlag(RAIL_PREF_KEY, true, RAIL_PREF_ENCODING)
 
   // Flight owns execution and its live jobs. The ledger only launches work
   // and displays the documents/results when the user returns.
@@ -80,11 +82,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const [docsReloadKey, setDocsReloadKey] = useState(0)
   const activeJob = coverageJobs.find((job) => job.feature === feature && job.status === 'running')
 
-  const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
-
-  // On the shared Escape stack, so a dialog open over the ledger closes alone
-  // instead of taking the whole page with it.
-  useEscapeToClose(onClose)
+  const toggleRail = useCallback(() => setRailOpen((v) => !v), [setRailOpen])
 
   useEffect(() => () => {
     if (focusClearRef.current) clearTimeout(focusClearRef.current)
@@ -117,9 +115,9 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           const existing = (e.body as { existingJobId?: string } | null)?.existingJobId
           if (existing) { onOpenGeneration(await coverageApi.getCoverageJob(existing)); return }
         }
-        setActionError(e instanceof Error ? e.message : String(e))
+        setActionError(displayError(e))
       })
-      .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setActionError(displayError(e)))
       .finally(() => setLaunching(false))
   }, [feature, onOpenGeneration])
 
@@ -310,7 +308,9 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   ) : null
 
   return (
-    <div className="clcov-root fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }} data-testid="coverage-ledger">
+    // On the shared Escape stack, so a dialog open over the ledger closes alone
+    // instead of taking the whole page with it.
+    <FullScreenPage onClose={onClose} className="clcov-root" testId="coverage-ledger">
       <style>{COVERAGE_CSS}</style>
       {modelsGate && (
         <ModelLaunchGate
@@ -444,6 +444,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           </div>
         </div>
       )}
-    </div>
+    </FullScreenPage>
   )
 }

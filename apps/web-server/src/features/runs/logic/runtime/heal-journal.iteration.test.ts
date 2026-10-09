@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { MAX_JOURNAL_DIFF_BYTES, appendJournalIteration, writeFullDiffPatch } from './heal-journal'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { MAX_JOURNAL_DIFF_BYTES, appendJournalIteration, parseJournalMarkdown, writeFullDiffPatch } from './heal-journal'
 import { DIAGNOSIS_JOURNAL_PATH as REAL_JOURNAL, LOGS_DIR as REAL_LOGS, MANIFEST_PATH as REAL_MANIFEST, SUMMARY_PATH as REAL_SUMMARY } from './paths'
 
+const tempDir = trackTempDirs('cl-le-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-')))
+  tmpDir = tempDir()
 })
 
 describe('appendJournalIteration', () => {
@@ -226,6 +227,34 @@ describe('appendJournalIteration', () => {
     const patchFile = path.join(tmpDir, 'diffs', 'iteration-1.patch')
     expect(fs.existsSync(patchFile)).toBe(true)
     expect(fs.readFileSync(patchFile, 'utf-8')).toContain(huge)
+  })
+
+  it('records the run-wide repair cycle and the execution the repair started from', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(path.join(tmpDir, 'm.json'), '{}')
+    fs.writeFileSync(path.join(tmpDir, 's.json'), '{}')
+    appendJournalIteration({
+      signal: '.rerun', hypothesis: 'h', cycle: 3, inputExecution: 2,
+      journalPath, manifestPath: path.join(tmpDir, 'm.json'), summaryPath: path.join(tmpDir, 's.json'),
+    })
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toContain('- cycle: 3\n')
+    expect(body).toContain('- inputExecution: 2\n')
+    expect(parseJournalMarkdown(body)[0]).toMatchObject({ iteration: 1, cycle: 3, inputExecution: 2 })
+  })
+
+  it('keeps every cycle diff as its own patch file, pointing at it only when the block is cut', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(path.join(tmpDir, 'm.json'), '{}')
+    fs.writeFileSync(path.join(tmpDir, 's.json'), '{}')
+    const small = 'diff --git a/a.ts b/a.ts\n+one line'
+    appendJournalIteration({
+      signal: '.rerun', hypothesis: 'h', diffContent: small,
+      journalPath, manifestPath: path.join(tmpDir, 'm.json'), summaryPath: path.join(tmpDir, 's.json'),
+    })
+    expect(fs.readFileSync(path.join(tmpDir, 'diffs', 'iteration-1.patch'), 'utf-8')).toBe(`${small}\n`)
+    // The block already holds all of it, so the agent is not sent to a file.
+    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('Full diff:')
   })
 
   it('omits the `Full diff:` pointer when the patch file write fails', () => {

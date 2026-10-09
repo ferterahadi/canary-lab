@@ -1,10 +1,11 @@
 import { STAGE_DEPENDS_ON, type FlightManifest, type FlightStage } from '@shared/flights/types'
-import { formatCount } from '@/shared/lib/format'
+import { formatCount, formatElapsedSeconds } from '@/shared/lib/format'
 import type { HealEnd } from '@shared/run-state'
 import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from '@shared/lib/plural'
 import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
+import { flightAttentionOnStage } from '../lib/attention-history'
 import { stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { flightRailLabel } from '@shared/flights/stage-labels'
@@ -22,6 +23,7 @@ export const HEAL_CAUSE_PHRASE: Record<NonNullable<HealEnd['agentCause']>, strin
   'crash': 'agent crashed',
   'trust-prompt': 'waiting for you to approve it in the terminal',
   'approval-prompt': 'waiting on a CLI approval prompt',
+  'cli-dialog': 'blocked on an interactive CLI prompt',
   'unknown': '',
 }
 
@@ -62,23 +64,6 @@ export function healEndShort(healEnd: HealEnd | undefined): string | null {
   }
 }
 
-/** Compact wall-clock duration between two ISO stamps ("4s", "2m 14s",
- *  "1h 03m") — the rail rows and the summary strip both render it (R61). */
-export function formatDuration(startedAt?: string, endedAt?: string): string | null {
-  if (!startedAt || !endedAt) return null
-  const ms = Date.parse(endedAt) - Date.parse(startedAt)
-  if (!Number.isFinite(ms) || ms < 0) return null
-  return formatMs(ms)
-}
-
-function formatMs(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
-}
-
 /** Milliseconds of actual work a stage did. Reads the banked work clock
  *  (`activeMs`, accumulated segment by segment as the stage leaves `running`)
  *  so a step parked overnight on a checkpoint reports its 90 seconds of work,
@@ -106,7 +91,7 @@ export function formatStageDuration(
   const a = stageWorkMs(primary)
   const b = stageWorkMs(folded)
   if (a == null && b == null) return null
-  return formatMs((a ?? 0) + (b ?? 0))
+  return formatElapsedSeconds(Math.round(((a ?? 0) + (b ?? 0)) / 1000))
 }
 
 /** `skipReason` is a mixed field: the conductor writes prose for evidence-based
@@ -146,13 +131,13 @@ export function runOutcomeLine(stage: FlightStage, flight: FlightManifest, compa
   const counts = ev.counts as { passed?: number; total?: number; failed?: number } | undefined
   // healCycles lives on whichever half of the merged run↔heal row carries it.
   const cycles = num(ev, 'healCycles') ?? num(evidenceOf(companion), 'healCycles')
-  const tail = cycles != null && cycles > 0 ? ` after ${cycles} repair cycle${cycles === 1 ? '' : 's'}` : ''
+  const tail = cycles != null && cycles > 0 ? ` after ${plural(cycles, 'repair cycle')}` : ''
   const total = counts && typeof counts.total === 'number' ? counts.total : null
   if (total != null && typeof counts?.failed === 'number' && counts.failed > 0) {
-    return `${counts.failed} of ${total} test${total === 1 ? '' : 's'} failed${tail}.`
+    return `${counts.failed} of ${plural(total, 'test')} failed${tail}.`
   }
   if (total != null && total > 0 && counts?.passed === total) {
-    return `All ${total} test${total === 1 ? '' : 's'} passed${tail}.`
+    return `All ${plural(total, 'test')} passed${tail}.`
   }
   const runStatus = str(ev, 'status') ?? flight.runVerdict
   const runId = str(ev, 'runId') ?? flight.links?.runId
@@ -227,6 +212,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
 
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key } = stage
+  if (flightAttentionOnStage(flight, key, companion?.key)) return flight.attention!.reason
   // Skipped-with-evidence narrates as settled — same rule the rail draws, so
   // the row's ✓ and this sentence can't contradict each other.
   const status = settledStageStatus(stage)
@@ -305,7 +291,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
     const captured = num(cev, 'captured')
     const verb = ev.reused ? 'reused' : 'created'
-    const files = captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''
+    const files = captured != null ? ` (${plural(captured, 'file')})` : ''
     // The dry-run boot is a GATE the env-capture stage runs. Read-time evidence
     // only proves the envset is on disk — it could have been written by hand or
     // by write_envset — so a probed pair states the artifact and stops there.
@@ -317,7 +303,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const count = num(cev, 'requirementCount')
     const docs = Array.isArray(ev.docs) ? ev.docs.length : null
     const source = docSourceLabel(str(ev, 'source'))
-    return `${count != null ? `${count} requirement${count === 1 ? '' : 's'}` : 'Requirements'} written${docs != null ? ` from ${docs} doc${docs === 1 ? '' : 's'}` : ''}${source ? ` (${source})` : ''}.`
+    return `${count != null ? plural(count, 'requirement') : 'Requirements'} written${docs != null ? ` from ${plural(docs, 'doc')}` : ''}${source ? ` (${source})` : ''}.`
   }
 
   // A running stage with a live agent snapshot says what the agent is doing
@@ -337,7 +323,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         const choice = str(ev, 'choice')
         return `Matched existing suite "${match.feature}"${choice ? ` — continuing as ${choice}` : ''}.`
       }
-      return `No match found${scanned != null ? ` (${scanned} suite${scanned === 1 ? '' : 's'} checked)` : ''} — starting fresh.`
+      return `No match found${scanned != null ? ` (${plural(scanned, 'suite')} checked)` : ''} — starting fresh.`
     }
     case 'scout': {
       const repos = flight.repoPaths.length
@@ -360,13 +346,13 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     case 'env-capture': {
       if (running) return 'Copying settings files and checking the app starts…'
       const captured = num(ev, 'captured')
-      return `Settings copied${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''} — the app started fine.`
+      return `Settings copied${captured != null ? ` (${plural(captured, 'file')})` : ''} — the app started fine.`
     }
     case 'docs': {
       if (running) return 'Collecting the documents…'
       const docs = Array.isArray(ev.docs) ? ev.docs.length : null
       const source = docSourceLabel(str(ev, 'source'))
-      return `Collected ${docs != null ? `${docs} document${docs === 1 ? '' : 's'}` : 'the documents'}${source ? ` — ${source}` : ''}.`
+      return `Collected ${docs != null ? plural(docs, 'document') : 'the documents'}${source ? ` — ${source}` : ''}.`
     }
     case 'prd-summary': {
       if (running) return 'Turning the documents into requirements…'
@@ -383,7 +369,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         if (p) {
           const doing =
             p.phase === 'authoring'
-              ? `writing tests to close ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'}`
+              ? `writing tests to close ${plural(p.gapsOpen, 'gap')}`
               : p.phase === 'validating'
                 ? 'checking the new tests compile'
                 : 'matching the tests to the requirements'
@@ -410,7 +396,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         }
         if (mappingState === 'generating') return 'Matching tests to requirements…'
         if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
-        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} mapped` : ''
+        const of = covered != null && total != null ? ` — ${covered} of ${plural(total, 'requirement')} mapped` : ''
         return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Run results are tracked separately.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
@@ -436,7 +422,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       if (running) return 'An agent is fixing the app…'
       const cycles = num(ev, 'healCycles')
       const runStatus = str(ev, 'finalStatus') ?? str(ev, 'status') ?? flight.runVerdict
-      if (cycles != null && cycles > 0) return `${cycles} repair cycle${cycles === 1 ? '' : 's'} — run ${runStatus ?? 'settled'}.`
+      if (cycles != null && cycles > 0) return `${plural(cycles, 'repair cycle')} — run ${runStatus ?? 'settled'}.`
       return `No repair needed — run ${runStatus ?? 'settled'}.`
     }
     case 'evaluation-export': {

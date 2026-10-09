@@ -3,7 +3,6 @@
 // mid-run cannot reach the process that produces the verdict.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createHash } from 'crypto'
 import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreReviewedSuiteFiles, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
@@ -15,16 +14,17 @@ import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
 import { cleanupSuiteRuntimeInputsForRun, materializeSuiteRuntimeInputs, removeSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-suite-snap-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-suite-snap-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {
@@ -163,6 +163,7 @@ describe('snapshotSuite', () => {
     expect(sink.patches).toEqual([{
       suiteSnapshot: {
         kind: 'taken',
+        specInventoryVersion: 2,
         dir: ctx.paths.suiteSnapshotDir,
         takenAt: expect.any(String),
         digest: suiteDigest(live),
@@ -864,15 +865,11 @@ describe('restoreSpecEdits', () => {
 
 describe('digestOfSpecHashes', () => {
   it('is what suiteDigest records, and digests an empty map to a real sha256', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-digest-'))
-    try {
-      fs.mkdirSync(path.join(dir, 'e2e'))
-      fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'test("a", () => {})\n')
-      expect(digestOfSpecHashes(hashFeatureSpecs(dir))).toBe(suiteDigest(dir))
-      expect(digestOfSpecHashes({})).toBe(createHash('sha256').digest('hex'))
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true })
-    }
+    const dir = tempDir('cl-digest-')
+    fs.mkdirSync(path.join(dir, 'e2e'))
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'test("a", () => {})\n')
+    expect(digestOfSpecHashes(hashFeatureSpecs(dir))).toBe(suiteDigest(dir))
+    expect(digestOfSpecHashes({})).toBe(createHash('sha256').digest('hex'))
   })
 })
 

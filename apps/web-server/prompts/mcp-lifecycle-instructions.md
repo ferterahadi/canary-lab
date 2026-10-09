@@ -10,6 +10,6 @@ Read get_workflow_guide(workflow:"<name>").
 - export — start_external_evaluation_export → submit_external_evaluation_export (keep the exact case count and order); relay archivePath verbatim; export as-is, never heal first.
 - portify — start_external_portify → poll if verifying; otherwise edit and submit_external_portify (a double-boot verifies) → save_portify(confirm:true) (standalone tools: portify/full profiles).
 
-Keep session_id stable; omit client_kind.
+Omit client_kind.
 
-Read coverageUpdate; old stats are stale. Monitor with wait_for_feature_change; respect owners and permissions.
+Use the native connector for human forms. With approvalId, show reviewUrl and wait_for_approval; never answer for the human. Read coverageUpdate; monitor wait_for_feature_change.

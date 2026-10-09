@@ -51,6 +51,7 @@ function fakeStore(rows: RunIndexEntry[], details: RunDetail[]) {
     list: ({ feature }: { feature?: string } = {}) =>
       rows.filter((row) => feature === undefined || row.feature === feature),
     get: (runId: string) => byId.get(runId) ?? null,
+    settleIfOrphaned: () => false,
   }
 }
 
@@ -245,6 +246,21 @@ describe('resolveRunRef', () => {
     const resolved = resolveRunRef(asDeps({ store: fakeStore(rows, [detail]) }), 'checkout', undefined, '7cvh')
 
     expect(resolved).toEqual({ kind: 'resolved', detail })
+  })
+
+  it('settles a referenced run whose server exited before reading it, so start_run restarts it', () => {
+    // The orphan reads `healing` until settled; after it, the caller sees the
+    // `aborted` row that start_run(run_ref) restarts in a fresh runner.
+    let current = runDetail({ runId: 'run-2026-05-25-7cvh', status: 'healing' })
+    const store = {
+      ...fakeStore([...rows, indexRow({ runId: 'run-2026-05-24-abcd' })], []),
+      get: () => current,
+      settleIfOrphaned: vi.fn(() => { current = runDetail({ runId: 'run-2026-05-25-7cvh', status: 'aborted' }); return true }),
+    }
+
+    expect(resolveRunRef(asDeps({ store }), 'checkout', undefined, '7cvh')).toEqual({ kind: 'resolved', detail: current })
+    expect(current.manifest.status).toBe('aborted')
+    expect(store.settleIfOrphaned.mock.calls).toEqual([['run-2026-05-25-7cvh']])
   })
 
   it('reports a ref that matches nothing as missing', () => {
@@ -504,5 +520,16 @@ describe('ensureExternalClaimForMcpCall', () => {
 
     expect(broker.claim).not.toHaveBeenCalled()
     expect(broker.touch).not.toHaveBeenCalled()
+  })
+})
+
+describe('continuation and restart eligibility', () => {
+  it('continues a running test run while excluding a healing boot session', () => {
+    const boot = runDetail({ runId: 'boot', executionType: 'boot' })
+    const running = runDetail({ runId: 'running', status: 'running' })
+    const deps = asDeps({ store: fakeStore([
+      indexRow({ runId: 'boot' }), indexRow({ runId: 'running', status: 'running' }),
+    ], [boot, running]) })
+    expect(findContinuingRunForFeature(deps, 'checkout', '')).toBe(running)
   })
 })

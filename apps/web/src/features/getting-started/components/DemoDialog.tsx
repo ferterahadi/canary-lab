@@ -7,6 +7,7 @@ import { Tooltip } from '@/shared/ui/Tooltip'
 import { Section, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { Modal } from '@/shared/ui/Overlays'
 import { OPTION_ROW_CENTERED_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
+import { displayError } from '@/shared/api/error-message'
 
 const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' | 'flight'>, string> = {
   coverage: 'Measure coverage',
@@ -304,7 +305,7 @@ export function DemoDialog({ open, onClose, workflows, session, actionBlockers =
     Promise.resolve(onInternalAction(workflow.internalAction))
       .catch((error: unknown) => setLaunchErrors((current) => ({
         ...current,
-        [workflow.id]: error instanceof Error ? error.message : String(error),
+        [workflow.id]: displayError(error),
       })))
       .finally(() => setLaunching((current) => current === workflow.id ? null : current))
   }

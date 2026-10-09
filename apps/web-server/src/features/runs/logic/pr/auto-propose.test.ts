@@ -1,13 +1,16 @@
+import type { ProjectConfig } from '../../../../../../../shared/project-config'
 import { describe, it, expect } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { autoProposeFixes, shouldAutoPropose } from './auto-propose'
 import type { RunContext } from '../runtime/run-context'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import type { RunFixCapture } from '../../../../../../../shared/run-state'
-import type { ProjectConfig } from '../runtime/launcher/project-config'
+
 import type { PrPreflight } from './pr-preflight'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-auto-propose-')
 
 const capture: RunFixCapture = {
   capturedAt: 'now',
@@ -99,7 +102,7 @@ describe('autoProposeFixes', () => {
   })
 
   it('hands propose the verdict provenance read off the manifest on disk (D9)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-auto-propose-'))
+    const dir = tempDir()
     const manifestPath = path.join(dir, 'manifest.json')
     const suiteSnapshot = { kind: 'taken' as const, dir: '/s', takenAt: 't', digest: 'abcdef0123456789' }
     fs.writeFileSync(manifestPath, JSON.stringify({ runId: 'run-1', suiteSnapshot, specEdits: { checkedAt: 't', pending: [], adopted: [] } }))

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { plural } from '@shared/lib/plural'
 import { healDisplayValue, healEnabled } from '@/shared/lib/heal-threshold'
 import { NumberInput } from './FormFields'
+import { activateOnKey } from './keyboard'
 import { OPTION_ROW_COMPACT_CLASS, optionRowStyle } from './OptionRow'
 
 // ─── Heal behavior: one choice, rendered the same on every surface ──────────
@@ -125,9 +126,7 @@ function HealModeRow({ testId, selected, editable, preserveControl, onPick, labe
       aria-disabled={preserveControl && !editable ? true : undefined}
       tabIndex={editable ? 0 : undefined}
       onClick={pick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() }
-      }}
+      onKeyDown={activateOnKey(pick)}
       className={`${OPTION_ROW_COMPACT_CLASS} ${editable && !selected ? 'cl-hover-row' : ''} ${divider ? 'border-t' : ''}`}
       style={optionRowStyle({ selected, interactive: editable && !selected })}
     >

@@ -1,14 +1,14 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createRequire } from 'module'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { verifySavedMcpRegistration } from './mcp-verify'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const requireModule = createRequire(import.meta.url)
+const tempDir = trackTempDirs('cl-saved-mcp-')
 let root: string
-beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-saved-mcp-'))) })
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
 
 function server(tool = 'exec', discover = true): string {
   const file = path.join(root, 'server.cjs')
@@ -69,6 +69,19 @@ describe('saved MCP launch verification', () => {
     const result = await verifySavedMcpRegistration({ command: '/missing/command', args: [] }, opts)
     expect(result.status).toBe('broken')
     expect(result.message).toContain('expected')
+  })
+
+  it.each([
+    ['{}', 200, 'an unknown workspace'],
+    ['invalid JSON', 200, 'JSON'],
+    ['unavailable', 503, 'MCP health returned 503'],
+  ] as const)('rejects invalid health %s before launching the bridge', async (body, status, message) => {
+    const opts = options()
+    opts.fetch.mockResolvedValue(new Response(body, { status }))
+    const result = await verifySavedMcpRegistration({ command: '/missing/command', args: [] }, opts)
+    expect(result.status).toBe('broken')
+    expect(result.message).toContain(message)
+    expect(opts.fetch).toHaveBeenCalledWith(new URL('http://127.0.0.1:12345/mcp/health'), { signal: expect.any(AbortSignal) })
   })
 
   it('reports an offline UI without launching a bridge or fetching health', async () => {

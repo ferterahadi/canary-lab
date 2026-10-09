@@ -1,31 +1,22 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/portify'
-import type { PortifyStatus } from '@shared/portify-index'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it } from 'vitest'
+import type { PortifyManifest, PortifyStatus } from '@shared/portify-index'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function manifest(status: PortifyStatus, over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'w',
     feature: 'cns',
+    featureDir: '/workspace/features/cns',
     repos: [{ name: 'app', path: '~/app', worktreePath: '/logs/portify/w/worktrees/g0-app' }],
     agent: 'claude',
     producer: 'external',
@@ -44,6 +35,22 @@ function render(m: PortifyManifest): void {
 }
 
 describe('ExternalPortifyPanel', () => {
+  it('updates failure text while preserving verification feedback and the mounted card', () => {
+    const verification = { ok: false, instances: [], failureDetail: 'Verification feedback' }
+    render(manifest('editing', { verification, error: 'Hidden failure' }))
+    const card = container.querySelector('.cl-card')
+    expect(container.textContent).not.toContain('Hidden failure')
+    render(manifest('failed', { verification, error: 'First failure' }))
+    const error = Array.from(container.querySelectorAll('div')).find((el) => el.textContent === 'First failure')!
+    expect(error.className).toBe('mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4')
+    expect(error.getAttribute('style')).toContain('var(--danger)')
+    render(manifest('failed', { verification, error: 'Next failure' }))
+    expect(error.textContent).toBe('Next failure')
+    render(manifest('failed', { verification }))
+    expect(container.textContent).not.toContain('Next failure')
+    expect(container.textContent).toContain('Verification feedback')
+    expect(container.querySelector('.cl-card')).toBe(card)
+  })
   it('shows the client identity, conversation name, and status pill', () => {
     render(manifest('editing'))
     const text = container.textContent ?? ''

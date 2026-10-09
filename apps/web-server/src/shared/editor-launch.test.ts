@@ -2,10 +2,19 @@ import { afterEach, describe, it, expect, vi } from 'vitest'
 import { spawn, spawnSync } from 'child_process'
 import { launchEditorDir } from './editor-launch'
 
-vi.mock('child_process', () => ({
-  spawn: vi.fn(() => ({ unref: vi.fn() })),
-  spawnSync: vi.fn(() => ({ status: 0 })),
-}))
+vi.mock('child_process', () => {
+  const spawnSync = vi.fn((_command: string, _args: readonly string[], _options?: unknown) => ({ status: 0 }))
+  return {
+    spawn: vi.fn(() => ({ unref: vi.fn() })),
+    spawnSync,
+    // `commandAvailable` looks commands up through execFileSync, which throws on
+    // a non-zero exit; route it through the spawnSync double so one status
+    // table (`commandsPresent`) drives the lookup.
+    execFileSync: vi.fn((command: string, args: readonly string[], options?: unknown) => {
+      if (spawnSync(command, args, options).status !== 0) throw new Error(`${args[0]}: not found`)
+    }),
+  }
+})
 
 const spawnMock = vi.mocked(spawn)
 const spawnSyncMock = vi.mocked(spawnSync)

@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { renameFeatureRecords, type RenamableRecordStore } from './feature-rename'
 import { writeRunsIndex, readRunsIndex } from '../../runs/logic/runtime/manifest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rename-')
 
 function fakeStore(counts: Record<string, number>, key: string): RenamableRecordStore & { calls: Array<[string, string]> } {
   const calls: Array<[string, string]> = []
@@ -18,8 +20,7 @@ function fakeStore(counts: Record<string, number>, key: string): RenamableRecord
 
 describe('renameFeatureRecords', () => {
   let logsDir: string
-  beforeEach(() => { logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rename-')) })
-  afterEach(() => { fs.rmSync(logsDir, { recursive: true, force: true }) })
+  beforeEach(() => { logsDir = tempDir() })
 
   it('carries the rename into every store and sums what moved', () => {
     const flights = fakeStore({ f: 1 }, 'f')

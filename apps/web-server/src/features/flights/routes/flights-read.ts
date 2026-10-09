@@ -1,8 +1,7 @@
+import { configuredRepoPaths } from '../../../shared/repo-identity'
 // Flights REST — reads: the flight index, the per-feature lookup, one flight,
 // its stage remedy, and stage evidence. Split out of flights.ts; bodies unchanged.
 import fs from 'fs'
-import os from 'os'
-import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
@@ -21,10 +20,12 @@ import { recommendFlightContinuation } from '../../../../../../shared/flights/co
 export async function registerFlightReadRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
 
+  const reader = deps.flightAttention ?? store
+
   // the latest (list is newest-first) instead of destructively pruning disk.
   app.get('/api/flights', async () => {
     const seen = new Set<string>()
-    const flights = store.list().filter((e) => {
+    const flights = reader.list().filter((e) => {
       if (seen.has(e.feature)) return false
       seen.add(e.feature)
       return true
@@ -75,26 +76,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
         return reason ? { key, allowed: false, reason } : { key, allowed: true }
       })
 
-      // Configs may declare repos as `~/...` — expand so the prefill posts
-      // paths the start route's realpath check accepts.
-      //
-      // Deduplicated: several services legitimately share one source tree (a
-      // suite declaring one repo per service over a single checkout, so each
-      // gets its own per-run worktree). One entry each put the same directory in
-      // the launcher's repo list three times over — three identical rows the
-      // user cannot tell apart, and a repoPaths list that then made the flight
-      // claim three repositories everywhere it was counted.
-      const seen = new Set<string>()
-      const configRepoPaths = (config?.repos ?? [])
-        .map((r) => r.localPath)
-        .filter((p): p is string => typeof p === 'string' && p.length > 0)
-        .map((p) => (p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p))
-        .filter((p) => {
-          const key = p.replace(/[\\/]+$/, '')
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
+      const configRepoPaths = configuredRepoPaths(config?.repos)
       const coverageTarget = Number.isFinite(requestedTarget) && requestedTarget >= 0 && requestedTarget <= 100
         ? requestedTarget
         : manifest?.opts.coverageTarget ?? 100
@@ -138,7 +120,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
   )
 
   app.get<{ Params: { id: string } }>('/api/flights/:id', async (req, reply) => {
-    const manifest = store.get(req.params.id)
+    const manifest = reader.get(req.params.id)
     if (!manifest) {
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }
@@ -186,7 +168,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
   // `git status`), never persisted. `remedy: null` = nothing actionable;
   // `repos: []` = the error is stale and everything is clean (just Continue).
   app.get<{ Params: { id: string } }>('/api/flights/:id/remedy', async (req, reply) => {
-    const manifest = store.get(req.params.id)
+    const manifest = reader.get(req.params.id)
     if (!manifest) {
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }

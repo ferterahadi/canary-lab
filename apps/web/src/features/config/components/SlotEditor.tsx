@@ -6,7 +6,8 @@ import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 import { CopyFromModal } from './CopyFromModal'
-import type { KvEntry } from './envset-diff'
+import type { KvEntry } from '@shared/lib/dotenv-edit'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 export function SlotEditor({
   feature,
@@ -28,8 +29,8 @@ export function SlotEditor({
     save: (payload) => configApi.putEnvsetSlot(feature, env, slot, payload as KvEntry[]),
   })
 
-  if (ed.error && !ed.doc) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
-  if (ed.loading || !ed.doc || !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+  if (ed.error && !ed.doc) return <ConfigLoadGuard error={ed.error} />
+  if (ed.loading || !ed.doc || !ed.draft) return <ConfigLoadGuard />
 
   const draft = ed.draft
   const doc = ed.doc

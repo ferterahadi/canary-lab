@@ -11,6 +11,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 export function CloseIcon({ size = 13 }: { size?: number } = {}) {
   return (
@@ -59,12 +60,8 @@ export function HintIcon({ hint, icon, label }: { hint: string; icon?: ReactNode
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
-    const tooltipWidth = 256
-    const margin = 8
-    let left = rect.left + rect.width / 2 - tooltipWidth / 2
-    left = Math.max(margin, Math.min(left, window.innerWidth - tooltipWidth - margin))
-    const top = rect.bottom + 6
-    setPos({ top, left })
+    // 256 = the tip's fixed `w-64`.
+    setPos({ top: rect.bottom + 6, left: clampToViewport(rect, 256, 'center', window.innerWidth) })
   }, [open])
 
   return (
@@ -216,9 +213,9 @@ export function PencilIcon({ size = 12 }: { size?: number } = {}) {
   )
 }
 
-export function TrashIcon() {
+export function TrashIcon({ size = 12 }: { size?: number } = {}) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
       <path d="M10 11v6" />
@@ -246,10 +243,51 @@ export function CheckIcon({ size = 13 }: { size?: number } = {}) {
   )
 }
 
-export function ChevronRightIcon() {
+export function ChevronRightIcon({ size = 12, strokeWidth = 2.5, className }: { size?: number; strokeWidth?: number; className?: string } = {}) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+/** The turning chevron of an expand/collapse control: right when closed, down
+ *  when open. Every disclosure draws it here so the turn has one speed. The
+ *  layout classes stay per call site — a caret centred in a fixed box and one
+ *  riding a text line need different wrappers to rotate about the glyph. */
+export function DisclosureCaret({ open, className = 'inline-flex shrink-0', strokeWidth = 2.5 }: {
+  open: boolean
+  className?: string
+  strokeWidth?: number
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`${className} transition-transform duration-150`.trim()}
+      style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
+    >
+      <ChevronRightIcon strokeWidth={strokeWidth} />
+    </span>
+  )
+}
+
+/** Paper plane — a flight. Stroke stays per call site: the features column
+ *  draws its icon buttons at 2.2, everything else at 2. */
+export function PlaneIcon({ size = 13, strokeWidth = 2, className }: { size?: number; strokeWidth?: number; className?: string } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M22 2 11 13" />
+      <path d="M22 2 15 22l-4-9-9-4Z" />
+    </svg>
+  )
+}
+
+/** Gear — settings or a suite's config. */
+export function GearIcon({ size = 13, strokeWidth = 2 }: { size?: number; strokeWidth?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   )
 }

@@ -1,7 +1,5 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -14,23 +12,21 @@ import { makeHealLoopContext } from '../features/runs/logic/runtime/__fixtures__
 import { adoptSpecEdits, recordSpecEdits, restoreSpecEdits, snapshotSuite } from '../features/runs/logic/runtime/run-suite-snapshot'
 import { writeManifest } from '../features/runs/logic/runtime/manifest'
 import { waitForTestReview } from './test-review-wait'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+import { initGitRepo } from '../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('canary-test-review-http-')
 
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
 async function harness(answer: (live: string) => { action: 'accept' | 'cancel' | 'decline'; content?: { choice: string } }, legacy = false, elicitation = true) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-test-review-http-'))
-  cleanups.push(async () => fs.rmSync(root, { recursive: true, force: true }))
+  const root = tempDir()
   const store = new RunStore(path.join(root, 'logs'), createRegistry())
   const { ctx } = makeHealLoopContext({ root, opts: { runStateSink: store } })
   fs.mkdirSync(path.join(ctx.feature.featureDir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), "test('a', () => expect(1).toBe(1))\n")
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: ctx.feature.featureDir, stdio: 'pipe' })
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'initial')
+  initGitRepo(ctx.feature.featureDir)
   fs.mkdirSync(ctx.paths.runDir, { recursive: true })
   writeManifest(ctx.paths.manifestPath, { runId: ctx.runId, feature: 'demo', featureDir: ctx.feature.featureDir, startedAt: 'now', status: 'healing', services: [], healCycles: 1, repoPaths: ['/editable-app'] })
   snapshotSuite(ctx)

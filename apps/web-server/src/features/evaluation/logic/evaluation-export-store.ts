@@ -12,6 +12,8 @@ import type {
   EvaluationExportTaskRecord,
   EvaluationExportTaskView,
 } from '../../../../../../shared/evaluation-export-types'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string
@@ -22,8 +24,11 @@ export interface EvaluationExportTaskPaths {
   certificatePath: string
 }
 
+/** The `<logs>/` subdirectory name — shared by the path builders and the store. */
+const EVALUATION_EXPORTS_DIR_NAME = 'evaluation-exports'
+
 export function evaluationExportsDir(logsDir: string): string {
-  return path.join(logsDir, 'evaluation-exports')
+  return path.join(logsDir, EVALUATION_EXPORTS_DIR_NAME)
 }
 
 export function evaluationExportTaskPaths(logsDir: string, taskId: string): EvaluationExportTaskPaths | null {
@@ -53,7 +58,7 @@ export function evalTaskStatusOf(r: EvaluationExportTaskRecord): string { return
 function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRecord> {
   return sharedTaskStore<EvaluationExportTaskRecord>({
     logsDir,
-    dirName: 'evaluation-exports',
+    dirName: EVALUATION_EXPORTS_DIR_NAME,
     recordFile: 'task.json',
     idOf: (r) => r.taskId,
     statusOf: evalTaskStatusOf,
@@ -207,7 +212,7 @@ export function writeEvaluationExportBuild(
   writeEvaluationExportZip(logsDir, taskId, built.zip)
   // Non-null: writeEvaluationExportZip has just thrown on an unsafe id.
   const p = evaluationExportTaskPaths(logsDir, taskId)!
-  fs.writeFileSync(p.certificatePath, JSON.stringify(built.certificate, null, 2), 'utf8')
+  atomicWriteJson(p.certificatePath, built.certificate)
 }
 
 /** The stored certificate, or null when the task has none — an export built
@@ -296,7 +301,7 @@ function isSafeTaskId(taskId: string): boolean {
 function isSessionRef(value: unknown): value is EvaluationExportSessionRef {
   if (!value || typeof value !== 'object') return false
   const ref = value as Record<string, unknown>
-  return (ref.agent === 'claude' || ref.agent === 'codex') && typeof ref.sessionId === 'string'
+  return isAgentKind(ref.agent) && typeof ref.sessionId === 'string'
 }
 
 function isArchiveContents(value: unknown): value is EvaluationArchiveContents {

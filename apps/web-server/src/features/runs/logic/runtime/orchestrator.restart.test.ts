@@ -1,64 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest, readRunsIndex } from './manifest'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -66,7 +16,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -75,28 +25,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.restart / rerun / status', () => {
   it('restart re-spawns services and truncates logs', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -120,9 +53,9 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('ignores a stale service exit from a pty replaced during restart', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -146,11 +79,11 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('selective restart only respawns services matching filesChanged', async () => {
-    const { factory, spawned } = makeFakeFactory()
-    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
-    const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-b-'))
+    const { factory, spawned } = makeFakePtyFactory()
+    const repoA = tempDir('cl-orc-a-')
+    const repoB = tempDir('cl-orc-b-')
     const orch = new RunOrchestrator({
-      feature: makeFeature({
+      feature: demoFeature(tmpDir, {
         repos: [
           { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
           { name: 'b', localPath: repoB, startCommands: [{ command: 'echo b', name: 'svcB', healthCheck: { url: 'http://b' } }] },
@@ -169,6 +102,7 @@ describe('RunOrchestrator.restart / rerun / status', () => {
 
     await orch.start()
     expect(spawned).toHaveLength(2) // two services started
+    spawned[1].emitData('svcB before\n')
 
     // Only repoA's file changed → only svcA restarts.
     await orch.restart([path.join(repoA, 'src/x.ts')])
@@ -179,14 +113,22 @@ describe('RunOrchestrator.restart / rerun / status', () => {
     expect(planEvents[0].toKeep).toEqual(['svcb'])
     expect(skipEvents).toEqual(['svcb'])
 
+    // The kept service's log rotates too, so its next execution starts its own
+    // file instead of running on under the earlier execution's lines.
+    spawned[1].emitData('svcB after\n')
+    const segments = fs.readdirSync(path.join(runDir, 'service-logs', 'svcb'))
+    expect(segments).toHaveLength(1)
+    expect(fs.readFileSync(path.join(runDir, 'service-logs', 'svcb', segments[0]), 'utf-8')).toBe('svcB before\n')
+    expect(fs.readFileSync(path.join(runDir, 'svc-svcb.log'), 'utf-8')).toBe('svcB after\n')
+
     await orch.stop('passed')
   })
 
   it('selective restart with no matches keeps all services warm and emits noMatch', async () => {
-    const { factory, spawned } = makeFakeFactory()
-    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
+    const { factory, spawned } = makeFakePtyFactory()
+    const repoA = tempDir('cl-orc-a-')
     const orch = new RunOrchestrator({
-      feature: makeFeature({
+      feature: demoFeature(tmpDir, {
         repos: [
           { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
         ],
@@ -212,11 +154,11 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('selective restart with full match restarts everything', async () => {
-    const { factory, spawned } = makeFakeFactory()
-    const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-a-'))
-    const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-b-'))
+    const { factory, spawned } = makeFakePtyFactory()
+    const repoA = tempDir('cl-orc-a-')
+    const repoB = tempDir('cl-orc-b-')
     const orch = new RunOrchestrator({
-      feature: makeFeature({
+      feature: demoFeature(tmpDir, {
         repos: [
           { name: 'a', localPath: repoA, startCommands: [{ command: 'echo a', name: 'svcA', healthCheck: { url: 'http://a' } }] },
           { name: 'b', localPath: repoB, startCommands: [{ command: 'echo b', name: 'svcB', healthCheck: { url: 'http://b' } }] },
@@ -237,9 +179,9 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('rerun truncates logs without re-spawning', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -255,9 +197,9 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('setStatus updates manifest + index and emits run-status', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -277,9 +219,9 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('noteHealCycle increments + persists', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -294,9 +236,9 @@ describe('RunOrchestrator.restart / rerun / status', () => {
   })
 
   it('stop is idempotent and finalizes manifest + index', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -319,10 +261,10 @@ describe('RunOrchestrator.restart / rerun / status', () => {
 
 describe('RunOrchestrator construction defaults', () => {
   it('uses real isHealthy + setTimeout-based delay when not injected', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     // Feature has no healthUrl, so the real isHealthy default never fires —
     // but the constructor branches that pick defaults are covered.
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{ name: 'r', localPath: tmpDir, startCommands: [{ command: 'x', name: 'x' }] }],
     })
     const orch = new RunOrchestrator({
@@ -336,9 +278,9 @@ describe('RunOrchestrator construction defaults', () => {
   })
 
   it('stop without prior start clears nothing but still finalizes manifest', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,

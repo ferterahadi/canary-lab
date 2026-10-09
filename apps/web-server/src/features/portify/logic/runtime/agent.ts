@@ -1,12 +1,10 @@
 import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex-args'
 import fs from 'fs'
-import path from 'path'
-import { type ChildProcess } from 'child_process'
-import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
+import { writeClaudeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import { type AgentProcessHandle, runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity
 // (no session-JSONL / log growth). No hard wall-clock — a slow-but-working agent
@@ -42,7 +40,7 @@ export function runPortifyAgent(opts: {
   prompt: string
   cwd: string
   logPath?: string
-  children?: Set<ChildProcess>
+  children?: Set<AgentProcessHandle>
   /** claude session id — set on attempt 1, reused on retries. */
   sessionId?: string
   /** true on a retry: resume the prior claude session instead of starting one. */
@@ -81,9 +79,9 @@ export function runPortifyAgent(opts: {
     idleMs: PORTIFY_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, cwd, sessionId, logPath ?? undefined),
   })
-  children?.add(handle.child)
+  children?.add(handle)
   const cleanup = (): void => {
-    children?.delete(handle.child)
+    children?.delete(handle)
     if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
   }
   return handle.done.then(
@@ -116,13 +114,5 @@ export function runPortifyAgent(opts: {
 // log so the shared AgentSessionView can render the agent timeline (same ref
 // shape the benchmark setup view uses).
 export function writePortifyClaudeRef(workflowDir: string, cwd: string, sessionId: string): void {
-  try {
-    // Route through the canonical resolver so this honors CLAUDE_CONFIG_DIR and
-    // the realpath/encoding rules instead of recomputing the path by hand.
-    const logPath = claudeSessionLogPath(cwd, sessionId)
-    const ref = { activeAgent: 'claude', sessions: { claude: { agent: 'claude', sessionId, logPath } } }
-    fs.writeFileSync(path.join(workflowDir, 'agent-session.json'), JSON.stringify(ref, null, 2))
-  } catch {
-    /* best-effort — the UI falls back to the text log */
-  }
+  writeClaudeWorkflowAgentRef(workflowDir, cwd, sessionId)
 }

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 const resolvePath = vi.hoisted(() => vi.fn((value: string) => value))
@@ -13,17 +12,17 @@ vi.mock('../../../../shared/launcher-startup', async (importActual) => {
 import { spawnHealAgentRepl } from './run-heal-agent'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-let root: string
+const tempDir = trackTempDirs('cl-heal-agent-fallback-')
 
 afterEach(() => {
   vi.clearAllMocks()
-  if (root) fs.rmSync(root, { recursive: true, force: true })
 })
 
 describe('spawnHealAgentRepl declared repository fallback', () => {
   it('resolves localPath when no worktree override is present', () => {
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-agent-fallback-')))
+    const root = tempDir()
     const sourceRoot = path.join(root, 'source')
     const featureDir = path.join(root, 'features', 'demo')
     fs.mkdirSync(sourceRoot, { recursive: true })

@@ -1,18 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import { createRecordIndexHydration } from '@/shared/state/record-index-store'
 import { portifyIndex, type PortifyAction } from './portify-state'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex
 
-const manifest = (status: PortifyManifest['status'] = 'saved'): PortifyManifest => ({ workflowId: 'wf', feature: 'checkout', status, repos: [], agent: 'codex', branch: 'ports', attempt: 1, maxAttempts: 3, startedAt: '2026-01-01' })
-function deferred() {
-  let resolve!: (value: PortifyManifest) => void
-  const promise = new Promise<PortifyManifest>((yes) => { resolve = yes })
-  return { promise, resolve }
-}
+const manifest = (status: PortifyManifest['status'] = 'saved'): PortifyManifest => ({ workflowId: 'wf', feature: 'checkout', featureDir: '/workspace/features/checkout', status, repos: [], agent: 'codex', branch: 'ports', attempt: 1, maxAttempts: 3, startedAt: '2026-01-01' })
+
 function harness() {
   let state = initialPortifyState
   const reads = createObservedReads()
@@ -50,8 +47,8 @@ it('shares failed hydration recovery between consumers and stops after success',
 
 it('supersedes hung reads and rejects late results after the last consumer leaves', async () => {
   const { owner, read, state } = harness()
-  const first = deferred()
-  const second = deferred()
+  const first = deferred<PortifyManifest>()
+  const second = deferred<PortifyManifest>()
   read.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
   const leave = owner.watch('wf')
   await vi.advanceTimersByTimeAsync(2500)
@@ -66,7 +63,7 @@ it('supersedes hung reads and rejects late results after the last consumer leave
 
 it.each(['update', 'removed', 'snapshot'] as const)('a stream %s supersedes HTTP and settles recovery', async (type) => {
   const { owner, read, stream, state } = harness()
-  const delayed = deferred(); read.mockReturnValueOnce(delayed.promise)
+  const delayed = deferred<PortifyManifest>(); read.mockReturnValueOnce(delayed.promise)
   owner.watch('wf')
   if (type === 'update') stream({ type, workflowId: 'wf', manifest: manifest() })
   if (type === 'removed') stream({ type, workflowId: 'wf' })
@@ -99,7 +96,7 @@ it('rehydrates terminal details omitted by reconnect and permits 404 reappearanc
 
 it('provider teardown cancels timers and prevents late callbacks', async () => {
   const { owner, read, state } = harness()
-  const delayed = deferred(); read.mockReturnValue(delayed.promise)
+  const delayed = deferred<PortifyManifest>(); read.mockReturnValue(delayed.promise)
   owner.watch('wf'); owner.stop(); delayed.resolve(manifest())
   await vi.advanceTimersByTimeAsync(10000)
   expect(state().details.wf).toBeUndefined()

@@ -1,6 +1,5 @@
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   detectMigrations,
@@ -17,20 +16,15 @@ import {
   loadTemplateHealPrompt,
   removeLegacyCurrentPointer,
 } from './upgrade-migration'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 import { KNOWN_OLD_HEAL_PROMPTS } from './upgrade-known-prompts'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-mig-')
 
 function mkRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mig-'))
-  tmpDirs.push(dir)
-  return fs.realpathSync(dir)
+  return tempDir()
 }
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
 
 const TEMPLATE_BODY = `Playwright failed. Fix service/app code, not tests.
 

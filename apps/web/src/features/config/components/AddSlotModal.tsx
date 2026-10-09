@@ -5,6 +5,8 @@ import { Modal } from '@/shared/ui/Overlays'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
+import { displayError } from '@/shared/api/error-message'
+import { plural } from '@shared/lib/plural'
 
 export const inlineSelectStyle = {
   backgroundColor: 'var(--bg-elevated)',
@@ -63,7 +65,7 @@ function AddSlotSession({
       })
       if (current()) await onAdded(res.slot)
     } catch (e: unknown) {
-      if (current()) setError(e instanceof Error ? e.message : 'Add slot failed')
+      if (current()) setError(displayError(e, 'Add slot failed'))
     } finally {
       submitting.current = false
       if (current()) setBusy(false)
@@ -80,7 +82,7 @@ function AddSlotSession({
         <div className="flex flex-col">
           <div className="px-4 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
             Pick the file you want to track. Any file type works (.env, .properties, .json — anything).
-            Its content will be copied into every existing env ({envCount} env{envCount === 1 ? '' : 's'}); you can edit each env's copy independently afterward.
+            Its content will be copied into every existing env ({plural(envCount, 'env')}); you can edit each env's copy independently afterward.
           </div>
           <div className="flex items-center gap-1.5 px-4 pb-2">
             <TextInput

@@ -1,4 +1,5 @@
-import type { PortifyManifest, PortifyRepoState, PortifyVerification } from './types'
+import type { PortifyManifest, PortifyRepoState, PortifyVerification } from '../../../../../../../shared/portify-index'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 // Sequences the port-ification lifecycle and owns the manifest as the source of
 // truth, persisting on every transition (the poll/WS push point). All I/O is
@@ -174,7 +175,7 @@ export class PortifyOrchestrator {
       if (d.isAborted?.()) {
         m = { ...m, status: 'aborted', endedAt: d.now() }
       } else {
-        m = { ...m, status: 'failed', endedAt: d.now(), error: err instanceof Error ? err.message : String(err) }
+        m = { ...m, status: 'failed', endedAt: d.now(), error: errorMessage(err) }
       }
       d.persist(m)
     }
@@ -246,7 +247,7 @@ export class PortifyOrchestrator {
       // double-boot had approved it. Clearing the field is not enough either —
       // save()'s guard treats an absent verification as no objection — so the
       // unverified state has to be spelled out as a FAILED one.
-      const detail = err instanceof Error ? err.message : String(err)
+      const detail = errorMessage(err)
       m = {
         ...m,
         status: 'ready-to-save',
@@ -303,7 +304,7 @@ export class PortifyOrchestrator {
       return m
     } catch (err) {
       await d.cleanup?.()
-      m = { ...m, status: 'failed', endedAt: d.now(), error: err instanceof Error ? err.message : String(err) }
+      m = { ...m, status: 'failed', endedAt: d.now(), error: errorMessage(err) }
       d.persist(m)
       return m
     }
@@ -366,7 +367,7 @@ export class PortifyOrchestrator {
       return m
     } catch (err) {
       // Re-park at editing so the client can fix + resubmit (or cancel).
-      m = { ...m, status: 'editing', error: err instanceof Error ? err.message : String(err) }
+      m = { ...m, status: 'editing', error: errorMessage(err) }
       d.persist(m)
       return m
     }

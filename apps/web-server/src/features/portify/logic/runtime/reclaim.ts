@@ -1,4 +1,4 @@
-import { isTerminalPortifyStatus } from '../../../../../../../shared/portify-index'
+import { isTerminalPortifyStatus, type PortifyManifest } from '../../../../../../../shared/portify-index'
 import fs from 'fs'
 import path from 'path'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
@@ -6,7 +6,6 @@ import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { removeWorktree } from '../../../runs/logic/runtime/repo-worktree'
 import { buildPortifyPaths, portifyDir } from './paths'
 import type { PortifyRunStore } from './store'
-import type { PortifyManifest } from './types'
 import { INTERRUPTED_BY_RESTART } from '../../../../../../../shared/lib/file-backed-task-store'
 
 // Startup reclaim for port-ification workflows orphaned by a dead process

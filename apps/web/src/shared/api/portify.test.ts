@@ -43,7 +43,7 @@ describe('portify api', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('http://x/api/portify/w1/revise')
     expect(init.method).toBe('POST')
-    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(init.headers).toMatchObject({ 'content-type': 'application/json' })
     expect(JSON.parse(init.body as string)).toEqual({ feedback: 'use PORT' })
   })
 

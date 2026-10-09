@@ -1,3 +1,5 @@
+import { probeCoverageCommandDiscovery } from './mcp-command-probe'
+import { probeCliHealth } from './health-probe'
 import { Readable, Writable } from 'stream'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { runAsScript } from './run-as-script'
@@ -131,9 +133,9 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
   if (!await ensureMcpServerReachable(url, opts)) return false
   try {
     const healthUrl = healthUrlFor(profileUrl)
-    const health = await fetchFn(healthUrl)
+    const health = await probeCliHealth(healthUrl, { fetchImpl: fetchFn, decode: 'required' })
     if (!health.ok) throw new Error(`/mcp/health returned ${health.status}`)
-    const healthBody = await health.json() as { toolCount?: number }
+    const healthBody = health.body as { toolCount?: number }
 
     const client = new Client(
       { name: 'canary-lab-mcp-doctor', version: '0.0.1' },
@@ -155,17 +157,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
         }
       }
       if (profile === 'compact') {
-        const discovery = await client.callTool({
-          name: 'exec',
-          arguments: {
-            command: 'search_tools',
-            arguments: { query: 'get_feature_coverage' },
-          },
-        })
-        const parsed = JSON.parse(toolResultText(discovery)) as {
-          matches?: Array<{ command?: unknown }>
-        }
-        if (!parsed.matches?.some((match) => match.command === 'get_feature_coverage')) {
+        if (!await probeCoverageCommandDiscovery((request) => client.callTool(request), toolResultText)) {
           throw new Error('exec search_tools could not discover get_feature_coverage')
         }
       }

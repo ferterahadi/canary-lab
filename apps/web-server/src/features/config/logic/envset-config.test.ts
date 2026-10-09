@@ -1,17 +1,19 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { readFeatureConfig } from '../../../shared/config-ast'
 import { listEnvFolders, readEnvsetsConfig, syncEnvsInConfig, writeEnvsetsConfig } from './envset-config'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-envset-config-')
 
 let dir: string
 let envsets: string
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-envset-config-'))
+  dir = tempDir()
   envsets = path.join(dir, 'envsets')
 })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(dir, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('treats missing metadata as optional and preserves unknown fields on round trip', () => {
   expect(readEnvsetsConfig(envsets)).toEqual({})
@@ -68,4 +70,17 @@ it('removes stale declarations, preserves comments, and skips unchanged config w
   fs.rmSync(envsets, { recursive: true })
   syncEnvsInConfig(dir)
   expect(readFeatureConfig(fs.readFileSync(file, 'utf8')).value).toMatchObject({ envs: [] })
+})
+
+it('replaces linked metadata without replacing the link or changing its permissions', () => {
+  fs.mkdirSync(envsets)
+  const target = path.join(dir, 'metadata.json')
+  fs.writeFileSync(target, '{}', { mode: 0o600 })
+  const link = path.join(envsets, 'envsets.config.json')
+  fs.symlinkSync('../metadata.json', link)
+  writeEnvsetsConfig(envsets, { appRoots: { app: '/workspace/app' } })
+  expect(fs.readlinkSync(link)).toBe('../metadata.json')
+  expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toEqual({ appRoots: { app: '/workspace/app' } })
+  expect(fs.statSync(target).mode & 0o777).toBe(0o600)
+  expect(fs.readdirSync(envsets)).toEqual(['envsets.config.json'])
 })

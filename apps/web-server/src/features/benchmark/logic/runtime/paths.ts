@@ -14,8 +14,11 @@ export interface BenchmarkPaths {
   reportPath: string
 }
 
+/** The `<logs>/` subdirectory name — shared with the store's record layout. */
+export const BENCHMARKS_DIR_NAME = 'benchmarks'
+
 export function benchmarksRoot(logsDir: string): string {
-  return path.join(logsDir, 'benchmarks')
+  return path.join(logsDir, BENCHMARKS_DIR_NAME)
 }
 
 export function benchmarksIndexPath(logsDir: string): string {

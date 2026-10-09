@@ -1,3 +1,4 @@
+import type { RecordIndexFrame } from '../record-index-frame'
 import { stageHasEvidence, type FlightIndexEntry, type FlightManifest } from './types'
 
 export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
@@ -16,6 +17,7 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     repoPaths: m.repoPaths,
     group: m.opts.group,
     status: m.status,
+    ...(m.attention ? { attention: m.attention } : {}),
     pauseReason: m.pauseReason,
     // Which kind of stop a parked flight is on, so the slim consumers can tell
     // a question for the human from an `external-work` hand-off without
@@ -35,3 +37,6 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     endedAt: m.endedAt,
   }
 }
+
+/** `/ws/flights` frames. */
+export type FlightsStreamFrame = RecordIndexFrame<FlightIndexEntry, FlightManifest, 'flights', 'flightId'>

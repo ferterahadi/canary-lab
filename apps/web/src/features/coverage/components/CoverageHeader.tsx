@@ -3,6 +3,7 @@ import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@share
 import { EmptyGlyph } from '@/shared/ui/EmptyState'
 import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { GAP_META, STRENGTH_META, STRENGTH_ORDER, countFor } from './CoverageCards'
+import { plural } from '@shared/lib/plural'
 
 // Empty main (summary ABSENT). The rail owns the docs and the Generate button, so
 // this pane's job is to say what the exercise IS — a paragraph floating in a
@@ -179,14 +180,7 @@ export function HeadlinePill({ headline }: { headline: string }) {
 
 // Persisted Docs-rail open/closed state (R12/R22) — reopening/refresh keeps it.
 export const RAIL_PREF_KEY = 'cl.coverage.rail'
-
-export function readRailPref(): boolean {
-  try { return localStorage.getItem(RAIL_PREF_KEY) !== 'closed' } catch { return true }
-}
-
-export function writeRailPref(open: boolean): void {
-  try { localStorage.setItem(RAIL_PREF_KEY, open ? 'open' : 'closed') } catch { /* ignore */ }
-}
+export const RAIL_PREF_ENCODING = { on: 'open', off: 'closed' } as const
 
 // Bar/legend order reads good → gap: the sky of `covered` leads, the work sinks
 // right, and the two gap kinds sit hottest-first (path gap, then variant gap). The
@@ -459,7 +453,7 @@ export function StrengthFilter({ tests, orphanTests, value, onToggle }: {
       name="Test depth"
       total={(
         <>
-          {tests.length} test{tests.length === 1 ? '' : 's'}
+          {plural(tests.length, 'test')}
           {orphanTests > 0 && (
             <>
               {' · '}

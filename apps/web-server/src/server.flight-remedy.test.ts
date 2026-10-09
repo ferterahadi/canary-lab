@@ -1,22 +1,23 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
 import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+import { initGitRepo, git } from '../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-remedy-wiring-')
 
 let root: string
 let repo: string
 let service: string
 let app: Awaited<ReturnType<typeof createServer>>['app']
 let client: Client
-const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' })
 
 beforeEach(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-remedy-wiring-'))
+  root = tempDir()
   repo = path.join(root, 'repo')
   service = path.join(repo, 'service')
   const suite = path.join(root, 'features', 'checkout')
@@ -24,8 +25,7 @@ beforeEach(async () => {
   fs.mkdirSync(suite, { recursive: true })
   fs.writeFileSync(path.join(service, 'tracked'), 'original')
   fs.writeFileSync(path.join(repo, 'sibling'), 'original')
-  git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com')
-  git('add', '.'); git('commit', '-m', 'fixture')
+  initGitRepo(repo, { branch: 'main' })
   fs.writeFileSync(path.join(suite, 'feature.config.cjs'), `module.exports={config:{name:'checkout',featureDir:__dirname,envs:[],repos:[{name:'service',localPath:${JSON.stringify(service)}}]}}`)
   new FlightRunStore(path.join(root, 'logs')).save({
     flightId: 'dirty-flight', feature: 'checkout', repoPaths: [service], description: 'fixture',
@@ -45,7 +45,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close()
   await app?.close()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it('reads current directory-scoped remedy counts through REST and a connected MCP client', async () => {
@@ -100,7 +99,7 @@ it('delivers scoped filesystem hints to existing workspace connections and fresh
     expect(JSON.parse(mcp.content[0].text).remedy.repos).toEqual([])
     expect(fs.readFileSync(index)).toEqual(before)
     frames.length = 0
-    git('checkout', '-b', 'external-branch')
+    git(repo, 'checkout', '-b', 'external-branch')
     await expect.poll(() => frames.some((frame) => frame.type === 'repos-changed'), { timeout: 5000 }).toBe(true)
     const agent = await client.callTool({ name: 'get_feature_repo_status', arguments: { feature: 'checkout', repo: 'service', fetch: false } })
     expect(agent.isError).not.toBe(true)

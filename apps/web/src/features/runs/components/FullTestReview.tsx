@@ -10,6 +10,7 @@ import { englishLines, englishSourceRange } from '@shared/readable-tests/source-
 import { sourceRows, rowsForTest, type ContextRow } from '@shared/test-source-diff'
 import { noTestAssessmentCopy, testAssessmentFinding, testAssessmentReason } from '@/shared/lib/test-assessment-copy'
 import type { ReviewFocus } from '@/shared/lib/workspace-view-state'
+import { displayError } from '@/shared/api/error-message'
 interface EnglishReturnPoint {
   selection: ReviewSourceSelection
   top: number
@@ -44,7 +45,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     setLoading(true)
     setError(null)
     featuresApi.getTestFileReview(feature, file, runId).then((result) => { if (!cancelled) { setData(result); setLoading(false) } })
-      .catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : 'Could not load test source'); setLoading(false) } })
+      .catch((err: unknown) => { if (!cancelled) { setError(displayError(err, 'Could not load test source')); setLoading(false) } })
     return () => { cancelled = true }
   }, [feature, file, runId, refresh, revision, retry])
   const rows = useMemo<ContextRow[]>(() => {

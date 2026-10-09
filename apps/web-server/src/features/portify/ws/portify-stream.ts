@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore, PortifyStoreEvent } from '../logic/runtime/store'
-import { type PortifyManifest } from '../logic/runtime/types'
 import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
 import {
   isActionablePortifyStatus as isActivePortifyStatus,
-  type PortifyIndexEntry,
+  type PortifyStreamFrame,
 } from '../../../../../../shared/portify-index'
 
 // `/ws/portify` — push channel for the port-ification wizard + the
@@ -19,15 +18,6 @@ import {
 export interface PortifyStreamDeps {
   store: PortifyStore
 }
-
-export type PortifyStreamFrame =
-  | {
-      type: 'snapshot'
-      workflows: PortifyIndexEntry[]
-      details: Record<string, PortifyManifest>
-    }
-  | { type: 'update'; workflowId: string; manifest: PortifyManifest }
-  | { type: 'removed'; workflowId: string }
 
 export async function portifyStreamRoutes(
   app: FastifyInstance,

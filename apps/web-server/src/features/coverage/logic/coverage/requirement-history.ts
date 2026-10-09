@@ -1,11 +1,11 @@
-import fs from 'fs'
-import path from 'path'
 import type { RequirementTestChange } from '../../../../../../../shared/coverage/types'
 import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
 import type { DirtySpec } from '../../../../../../../shared/run-manifest'
 import { DirtySpecStore } from '../../../runs/logic/dirty-specs/store'
 import { readManifest, readRunsIndex } from '../../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath, runSummaryPath } from '../../../runs/logic/runtime/run-paths'
+import { passedNames } from '../../../runs/logic/runtime/summary-names'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 import { summaryEntryName } from '../../../../../../../shared/test-names'
 import type { RequirementHistory } from './enforcement'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
@@ -76,12 +76,8 @@ function specEvents(spec: DirtySpec, at: string, runId?: string): TestChangeEven
 }
 
 function readPasses(logsDir: string, runId: string): Set<string> | null {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(runDirFor(logsDir, runId), 'e2e-summary.json'), 'utf-8')) as { passedNames?: unknown }
-    return new Set((Array.isArray(parsed.passedNames) ? parsed.passedNames : []).filter((n): n is string => typeof n === 'string'))
-  } catch {
-    return null
-  }
+  const parsed = readJsonOr<{ passedNames?: unknown } | null>(runSummaryPath(runDirFor(logsDir, runId)), null)
+  return parsed === null ? null : new Set(passedNames(parsed))
 }
 
 export function readFeatureRunHistory(logsDir: string, feature: string, opts: ReadFeatureRunHistoryOptions = {}): FeatureRunHistory {
@@ -95,7 +91,7 @@ export function readFeatureRunHistory(logsDir: string, feature: string, opts: Re
   for (const entry of entries) {
     const passed = readPasses(logsDir, entry.runId)
     if (passed) runs.push({ runId: entry.runId, at: entry.endedAt ?? entry.startedAt, passed })
-    const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
+    const manifest = readManifest(runManifestPath(runDirFor(logsDir, entry.runId)))
     const specEdits = manifest?.specEdits
     if (!specEdits) continue
     for (const pending of specEdits.pending) changes.push(...specEvents(pending, specEdits.checkedAt, entry.runId))

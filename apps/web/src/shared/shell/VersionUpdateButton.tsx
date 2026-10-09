@@ -4,6 +4,8 @@ import { useAnchoredPosition } from '../ui/use-anchored-position'
 import { createPortal } from 'react-dom'
 import * as workspaceApi from '../api/workspace'
 import type { VersionStatus } from '@shared/version-status'
+import { displayError } from '@/shared/api/error-message'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 // Footer version indicator. The trigger is a single 28px icon whose colour/glyph
 // reads the version state; ALL copy + actions live in a portaled popover opened
@@ -73,7 +75,7 @@ export function VersionUpdateButton({ status }: { status: VersionStatus | null }
     const r = btnRef.current?.getBoundingClientRect()
     if (!r) return
     const width = 264
-    const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - width - 8))
+    const left = clampToViewport(r, width, 'start', window.innerWidth)
     // Anchor the popover's BOTTOM 8px above the trigger → opens upward,
     // height-independent (the footer hugs the bottom of the viewport).
     setPos({ left, bottom: window.innerHeight - r.top + 8, width })
@@ -95,7 +97,7 @@ export function VersionUpdateButton({ status }: { status: VersionStatus | null }
     try {
       await workspaceApi.startVersionUpdate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'update failed to start')
+      setError(displayError(e, 'update failed to start'))
     } finally {
       setStarting(false)
     }

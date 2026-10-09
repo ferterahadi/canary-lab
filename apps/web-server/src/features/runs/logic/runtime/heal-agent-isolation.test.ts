@@ -1,16 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { HEAL_AGENT_ISOLATION_SETTINGS, writeHealAgentIsolationSettings } from './heal-agent-isolation'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-heal-isolation-')
 let root: string
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-isolation-')))
+  root = tempDir()
 })
-
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('writeHealAgentIsolationSettings', () => {
   it('allows the run worktree while denying the source checkout and authored suite', () => {
@@ -44,6 +43,22 @@ describe('writeHealAgentIsolationSettings', () => {
       `Edit(/${featureDir}/**)`,
       `Edit(/${sourceApp}/**)`,
     ])
+  })
+
+  it('carries the unattended-dialog policy, because this file is the REPL\'s only --settings', () => {
+    // The heal command passes this file in place of the inline policy, and a
+    // second `--settings` would replace it — so without the key here the
+    // "Teach auto mode about your environment?" dialog could strand the REPL.
+    const settingsPath = writeHealAgentIsolationSettings({
+      runDir: path.join(root, 'run'),
+      writableDirs: [path.join(root, 'repo')],
+      featureDir: path.join(root, 'features', 'checkout'),
+      featureDirReadOnly: true,
+      worktrees: [],
+    })
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    expect(settings.skillOverrides).toEqual({ 'auto-mode-setup': 'off' })
+    expect(settings.sandbox.enabled).toBe(true)
   })
 
   it('fails closed when a protected source path contains the requested worktree path', () => {

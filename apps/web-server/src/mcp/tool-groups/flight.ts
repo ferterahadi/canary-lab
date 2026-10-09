@@ -1,3 +1,5 @@
+import { isActiveFlightStatus, type FlightStatus } from '../../../../../shared/flights/types'
+import type { FlightAttention } from '../../../../../shared/flights/attention'
 // MCP tools — the conducted flight pipeline (start / inspect / answer checkpoints).
 import { z } from 'zod'
 import { requestFlightCheckpoint } from '../flight-input'
@@ -17,7 +19,7 @@ import {
 import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse, FlightEntryOptions } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
-import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, errorResult, gettingStartedBusyResult } from '../tool-support'
 
 export function registerFlightTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -27,6 +29,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   const flightView = (raw: unknown): Record<string, unknown> => {
     const m = raw as {
       flightId: string; feature: string; status: string; currentStage: string | null
+      attention?: FlightAttention
       pauseReason?: string
       runVerdict?: string; error?: string; links?: unknown
       stages?: Array<{ key: string; status: string; error?: string; skipReason?: string; checkpoint?: unknown }>
@@ -61,6 +64,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       flightId: m.flightId,
       feature: m.feature,
       status: m.status,
+      ...(m.attention ? { attention: m.attention } : {}),
       currentStage: m.currentStage,
       ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
       ...(m.runVerdict ? { runVerdict: m.runVerdict } : {}),
@@ -180,6 +184,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     if (view.status === 'paused' && view.pauseReason === 'user') {
       return `${reportReady ? `${reportReady} ` : ''}The USER paused this flight — its stage work (spawned agents, run, portify workflow, export) was stopped. Do not resume it unless they ask. If you were doing an external-work step for it, discard that result and do not submit it. When they do want it continued, start_flight on the same repos resumes from the first open stage (repos and intent are frozen — re-call without new repoPaths/description).`
     }
+    const attention = view.attention as FlightAttention | undefined
+    if (attention?.state === 'resolved') return `${attention.title} ${attention.reason} The recorded pause and error are historical. Do not resume automatically; discuss remaining work only if requested.`
+    if (attention?.state === 'unavailable') return `${attention.reason} Retry get_flight to confirm the current evidence before recommending recovery.`
     if (view.status === 'paused') return `${reportReady ? `${reportReady} Independent work did not invalidate it. ` : ''}Flight is paused (a stage failed, or the server restarted). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage — its repos and intent are frozen, so re-call without new repoPaths/description (they are reused).`
     if (view.status === 'aborted') return 'Flight was ABORTED — terminal, and it will not continue. Discard any work in progress for it. Only start_flight with redo:true begins a new attempt, and only if the user asks for one.'
     if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html for per-test reasoning and verdicts. Reviewing the evaluation IS the core loop, not an optional extra.'
@@ -226,7 +233,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to continue a configured suite / locate its existing Flight.')
     }
     const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
-    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: string; repoPaths?: string[] }> }).flights ?? [])
+    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: FlightStatus; repoPaths?: string[] }> }).flights ?? [])
     const targets = new Set((repoPaths ?? []).map((p) => path.resolve(p)))
     const latest = flights.find((f) =>
       targets.size > 0
@@ -270,7 +277,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
           ...(external_session_url ? { sessionUrl: external_session_url } : {}),
         }
       : undefined
-    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval') && !redo && !from_stage) {
+    if (latest && isActiveFlightStatus(latest.status) && !redo && !from_stage) {
       const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
       const view = flightView(current.body)
       return asJsonResult({ ...view, note: 'a flight is already active for these repos — following it', next: flightNext(view) })
@@ -285,12 +292,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // Resuming the Getting Started demo flight re-claims the workspace demo
       // session, so it can collide with another active demo exactly like start.
       if (resumed.statusCode === 409 && resumedBody.type === 'getting_started_busy') {
-        return asJsonResult({
-          type: 'getting_started_busy',
-          active: resumedBody.active,
-          message: resumedBody.error,
-          next: 'Follow the active demo in its current owner; do not start another run or Flight.',
-        })
+        return gettingStartedBusyResult({ active: resumedBody.active, message: resumedBody.error, variant: 'flight' })
       }
       if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String(resumedBody.error ?? '')}`)
       const view = flightView(resumed.body)
@@ -344,12 +346,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     })
     const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string; active?: unknown }
     if (started.statusCode === 409 && startedBody.type === 'getting_started_busy') {
-      return asJsonResult({
-        type: 'getting_started_busy',
-        active: startedBody.active,
-        message: startedBody.error,
-        next: 'Follow the active demo in its current owner; do not start another run or Flight.',
-      })
+      return gettingStartedBusyResult({ active: startedBody.active, message: startedBody.error, variant: 'flight' })
     }
     if (started.statusCode === 409 && startedBody.type === 'flight_exists_requires_choice') {
       return asJsonResult({
@@ -425,7 +422,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   }
 
   registerTool('get_flight', {
-    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight until links.evaluationZip appears; then surface the Report immediately and end the foreground conversation while Parallel setup continues as Canary-owned background work. Before the Report, it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming. A flight parked on an external-work hand-off that no client has checked in on for 45+ minutes also carries `handOffIdle` — the step was handed out and abandoned (usually a client that ended its turn with it open). Nothing resumes a parked hand-off on its own. If checkpoint.data.takeoverRequestedAt is present, the user asked Canary to take this step: stop your work and acknowledge with respond_flight_checkpoint(choice:"run-internally") instead of submitting.',
+    description: 'Fetch one flight (stage rail + open checkpoint + server-owned attention assessment) by id, or list all flights when flightId is omitted. Poll this to follow a running flight until links.evaluationZip appears; then surface the Report immediately and end the foreground conversation while Parallel setup continues as Canary-owned background work. Before the Report, it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming. A flight parked on an external-work hand-off that no client has checked in on for 45+ minutes also carries `handOffIdle` — the step was handed out and abandoned (usually a client that ended its turn with it open). Nothing resumes a parked hand-off on its own. If checkpoint.data.takeoverRequestedAt is present, the user asked Canary to take this step: stop your work and acknowledge with respond_flight_checkpoint(choice:"run-internally") instead of submitting.',
     inputSchema: {
       flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
     },
@@ -437,6 +434,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         flightId: f.flightId, feature: f.feature, status: f.status,
         ...(f.pauseReason ? { pauseReason: f.pauseReason } : {}),
         currentStage: f.currentStage, repoPaths: f.repoPaths,
+        ...(f.attention ? { attention: f.attention } : {}),
       }))
       return asJsonResult({ flights: rows })
     }
@@ -446,7 +444,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     // Read-time remedy for a failed stage (live git re-check, never stored):
     // give the agent the machine-actionable fix, not just the error prose.
     const remedy = await flightStageRemedy(resp.body as FlightManifest, deps.repositoryObserver).catch(() => null)
-    if (remedy) {
+    if (remedy && (view.attention as FlightAttention | undefined)?.state !== 'resolved') {
       const fix = remedy.repos.length === 0
         ? `The failed ${remedy.stage} stage blamed uncommitted changes, but every repo is CLEAN now (fixed outside this conversation) — just start_flight(feature) to resume.`
         : `The failed ${remedy.stage} stage is blocked by uncommitted changes in ${remedy.repos.map((r) => `"${r.name}" (${r.modified} files, ${r.path})`).join(', ')}. Help the user clean each repo — \`git stash push -u\` (undoable) or commit — then start_flight(feature) to resume; the stage retries automatically.`
@@ -465,6 +463,21 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     })
   })
 
+  const stopFlight = async (flightId: string, action: 'pause' | 'abort'): Promise<CallToolResult> => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/${action}`,
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`${action} failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    // Failed stops leave the hand-off active; forget its contact only on success.
+    forgetHandOffContact(handOffContact, flightId)
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  }
+
   // Two tools rather than one with a mode argument: pause is safe and resumable,
   // abort is terminal and by this repo's convention gates on `confirm` (pattern:
   // abort_run). A single mode-arg tool cannot express "confirm required only for
@@ -476,21 +489,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     inputSchema: {
       flightId: z.string(),
     },
-  }, async ({ flightId }) => {
-    if (!deps.flightsRequest) return flightsUnavailable()
-    const resp = await deps.flightsRequest({
-      method: 'POST',
-      url: `/api/flights/${encodeURIComponent(flightId)}/pause`,
-    })
-    if (resp.statusCode !== 200) {
-      return errorResult(`pause failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
-    }
-    // The hand-off is settled or the flight is stopping: drop its contact
-    // record so the ledger cannot grow across a long-lived server.
-    forgetHandOffContact(handOffContact, flightId)
-    const view = flightView(resp.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
-  })
+  }, async ({ flightId }) => stopFlight(flightId, 'pause'))
 
   registerTool('abort_flight', {
     description:
@@ -500,21 +499,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       confirm: z.literal(true).describe('Must be true. Aborting is terminal — pause_flight is the resumable stop.'),
     },
     annotations: { destructiveHint: true, idempotentHint: false },
-  }, async ({ flightId }) => {
-    if (!deps.flightsRequest) return flightsUnavailable()
-    const resp = await deps.flightsRequest({
-      method: 'POST',
-      url: `/api/flights/${encodeURIComponent(flightId)}/abort`,
-    })
-    if (resp.statusCode !== 200) {
-      return errorResult(`abort failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
-    }
-    // The hand-off is settled or the flight is stopping: drop its contact
-    // record so the ledger cannot grow across a long-lived server.
-    forgetHandOffContact(handOffContact, flightId)
-    const view = flightView(resp.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
-  })
+  }, async ({ flightId }) => stopFlight(flightId, 'abort'))
 
   registerTool('stop_flight_agent', {
     description:

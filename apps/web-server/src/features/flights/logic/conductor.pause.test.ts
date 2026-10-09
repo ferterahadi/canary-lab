@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore, type FlightStore } from './store'
 import {
@@ -27,13 +26,13 @@ import {
   FlightFrozenError,
   FlightStageEntryError,
 } from './flight-errors'
-import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
+import type { StageAdapters, StageOutcome } from './flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightOptions,
-  type FlightStageKey,
-} from '../../../../../../shared/flights/types'
+import { type FlightOptions, type FlightStageKey } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from './__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-')
 
 let tmpDir: string
 
@@ -42,30 +41,16 @@ let store: FlightRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 
 const now = () => '2026-01-01T00:00:00Z'
 
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
-
-const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
-  teardown: () => null,
-  run: async (ctx) => {
-    calls?.push(ctx.manifest().currentStage as FlightStageKey)
-    return { kind: 'done' }
-  },
-})
-
-function allDone(calls?: FlightStageKey[]): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((k) => [k, doneAdapter(calls)])) as StageAdapters
-}
 
 function deps(adapters: StageAdapters): FlightConductorDeps {
   return { store, adapters, now, newFlightId: ids }
@@ -79,7 +64,7 @@ describe('pauseFlight', () => {
   it('parks an active flight resumable with pauseReason user; the open stage flips to pending', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((r) => (release = r))
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       teardown: () => null,
@@ -104,7 +89,7 @@ describe('pauseFlight', () => {
 
   it('persists a done outcome that settled during the pause, but never advances', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     const d = deps(adapters)
     adapters.scout = {
       teardown: () => null,
@@ -126,7 +111,7 @@ describe('pauseFlight', () => {
 
   it('persists a skipped outcome that settled during the pause, but never advances', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     const d = deps(adapters)
     adapters.docs = {
       teardown: () => null,
@@ -153,7 +138,7 @@ describe('pauseFlight', () => {
 
   it('the drive loop stops itself if the flight is found paused at the top of a later iteration (defensive re-check)', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     const d = deps(adapters)
     let pausedOnce = false
     // Simulate the flight being paused by another process exactly in the gap
@@ -183,7 +168,7 @@ describe('pauseFlight', () => {
 
   it('the drive loop also stops itself if the flight is found aborted at the top of a later iteration (defensive re-check)', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     const d = deps(adapters)
     let abortedOnce = false
     // Same defensive-recheck scenario as the paused case above, but landing
@@ -213,7 +198,7 @@ describe('pauseFlight', () => {
 
   it('aborts the stage context signal so in-flight agent work stops promptly', async () => {
     let sawAbort = false
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       teardown: () => null,
@@ -232,7 +217,7 @@ describe('pauseFlight', () => {
   })
 
   it('pausing a parked checkpoint clears it back to pending; resume re-issues it', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({
@@ -260,7 +245,7 @@ describe('pauseFlight', () => {
   it('stops the open stage job with "pause" and records it in the stage log', async () => {
     const reasons: string[] = []
     let seenFlightId: string | undefined
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs
@@ -302,7 +287,7 @@ describe('pauseFlight', () => {
     const order: string[] = []
     let releaseStop: () => void = () => {}
     const stopped = new Promise<void>((r) => (releaseStop = r))
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}),
@@ -324,7 +309,7 @@ describe('pauseFlight', () => {
   })
 
   it('swallows a teardown that throws — a broken stop must not fail the pause', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs, interrupted by pause
@@ -344,7 +329,7 @@ describe('pauseFlight', () => {
 
   it('swallows a teardown whose ctx.manifest() read fails (record deleted out-of-band)', async () => {
     let caught: unknown
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs, interrupted by pause
@@ -374,7 +359,7 @@ describe('pauseFlight', () => {
     // such a stage with "no adapter for stage x". The teardown path must not
     // throw on the way past it, or a pause would 500 on a flight that is already
     // broken.
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     startFlight(args(), d)
@@ -387,7 +372,7 @@ describe('pauseFlight', () => {
     // The null case: a stage that never spawned, whose spawn already exited, or
     // that is parked on an external hand-off someone else is executing.
     let asked = 0
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}),
@@ -402,19 +387,19 @@ describe('pauseFlight', () => {
   })
 
   it('refuses to pause a non-active flight', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
-    await expect(pauseFlight(manifest.flightId, deps(allDone()))).rejects.toThrow(/not active/)
+    await expect(pauseFlight(manifest.flightId, deps(allDoneAdapters()))).rejects.toThrow(/not active/)
   })
 
   it('resume clears pauseReason', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), d)
     await new Promise((r) => setTimeout(r, 10))
     pauseFlight(manifest.flightId, d)
-    const resumed = resumeFlight(manifest.flightId, deps(allDone()))
+    const resumed = resumeFlight(manifest.flightId, deps(allDoneAdapters()))
     await resumed.completion
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
@@ -422,7 +407,7 @@ describe('pauseFlight', () => {
   })
 
   it('a stale, superseded drive loop settling late does not corrupt a record a newer drive already finished', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const d = deps(adapters)
     let releaseStale: () => void = () => {}
     const staleGate = new Promise<void>((r) => (releaseStale = r))
@@ -464,28 +449,28 @@ describe('pauseFlight', () => {
 
 describe('frozen repos + intent (R57/R75)', () => {
   it('JUMP with a DIFFERENT repo set is rejected — mid-pipeline re-entry keeps the freeze', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     expect(() =>
-      startFlight({ ...args('/repo/b'), mode: 'jump', fromStage: 'scout' }, deps(allDone())),
+      startFlight({ ...args('/repo/b'), mode: 'jump', fromStage: 'scout' }, deps(allDoneAdapters())),
     ).toThrow(FlightFrozenError)
     expect(store.get(manifest.flightId)!.repoPaths).toEqual(['/repo/a'])
   })
 
   it('JUMP with a DIFFERENT description is rejected — intent stays frozen mid-pipeline', async () => {
-    const { completion } = startFlight(args(), deps(allDone()))
+    const { completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     expect(() =>
-      startFlight({ ...args(), description: 'something else entirely', mode: 'jump', fromStage: 'scout' }, deps(allDone())),
+      startFlight({ ...args(), description: 'something else entirely', mode: 'jump', fromStage: 'scout' }, deps(allDoneAdapters())),
     ).toThrow(FlightFrozenError)
   })
 
   it('REDO with different repos + intent is ACCEPTED — a full restart replaces the stored inputs (R75)', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const redone = startFlight(
       { ...args('/repo/b'), description: 'a new intent', mode: 'redo' },
-      deps(allDone()),
+      deps(allDoneAdapters()),
     )
     expect(redone.manifest.flightId).toBe(manifest.flightId) // same record, replaced inputs
     expect(redone.manifest.repoPaths).toEqual(['/repo/b'])
@@ -494,11 +479,11 @@ describe('frozen repos + intent (R57/R75)', () => {
   })
 
   it('redo with EMPTY repos/description reuses the stored values (the CLI/dialog omission path)', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const redone = startFlight(
       { feature: 'checkout', repoPaths: [], description: '', opts: OPTS, mode: 'redo' },
-      deps(allDone()),
+      deps(allDoneAdapters()),
     )
     expect(redone.manifest.flightId).toBe(manifest.flightId)
     expect(redone.manifest.repoPaths).toEqual(['/repo/a'])
@@ -508,16 +493,16 @@ describe('frozen repos + intent (R57/R75)', () => {
 
   it('a mode-carrying call for a feature with NO record still requires real inputs', async () => {
     expect(() =>
-      startFlight({ feature: 'ghost', repoPaths: [], description: '', opts: OPTS, mode: 'redo' }, deps(allDone())),
+      startFlight({ feature: 'ghost', repoPaths: [], description: '', opts: OPTS, mode: 'redo' }, deps(allDoneAdapters())),
     ).toThrow(FlightStageEntryError)
   })
 })
 
 describe('redoFlight', () => {
   it('restarts the record from stage 1 with its own stored args', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
-    const redone = redoFlight(manifest.flightId, deps(allDone()))
+    const redone = redoFlight(manifest.flightId, deps(allDoneAdapters()))
     await redone.completion
     const final = store.get(manifest.flightId)!
     expect(final.flightId).toBe(manifest.flightId) // same record, never a second manifest
@@ -526,15 +511,15 @@ describe('redoFlight', () => {
   })
 
   it('refuses on an active flight', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
-    expect(() => redoFlight(manifest.flightId, deps(allDone()))).toThrow(/pause or abort/)
+    expect(() => redoFlight(manifest.flightId, deps(allDoneAdapters()))).toThrow(/pause or abort/)
   })
 
   it('refuses to redo an unknown flight id', () => {
-    expect(() => redoFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
+    expect(() => redoFlight('nope', deps(allDoneAdapters()))).toThrow(/flight not found: nope/)
   })
 })
 
@@ -543,9 +528,9 @@ it('accepts a frozen-flight re-entry through an equivalent repository symlink', 
   const alias = path.join(tmpDir, 'alias')
   fs.mkdirSync(repo)
   fs.symlinkSync(repo, alias, 'dir')
-  const first = startFlight(args(repo), deps(allDone()))
+  const first = startFlight(args(repo), deps(allDoneAdapters()))
   await first.completion
-  const resumed = startFlight({ ...args(alias), mode: 'jump', fromStage: 'similarity' }, deps(allDone()))
+  const resumed = startFlight({ ...args(alias), mode: 'jump', fromStage: 'similarity' }, deps(allDoneAdapters()))
   expect(resumed.manifest.flightId).toBe(first.manifest.flightId)
   expect(resumed.manifest.repoPaths).toEqual([repo])
   await resumed.completion

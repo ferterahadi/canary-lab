@@ -4,7 +4,7 @@
 import type { Feature } from './types'
 import type { FeatureTestReview, TestFileReview, TestReviewReceipt, TestSourceComparison } from '@shared/test-review'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getTestSourceComparison(feature: string, runId: string, opts?: ClientOptions): Promise<TestSourceComparison> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -35,10 +35,7 @@ export function getFeatureTestReview(feature: string, opts?: ClientOptions): Pro
 }
 
 function featureReviewDecision(feature: string, action: 'accept' | 'restore', expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/${action}-test-review`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
-  }, fetchImpl)
+  return requestJson(`/api/features/${encodeURIComponent(feature)}/${action}-test-review`, 'POST', { expectedRevision }, opts)
 }
 
 export function acceptFeatureTestReview(feature: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {

@@ -4,13 +4,13 @@
 // control flow: a mocked `runPlaywright` can flip `ctx.stopped` before it
 // returns, so the abort windows between awaits are ordinary assignments here
 // instead of the timing races they are in a full-orchestrator test.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { HealSignal } from '../../../../../../../shared/run-state'
 import type { RunContext } from './run-context'
 import type { VerificationPlan } from './run-verdict'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   runPlaywright: vi.fn(),
@@ -86,6 +86,7 @@ vi.mock('./run-manifest-writer', () => ({
 const { runAutoHealLoop, runManualExternalHealLoop } = await import('./run-heal-loop')
 const { makeHealLoopContext, makeLoopHost } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-heal-loop-')
 let tmpDir: string
 
 const ALL_PASSED: VerificationPlan = { kind: 'all-passed', total: 3 }
@@ -106,7 +107,7 @@ function rerunSignal(body: Record<string, unknown> = {}): HealSignal {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-loop-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   // Defaults: nothing failing, no services missing, no files changed.
   h.readSummary.mockReturnValue({})
@@ -125,10 +126,6 @@ beforeEach(() => {
   h.decideRunStatus.mockReturnValue('failed')
   h.runPlaywright.mockResolvedValue(1)
   h.captureHealAgentCause.mockReturnValue(undefined)
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> = {}) {
@@ -233,7 +230,7 @@ describe('runManualExternalHealLoop', () => {
       ctx,
       'agent-healing',
       'External heal cycle 1 started',
-      expect.objectContaining({ detail: expect.stringContaining('external AI client') }),
+      expect.objectContaining({ detail: expect.stringContaining('external AI client'), repairCycle: 1 }),
     )
     // `.restart` journal shape, distinct from the `.rerun` cases above.
     expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({ signal: '.restart' }))
@@ -380,6 +377,20 @@ describe('runManualExternalHealLoop', () => {
 
 describe('runAutoHealLoop', () => {
   const AUTO = { maxCycles: 3 }
+
+  it('numbers the repair cycle run-wide even when the loop\'s own counter restarts', async () => {
+    // A restart-heal seeds the run's two earlier cycles but builds a fresh
+    // loop, whose narration counts from 1 again.
+    const { ctx } = ctxFor({ healCycles: 2 }, { autoHeal: { maxCycles: 1 } })
+    h.extractFailedSlugs.mockReturnValueOnce(['test-case-a'])
+    h.runHealAgent.mockResolvedValue({ signal: rerunSignal(), reason: 'signal' })
+    h.decideRunStatus.mockReturnValue('passed')
+
+    await runAutoHealLoop(ctx, makeLoopHost())
+
+    expect(h.recordLifecycle).toHaveBeenCalledWith(ctx, 'agent-healing', 'Heal cycle 1 started',
+      expect.objectContaining({ activeCycle: 1, repairCycle: 3 }))
+  })
 
   it('refuses to run at all without an autoHeal config', async () => {
     const { ctx } = ctxFor()

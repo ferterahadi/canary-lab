@@ -9,6 +9,8 @@ import { NewEnvControl } from './NewEnvControl'
 import { SlotEditor } from './SlotEditor'
 import { NEW_ENV_SENTINEL, NEW_SLOT_SENTINEL, stripFeaturePrefix } from './envset-diff'
 import { useCachedDoc } from './config-doc-cache'
+import { displayError } from '@/shared/api/error-message'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 export function EnvsetsTab({ feature }: { feature: string }) {
   // Cached for the dialog's lifetime, so returning to this tab paints the env
@@ -31,7 +33,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   const refresh = (): Promise<void> =>
     configApi.getEnvsetsIndex(feature)
       .then((idx) => { setIndex(idx); setError(null) })
-      .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Failed to load envsets') })
+      .catch((e: unknown) => { setError(displayError(e, 'Failed to load envsets')) })
 
   // Keep valid selections; deleted environments/slots fall back to available
   // rows so an external removal cannot strand the open editor on a missing file.
@@ -59,7 +61,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       const created = fresh.envs.find((e) => e.name === name)
       setSlot(created?.slots[0] ?? null)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Create failed')
+      setError(displayError(e, 'Create failed'))
     } finally {
       setBusy(false)
     }
@@ -74,7 +76,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       setEnv(null)
       setSlot(null)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
+      setError(displayError(e, 'Delete failed'))
     } finally {
       setBusy(false)
       setConfirmDeleteEnv(null)
@@ -91,7 +93,7 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       const currentEnv = fresh.envs.find((e) => e.name === env) ?? fresh.envs[0]
       setSlot(currentEnv?.slots[0] ?? null)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
+      setError(displayError(e, 'Delete failed'))
     } finally {
       setBusy(false)
       setConfirmDeleteSlot(null)
@@ -106,10 +108,10 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   }
 
   if (error && !index) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{error}</div>
+    return <ConfigLoadGuard error={error} />
   }
   if (!index) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <ConfigLoadGuard />
   }
 
   const envObj = index.envs.find((e) => e.name === env) ?? index.envs[0]

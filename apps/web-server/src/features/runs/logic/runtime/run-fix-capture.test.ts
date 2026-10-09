@@ -5,7 +5,6 @@
 // repository.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { RunContext } from './run-context'
@@ -13,6 +12,7 @@ import type { RunnerLog } from './runner-log'
 import { readManifest, writeManifest } from './manifest'
 import { FileRunStateSink } from './run-state-sink'
 import { FIX_CAPTURE_MAX_FILE_NAMES } from '../../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({
   snapshotWorkingTree: vi.fn(),
@@ -42,10 +42,11 @@ vi.mock('../../../portify/logic/runtime/git-ops', async (importOriginal) => ({
 const { captureFixBaseline, captureFixes, reversePortifyOverlay, startLiveFixCapture } = await import('./run-fix-capture')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-fixcap-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fixcap-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
   h.listUntracked.mockResolvedValue(new Set<string>())
   h.runGit.mockResolvedValue({ code: 0, stdout: 'abc123\n', stderr: '' })
@@ -56,7 +57,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function fakeRunnerLog(): RunnerLog & { infos: string[]; warnings: string[] } {
@@ -187,6 +187,30 @@ describe('captureFixes', () => {
     h.diffContentSinceSnapshot.mockResolvedValue('   \n')
 
     expect(await captureFixes(ctx)).toBeNull()
+  })
+
+  it('does not replace an already-captured patch when its bytes are unchanged', async () => {
+    const { ctx } = withBaseline()
+    await captureFixes(ctx)
+    // Occupy the staging name: a redundant replacement would now fail. A
+    // content-equal capture must still retain and report the original patch.
+    const patch = path.join(ctx.paths.fixesDir, 'app.patch')
+    const original = fs.readFileSync(patch, 'utf8')
+    fs.mkdirSync(`${patch}.tmp`)
+    expect((await captureFixes(ctx))?.repos[0].patchPath).toBe(patch)
+    expect(fs.readFileSync(patch, 'utf8')).toBe(original)
+  })
+
+  it('does not publish patch evidence after a staging write fails', async () => {
+    const { ctx } = withBaseline()
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', startedAt: 'now', status: 'healing', healCycles: 1, services: [],
+    })
+    fs.mkdirSync(path.join(ctx.paths.fixesDir, 'app.patch.tmp'), { recursive: true })
+    expect(await captureFixes(ctx)).toBeNull()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture).toBeUndefined()
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'fixes.json'))).toBe(false)
   })
 
   it('publishes an evolving patch and then finalizes it without waiting to discover edits', async () => {

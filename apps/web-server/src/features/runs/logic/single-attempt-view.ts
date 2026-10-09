@@ -4,7 +4,7 @@ import { claimedSingleAttempt, policyForRunManifest } from '../../../shared/sing
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
 import { readManifest } from './runtime/manifest'
 import type { RunDetail } from '../../../../../../shared/run-detail'
-import { runDirFor } from './runtime/run-paths'
+import { runDirFor, runManifestPath } from './runtime/run-paths'
 
 /** Read-side action state for receipts claimed by older runs whose index and
  *  manifest predate the single-attempt policy. REST and the run stream must
@@ -18,7 +18,7 @@ export function withSingleAttemptIndexState(
   return entries.map((entry) => {
     if (entry.newRunRequired || !isRestartableRunStatus(entry.status)) return entry
     const runDir = runDirFor(logsDir, entry.runId)
-    const manifest = readManifest(path.join(runDir, 'manifest.json'))
+    const manifest = readManifest(runManifestPath(runDir))
     let policy = manifest?.singleAttempt
     if (!policy) {
       if (!policies.has(entry.feature)) {

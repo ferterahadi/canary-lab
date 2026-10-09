@@ -1,16 +1,18 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { applyExternalSummary, regeneratePrdSummary } from './feature-docs'
 import { readPrdSummary } from './prd-summary-render'
 import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-accept-')
 
 let tmp: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-accept-')))
+  tmp = tempDir()
   featuresDir = path.join(tmp, 'features')
   const dir = path.join(featuresDir, 'checkout')
   fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
@@ -28,10 +30,6 @@ beforeEach(() => {
     ],
     now: '2026-09-01T00:00:00.000Z',
   })
-})
-
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('legacy requirement confirmation metadata', () => {

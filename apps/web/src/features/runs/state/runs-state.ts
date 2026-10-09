@@ -1,36 +1,39 @@
 import { runIndexEntry, type RunIndexEntry } from '@shared/run-index'
-import { ApiError } from '@/shared/api/internal'
-import type { RunDetail } from '@shared/run-detail'
+import type { RunDetail, RunsStreamFrame } from '@shared/run-detail'
 import { isTerminalRunStatus, type TransientAction } from '@shared/run-state'
 import type { ConnectionState } from '@/shared/state/record-stream'
+import { createRecordIndex, byStartedDesc } from '@/shared/state/record-index-store'
 
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives
 // outside the .tsx file so it can be unit-tested in the existing
 // `node`-environment vitest config (no jsdom required).
 
-// ─── Wire frames mirror apps/web-server/ws/runs-stream.ts ────────────────
-
-export type RunsStreamFrame =
-  | { type: 'snapshot'; runs: RunIndexEntry[]; details: Record<string, RunDetail> }
-  | { type: 'update'; runId: string; detail: RunDetail }
-  | { type: 'removed'; runId: string }
-  | { type: 'list-changed'; runs: RunIndexEntry[] }
-
 // ─── State + actions ─────────────────────────────────────────────────────
 
 export interface RunsState {
   runs: RunIndexEntry[]
+  indexLoaded: boolean
   details: Record<string, RunDetail>
   transients: Record<string, TransientAction>
   connection: ConnectionState
   errors: Record<string, string>
 }
 
+const runsIndex = createRecordIndex<RunIndexEntry, RunDetail, 'runs', 'runId'>({
+  keys: { list: 'runs', id: 'runId' },
+  entryOf: (detail) => {
+    const entry = runIndexEntry(detail.manifest)
+    // The server may enrich historical single-attempt records on read.
+    if (detail.newRunRequired) entry.newRunRequired = true
+    return entry
+  },
+  compareEntries: byStartedDesc,
+})
+
 export const initialRunsState: RunsState = {
-  runs: [],
-  details: {},
+  ...runsIndex.initialState,
+  indexLoaded: false,
   transients: {},
-  connection: 'connecting',
   errors: {},
 }
 
@@ -50,39 +53,30 @@ export type RunsAction =
 export function runsReducer(state: RunsState, action: RunsAction): RunsState {
   switch (action.type) {
     case 'snapshot':
-      return { ...state, runs: action.runs, details: action.details }
+      return { ...state, ...runsIndex.reducer(state, action), indexLoaded: true }
     case 'http-detail':
     case 'update': {
-      const entry = runIndexEntry(action.detail.manifest)
-      // The server may enrich historical single-attempt records on read.
-      if (action.detail.newRunRequired) entry.newRunRequired = true
-      const others = state.runs.filter((r) => r.runId !== action.runId)
-      const transients = isTerminalRunStatus(entry.status)
+      const transients = isTerminalRunStatus(action.detail.manifest.status)
         ? omitRun(state.transients, action.runId)
         : state.transients
       return {
         ...state,
-        runs: [entry, ...others].sort(byStartedDesc),
-        details: { ...state.details, [action.runId]: action.detail },
+        ...runsIndex.reducer(state, { type: 'update', runId: action.runId, manifest: action.detail }),
         transients,
       }
     }
     case 'removed': {
-      const { [action.runId]: _droppedDetail, ...details } = state.details
-      const { [action.runId]: _droppedTransient, ...transients } = state.transients
-      const { [action.runId]: _droppedError, ...errors } = state.errors
       return {
         ...state,
-        runs: state.runs.filter((r) => r.runId !== action.runId),
-        details,
-        transients,
-        errors,
+        ...runsIndex.reducer(state, action),
+        transients: omitRun(state.transients, action.runId),
+        errors: omitRun(state.errors, action.runId),
       }
     }
     case 'list-changed':
-      return { ...state, runs: action.runs, transients: pruneTerminalTransients(state.transients, action.runs) }
+      return { ...state, runs: action.runs, indexLoaded: true, transients: pruneTerminalTransients(state.transients, action.runs) }
     case 'connection':
-      return { ...state, connection: action.status }
+      return { ...state, ...runsIndex.reducer(state, action) }
     case 'transient-set':
       return { ...state, transients: { ...state.transients, [action.runId]: action.action } }
     case 'transient-clear': {
@@ -96,12 +90,8 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       return { ...state, errors: rest }
     }
     case 'http-list':
-      return { ...state, runs: action.runs }
+      return { ...state, runs: action.runs, indexLoaded: true }
   }
-}
-
-function byStartedDesc(a: RunIndexEntry, b: RunIndexEntry): number {
-  return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
 
 function omitRun<T>(values: Record<string, T>, runId: string): Record<string, T> {
@@ -135,30 +125,4 @@ export function frameToAction(frame: RunsStreamFrame): RunsAction | null {
     case 'list-changed':
       return { type: 'list-changed', runs: frame.runs }
   }
-}
-
-/** Produce a user-facing error string from the various shapes our action
- *  layer can throw: ApiError (server returned non-2xx), TypeError (fetch
- *  failure / connection drop), generic Error, anything else. */
-export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const body = err.body
-    if (body && typeof body === 'object' && 'reason' in body) {
-      return String((body as { reason: unknown }).reason)
-    }
-    if (body && typeof body === 'object' && 'error' in body) {
-      return String((body as { error: unknown }).error)
-    }
-    return err.message
-  }
-  if (isNetworkError(err)) {
-    return 'Lost connection to server. Check that the server is running.'
-  }
-  return err instanceof Error ? err.message : String(err)
-}
-
-function isNetworkError(err: unknown): boolean {
-  if (!(err instanceof TypeError)) return false
-  const msg = err.message.toLowerCase()
-  return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
 }

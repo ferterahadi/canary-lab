@@ -1,9 +1,11 @@
 import { act, useState } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as workspaceApi from '@/shared/api/workspace'
 import { BranchControl } from './RepoBranchControl'
 import type { RepoSlice } from './repo-slice'
+import { advanceAct } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: vi.fn(),
@@ -18,14 +20,14 @@ function Editor({ feature = 'checkout', activeRun = false }: { feature?: string;
 }
 const render = (props: Parameters<typeof Editor>[0] = {}) => act(async () => { root.render(<Editor {...props} />) })
 const switchButton = () => [...container.querySelectorAll('button')].find((button) => /Switch/.test(button.textContent ?? ''))!
-const advance = (ms = 30000) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+const advance = (ms = 30000) => advanceAct(ms)
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0)
   vi.mocked(workspaceApi.getRepoGitStatus).mockResolvedValue(status())
   vi.mocked(workspaceApi.checkoutRepoBranch).mockResolvedValue(status('other'))
-  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('shows initial checking, then retains stale evidence and drafts while disabling Switch until recovery', async () => {
   let finish!: (value: workspaceApi.GitRepoStatus) => void

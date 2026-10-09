@@ -1,6 +1,6 @@
 import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { act, useRef } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as featuresApi from '@/shared/api/features'
 import * as configApi from '@/shared/api/config'
@@ -11,6 +11,7 @@ import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidati
 import { useWorkspaceData } from '@/shared/state/use-workspace-data'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { PortsTab } from './PortsTab'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -76,11 +77,9 @@ beforeEach(() => {
   vi.mocked(workspaceApi.getGitRemote).mockResolvedValue({ cloneUrl: null })
   vi.mocked(workspaceApi.getRepoGitStatus).mockResolvedValue({ path: '/workspace/app', expectedBranch: null, isGitRepo: false, currentBranch: null, detached: false, dirty: false, dirtyFiles: [], localBranches: [], remoteBranches: [] })
   vi.mocked(connectWorkspaceEvents).mockReturnValue({ close })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it.each(['features-changed', 'connected'] as const)('updates a mounted Ports tab after external removal via %s', async (type) => {
   await act(async () => { root.render(<InvalidationProvider><Workspace /></InvalidationProvider>) })

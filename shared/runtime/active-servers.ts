@@ -1,3 +1,5 @@
+import { atomicWriteJson } from '../lib/atomic-write'
+import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -46,7 +48,7 @@ export type IsAlive = (pid: number) => boolean
 // `kill(pid, 0)` probes without signalling: ESRCH means gone, EPERM means alive
 // but owned by another user (still a live server). Local-only, which is exactly
 // the scope of these records.
-function defaultIsAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -69,9 +71,8 @@ function readRaw(homeDir?: string): ActiveServerEntry[] {
 
 function writeFile(entries: ActiveServerEntry[], homeDir?: string): void {
   const file = activeServersPath(homeDir)
-  fs.mkdirSync(path.dirname(file), { recursive: true })
   const payload: ActiveServersFile = { version: 1, servers: entries }
-  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
+  atomicWriteJson(file, payload, undefined, { uniqueTemporary: true })
 }
 
 // Live entries only — dead pids are filtered out (and not persisted; the next
@@ -79,7 +80,7 @@ function writeFile(entries: ActiveServerEntry[], homeDir?: string): void {
 export function readActiveServers(
   opts: { homeDir?: string; isAlive?: IsAlive } = {},
 ): ActiveServerEntry[] {
-  const isAlive = opts.isAlive ?? defaultIsAlive
+  const isAlive = opts.isAlive ?? isProcessAlive
   return readRaw(opts.homeDir).filter((entry) => isAlive(entry.pid))
 }
 
@@ -89,11 +90,11 @@ export function registerActiveServer(
 ): void {
   const resolved = path.resolve(entry.projectRoot)
   const now = (opts.now ?? new Date()).toISOString()
-  const isAlive = opts.isAlive ?? defaultIsAlive
+  const isAlive = opts.isAlive ?? isProcessAlive
   const kept = readRaw(opts.homeDir).filter(
     (existing) =>
       existing.pid !== entry.pid &&
-      !samePath(existing.projectRoot, resolved) &&
+      !sameWorkspacePath(existing.projectRoot, resolved) &&
       isAlive(existing.pid),
   )
   writeFile([...kept, { projectRoot: resolved, port: entry.port, pid: entry.pid, updatedAt: now }], opts.homeDir)
@@ -108,7 +109,7 @@ export function unregisterActiveServer(
   const resolvedRoot = match.projectRoot ? path.resolve(match.projectRoot) : undefined
   const kept = readRaw(opts.homeDir).filter((entry) => {
     if (match.pid !== undefined && entry.pid === match.pid) return false
-    if (resolvedRoot !== undefined && samePath(entry.projectRoot, resolvedRoot)) return false
+    if (resolvedRoot !== undefined && sameWorkspacePath(entry.projectRoot, resolvedRoot)) return false
     return true
   })
   writeFile(kept, opts.homeDir)
@@ -135,7 +136,7 @@ export function resolveActiveServer(
   const explicit = env.CANARY_LAB_PROJECT_ROOT?.trim()
   if (explicit) {
     const resolved = path.resolve(explicit)
-    const match = servers.find((server) => samePath(server.projectRoot, resolved))
+    const match = servers.find((server) => sameWorkspacePath(server.projectRoot, resolved))
     if (match) return match
   }
 
@@ -157,17 +158,29 @@ export function resolveActiveServer(
   return byRecency.find((server) => !isUnderTempDir(server.projectRoot)) ?? byRecency[0]
 }
 
+/** Base URL of the UI server for ONE project root — what a thin CLI client
+ *  (`boot`, `flight`) talks to. The live record for this exact root wins, so
+ *  the client follows the port the running UI actually bound; without one, the
+ *  project's configured port (the server a fresh `ui` would bind). Unlike
+ *  `resolveActiveServer` there is no cwd or recency guess: a client acting on a
+ *  named workspace must never reach a different workspace's server. The config
+ *  read is injected so this module stays free of the server's config loader. */
+export function resolveServerBase(
+  projectRoot: string,
+  configPort: () => number,
+  opts: { homeDir?: string; isAlive?: IsAlive } = {},
+): string {
+  const resolved = path.resolve(projectRoot)
+  const live = readActiveServers(opts).find((server) => sameWorkspacePath(server.projectRoot, resolved))
+  return `http://127.0.0.1:${live ? live.port : configPort()}`
+}
+
 function isAtOrUnder(child: string, parent: string): boolean {
   const c = path.normalize(child)
   const p = path.normalize(parent)
   return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep)
 }
 
-function samePath(left: string, right: string): boolean {
-  const a = path.normalize(left)
-  const b = path.normalize(right)
-  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
-}
 
 function isServerEntry(value: unknown): value is ActiveServerEntry {
   if (!value || typeof value !== 'object') return false

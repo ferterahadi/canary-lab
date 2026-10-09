@@ -71,7 +71,7 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
         kind: 'checkpoint',
         checkpoint: {
           kind: 'similarity-choice',
-          message: `A suite called "${match.feature}" already tests ${match.repo} ("${match.description}"). Re-run it, update it with this flight's new docs and tests, or start a fresh suite?`,
+          message: `"${match.feature}" already tests ${match.repo}. Run it again, add this flight's requirements and tests, or create a new suite?`,
           options: [...CHECKPOINT_OPTIONS['similarity-choice']],
           data: { match },
         },

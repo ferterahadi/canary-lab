@@ -1,7 +1,9 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-partial-')
 
 // Setup creates one worktree per git root, in order, assigning `group.handle`
 // as it goes. If a later root fails, the earlier groups already own a worktree
@@ -32,19 +34,15 @@ vi.mock('./git-ops', async (importOriginal) => {
 const { gitInit, makeRunner, waitForStatus, writeConfig, TERMINAL } =
   await import('./__fixtures__/runner.part4-fixtures')
 
-const roots: string[] = []
-
 afterEach(() => {
   created.length = 0
   discarded.length = 0
-  while (roots.length) fs.rmSync(roots.pop()!, { recursive: true, force: true })
   vi.clearAllMocks()
 })
 
 /** One feature spanning TWO separate git roots, so setup builds two groups. */
 async function twoRootFixture(): Promise<{ featuresDir: string; logsDir: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-partial-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'myfeat')
   const logsDir = path.join(root, 'logs')

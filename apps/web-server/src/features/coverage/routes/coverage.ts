@@ -1,3 +1,6 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
+import type { FlightAttentionReader } from '../../flights/logic/attention'
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from '../logic/coverage/freshness-monitor'
@@ -5,7 +8,8 @@ import { FeatureNotFoundError, computeFeatureCoverage, featureExists } from '../
 import { clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from '../logic/coverage/feature-docs'
 import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
 import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
-import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
+import { CoverageJobConflictError } from '../logic/coverage/jobs/creation'
+import { startCoverageJob } from '../logic/coverage/jobs/runner'
 import type { CoverageJobKind, CoverageJobModels } from '../../../../../../shared/coverage/types'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { pickAvailableHealAgent } from '../../runs/logic/runtime/heal-agent-spawn'
@@ -33,8 +37,10 @@ import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-sess
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface CoverageRouteDeps {
+  flightAttention?: FlightAttentionReader
   coverageMonitor?: CoverageFreshnessMonitor
   featuresDir: string
   logsDir: string
@@ -93,15 +99,19 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     const timeout = Number(req.query.timeoutMs ?? 0)
     if (!Number.isFinite(timeout) || timeout < 0 || timeout > 30_000) throw Object.assign(new Error('timeoutMs must be between 0 and 30000'), { statusCode: 400 })
     const result = deps.coverageMonitor
-      ? await deps.coverageMonitor.wait(req.params.name, req.query.afterRevision, timeout)
+      ? await deps.coverageMonitor.wait(req.params.name, req.query.afterRevision, deps.flightAttention ? Math.min(timeout, 10_000) : timeout)
       : (() => {
           const ledger = computeFeatureCoverage({ ...deps, feature: req.params.name })
           return { changed: ledger.freshness!.revision !== req.query.afterRevision, change: { feature: req.params.name, freshness: ledger.freshness!, delivery: 'tool-response-and-wait' as const } }
         })()
     const flight = deps.flightStore?.latestForFeature(req.params.name)
+    const attention = flight ? deps.flightAttention?.get(flight.flightId)?.attention : undefined
+    const flightChange = flight
+      ? { flightId: flight.flightId, flightStatus: flight.status, ...(attention ? { flightAttention: attention } : {}) }
+      : {}
     const job = jobStore.activeFor(req.params.name, 'summary') ?? jobStore.activeFor(req.params.name, 'coverage')
     const owner = job ? jobStore.get(job.jobId)?.externalSessionId ?? job.producer ?? 'internal' : undefined
-    return { ...result, change: { ...result.change, ...(flight ? { flightId: flight.flightId, flightStatus: flight.status } : {}), ...(job ? { activeJobId: job.jobId, activeJobOwner: owner } : {}) } }
+    return { ...result, change: { ...result.change, ...flightChange, ...(job ? { activeJobId: job.jobId, activeJobOwner: owner } : {}) } }
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/docs', async (req, reply) => {
@@ -157,7 +167,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         text = extracted.text
       } catch (err) {
         reply.code(400)
-        return { error: err instanceof Error ? err.message : String(err) }
+        return { error: errorMessage(err) }
       }
       // Store under a sanitized .md slug (the pipeline is markdown-only).
       const base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'doc'
@@ -397,32 +407,30 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           gettingStartedSession = deps.gettingStarted.claim('coverage', req.body.gettingStartedSource).sessionId
         } catch (err) {
           if (!(err instanceof GettingStartedBusyError)) throw err
-          reply.code(409)
-          return { type: err.type, error: err.message, active: err.active }
+          return gettingStartedBusyReply(reply, err)
         }
       }
       try {
-        const { manifest } = startCoverageJob(
-          {
-            featuresDir: deps.featuresDir,
-            logsDir: deps.logsDir,
-            feature: req.params.name,
-            kind,
-            adapter: req.body?.adapter as never,
-            // Run the agent in the project root so its session log + cwd-based
-            // codex session location resolve (R17).
-            cwd: deps.projectRoot,
-            models: resolveCoverageJobModels(deps.projectRoot, req.body?.adapter, req.body?.models),
-          },
-          { store: jobStore, workspaceEvents: deps.workspaceEvents },
-        )
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
-        }
-        reply.code(202)
-        return manifest
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), (attach) => {
+          const { manifest } = startCoverageJob(
+            {
+              featuresDir: deps.featuresDir,
+              logsDir: deps.logsDir,
+              feature: req.params.name,
+              kind,
+              adapter: req.body?.adapter as never,
+              // Run the agent in the project root so its session log + cwd-based
+              // codex session location resolve (R17).
+              cwd: deps.projectRoot,
+              models: resolveCoverageJobModels(deps.projectRoot, req.body?.adapter, req.body?.models),
+            },
+            { store: jobStore, workspaceEvents: deps.workspaceEvents },
+          )
+          attach({ kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
+          reply.code(202)
+          return manifest
+        })
       } catch (err) {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         if (err instanceof CoverageJobConflictError) {
           reply.code(409)
           return { error: err.message, existingJobId: err.existingJobId }

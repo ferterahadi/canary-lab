@@ -1,67 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import net from 'net'
 import { findFreePort } from './port-allocator'
 import { RunOrchestrator } from './orchestrator'
 import type { ServiceSpec } from './run-orchestrator-types'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest, readRunsIndex } from './manifest'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -69,7 +19,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -78,31 +28,14 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.start', () => {
   it('refuses to start after a suite claimed its one external-effect receipt', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const receipt = path.join(runDir, 'runtime', 'attempt.json')
     fs.mkdirSync(path.dirname(receipt), { recursive: true })
     fs.writeFileSync(receipt, '{}')
     const orch = new RunOrchestrator({
-      feature: makeFeature({ repos: [], singleAttempt: { receipt: 'runtime/attempt.json' } }),
+      feature: demoFeature(tmpDir, { repos: [], singleAttempt: { receipt: 'runtime/attempt.json' } }),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -114,9 +47,9 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('starts cleanly when a feature has no services', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ repos: [] }),
+      feature: demoFeature(tmpDir, { repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -129,9 +62,9 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('spawns each service and writes manifest + index', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -185,9 +118,9 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('tees pty output to disk and emits service-output', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -210,9 +143,9 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('emits service-exit on pty exit', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -230,9 +163,9 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('records a boot failure (does NOT throw or abort) on health-check timeout for a normal run', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -263,10 +196,10 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('fast-fails the health wait when a service process exits before becoming healthy', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     let calls = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -290,8 +223,8 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('skips health checks when no service exposes a healthUrl', async () => {
-    const { factory } = makeFakeFactory()
-    const f = makeFeature({
+    const { factory } = makeFakePtyFactory()
+    const f = demoFeature(tmpDir, {
       repos: [{ name: 'r', localPath: tmpDir, startCommands: [{ command: 'x', name: 'x' }] }],
     })
     const orch = new RunOrchestrator({
@@ -309,8 +242,8 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('includes the selected env in missing-probe warnings', async () => {
-    const { factory } = makeFakeFactory()
-    const f = makeFeature({
+    const { factory } = makeFakePtyFactory()
+    const f = demoFeature(tmpDir, {
       envs: ['beta'],
       repos: [{ name: 'r', localPath: tmpDir, startCommands: [{ command: 'x', name: 'x' }] }],
     })
@@ -335,8 +268,8 @@ describe('RunOrchestrator.start', () => {
     await new Promise<void>((r) => server.once('listening', () => r()))
     const port = (server.address() as { port: number }).port
     try {
-      const { factory } = makeFakeFactory()
-      const f = makeFeature({
+      const { factory } = makeFakePtyFactory()
+      const f = demoFeature(tmpDir, {
         repos: [{
           name: 'r',
           localPath: tmpDir,
@@ -367,8 +300,8 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('picks the per-env probe from a HealthCheck env-map (tagged shape)', async () => {
-    const { factory } = makeFakeFactory()
-    const f = makeFeature({
+    const { factory } = makeFakePtyFactory()
+    const f = demoFeature(tmpDir, {
       envs: ['local', 'beta'],
       repos: [{
         name: 'r',
@@ -401,8 +334,8 @@ describe('RunOrchestrator.start', () => {
   })
 
   it('back-compat: accepts the legacy `{ url }` shape and dispatches an http probe', async () => {
-    const { factory } = makeFakeFactory()
-    const f = makeFeature({
+    const { factory } = makeFakePtyFactory()
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -437,9 +370,9 @@ describe('RunOrchestrator.start', () => {
 describe('RunOrchestrator signal watcher', () => {
   it('consumes and records signals as ignored when not waiting for heal input', async () => {
     vi.useFakeTimers()
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,

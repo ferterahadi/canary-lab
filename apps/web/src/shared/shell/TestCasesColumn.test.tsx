@@ -25,15 +25,7 @@ vi.mock('../api/features', async (importOriginal) => ({
   getTestSourceComparison: vi.fn(),
 }))
 
-vi.mock('shiki/core', () => ({
-  createHighlighterCore: async () => ({
-    codeToHtml: (code: string) => (
-      `<pre class="shiki one-dark-pro"><code>${
-        code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
-      }</code></pre>`
-    ),
-  }),
-}))
+vi.mock('shiki/core', async () => (await import('@/test-helpers/shiki-mock')).shikiCoreMock())
 
 vi.mock('shiki/engine/oniguruma', () => ({ createOnigurumaEngine: () => ({}) }))
 
@@ -1065,6 +1057,61 @@ describe('TestCasesColumn', () => {
 
     await waitFor(() => statusBadges().length === 2)
     expect(statusBadges()).toEqual(['passed', 'failed'])
+  })
+
+  it('opens a recorded result from a sibling badge, keeping the caret for source and same-title tests apart', async () => {
+    const file = '/tmp/features/alpha/e2e/current.spec.ts'
+    vi.mocked(getFeatureTests).mockResolvedValue([{
+      file,
+      tests: [
+        { name: 'renders', line: 14, bodySource: '{}', steps: [], readable: readableTest('renders') },
+        { name: 'renders', line: 30, bodySource: '{}', steps: [], readable: readableTest('renders') },
+        { name: 'never ran', line: 50, bodySource: '{}', steps: [], readable: readableTest('never ran') },
+      ],
+    }])
+    const onOpenResult = vi.fn()
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          onOpenResult={onOpenResult}
+          runEvidence={{ manifest: { runId: 'run-1' }, status: 'failed', summary: {
+            complete: true, total: 3, passed: 1,
+            passedIds: ['id-guest'],
+            knownTests: [
+              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `${file}:14` },
+              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `${file}:30` },
+              { id: 'id-never', name: 'test-case-never-ran', title: 'never ran', location: `${file}:50` },
+            ],
+            failed: [{ id: 'id-host', name: 'test-case-renders' }],
+          } }}
+        />,
+      )
+    })
+    await waitFor(() => container.querySelectorAll('[data-testid="test-open-result"]').length === 2)
+    const results = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="test-open-result"]')]
+    // Never a button inside a button: the badge is the toggle's sibling.
+    for (const result of results) expect(result.parentElement?.closest('button')).toBeNull()
+    expect(results.map((b) => b.getAttribute('aria-label'))).toEqual(['Open renders in Results & Fixes', 'Open renders in Results & Fixes'])
+
+    const toggle = results[1].closest('.cl-card')!.querySelector<HTMLButtonElement>(':scope > button')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => { results[1].click() })
+    expect(onOpenResult).toHaveBeenLastCalledWith('run-1', { test: 'test-case-renders', testId: 'id-host', testLocation: `${file}:30` })
+    // Opening the result leaves the card's source as it was.
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => { results[0].click() })
+    expect(onOpenResult).toHaveBeenLastCalledWith('run-1', { test: 'test-case-renders', testId: 'id-guest', testLocation: `${file}:14` })
+
+    // The caret still expands source and never navigates.
+    await act(async () => { toggle.click() })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(onOpenResult).toHaveBeenCalledTimes(2)
+
+    // A test the run never reached has nothing to open.
+    const neverRan = [...container.querySelectorAll('.cl-card')].find((card) => card.textContent?.includes('never ran'))
+    expect(neverRan?.querySelector('[data-testid="test-open-result"]')).toBeNull()
+    expect(neverRan?.textContent).toContain('not run')
   })
 
   it('updates a column-qualified recorded verdict while the Tests column stays mounted', async () => {

@@ -1,10 +1,11 @@
+import { initGitRepo } from '../../../../../../../../tools/test-helpers/git-repo'
+import { waitForStatus as waitForRecordStatus } from '../../../../../../../../tools/test-helpers/wait-for-status'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../../runs/logic/runtime/pty-spawner'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../../shared/launcher/types'
-import { runGit } from '../../../../../shared/git-repo'
 import { createBenchmarkRunner, type BenchmarkRunnerDeps } from '../runner'
 import { BenchmarkRunStore } from '../store'
 import type { StartBenchmarkInput } from '../types'
@@ -21,11 +22,7 @@ export const fakePtyFactory: PtyFactory = (): PtyHandle => ({
 export const roots: string[] = []
 
 export async function gitInit(dir: string): Promise<void> {
-  await runGit(dir, ['init', '-q'])
-  await runGit(dir, ['config', 'user.email', 't@t'])
-  await runGit(dir, ['config', 'user.name', 'test'])
-  await runGit(dir, ['add', '-A'])
-  await runGit(dir, ['commit', '-q', '-m', 'init', '--no-verify'])
+  initGitRepo(dir)
 }
 
 export async function pollUntil(check: () => boolean, timeoutMs = 8000): Promise<boolean> {
@@ -38,13 +35,7 @@ export async function pollUntil(check: () => boolean, timeoutMs = 8000): Promise
 }
 
 export async function waitForStatus(store: BenchmarkRunStore, id: string, until: string[], timeoutMs = 8000): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const m = store.get(id)
-    if (m && until.includes(m.status)) return m.status
-    await new Promise((r) => setTimeout(r, 20))
-  }
-  return store.get(id)?.status ?? 'missing'
+  return waitForRecordStatus(store, id, until, timeoutMs, 20)
 }
 
 // Self-contained layout: repo.localPath IS the git root (featureSub === '' in

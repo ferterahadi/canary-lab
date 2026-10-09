@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { journalRoutes } from './journal'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-jroutes-')
 
 let tmpDir: string
 let logsDir: string
@@ -31,7 +33,7 @@ const SAMPLE = `# Diagnosis Journal
 `
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-jroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   journalPath = path.join(tmpDir, 'diagnosis-journal.md')
   fs.writeFileSync(journalPath, SAMPLE)

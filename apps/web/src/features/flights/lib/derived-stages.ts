@@ -8,14 +8,13 @@ import {
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { Feature } from '@/shared/api/types'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
-import type { RunIndexEntry } from '@shared/run-index'
+import { isSuiteVerdictRun, type RunIndexEntry } from '@shared/run-index'
 import type { RunStatus } from '@shared/run-state'
 import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 import { useRuns } from '@/features/runs/state/RunsContext'
 import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 import { usePortify } from '@/features/portify/state/PortifyContext'
 import type { FeatureExternalHistory, StageExternalHistory } from '../state/feature-activity'
-import { isAuxiliaryExecution } from '@shared/verification'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
 // actually been done to this suite, regardless of who did it (flight, standalone UI,
@@ -221,8 +220,7 @@ export function latestTerminalRunByFeature(
 ): Map<string, RunIndexEntry> {
   const map = new Map<string, RunIndexEntry>()
   for (const r of runs) {
-    if (isAuxiliaryExecution(r.executionType) || r.executionType === 'verify') continue
-    if (!statuses.includes(r.status)) continue
+    if (!isSuiteVerdictRun(r, statuses)) continue
     const prev = map.get(r.feature)
     if (!prev || r.startedAt.localeCompare(prev.startedAt) > 0) map.set(r.feature, r)
   }

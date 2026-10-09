@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
 import { Section } from '@/shared/ui/atoms'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { TrashIcon } from '@/shared/ui/Icons'
@@ -15,6 +15,8 @@ import { patchFileName } from '@shared/portify-overlay'
 import { portInjectability, startCommandPortSlotCounts, type PortInjectability } from '@shared/launcher/port-injectability'
 import { PortSlotTable } from './ReposTab'
 import { deriveRepoName, parseRepo, type RepoSlice } from './repo-slice'
+import { displayError } from '@/shared/api/error-message'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 /**
  * The frame every state of this tab shares: the inset scroller plus the footer
@@ -108,10 +110,10 @@ export function PortsTab({
   const blockedBy = activeEntry && activeEntry.feature !== feature ? activeEntry : undefined
 
   if (loadError) {
-    return <PortsFrame><div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div></PortsFrame>
+    return <PortsFrame><ConfigLoadGuard error={loadError} /></PortsFrame>
   }
   if (repos === null) {
-    return <PortsFrame><div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div></PortsFrame>
+    return <PortsFrame><ConfigLoadGuard /></PortsFrame>
   }
 
   // The band reports INJECTABILITY with its evidence level, not portify status:
@@ -140,7 +142,7 @@ export function PortsTab({
       cached.refresh()
       setConfirmRemove(false)
     } catch (err) {
-      setRemoveError(err instanceof Error ? err.message : 'Remove failed')
+      setRemoveError(displayError(err, 'Remove failed'))
     } finally {
       setRemoving(false)
     }

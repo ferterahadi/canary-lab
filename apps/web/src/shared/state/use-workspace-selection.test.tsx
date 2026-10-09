@@ -1,18 +1,18 @@
 import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Feature } from '../api/types'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { DurableView, PersistedView } from '../lib/workspace-view-state'
 import type { ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
-import type { RunsStreamFrame } from '@/features/runs/state/runs-state'
+import type { RunsStreamFrame } from '@shared/run-detail'
 import type { WorkspaceNavigation } from './use-workspace-navigation'
 import type { WorkspaceData } from './use-workspace-data'
 import type { useWorkspaceSelection } from './use-workspace-selection'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const api = vi.hoisted(() => ({ listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(),
   getVersionStatus: vi.fn(), listRuns: vi.fn(), getRunDetail: vi.fn() }))
 vi.mock('../api/features', async (importOriginal) => ({
@@ -112,11 +112,9 @@ beforeEach(() => {
   api.getVersionStatus.mockResolvedValue({ current: '1.0.0' })
   api.listRuns.mockResolvedValue([])
   api.getRunDetail.mockRejectedValue(new Error('Detail not loaded yet'))
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe('workspace selection through navigation, data, and run streams', () => {
   it('keeps a pending run selected while evidence falls back, then follows its arrival', async () => {
@@ -218,7 +216,7 @@ describe('workspace selection through navigation, data, and run streams', () => 
       nav.navigateToRun('suite', 'first', { test: 'failure' }, 'flight-1')
       nav.setCurrentTests(false)
     })
-    expect(nav.focusTest).toEqual({ runId: 'first', test: 'failure' })
+    expect(nav.focusTest).toEqual({ runId: 'first', test: 'failure', request: 1 })
     expect(nav.returnFlight).toBe('flight-1')
     await act(async () => crossTab({ view: 'workspace', feature: 'other' }))
     expect(nav.selectedRunId).toBe('other-run')
@@ -243,12 +241,15 @@ describe('workspace selection through navigation, data, and run streams', () => 
     const callbacks = [selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]
     const entry = run('first')
     await index([entry], { first: detail(entry) })
+    // Opening a run takes the observer's one recovery read; the pushed update
+    // and the following five seconds must add none.
+    expect(api.getRunDetail.mock.calls).toEqual([['first']])
     await frame({ type: 'update', runId: entry.runId, detail: detail({ ...entry, status: 'failed' }) })
     await act(async () => vi.advanceTimersByTimeAsync(5000))
     expect([selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]).toEqual(callbacks)
     expect(workspace.connect).toHaveBeenCalledTimes(1)
     expect(workspace.close).not.toHaveBeenCalled()
-    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(api.getRunDetail.mock.calls).toEqual([['first']])
     expect(api.listFeatures).toHaveBeenCalledTimes(1)
     expect(selection.selectedRunEvidence.status).toBe('failed')
     expect(JSON.parse(container.textContent!)).toMatchObject({ run: 'first', evidence: 'first', status: 'failed' })

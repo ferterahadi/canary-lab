@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -17,18 +16,21 @@ import * as compatibility from '../../runs/logic/runtime/env-switcher/switch'
 import { applyFeatureEnvset } from '../../runs/logic/runtime/run-primitives'
 import { hydrateEnvsetIntoWorktrees } from '../../runs/logic/runtime/env-switcher/worktree-hydrate'
 import { envsetProcessEnv } from './envset-process-env'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-envset-runtime-')
 
 let root: string
 let featureDir: string
 let envsetsDir: string
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-envset-runtime-')))
+  root = tempDir()
   featureDir = path.join(root, 'features', 'example')
   envsetsDir = path.join(featureDir, 'envsets')
   fs.mkdirSync(path.join(envsetsDir, 'local'), { recursive: true })
   vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
 })
-afterEach(() => { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.unstubAllEnvs() })
 
 function seed(target = '$CANARY_LAB/features/example/.env'): EnvSetsConfig {
   const config = { appRoots: {}, slots: { 'app.env': { description: 'fixture', target } }, feature: { slots: ['app.env'], testCommand: 'true', testCwd: '$CANARY_LAB/features/example' } }

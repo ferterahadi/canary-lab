@@ -5,10 +5,10 @@ import type { DraftRecord } from '@shared/draft-types'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightStageKey } from '@shared/flights/types'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry, PortifyManifest } from '@shared/portify-index'
 import * as coverageApi from '@/shared/api/coverage'
 import { useLiveResource } from '@/shared/state/use-live-resource'
+import { backgroundTraceStatus, draftTraceStatus, portifyTraceStatus, type AgentJobStatus } from '@/shared/lib/agent-job-status'
 import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 import { isActionablePortifyStatus as isActivePortify } from '@shared/portify-index'
 import { usePortify } from '@/features/portify/state/PortifyContext'
@@ -68,7 +68,7 @@ export interface ExternalWorkTrace {
   stage: FlightStageKey
   /** Stable handle into the task's own live/detail store. */
   resourceId?: string
-  status: 'running' | 'ready' | 'done' | 'failed' | 'aborted'
+  status: AgentJobStatus
   startedAt: string
   updatedAt: string
   clientKind?: string
@@ -378,29 +378,6 @@ function toExternalWorkTrace(candidate: ExternalWorkTrace & { external: boolean;
   return trace
 }
 
-function draftTraceStatus(status: DraftRecord['status']): ExternalWorkTrace['status'] {
-  if (status === 'planning' || status === 'generating') return 'running'
-  if (status === 'accepted') return 'done'
-  if (status === 'error') return 'failed'
-  if (status === 'cancelled' || status === 'rejected') return 'aborted'
-  return 'ready'
-}
-
-function backgroundTraceStatus(status: CoverageJobIndexEntry['status']): ExternalWorkTrace['status'] {
-  if (status === 'running') return 'running'
-  if (status === 'done') return 'done'
-  if (status === 'failed') return 'failed'
-  return 'aborted'
-}
-
-function portifyTraceStatus(status: PortifyIndexEntry['status']): ExternalWorkTrace['status'] {
-  if (status === 'saved') return 'done'
-  if (status === 'failed') return 'failed'
-  if (status === 'aborted') return 'aborted'
-  if (status === 'ready-to-save') return 'ready'
-  return 'running'
-}
-
 function runTraceStatus(status: RunIndexEntry['status']): ExternalWorkTrace['status'] {
   if (status === 'passed') return 'done'
   if (status === 'failed') return 'failed'
@@ -449,11 +426,4 @@ export function useFeatureWorkState(): FeatureWorkState {
       portifyDetails,
     }),
   }), [allRuns, runs, workflows, portifyDetails, drafts, records, tasks, coverageJobs, runDetails])
-}
-
-/** Compatibility hook for consumers that only need the live verb map. New
- *  Flight surfaces should use `useFeatureWorkState` so activity and provenance
- *  come from one snapshot of the shared stores. */
-export function useFeatureActivity(): Map<string, FeatureActivity> {
-  return useFeatureWorkState().activity
 }

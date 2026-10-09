@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RunStatus } from '@shared/run-state'
-import type { RunArrivalTab } from '@/shared/lib/workspace-view-state'
+import type { RunArrivalTab, RunLocation } from '@/shared/lib/workspace-view-state'
 import { branchForService } from '../utils/run-detail-playback'
 import { useRun } from '../state/RunsContext'
 import { deriveRunViewModel } from '../utils/run-view-model'
@@ -10,21 +10,22 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY, healNoTranscriptCopy, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
-import { ChangesTab } from './ChangesTab'
-import { JournalTab } from './JournalTab'
 import { RunQueueBanner } from './RunQueueBanner'
 import { TestReviewBanner } from './TestReviewBanner'
 import { ManualHealBanner } from './ManualHealBanner'
-import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
 import { RunPane } from './RunPane'
-import type { PlaywrightView } from './RunPlaybackPanels'
-import { ServiceTabButton, TabButton } from './RunServicePanels'
+import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
+import type { ResultsSelection, ServiceLogAnchor } from '../utils/results-fixes'
+import { ServiceLogInspector } from './ServiceLogInspector'
+import { useResultsFocus } from '../state/use-results-focus'
+import { ServiceTabButton } from './RunServicePanels'
+import { Tab } from '@/shared/ui/Tab'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
 
-type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'changes' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'agent' | 'results'
 
 /** Why this run has no repair transcript. A run that passed never spawned an
  *  agent at all — saying so is the whole answer, where "no structured session
@@ -38,40 +39,68 @@ export function healEmptyCopy(status: RunStatus, healCycles: number): EmptyCopy 
 export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
-  totalTests,
   focusTest,
+  focusTestId,
+  focusTestLocation,
+  focusRequest,
   arriveTab,
   onOpenEvaluationReport,
   onOpenSpecReview,
   bootFailureOpen,
   onBootFailureOpenChange,
+  location,
+  onLocationChange,
 }: {
   runId: string | null
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
-  totalTests?: number
-  /** R82: a failing test to land on — the run-summary failed-entry `name` a
-   *  flight's Test Run stage was clicked on. Opens the Playwright tab and scrolls
-   *  that test's card into view. Routed as `?run=…&test=…`, so a refresh or a
-   *  pasted link lands in the same place. */
+  /** R82: a test to land on — the run-summary `name` of a failure clicked in a
+   *  flight's Test Run stage, or of a result badge clicked in the Tests column.
+   *  Opens Results & Fixes with that test's row expanded and scrolled into
+   *  view. Routed as `?run=…&test=…`, so a refresh or a pasted link lands in
+   *  the same place. */
   focusTest?: string
+  focusTestId?: string
+  focusTestLocation?: string
+  /** Bumped by each click on a test, so the same test clicked again re-opens. */
+  focusRequest?: number
   /** Which tab to open on, when the view that linked here named one instead of a
    *  failing test — the flight's Test Run stage sends its captured fixes to
-   *  `changes`. Routed as `?run=…&runtab=…`, so a refresh lands the same way. */
+   *  `changes`, which is Results & Fixes' run-wide view. Routed as
+   *  `?run=…&runtab=…`, so a refresh lands the same way. */
   arriveTab?: RunArrivalTab
   /** The boot-failure detail dialog, routed as `?run=…&dialog=boot-failure`.
    *  Absent = the service card keeps the open state itself. */
   bootFailureOpen?: boolean
   onBootFailureOpenChange?: (open: boolean) => void
+  /** A restored place inside this run (a cold load of `?run=…&runtab=…`). Read
+   *  when the run opens; afterwards the reader's own state is the owner. */
+  location?: RunLocation
+  /** Reports where the reader is, so the route can restore it. Absent for
+   *  embedded details (services dialog, benchmark), which stay unrouted. */
+  onLocationChange?: (location: RunLocation) => void
 }) {
-  // Arriving with a focused failure means the Playwright tab IS the destination —
+  // Arriving with a focused failure means Results & Fixes IS the destination —
   // opening on Overview would hide the thing that was clicked. A named arrival
   // tab is the same contract for a link that points at a pane rather than a test.
-  const [tab, setTab] = useState<Tab>(focusTest ? 'playwright' : arriveTab ?? 'overview')
-  const [serviceIdx, setServiceIdx] = useState(0)
-  const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
+  const [tab, setTab] = useState<Tab>(location ? location.tab ?? 'overview' : focusTest || arriveTab ? 'results' : 'overview')
+  // By safe name, so a link names the same service whatever order it boots in.
+  const [serviceKey, setServiceKey] = useState<string | null>(location?.service ?? null)
+  const [resultsView, setResultsView] = useState<ResultsView>(location ? location.view ?? 'tests' : arriveTab === 'changes' && !focusTest ? 'run-wide' : 'tests')
+  // A restored place applies once, to the run it was restored for: its case
+  // and cycle when the routed test resolves, its tab instead of the one a
+  // focused test would otherwise imply.
+  const seed = useRef(location ? { runId, location, focusKey: JSON.stringify([focusTest, focusTestId, focusTestLocation, focusRequest]) } : null)
+  // Owned here, not by the tab, so leaving Results & Fixes and coming back
+  // (from a linked service log, say) keeps the reader's case and cycle.
+  const [selection, setSelection] = useState<ResultsSelection>({ caseKey: null })
+  // A Full service log link: the Services tab shows that retained range until
+  // the reader asks for the latest output or picks another service.
+  const [logAnchor, setLogAnchor] = useState<ServiceLogAnchor | null>(
+    location?.service && location.log ? { service: location.service, ...location.log } : null,
+  )
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
   const [agentPaneExited, setAgentPaneExited] = useState(false)
   const currentRunStatusRef = useRef<RunStatus | undefined>(undefined)
@@ -121,22 +150,79 @@ export function RunDetailColumn({
   const executionType = detail?.manifest.executionType ?? 'run'
   const isVerifyRun = executionType === 'verify'
   const isBootRun = executionType === 'boot'
-  // A later focus (clicking a second failure while this run is already open)
-  // switches back to the tab that can show it.
+  // Another run's selection must never show under this one.
+  const seededRun = useRef(runId)
   useEffect(() => {
-    if (focusTest) setTab('playwright')
-  }, [focusTest, runId])
+    if (seededRun.current === runId) return
+    seededRun.current = runId
+    seed.current = null
+    setSelection({ caseKey: null })
+    setLogAnchor(null)
+    setServiceKey(null)
+  }, [runId])
+  const focusKey = JSON.stringify([focusTest, focusTestId, focusTestLocation, focusRequest])
+  const seeding = seed.current?.runId === runId && seed.current.focusKey === focusKey ? seed.current.location : undefined
+  // A later focus (clicking a second failure while this run is already open)
+  // switches back to the tab that can show it — once per focus, so the seed
+  // clearing on resolve cannot replay it. A restored place already says which
+  // tab its test was read on, so the focus it was restored with is handled.
+  const handledFocus = useRef<string | null>(seeding ? `${runId}:${focusKey}` : null)
+  useEffect(() => {
+    if (!focusTest) return
+    const key = `${runId}:${focusKey}`
+    if (handledFocus.current === key) return
+    handledFocus.current = key
+    setTab('results')
+    setResultsView('tests')
+  }, [focusTest, focusKey, runId])
+  const focusTarget = focusTest ? { name: focusTest, ...(focusTestId ? { id: focusTestId } : {}), ...(focusTestLocation ? { location: focusTestLocation } : {}) } : undefined
+  // Which focus the selection has taken up, set in the same update as the
+  // selection so the reported place never drops the test in between.
+  const [appliedFocus, setAppliedFocus] = useState<string | null>(null)
+  const focus = useResultsFocus(runId, detail, { test: focusTest, testId: focusTestId, testLocation: focusTestLocation, request: focusRequest }, (caseKey) => {
+    seed.current = null
+    setAppliedFocus(`${runId}:${focusKey}`)
+    setSelection({
+      caseKey,
+      ...(focusTarget ? { test: focusTarget } : {}),
+      ...(seeding?.cycle !== undefined ? { cycle: seeding.cycle } : {}),
+      ...(seeding?.journal ? { journal: seeding.journal } : {}),
+    })
+  })
   // Same for a later arrival at a named tab (clicking the run's captured fixes
   // while that run is already open) — otherwise the click looks ignored.
   useEffect(() => {
-    if (arriveTab) setTab(arriveTab)
+    if (arriveTab !== 'changes') return
+    setTab('results')
+    setResultsView('run-wide')
   }, [arriveTab, runId])
   useEffect(() => {
-    if (isVerifyRun && tab !== 'overview' && tab !== 'playwright') setTab('overview')
+    if (isVerifyRun && tab !== 'overview' && tab !== 'results') setTab('overview')
     // A boot-only session has no Playwright / heal / journal — keep the user on
     // the tabs that exist (overview, run logs, services).
     if (isBootRun && tab !== 'overview' && tab !== 'run-logs' && tab !== 'services') setTab('overview')
   }, [isVerifyRun, isBootRun, tab])
+
+  // The reader's place, for the route. While a routed or clicked test has not
+  // resolved yet (its events can arrive after the link), the URL keeps naming
+  // it rather than dropping it.
+  const pendingTest = appliedFocus === `${runId}:${focusKey}` ? undefined : focusTarget
+  const selectedTest = selection.caseKey ? selection.test : pendingTest
+  const routedLocation: RunLocation = {
+    ...(tab !== 'overview' ? { tab } : {}),
+    ...(tab === 'results' && resultsView !== 'tests' ? { view: resultsView } : {}),
+    ...(selectedTest ? { test: selectedTest } : {}),
+    ...(selectedTest && (selection.caseKey ? selection.cycle : seeding?.cycle) !== undefined ? { cycle: (selection.caseKey ? selection.cycle : seeding?.cycle)! } : {}),
+    ...(selectedTest && (selection.caseKey ? selection.journal : seeding?.journal) ? { journal: (selection.caseKey ? selection.journal : seeding?.journal)! } : {}),
+    ...(serviceKey ? { service: serviceKey } : {}),
+    ...(tab === 'services' && logAnchor && logAnchor.service === serviceKey ? { log: { execution: logAnchor.execution, startLine: logAnchor.startLine, endLine: logAnchor.endLine, approximate: logAnchor.approximate } } : {}),
+  }
+  const routedKey = JSON.stringify(routedLocation)
+  const report = useRef(onLocationChange)
+  report.current = onLocationChange
+  useEffect(() => {
+    if (runId) report.current?.(JSON.parse(routedKey) as RunLocation)
+  }, [runId, routedKey])
 
   // Compact for both: the run list that fills this pane sits directly above
   // it, so a three-line body here would spend all three saying "pick one".
@@ -148,7 +234,12 @@ export function RunDetailColumn({
   const view = deriveRunViewModel(detail, transient)
   const services = m.services
   const repoBranches = m.repoBranches ?? []
+  const requestedService = serviceKey === null ? -1 : services.findIndex((s) => s.safeName === serviceKey)
+  const serviceIdx = Math.max(0, requestedService)
   const activeService = services[serviceIdx]
+  // A link can outlive the service it named (a suite that no longer starts
+  // it); say so rather than showing another service's log as if it were it.
+  const staleService = serviceKey !== null && requestedService === -1 ? serviceKey : null
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
   // External heal keeps its own panel: the parked/claimed state is the answer there.
   const settledWithoutRepair = isTerminalRunStatus(m.status) && m.healCycles === 0 && m.healMode !== 'external'
@@ -191,35 +282,30 @@ export function RunDetailColumn({
         </div>
         {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
         {view.waiting?.kind === 'test-review' && onOpenSpecReview && (
-          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={onOpenSpecReview} />
+          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={() => onOpenSpecReview(m.feature, m.runId)} />
         )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
-          <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
-          {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}
-          {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
-          {!isBootRun && <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>}
-          {!isVerify && !isBootRun && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
-          {/* What the repair actually changed. Always openable, like Journal: a
-              run that changed nothing is a fact worth reading, and the tab's
-              own empty state says which kind of nothing it was. */}
-          {!isVerify && !isBootRun && (
-            <TabButton active={tab === 'changes'} onClick={() => setTab('changes')}>
-              Changes
-            </TabButton>
-          )}
-          {!isVerify && !isBootRun && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
+          <Tab active={tab === 'overview'} onClick={() => setTab('overview')} className="shrink-0 whitespace-nowrap">Overview</Tab>
+          {!isVerify && <Tab active={tab === 'run-logs'} onClick={() => setTab('run-logs')} className="shrink-0 whitespace-nowrap">Run Logs</Tab>}
+          {!isVerify && <Tab active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0} className="shrink-0 whitespace-nowrap">Services</Tab>}
+          {!isVerify && !isBootRun && <Tab active={tab === 'agent'} onClick={() => setTab('agent')} className="shrink-0 whitespace-nowrap">Heal Agent</Tab>}
+          {/* Every test's result and repair story, plus the run's own captured
+              changes, journal and Playwright terminal. Always openable: a run
+              that repaired nothing is a fact worth reading. */}
+          {!isBootRun && <Tab active={tab === 'results'} onClick={() => setTab('results')} className="shrink-0 whitespace-nowrap">Results &amp; Fixes</Tab>}
         </nav>
       </header>
       <div className="flex-1 min-h-0 overflow-hidden mt-2">
         {tab === 'overview' && (
           isVerify ? (
-            <VerifyOverviewTab manifest={m} view={view} />
+            <VerifyOverviewTab manifest={m} view={view} onCompareTests={onOpenSpecReview ? () => onOpenSpecReview(m.feature, m.runId) : undefined} />
           ) : (
             <RunOverviewTab
               manifest={m}
               view={view}
               services={services}
               repoBranches={repoBranches}
+              onCompareTests={onOpenSpecReview ? () => onOpenSpecReview(m.feature, m.runId) : undefined}
               onOpenEvaluationReport={onOpenEvaluationReport}
               onOpenBootFailure={() => setBootFailureDialogOpen(true)}
             />
@@ -239,14 +325,28 @@ export function RunDetailColumn({
                     service={s}
                     branch={branchForService(s, repoBranches)}
                     active={i === serviceIdx}
-                    onClick={() => setServiceIdx(i)}
+                    onClick={() => { setServiceKey(s.safeName); setLogAnchor(null) }}
                     siblings={repoServiceCount(s, services)}
                   />
                 ))}
               </>
             }
           >
-            {activeService && (
+            {staleService && activeService && (
+              <p className="m-0 shrink-0 border-b px-3 py-2 text-[11px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }} data-testid="stale-service-link">
+                This link names a service this run did not start ({staleService}); showing {activeService.name}.
+              </p>
+            )}
+            {activeService && logAnchor?.service === activeService.safeName ? (
+              <ServiceLogInspector
+                key={JSON.stringify(logAnchor)}
+                runId={m.runId}
+                anchor={logAnchor}
+                serviceName={activeService.name}
+                onBack={() => setTab('results')}
+                onLatest={() => setLogAnchor(null)}
+              />
+            ) : activeService && (
               <PaneTerminal
                 runId={m.runId}
                 paneId={`service:${activeService.safeName}`}
@@ -255,19 +355,23 @@ export function RunDetailColumn({
             )}
           </RunPane>
         )}
-        {tab === 'playwright' && (
-          <PlaywrightPanel
-            runId={m.runId}
-            view={playwrightView}
-            onViewChange={setPlaywrightView}
-            events={detail.playbackEvents}
-            artifactGroups={detail.playwrightArtifacts}
-            artifactPolicy={m.playwrightArtifacts}
-            onOpenArtifactSettings={() => onOpenPlaywrightSettings?.(m.feature)}
-            summary={detail.summary}
+        {!isBootRun && tab === 'results' && (
+          <ResultsFixesTab
+            detail={detail}
+            view={resultsView}
+            onViewChange={setResultsView}
+            selection={selection}
+            onSelectionChange={setSelection}
+            {...(focus === 'unmatched' && focusTest ? { unmatchedTest: focusTest } : {})}
+            repairEvidence={!isVerify}
             diagnostics={m.verification?.diagnostics}
-            totalTests={totalTests}
-            {...(focusTest ? { focusTest } : {})}
+            onOpenServiceLog={(anchor) => {
+              if (!services.some((s) => s.safeName === anchor.service)) return
+              setServiceKey(anchor.service)
+              setLogAnchor(anchor)
+              setTab('services')
+            }}
+            {...(onOpenPlaywrightSettings ? { onOpenArtifactSettings: () => onOpenPlaywrightSettings(m.feature) } : {})}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
@@ -328,24 +432,6 @@ export function RunDetailColumn({
           </RunPane>
           )}
         </div>}
-        {!isVerify && !isBootRun && tab === 'changes' && (
-          // No wrapper scroller: the tab renders its own `RunPane`, the same
-          // frame every other tab uses. The extra `overflow-auto` div around it
-          // made this the one pane with two nested scrollers.
-          <ChangesTab
-            runId={m.runId}
-            healCycles={m.healCycles}
-            runStopped={isTerminalRunStatus(m.status) && Boolean(m.endedAt)}
-            fixCapture={m.fixCapture}
-            worktrees={m.worktrees}
-            proposedPrs={m.proposedPrs}
-            prAttempt={m.prAttempt}
-            repoBranches={repoBranches}
-          />
-        )}
-        {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} healCycles={m.healCycles} />
-        )}
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand
           an open dialog's route. */}

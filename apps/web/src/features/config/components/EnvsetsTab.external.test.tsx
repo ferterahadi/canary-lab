@@ -1,6 +1,6 @@
 import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { act, useRef } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as featuresApi from '@/shared/api/features'
 import * as flightsApi from '@/shared/api/flights'
@@ -11,6 +11,7 @@ import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidati
 import { useWorkspaceData } from '@/shared/state/use-workspace-data'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { EnvsetsTab } from './EnvsetsTab'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', () => ({
   getEnvsetsIndex: vi.fn(),
@@ -54,11 +55,9 @@ beforeEach(() => {
   vi.mocked(workspaceApi.getVersionStatus).mockResolvedValue({ current: '1.0.0', latest: null, updateAvailable: false, packageName: null, update: null })
   vi.mocked(connectWorkspaceEvents).mockReturnValue({ close })
   vi.mocked(configApi.getEnvsetsIndex).mockResolvedValue(index('local'))
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('updates the mounted Envsets tab through workspace events, bulk changes and reconnect', async () => {
   await act(async () => { render() })

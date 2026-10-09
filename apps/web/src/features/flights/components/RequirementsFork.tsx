@@ -1,3 +1,4 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
 import { useRef, useState } from 'react'
 import * as flightsApi from '@/shared/api/flights'
 import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@shared/flights/types'
@@ -8,7 +9,9 @@ import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
-import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
+import { externalMutationTooltip } from '../lib/external-work'
+import { displayError } from '@/shared/api/error-message'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 /** Read the structured outcome of the previous collector attempt off the
  *  parked checkpoint. Absent on a first visit, and on flights parked by an
@@ -62,14 +65,11 @@ export function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
 export function RequirementsFork({
   flightId,
   flight,
-  refreshKey,
   onResponded,
   listing,
 }: {
   flightId: string
   flight: FlightManifest
-  /** Bumped on coverage-changed so out-of-band doc writes show live. */
-  refreshKey?: number
   onResponded: () => void
   /** The listing the stage band already fetched — see useFlightDocs. */
   listing?: FeatureDocsListing | null
@@ -87,6 +87,8 @@ export function RequirementsFork({
    *  fades on its own (cl-flash-fade). The token forces a remount so a repeat
    *  press restarts the animation even if the previous flash hasn't finished. */
   const [startedFlash, setStartedFlash] = useState<number | null>(null)
+  // Bumped on coverage-changed so out-of-band doc writes show live.
+  const refreshKey = useInvalidationKey('coverage')
   const docs = useFlightDocs(flight.feature, refreshKey, undefined, listing)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // The fork is an answering surface end to end — every path ends in a
@@ -108,7 +110,7 @@ export function RequirementsFork({
     setFailure(null)
     flightsApi.respondFlightCheckpoint(flightId, { choice })
       .then(() => onResponded())
-      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setFailure(displayError(err)))
       .finally(() => setBusy(false))
   }
 

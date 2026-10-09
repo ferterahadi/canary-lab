@@ -9,7 +9,7 @@ import {
   EXTERNAL_HEAL_NEXT_STEPS,
   buildSpecEditsWarning,
 } from '../features/runs/logic/heal/external-heal-surface'
-import { normalizeRunCounts } from '../features/runs/logic/heal/external-heal-counts'
+import { normalizeRunCounts } from '../../../../shared/run-counts'
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { RunDetail } from '../../../../shared/run-detail'
 import type { RunManifest } from '../../../../shared/run-manifest'

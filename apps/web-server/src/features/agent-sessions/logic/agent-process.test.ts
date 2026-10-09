@@ -1,11 +1,16 @@
 import { EventEmitter } from 'events'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAgentProcesses } from './agent-process'
 import { agentJobStore } from './agent-jobs/store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-agentrec-')
+
+// Spelled out rather than imported: the literal is what reaches the CLI, and
+// the documented off switch is this exact key and value.
+const UNATTENDED_SETTINGS_JSON = '{"skillOverrides":{"auto-mode-setup":"off"}}'
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
 const { mockNodeSpawn, mockSpawnSync } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn(), mockSpawnSync: vi.fn() }))
@@ -140,12 +145,25 @@ describe('runAgentProcess', () => {
     expect((spawn.calls[0].opts as { detached: boolean }).detached).toBe(process.platform !== 'win32')
   })
 
-  it('gives every claude child a 350K auto-compaction window', async () => {
+  it('gives every claude child a 350K auto-compaction window and the unattended-dialog policy', async () => {
     const child = new FakeChild()
     const spawn = fakeSpawn(child)
     runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
     child.close(0)
-    expect(spawn.calls[0].args).toEqual(['--autocompact', '350k', '-p', 'hi'])
+    expect(spawn.calls[0].args).toEqual(['--autocompact', '350k', '--settings', UNATTENDED_SETTINGS_JSON, '-p', 'hi'])
+  })
+
+  it('gives every builder-made claude argv exactly one --settings, carrying the dialog policy', async () => {
+    // A second `--settings` REPLACES the first (measured on claude 2.1.286), so a
+    // builder that grew its own would silently drop the policy. Pin the count
+    // on a real builder's output, not a hand-written argv.
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: 'claude', args: buildClaudeAgenticArgs('hi', { readOnly: true }), idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
+    child.close(0)
+    const args = spawn.calls[0].args
+    expect(args.filter((arg) => arg === '--settings')).toHaveLength(1)
+    expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual({ skillOverrides: { 'auto-mode-setup': 'off' } })
   })
 
   it('gives every codex child a 258K window with auto-compaction enabled', async () => {
@@ -298,7 +316,7 @@ describe('runAgentProcess', () => {
     child.close(0)
     const res = await h.done
     expect(res.code).toBe(0)
-    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['--autocompact', '350k', '-p', 'hi'], expect.anything())
+    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['--autocompact', '350k', '--settings', UNATTENDED_SETTINGS_JSON, '-p', 'hi'], expect.anything())
   })
 
   it('resolves a bare agent kind to the absolute path before spawning', async () => {
@@ -537,10 +555,8 @@ describe('durable records — how a spawn ends, in the record', () => {
   let logsDir: string
 
   beforeEach(() => {
-    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentrec-')))
+    logsDir = tempDir()
   })
-
-  afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
 
   const ref = { jobId: 'fl-1:scout', flightId: 'fl-1', feature: 'checkout', stage: 'scout', agent: 'claude' as const }
 

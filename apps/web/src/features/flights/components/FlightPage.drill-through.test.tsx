@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
-import { InvalidationProvider } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -89,11 +89,7 @@ vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: mocks.getRepoGitStatus,
   openEditor: mocks.openEditor,
 }))
-vi.mock('@/shared/api/internal', () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
-  },
-}))
+vi.mock('@/shared/api/internal', async () => (await import('./__fixtures__/flight-page-mocks')).apiInternalMock())
 
 // The agent timeline is its own tested component with live transports — stub it.
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
@@ -158,6 +154,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -175,10 +173,10 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 })
 
 import { FlightPage } from './FlightPage'
+import { manifest } from './__fixtures__/flight-page-part7-fixtures'
+import { renderFlightPage } from './__fixtures__/FlightPageHarness'
 
 ;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -191,7 +189,7 @@ beforeEach(() => {
   mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
-  mocks.listRuns.mockResolvedValue([])
+  mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'passed', startedAt: '2026-01-01T00:00:00Z' }])
   mocks.listJournal.mockResolvedValue([])
   mocks.downloadTask.mockResolvedValue(undefined)
   mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
@@ -218,48 +216,14 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
-
-function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl_1',
-    feature: 'checkout',
-    repoPaths: ['/repo/shop'],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'scout',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
-}
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
 // remount key per call remounts FlightPage, which re-runs its fetch effect —
 // the same observable effect, without a prop lever.
-let renderSeq = 0
-
-async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
-  renderSeq += 1
-  await act(async () => {
-    root.render(
-      <InvalidationProvider>
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
-      </InvalidationProvider>,
-    )
-  })
-}
+const render = (flightId: string, extraProps?: Record<string, unknown>) => renderFlightPage(root, FlightPage, flightId, extraProps)
 
 describe('stage summary + drill-through (R6)', () => {
   async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenConfig?: ReturnType<typeof vi.fn>; onOpenSpecReview?: ReturnType<typeof vi.fn> }) {
@@ -290,6 +254,39 @@ describe('stage summary + drill-through (R6)', () => {
     expect(drill?.textContent).toContain('Latest run')
     await act(async () => { drill?.click() })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('a paused flight shows the newest Verify execution and every drill targets it instead of the old flight run', async () => {
+    const onOpenRun = vi.fn()
+    const onOpenSpecReview = vi.fn()
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' },
+      { runId: 'verify-latest', feature: 'checkout', status: 'passed', executionType: 'verify', env: 'staging', startedAt: '2026-01-02T00:00:00Z' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'verify-latest', manifest: { runId: 'verify-latest', status: 'passed', executionType: 'verify', healCycles: 0, services: [],
+        suiteSnapshot: { kind: 'taken', dir: '/workspace/suite', takenAt: '2026-01-02T00:00:00Z', digest: 'abc123' },
+        specEdits: { checkedAt: '2026-01-02T00:01:00Z', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] },
+      }, summary: { total: 16, passed: 16, failed: [] },
+    })
+    const saved = manifest({ status: 'paused', currentStage: 'specs-coverage', links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'failed', healCycles: 9 } } : {}),
+      })),
+    })
+    await renderWithDrill(saved, { onOpenRun, onOpenSpecReview })
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')!.click())
+    const hero = container.querySelector('[data-testid="test-run-hero"]')!
+    expect(hero.textContent).toContain('Verify latest')
+    expect(hero.textContent).toContain('16/16')
+    expect(hero.textContent).not.toContain('9 of 10')
+    expect(container.querySelector('[data-testid="previous-runs"]')?.textContent).toContain('Run run-9')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')!.click())
+    expect(onOpenRun).toHaveBeenCalledExactlyOnceWith('checkout', 'verify-latest')
+    await act(async () => hero.querySelector<HTMLButtonElement>('[data-testid="run-hero-spec-edits"]')!.click())
+    expect(onOpenSpecReview).toHaveBeenCalledExactlyOnceWith('checkout', 'verify-latest')
+    expect(saved.links?.runId).toBe('run-9')
+    expect(saved.stages.find((stage) => stage.key === 'run')?.status).toBe('pending')
   })
 
   it('R82: clicking a failing test drills to the run detail carrying that test as the focus', async () => {
@@ -325,7 +322,7 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number"]')?.click()
     })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { test: 'test-case-req-r5-path-happy-clean-number' })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { test: 'test-case-req-r5-path-happy-clean-number', testId: 'f2', testLocation: '/ws/e2e/blocklist.spec.ts:176' })
   })
 
   it('reports the repair fixes as one link into that run’s Changes tab', async () => {
@@ -407,10 +404,10 @@ describe('stage summary + drill-through (R6)', () => {
     // The rung names the fact (label over value); the link IS the value.
     const rung = link?.closest('[title]')
     expect(rung?.textContent).toContain('Verdict from')
-    expect(link?.textContent).toContain('recorded tests · 2 pending test-file changes · 1 hint')
+    expect(link?.textContent).toContain('recorded tests · 2 recorded unexecuted test-file changes · 1 hint')
     expect(rung?.getAttribute('title')).toMatch(/2 test-file changes made since the run started were not run/)
     await act(async () => { link?.click() })
-    expect(onOpenSpecReview).toHaveBeenCalledTimes(1)
+    expect(onOpenSpecReview).toHaveBeenCalledExactlyOnceWith('checkout', 'run-9')
   })
 
   it('states the snapshot provenance without a link when nothing is pending, and flags a run that had no snapshot', async () => {

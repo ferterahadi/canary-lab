@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DurableView, PersistedView } from '../lib/workspace-view-state'
 import type { WorkspaceNavigation } from './use-workspace-navigation'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The URL/localStorage layer is mocked, not the derivation: `nav-state` runs for
 // real here (its own suite covers it in isolation) so the seed, the routed
@@ -29,7 +28,6 @@ function persisted(over: Partial<PersistedView> = {}): PersistedView {
   }
 }
 
-let container: HTMLDivElement
 let root: Root
 let nav: WorkspaceNavigation
 let crossTab: ((state: DurableView) => void) | null
@@ -47,10 +45,8 @@ async function mount(seed: PersistedView = persisted()): Promise<void> {
   await act(async () => { root.render(<Probe />) })
 }
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   crossTab = null
   unsubscribes = 0
   viewState.persistView.mockReset()
@@ -59,11 +55,6 @@ beforeEach(() => {
     crossTab = cb
     return () => { unsubscribes += 1 }
   })
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
 })
 
 describe('useWorkspaceNavigation — seeding from the route', () => {
@@ -226,6 +217,19 @@ describe('useWorkspaceNavigation — dialog openers', () => {
     expect(nav.routedDialog).toBe('flight-new')
   })
 
+  it('opens the changed-tests review on the focus it names, and clears a stale one', async () => {
+    await mount()
+
+    await act(async () => { nav.openReview({ file: 'e2e/cart.spec.ts', line: 4, mode: 'english' }) })
+    expect([nav.specReviewOpen, nav.reviewFocus, nav.routedDialog]).toEqual([true, { file: 'e2e/cart.spec.ts', line: 4, mode: 'english' }, 'tests-review'])
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ dialog: 'tests-review', reviewFocus: { file: 'e2e/cart.spec.ts', line: 4, mode: 'english' } }))
+
+    await act(async () => { nav.setSpecReviewOpen(false) })
+    // An open without a focus lands on the overview, not the file the last one named.
+    await act(async () => { nav.openReview() })
+    expect([nav.specReviewOpen, nav.reviewFocus]).toEqual([true, undefined])
+  })
+
   it('closing settings also drops the stacked model matrix (the setConfigFor rule)', async () => {
     await mount()
 
@@ -311,10 +315,27 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
 
     await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', tab: 'changes' }) })
 
-    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'should pay' })
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'should pay', request: 1 })
     expect(nav.runTab).toBeNull()
     expect(nav.view).toBe('workspace')
     expect(nav.selectedFeature).toBe('checkout')
+  })
+
+  it('hydrates and replaces identity qualifiers, then drops them for another run', async () => {
+    await mount(persisted({ run: 'r1', focusTest: 'checkout', testId: 'first', testLocation: 'file:1' }))
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'first', testLocation: 'file:1' })
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'checkout', testId: 'second', testLocation: 'file:2' }) })
+    expect(nav.focusTest).toEqual({ runId: 'r1', test: 'checkout', testId: 'second', testLocation: 'file:2', request: 1 })
+    await act(async () => { nav.navigateToRun('checkout', 'r2') })
+    expect(nav.focusTest).toBeNull()
+  })
+
+  it('counts a repeated click on the same test as a new request, so a collapsed row reopens', async () => {
+    await mount()
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', testId: 'a' }) })
+    const first = nav.focusTest
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { test: 'should pay', testId: 'a' }) })
+    expect(nav.focusTest).toEqual({ ...first, request: first!.request! + 1 })
   })
 
   it('lands on a named tab when no test is named', async () => {
@@ -337,6 +358,35 @@ describe('useWorkspaceNavigation — run and coverage arrivals', () => {
     expect(nav.runTab).toBeNull()
     expect(nav.returnFlight).toBeNull()
     expect(nav.pendingRunSelectionRef.current).toBeNull()
+  })
+
+  it('restores where the reader was inside a run, follows each report, and lets an arrival replace it', async () => {
+    const location = { tab: 'services' as const, service: 'api', log: { execution: 2, startLine: 5, endLine: 9, approximate: false } }
+    await mount(persisted({ feature: 'checkout', run: 'r1', runLocation: location }))
+    expect(nav.runLocation).toEqual({ runId: 'r1', location })
+
+    await act(async () => { nav.setRunLocation('r1', { tab: 'results', test: { name: 'should pay' }, cycle: 2 }) })
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'r1', runLocation: { tab: 'results', test: { name: 'should pay' }, cycle: 2 } }))
+
+    // An equal report keeps the same state, so the URL is not rewritten.
+    const writes = viewState.persistView.mock.calls.length
+    const before = nav.runLocation
+    await act(async () => { nav.setRunLocation('r1', { tab: 'results', test: { name: 'should pay' }, cycle: 2 }) })
+    expect(nav.runLocation).toBe(before)
+    expect(viewState.persistView.mock.calls.length).toBe(writes)
+
+    await act(async () => { nav.navigateToRun('checkout', 'r1', { tab: 'changes' }) })
+    expect(nav.runLocation).toBeNull()
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'r1', runTab: 'changes' }))
+    expect(viewState.persistView.mock.lastCall?.[0]).not.toHaveProperty('runLocation')
+  })
+
+  it('never writes one run’s place under another', async () => {
+    await mount(persisted({ feature: 'checkout', run: 'r1' }))
+    await act(async () => { nav.setRunLocation('r1', { tab: 'agent' }) })
+    await act(async () => { nav.setSelectedRunId('r2') })
+    expect(viewState.persistView.mock.lastCall?.[0]).toMatchObject({ run: 'r2' })
+    expect(viewState.persistView.mock.lastCall?.[0]).not.toHaveProperty('runLocation')
   })
 
   it('opens the coverage ledger, carrying the way back only when given one', async () => {

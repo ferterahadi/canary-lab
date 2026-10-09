@@ -1,12 +1,15 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { porcelainPath } from './git-status-path'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+import { initGitRepo } from '../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('git-paths-')
 
 let root: string | undefined
-afterEach(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); root = undefined })
+afterEach(() => { root = undefined })
 
 describe('porcelainPath', () => {
   it.each([
@@ -41,13 +44,12 @@ describe('porcelainPath', () => {
   })
 
   it.each(['true', 'false'])('decodes real status, renames and copies with core.quotePath=%s', (quotePath) => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-paths-'))
+    root = tempDir()
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
-    git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.test')
-    git('config', 'core.quotePath', quotePath)
     const names = ['plain.txt', 'with space.txt', 'tab\tfile.txt', 'café.txt', 'quote"file.txt', 'back\\slash.txt', 'left -> right.txt', ' padded ', 'line\nbreak.txt']
     for (const name of names) fs.writeFileSync(path.join(root, name), `${name}: original\n`.repeat(20))
-    git('add', '.'); git('commit', '-qm', 'fixture')
+    initGitRepo(root)
+    git('config', 'core.quotePath', quotePath)
     for (const name of names) fs.appendFileSync(path.join(root, name), 'edited\n')
     const status = () => git('--no-optional-locks', 'status', '--porcelain').split('\n').filter(Boolean)
     expect(status().map(porcelainPath).sort()).toEqual([...names].sort())

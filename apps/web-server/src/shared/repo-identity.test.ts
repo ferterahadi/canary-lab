@@ -1,13 +1,16 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { resolveRepoIdentity, resolveRepoPath, resolveRepoPaths, sameRepoSet } from './repo-identity'
+import { configuredRepoPaths, resolveRepoIdentity, resolveRepoPath, resolveRepoPaths, sameRepoSet } from './repo-identity'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+import { git } from '../../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-identity-')
 
 let root: string
-beforeEach(() => { root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-'))) })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('preserves home expansion without expanding named users', () => {
   expect(resolveRepoPath('~')).toBe(os.homedir())
@@ -27,10 +30,9 @@ it.each(['required', 'best-effort'] as const)('resolves aliases, relative spelli
 })
 
 it('keeps different subdirectories and real Git worktrees distinct', () => {
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' })
-  git('init', '-q'); git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'initial')
+  git(root, 'init', '-q'); git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'initial')
   const worktree = path.join(root, 'worktree')
-  git('worktree', 'add', '--detach', worktree, 'HEAD')
+  git(root, 'worktree', 'add', '--detach', worktree, 'HEAD')
   const dirs = [path.join(root, 'service-a'), path.join(root, 'service-b')]
   dirs.forEach((dir) => fs.mkdirSync(dir))
   expect(new Set([root, worktree, ...dirs].map((dir) => resolveRepoIdentity(dir, 'required'))).size).toBe(4)
@@ -105,4 +107,11 @@ it('returns the first original failing path without processing later paths', () 
   const spy = vi.spyOn(fs, 'realpathSync')
   expect(resolveRepoPaths([root, first, second])).toEqual({ ok: false, path: first })
   expect(spy).not.toHaveBeenCalledWith(second)
+})
+
+it('normalizes configured paths without probing or merging filesystem identities', () => {
+  expect(configuredRepoPaths(undefined)).toEqual([])
+  expect(configuredRepoPaths([{}, { localPath: '' }])).toEqual([])
+  const dirs = ['~/missing-repo', path.join(os.homedir(), 'missing-repo') + '/', '/repo/service-a', '/repo/service-b', '/worktree']
+  expect(configuredRepoPaths(dirs.map((localPath) => ({ localPath })))).toEqual([path.join(os.homedir(), 'missing-repo'), '/repo/service-a', '/repo/service-b', '/worktree'])
 })

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CHANGED_ELSEWHERE, useEditableDraft } from '@/shared/state/use-editable-draft'
 import { useCachedDoc } from './config-doc-cache'
+import { displayError } from '@/shared/api/error-message'
 
 /** Generic editor state hook: load → draft → diff → save.
  *
@@ -82,7 +83,7 @@ export function useEditableSlice<Doc, Slice>({
       setSavedAt(Date.now())
       return true
     } catch (error: unknown) {
-      if (current()) setSaveError(error instanceof Error ? error.message : 'Save failed')
+      if (current()) setSaveError(displayError(error, 'Save failed'))
       return false
     } finally { if (current()) setSaving(false) }
   }

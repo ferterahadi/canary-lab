@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PortifyOrchestrator, type PortifyOrchestratorDeps } from './orchestrator'
-import type { PortifyManifest, PortifyVerification } from './types'
+import type { PortifyManifest, PortifyVerification } from '../../../../../../../shared/portify-index'
 
 function baseManifest(maxAttempts = 3): PortifyManifest {
   return {

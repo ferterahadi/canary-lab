@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { useEditableSlice } from '../components/useEditableSlice'
 
 /** Uses the same document owner as Advanced setup, with immediate field commits.

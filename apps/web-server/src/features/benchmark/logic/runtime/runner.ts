@@ -2,13 +2,12 @@ import { buildCodexAgenticArgs } from '../../../agent-sessions/logic/agent-codex
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { runGit, readWorkingTree } from '../../../../shared/git-repo'
 import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-paths'
-import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import { type AgentProcessHandle, runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { addWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { RunOrchestrator } from '../../../runs/logic/runtime/orchestrator'
 import { defaultPlaywrightSpawner } from '../../../runs/logic/runtime/run-spawn'
@@ -28,8 +27,8 @@ import { runSabotage } from './sabotage'
 import { buildBaselineHealPrompt, baselinePlaywrightSpawner } from './arm-config'
 import { loadBundledSabotageSkills } from './skills'
 import { worktreeFeatureDir } from './worktree-feature-dir'
-import type { ArmIterationResult } from './report'
-import type { ArmMode, BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from './types'
+import type { ArmIterationResult, ArmMode, BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
+import type { StartBenchmarkInput, StartBenchmarkResult } from './types'
 
 // Wires the real I/O behind the (tested) BenchmarkOrchestrator: git worktrees,
 // the sabotage agent, and per-arm RunOrchestrators. Built as a factory taking
@@ -147,11 +146,11 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     // is marked 'aborted'), kills the in-flight sabotage child, and stops any
     // live arm RunOrchestrators.
     let aborted = false
-    const children = new Set<ChildProcess>()
+    const children = new Set<AgentProcessHandle>()
     const orchRefs = new Set<RunOrchestrator>()
     aborts.set(benchmarkId, () => {
       aborted = true
-      for (const c of children) { try { c.kill('SIGTERM') } catch { /* already gone */ } }
+      for (const handle of children) handle.stop('SIGTERM')
       for (const o of orchRefs) void o.stop('aborted').catch(() => {})
     })
 
@@ -435,7 +434,7 @@ function runAgentHeadless(
   // Required: the sole caller always tees to `sabotage-agent.log`, so "no log
   // path" is not a state this function has to carry a fallback for.
   logPath: string,
-  children?: Set<ChildProcess>,
+  children?: Set<AgentProcessHandle>,
 ): Promise<void> {
   // Shared agent-process runner (spawn + tee + idle). claude gets stream-json
   // for liveness; the diff is the arbiter, so we don't capture/parse the output.
@@ -453,9 +452,9 @@ function runAgentHeadless(
     idleMs: 5 * 60 * 1000,
     activityPath: session.agent === 'claude' ? claudeSessionLogPath(cwd, session.sessionId) : logPath,
   })
-  children?.add(handle.child)
+  children?.add(handle)
   const cleanup = (): void => {
-    children?.delete(handle.child)
+    children?.delete(handle)
     if (out !== null) { try { fs.closeSync(out) } catch { /* noop */ } }
   }
   // Sabotage swallows a failed/non-zero agent (it may still have edited code;

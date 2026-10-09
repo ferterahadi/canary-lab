@@ -1,6 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
@@ -13,6 +12,9 @@ import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import type { GettingStartedSessionStore } from '../config/logic/getting-started-session'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-reg-')
 
 /**
  * The stage adapters are the flight's heaviest subsystem — each one spawns
@@ -63,7 +65,7 @@ let planStore: PlanFeaturesStore
 let app: FastifyInstance
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

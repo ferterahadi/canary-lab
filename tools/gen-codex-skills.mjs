@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { REPO, walk } from './lib/fs.mjs'
 
 // .codex/skills/ is generated from .claude/skills/ so Codex and Claude read the
 // same contributor conventions. `.claude/skills/` is the single source of truth;
@@ -8,9 +9,8 @@ import path from 'node:path'
 // after adding or editing a skill, or rely on the build (`npm run build`).
 // `--check` exits non-zero if .codex/skills is stale (used by smoke:pack).
 
-const repoRoot = path.resolve(import.meta.dirname, '..')
-const sourceDir = path.join(repoRoot, '.claude', 'skills')
-const targetDir = path.join(repoRoot, '.codex', 'skills')
+const sourceDir = path.join(REPO, '.claude', 'skills')
+const targetDir = path.join(REPO, '.codex', 'skills')
 
 // Local-only and gitignored (`.gitignore`: `.claude/skills/cl_apply-local/`). It
 // overrides a shipped hard rule for one machine, so it must never be copied into
@@ -34,11 +34,10 @@ function render(source, relPath) {
   return `${body.slice(0, cut)}\n${BANNER}${body.slice(cut)}`
 }
 
-function walk(dir, base = dir) {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name)
-    return entry.isDirectory() ? walk(full, base) : [path.relative(base, full)]
-  })
+// Native separators, unlike `walk`'s `relativeTo`: the keys are compared
+// against `path.join` output below.
+function filesUnder(dir) {
+  return walk(dir).map((full) => path.relative(dir, full))
 }
 
 function renderAll() {
@@ -47,7 +46,7 @@ function renderAll() {
     if (EXCLUDED.has(name)) continue
     const skillDir = path.join(sourceDir, name)
     if (!fs.statSync(skillDir).isDirectory()) continue
-    for (const rel of walk(skillDir)) {
+    for (const rel of filesUnder(skillDir)) {
       const source = fs.readFileSync(path.join(skillDir, rel), 'utf8')
       rendered.set(path.join(name, rel), render(source, rel))
     }
@@ -58,7 +57,7 @@ function renderAll() {
 const expected = renderAll()
 
 if (process.argv.includes('--check')) {
-  const actual = fs.existsSync(targetDir) ? walk(targetDir) : []
+  const actual = fs.existsSync(targetDir) ? filesUnder(targetDir) : []
   const stale = actual.filter((rel) => !expected.has(rel))
   const drifted = [...expected.keys()].filter((rel) => {
     const full = path.join(targetDir, rel)

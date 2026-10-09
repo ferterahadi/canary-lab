@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '../../shared/flights/types'
 /**
  * Scripted end-to-end drive of the Flight experience (R53–R68 verification).
  *
@@ -32,6 +33,7 @@ import type { FlightStageDeps } from '../web-server/src/features/flights/logic/s
 import { WorkspaceEventBus } from '../web-server/src/shared/workspace-events'
 import { writeEvaluationExportTask } from '../web-server/src/features/evaluation/logic/evaluation-export-store'
 import type { FlightManifest, PlanFeaturesTask } from '../../shared/flights/types'
+import { sleep } from '../../shared/lib/sleep'
 
 const FIXTURE = path.resolve(__dirname, '../../tools/fixtures/first-flight-app')
 const DEADLINE_MS = 60_000
@@ -50,8 +52,6 @@ function assert(cond: unknown, label: string, detail?: unknown): void {
   if (!cond) fail(label, detail)
   ok(label)
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 async function main(): Promise<void> {
   const tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-drive-')))
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     if (event.type !== 'flights-changed') return
     flightsChanged += 1
     const all = store.list()
-    const active = all.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval')
+    const active = all.filter((f) => isActiveFlightStatus(f.status))
     maxConcurrentActive = Math.max(maxConcurrentActive, active.length)
     if (all.some((f) => f.status === 'paused' && f.pauseReason === 'queued')) sawQueued = true
   })
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   // store (the drain starts queued flights on its own schedule — a script-side
   // variable would race it).
   const currentFeatureName = (): string => {
-    const active = store.list().find((f) => f.status === 'running' || f.status === 'waiting-for-approval')
+    const active = store.list().find((f) => isActiveFlightStatus(f.status))
     return active?.feature ?? store.list()[0]?.feature ?? 'first-flight-app'
   }
   const spawnAgent = async ({ prompt }: { prompt: string }): Promise<{ text: string }> => {

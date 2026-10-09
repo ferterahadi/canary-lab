@@ -1,38 +1,3 @@
-// Pure utilities for the Journal tab. The server already filters and orders
-// entries via the `?run=` / `?feature=` query, but we re-derive these client
-// side too so the in-place "show all runs" toggle and the optimistic-after-
-// delete refresh don't always need a round trip.
-
-import type { JournalSection } from '@shared/run-detail'
-
-// Newest first by iteration. Entries with a null iteration sink to the
-// bottom (this is also what the server returns, but we re-sort to be safe
-// after a client-side mutation).
-export function newestFirst(entries: readonly JournalSection[]): JournalSection[] {
-  return [...entries].sort((a, b) => {
-    const ai = a.iteration ?? -Infinity
-    const bi = b.iteration ?? -Infinity
-    if (ai === bi) return 0
-    return bi > ai ? 1 : -1
-  })
-}
-
-export interface JournalFilter {
-  feature?: string
-  run?: string
-}
-
-export function filterEntries(
-  entries: readonly JournalSection[],
-  filter: JournalFilter,
-): JournalSection[] {
-  return entries.filter((e) => {
-    if (filter.feature && e.feature !== filter.feature) return false
-    if (filter.run && e.run !== filter.run) return false
-    return true
-  })
-}
-
 // Pull `- key: value` lines out of the entry body. The server-side parser
 // only surfaces a handful of fields as structured columns; this digs further
 // so the UI can render every field the user wrote without having to ship a

@@ -1,8 +1,8 @@
+import { expandHomePath } from './home-path'
 import http from 'http'
 import https from 'https'
 import net from 'net'
-import os from 'os'
-import type { HealthCheck, HealthProbe, HttpProbe, LegacyHealthProbe, StartCommand, TcpProbe } from '../../../../shared/launcher/types'
+import type { FeatureConfig, HealthCheck, HealthProbe, HttpProbe, LegacyHealthProbe, RepoPrerequisite, StartCommand, TcpProbe } from '../../../../shared/launcher/types'
 
 export interface StartTab {
   dir: string
@@ -11,7 +11,7 @@ export interface StartTab {
 }
 
 export function resolvePath(p: string): string {
-  return p.startsWith('~/') ? p.replace('~', os.homedir()) : p
+  return expandHomePath(p)
 }
 
 // Whether a repo or startCommand with an `envs` whitelist is active in the
@@ -24,7 +24,7 @@ export function enabledForEnv(envs: string[] | undefined, selected: string | und
 export function normalizeStartCommand(
   command: string | StartCommand,
   fallbackName: string,
-): StartCommand {
+): StartCommand & { name: string } {
   if (typeof command === 'string') {
     return {
       command,
@@ -35,6 +35,21 @@ export function normalizeStartCommand(
   return {
     ...command,
     name: command.name ?? fallbackName,
+  }
+}
+
+/** Selection is shared by readiness, allocation, and boot; naming uses the
+ * original index so filtering a command cannot rename the services after it. */
+export function* enabledRepoCommands(feature: Pick<FeatureConfig, 'repos'>, env?: string): Generator<{
+  repo: RepoPrerequisite
+  commands: Array<StartCommand & { name: string }>
+}> {
+  for (const repo of feature.repos ?? []) {
+    if (!enabledForEnv(repo.envs, env)) continue
+    const commands = (repo.startCommands ?? [])
+      .map((command, index) => normalizeStartCommand(command, `${repo.name}-cmd-${index + 1}`))
+      .filter((command) => enabledForEnv(command.envs, env))
+    yield { repo, commands }
   }
 }
 
@@ -232,4 +247,3 @@ export async function isHealthy(url: string, timeoutMs = 1500): Promise<boolean>
     req.on('error', () => resolve(false))
   })
 }
-

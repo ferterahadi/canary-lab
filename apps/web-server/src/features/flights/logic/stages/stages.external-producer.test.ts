@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { scoutStage } from './scout'
 import { docsStage } from './docs'
@@ -16,6 +15,10 @@ import {
 } from '../../../../../../../shared/flights/types'
 import { stageContextStub } from './__fixtures__/stage-context'
 import { readDocsCollection } from '../../../coverage/logic/coverage/docs-collection'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-external-producer-')
 
 // The hand-off path: `opts.stageProducer === 'external'` makes the thinking
 // stages (scout, docs, prd-summary, specs↔coverage) park on an `external-work`
@@ -33,14 +36,12 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-external-producer-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   repoDir = path.join(tmpDir, 'product-repo')
   for (const d of [featuresDir, logsDir, repoDir]) fs.mkdirSync(d, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
   return {
@@ -426,19 +427,10 @@ describe('prd-summary — external producer', () => {
   /** A discoverable feature (loadFeatures needs the config) with one source doc,
    *  so buildSummaryAuthoringContext has something to hand off and
    *  applyExternalSummary can resolve the feature dir. */
-  const writeFeature = (opts: { docs?: boolean } = {}): string => {
-    const dir = path.join(featuresDir, 'checkout')
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(
-      path.join(dir, 'feature.config.cjs'),
-      `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-    )
-    if (opts.docs !== false) {
-      fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-      fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item\n')
-    }
-    return dir
-  }
+  const writeFeature = (opts: { docs?: boolean } = {}): string =>
+    writeFeatureFixture(featuresDir, 'checkout', SELF_REPO_CONFIG, {
+      docs: opts.docs !== false ? { 'spec.md': '# Create todo\na user can create a new todo item\n' } : {},
+    })
 
   const summaryOnDisk = () =>
     JSON.parse(fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), 'utf-8')) as {

@@ -1,6 +1,5 @@
 import fs from 'fs'
-import path from 'path'
-import { readEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
+import { evaluationExportTaskPaths, readEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../../evaluation/logic/external-evaluation-export'
 import { buildTestReviewPacket } from '../../../evaluation/logic/test-review/packet'
 import { deterministicEvaluationRewrite } from '../../../evaluation/logic/test-review/rewrite'
@@ -48,7 +47,9 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       return { kind: 'failed', error: `evaluation export failed: ${task?.error ?? task?.status}` }
     }
 
-    const evaluationZip = path.join(deps.logsDir, 'evaluation-exports', taskId, 'export.zip')
+    // Non-null: the task record was just read under this id, and the reader
+    // rejects exactly the ids the path builder does.
+    const evaluationZip = evaluationExportTaskPaths(deps.logsDir, taskId)!.zipPath
     if (!fs.existsSync(evaluationZip)) {
       return { kind: 'failed', error: `export reported ready but no archive at ${evaluationZip}` }
     }
@@ -154,7 +155,7 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       kind: 'checkpoint',
       checkpoint: {
         kind: 'export-mode',
-        message: `How should the evaluation for "${m.feature}" be written? raw = fast report straight from the run evidence; localized = an agent rewrites the per-test reasoning for readability (slower).`,
+        message: `For "${m.feature}", create a quick report from the test results (raw), or have an agent rewrite the explanations for clarity (localized, slower)?`,
         options: [...CHECKPOINT_OPTIONS['export-mode']],
         data: { runId: m.links?.runId },
       },
@@ -229,8 +230,10 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
     async reset(ctx) {
       const taskId = ctx.manifest().links?.evaluationTaskId
       if (!taskId) return
-      const archive = path.join(deps.logsDir, 'evaluation-exports', taskId, 'export.zip')
-      if (readEvaluationExportTask(deps.logsDir, taskId)?.downloadReady && fs.existsSync(archive)) return
+      // The path is built only after the record read succeeds: the reader and
+      // the path builder reject the same unsafe ids, so the assertion holds.
+      if (readEvaluationExportTask(deps.logsDir, taskId)?.downloadReady
+        && fs.existsSync(evaluationExportTaskPaths(deps.logsDir, taskId)!.zipPath)) return
       await deps
         .inject({ method: 'DELETE', url: `/api/evaluation-exports/${encodeURIComponent(taskId)}` })
         .catch(() => {})

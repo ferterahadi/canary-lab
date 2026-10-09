@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { beforeEach, afterEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import * as configApi from '../api/config'
 import * as featuresApi from '../api/features'
 import type { FeatureSpecFile } from '../api/types'
@@ -10,6 +10,7 @@ import type { TestSourceComparison } from '@shared/test-review'
 import { readableTest } from '../api/__fixtures__/readable-test'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('../api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/config')>()),
@@ -47,9 +48,8 @@ beforeEach(() => {
   comparison = { ...noChanges, differences: [{ file: 'e2e/a.spec.ts', affectedTests: ['new'] }], changes: { added: [{ file: 'e2e/a.spec.ts', name: 'new', line: 31, endLine: 39 }], changed: [], removed: [] } }
   vi.mocked(configApi.getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? recorded : current)
   vi.mocked(featuresApi.getTestSourceComparison).mockImplementation(async () => comparison)
-  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 async function render(props: Parameters<typeof View>[0] = {}) { await act(async () => root.render(<InvalidationProvider><View {...props} /></InvalidationProvider>)) }
 // The tabs carry their full sentence as the accessible name — the visible tab is
 // a glyph and a ratio, so the failed and skipped counts live only here. Match on

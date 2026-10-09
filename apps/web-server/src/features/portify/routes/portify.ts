@@ -1,14 +1,17 @@
+import type { EditorChoice } from '../../../../../../shared/project-config'
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../logic/runtime/store'
 import { portifyCleanupListing } from '../logic/runtime/cleanup'
-import type { PortifyManifest, StartExternalPortifyInput, StartExternalPortifyResult, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
-import type { HealAgent } from '../../agent-sessions/logic/agent-binary'
+import type { StartExternalPortifyInput, StartExternalPortifyResult, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
+import type { PortifyManifest } from '../../../../../../shared/portify-index'
+import { isAgentKind, type HealAgent } from '../../agent-sessions/logic/agent-binary'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { overlayDir } from '../logic/runtime/overlay'
-import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
-import { notFound } from '../../../shared/http-error'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
+import { notFound, replyFailure } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
 // Reads go through the injected store; start/save/cancel delegate to the
@@ -72,8 +75,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       reply.code(400)
       return { error: 'feature is required' }
     }
-    const agent: HealAgent | undefined =
-      body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
+    const agent: HealAgent | undefined = isAgentKind(body.agent) ? body.agent : undefined
     const maxAttempts = Number.isInteger(body.maxAttempts) ? body.maxAttempts : undefined
     try {
       if (body.producer === 'external') {
@@ -88,8 +90,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       }
       return await deps.startPortify({ feature, agent, maxAttempts, models: body.models })
     } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 
@@ -129,7 +130,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { opened: true, paths: dirs, editor: usedEditor }
     } catch (err) {
       reply.code(200)
-      return { opened: false, paths: dirs, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, paths: dirs, error: errorMessage(err) }
     }
   })
 
@@ -151,8 +152,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return manifest
     } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 
@@ -160,8 +160,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
     try {
       return await deps.cancelPortify(req.params.workflowId)
     } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 
@@ -170,8 +169,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
     try {
       return await deps.removePortify(req.params.workflowId)
     } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 
@@ -190,8 +188,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       }
       return await deps.revisePortify(req.params.workflowId, feedback)
     } catch (err) {
-      reply.code((err as { statusCode?: number }).statusCode ?? 500)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 }

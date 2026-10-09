@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { parseFlightArgs, deriveFeatureName, findWorkspaceRoot } from './flight'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-ws-')
 
 describe('parseFlightArgs', () => {
   const dirs = new Set(['/repo/shop', '/repo/api'])
@@ -63,16 +65,15 @@ describe('deriveFeatureName', () => {
   })
   it('slugs the first repo basename otherwise', () => {
     expect(deriveFeatureName(['/x/My Shop_v2'])).toBe('my-shop-v2')
-    expect(deriveFeatureName(['/x/---'])).toBe('first-flight')
+    expect(deriveFeatureName(['/x/---'])).toBe('feature')
   })
 })
 
 describe('findWorkspaceRoot', () => {
   let tmpDir: string
   beforeEach(() => {
-    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-ws-')))
+    tmpDir = tempDir()
   })
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
   it('walks up to the nearest dir whose package.json depends on canary-lab', () => {
     const ws = path.join(tmpDir, 'lab')

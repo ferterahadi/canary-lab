@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 // Old persisted/external extractor entries predate `bodyLine`. The route still
 // accepts that compatible shape, so pin its fallback to the test call's line
@@ -26,28 +26,26 @@ vi.mock('../../../shared/ast-extractor', async (importActual) => {
 
 import { featuresRoutes } from './features'
 
+const tempDir = trackTempDirs('cl-features-legacy-')
+
 describe('GET /api/features/:name/tests legacy AST entries', () => {
   it('uses the test line when bodyLine is absent', async () => {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-features-legacy-')))
-    try {
-      const featuresDir = path.join(root, 'features')
-      const featureDir = path.join(featuresDir, 'legacy')
-      fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
-      fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports = { config: { name: 'legacy', description: 'd', envs: [], featureDir: __dirname } }`)
-      fs.writeFileSync(path.join(featureDir, 'e2e', 'legacy.spec.ts'), 'test("legacy test", async () => {})')
-      const app = Fastify()
-      await app.register(featuresRoutes, {
-        featuresDir,
-        playwrightListSpawner: () => ({ command: 'node', args: ['-e', 'process.exit(1)'], cwd: featureDir }),
-      })
+    const root = tempDir()
+    const featuresDir = path.join(root, 'features')
+    const featureDir = path.join(featuresDir, 'legacy')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports = { config: { name: 'legacy', description: 'd', envs: [], featureDir: __dirname } }`)
+    fs.writeFileSync(path.join(featureDir, 'e2e', 'legacy.spec.ts'), 'test("legacy test", async () => {})')
+    const app = Fastify()
+    await app.register(featuresRoutes, {
+      featuresDir,
+      playwrightListSpawner: () => ({ command: 'node', args: ['-e', 'process.exit(1)'], cwd: featureDir }),
+    })
 
-      const response = await app.inject({ method: 'GET', url: '/api/features/legacy/tests' })
-      const body = response.json() as Array<{ tests: Array<{ codeDisplay: { lineMap: Array<{ sourceLine: number }> } }> }>
-      expect(response.statusCode).toBe(200)
-      expect(body[0].tests[0].codeDisplay.lineMap[0].sourceLine).toBe(7)
-      await app.close()
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true })
-    }
+    const response = await app.inject({ method: 'GET', url: '/api/features/legacy/tests' })
+    const body = response.json() as Array<{ tests: Array<{ codeDisplay: { lineMap: Array<{ sourceLine: number }> } }> }>
+    expect(response.statusCode).toBe(200)
+    expect(body[0].tests[0].codeDisplay.lineMap[0].sourceLine).toBe(7)
+    await app.close()
   })
 })

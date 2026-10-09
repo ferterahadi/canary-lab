@@ -14,7 +14,6 @@ import { ApiError } from '@/shared/api/internal'
 import { multilineImportReview, testFileReview } from '@/shared/api/__fixtures__/test-review'
 import { DirtyReviewDialog } from './DirtyReviewDialog'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/features', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/features')>()),
   getTestFileReview: vi.fn(),

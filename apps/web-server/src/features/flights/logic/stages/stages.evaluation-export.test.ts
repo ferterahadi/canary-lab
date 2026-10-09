@@ -1,49 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
-
-// Transparent pass-through by default — every other test in this file spawns
-// real processes (fake npx/claude binaries on PATH). Only the one test below
-// that needs to control child-process event ordering deterministically
-// installs an override via setMockSpawn.
-const { getMockSpawn, setMockSpawn } = vi.hoisted(() => {
-  let impl: ((...args: unknown[]) => unknown) | null = null
-  return {
-    getMockSpawn: () => impl,
-    setMockSpawn: (fn: ((...args: unknown[]) => unknown) | null) => { impl = fn },
-  }
-})
-
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>()
-  return {
-    ...actual,
-    spawn: (...args: unknown[]) => {
-      const impl = getMockSpawn()
-      return impl ? impl(...args) : (actual.spawn as (...a: unknown[]) => unknown)(...args)
-    },
-  }
-})
 
 import { evaluationExportStage } from './evaluation-export'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import type { FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { readEvaluationExportTask, writeEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx, stageDirs, stageDeps, stageManifest } from './__fixtures__/stage-context'
+import { fakeFlightInject, type FlightInjectCall } from './__fixtures__/flight-inject'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -54,78 +28,19 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
-  featuresDir = path.join(tmpDir, 'features')
-  logsDir = path.join(tmpDir, 'logs')
-  repoDir = path.join(tmpDir, 'product-repo')
-  fs.mkdirSync(featuresDir, { recursive: true })
-  fs.mkdirSync(logsDir, { recursive: true })
-  fs.mkdirSync(repoDir, { recursive: true })
+  ({ tmpDir, featuresDir, logsDir, repoDir } = stageDirs(tempDir()))
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
-  return {
-    featuresDir,
-    logsDir,
-    projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
-    ...over,
-  }
+  return stageDeps({ featuresDir, logsDir, projectRoot: tmpDir }, over)
 }
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl-test',
-    feature: 'checkout',
-    repoPaths: [repoDir],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'similarity',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
+  return stageManifest(repoDir, over)
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir })
 }
 
 describe('evaluation-export stage', () => {
@@ -135,8 +50,8 @@ describe('evaluation-export stage', () => {
     manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, ...(links ? { links } : {}) })
 
   it('teardown aborts the linked export task without erasing it', async () => {
-    const calls: InjectCall[] = []
-    const inject = makeInject(() => ({ statusCode: 202, body: { aborted: true } }), calls)
+    const calls: FlightInjectCall[] = []
+    const inject = fakeFlightInject(() => ({ statusCode: 202, body: { aborted: true } }), calls)
     const m = manifest({ links: { runId: 'run-1', evaluationTaskId: 'task-9' } })
     await evaluationExportStage(deps({ inject })).teardown(ctxFor(m).ctx)!.stop('pause')
     // The abort route, not the DELETE: a paused flight must leave the record and
@@ -153,9 +68,9 @@ describe('evaluation-export stage', () => {
   })
 
   it('the chosen mode is passed through to the export engine', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-loc')
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-loc',
@@ -191,9 +106,9 @@ describe('evaluation-export stage', () => {
     ['codex', 'codex'],
     [undefined, 'claude'], // pre-R79 record with no stored agent → claude
   ] as const)('the report model plan rides the export payload keyed by the conducting agent (%s)', async (agent, expectKey) => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-m')
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-m',
@@ -235,7 +150,7 @@ describe('evaluation-export stage', () => {
 
   it('drives the export task and settles only when the archive exists on disk', async () => {
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-1')
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-1',
@@ -271,7 +186,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('fails when the export-start request is rejected', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) return { statusCode: 400, body: { error: 'bad mode' } }
       return undefined
     })
@@ -280,7 +195,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('fails when the started response carries no taskId', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) return { statusCode: 202, body: {} }
       return undefined
     })
@@ -289,7 +204,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('fails when the task settles without downloadReady', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-2',
@@ -312,7 +227,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('settles on a bare error field even when status is still "running"', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-4',
@@ -335,7 +250,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('falls back to "unknown" when a failed task carries neither error nor a useful status', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-5',
@@ -357,7 +272,7 @@ describe('evaluation-export stage', () => {
   })
 
   it('fails when the task reports ready but the archive is missing on disk', async () => {
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-3',
@@ -473,9 +388,9 @@ describe('evaluation-export — external producer', () => {
   })
 
   it('choosing raw under an external producer stays internal and deterministic', async () => {
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-raw')
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-raw',
@@ -552,9 +467,9 @@ describe('evaluation-export — external producer', () => {
 
   it('run-internally degrades to the internal localized export, not the abandoned external task', async () => {
     writeRunRecord()
-    const calls: InjectCall[] = []
+    const calls: FlightInjectCall[] = []
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-int')
-    const inject = makeInject((call) => {
+    const inject = fakeFlightInject((call) => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
         writeEvaluationExportTask(logsDir, {
           taskId: 'eval-task-int',

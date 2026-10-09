@@ -1,8 +1,11 @@
+import { buildRunPaths, runManifestPath, runSummaryPath } from './run-paths'
+import { failedNames } from './summary-names'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 import fs from 'fs'
 import path from 'path'
 import { DIAGNOSIS_JOURNAL_PATH, HEAL_INDEX_PATH, ROOT, getSummaryPath } from './paths'
 import { readJournalTail, readPreviousFailingSlugsFromJournal } from './heal-journal'
-import { EnrichedSummary, Manifest, healIndexPathForSummary, journalPathForSummary, manifestPathForSummary, readManifest, renderSliceLines, stripAnsi, truncateOneLine } from './log-enrichment'
+import { EnrichedSummary, Manifest, readManifest, renderSliceLines, stripAnsi, truncateOneLine } from './log-enrichment'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 
 export function normalizeErrorKey(raw: string): string {
@@ -46,26 +49,20 @@ export function readCrossRunFailureHistory(opts: {
   for (const name of priorDirs) {
     if (inspected >= FLAKE_HISTORY_RUN_LIMIT) break
     const dir = path.join(root, name)
-    const manifest = readManifest(path.join(dir, 'manifest.json'))
+    const manifest = readManifest(runManifestPath(dir))
     const feature = manifest.feature ?? manifest.featureName
     if (!feature || feature !== opts.feature) continue
-    let failedNames: Set<string>
-    try {
-      const summary = JSON.parse(
-        fs.readFileSync(path.join(dir, 'e2e-summary.json'), 'utf-8'),
-      ) as { failed?: Array<{ name?: unknown }> }
-      failedNames = new Set(
-        (Array.isArray(summary.failed) ? summary.failed : [])
-          .map((f) => (typeof f?.name === 'string' ? f.name : ''))
-          .filter((n) => n.length > 0),
-      )
-    } catch { continue }
+    // An unreadable summary (or a literal `null`) is skipped, not counted as a
+    // run where nothing failed.
+    const summary = readJsonOr<{ failed?: unknown } | null>(runSummaryPath(dir), null)
+    if (summary === null) continue
+    const failed = new Set(failedNames(summary))
     inspected += 1
     for (const slug of opts.slugs) {
       // `counts` was seeded from this same list, so every slug has an entry.
       const c = counts.get(slug)!
       c.total += 1
-      if (failedNames.has(slug)) c.failed += 1
+      if (failed.has(slug)) c.failed += 1
     }
   }
   return inspected === 0 ? null : counts
@@ -109,14 +106,15 @@ export function writeHealIndex(parsed?: {
     summary = parsed.summary
     manifest = parsed.manifest
     healIndexPath = parsed.healIndexPath ?? healIndexPath
-    journalPath = parsed.journalPath ?? (parsed.summaryPath ? journalPathForSummary(parsed.summaryPath) : journalPath)
+    journalPath = parsed.journalPath ?? (parsed.summaryPath ? buildRunPaths(path.dirname(parsed.summaryPath)).diagnosisJournalPath : journalPath)
   } else {
     const summaryPath = getSummaryPath()
     if (!fs.existsSync(summaryPath)) return
     summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
-    manifest = readManifest(manifestPathForSummary(summaryPath))
-    healIndexPath = healIndexPathForSummary(summaryPath)
-    journalPath = journalPathForSummary(summaryPath)
+    const paths = buildRunPaths(path.dirname(summaryPath))
+    manifest = readManifest(paths.manifestPath)
+    healIndexPath = paths.healIndexPath
+    journalPath = paths.diagnosisJournalPath
   }
 
   const failed = Array.isArray(summary.failed) ? summary.failed : []

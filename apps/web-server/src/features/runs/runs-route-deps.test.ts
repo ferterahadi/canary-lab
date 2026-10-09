@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -14,7 +13,11 @@ import { buildRunsRouteDeps, type RunsRouteDepsParts } from './runs-route-deps'
 import type { ServerContext } from '../../server-context'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
-import { git } from '../../../../../tools/test-helpers/git-repo'
+import { git, initGitRepo } from '../../../../../tools/test-helpers/git-repo'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-routedeps-')
 
 /**
  * The two mocked edges, and why they are the only two.
@@ -131,7 +134,7 @@ let savedMaxRuns: string | undefined
 const madeTmpPaths: string[] = []
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-routedeps-')))
+  tmpDir = tempDir()
   projectRoot = path.join(tmpDir, 'project')
   featuresDir = path.join(projectRoot, 'features')
   logsDir = path.join(projectRoot, 'logs')
@@ -159,7 +162,6 @@ afterEach(() => {
   if (savedMaxRuns === undefined) delete process.env.CANARY_MAX_CONCURRENT_RUNS
   else process.env.CANARY_MAX_CONCURRENT_RUNS = savedMaxRuns
   for (const p of madeTmpPaths.splice(0)) fs.rmSync(p, { recursive: true, force: true })
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
@@ -169,13 +171,7 @@ interface FeatureSpec { envs?: string[]; repos?: RepoSpec[] }
 
 /** Real on-disk feature config — `loadFeatures` requires and re-reads it. */
 function writeFeature(name: string, spec: FeatureSpec = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { ...${JSON.stringify({ name, description: 'd', ...spec })}, featureDir: __dirname } }`,
-  )
-  return dir
+  return writeFeatureFixture(featuresDir, name, spec)
 }
 
 function writeProjectConfig(healAgent: string): void {
@@ -235,12 +231,7 @@ function initRepo(dir: string): string {
   // copy it into the fresh worktree, which both inflates the untracked count
   // and pre-creates the directory `linkNodeModules` refuses to overwrite.
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n')
-  git(dir, 'init', '-q', '-b', 'main')
-  git(dir, 'config', 'user.email', 'test@example.com')
-  git(dir, 'config', 'user.name', 'Test')
-  git(dir, 'add', '-A')
-  git(dir, 'commit', '-q', '-m', 'init')
-  return dir
+  return initGitRepo(dir, { branch: 'main' })
 }
 
 /**
@@ -257,11 +248,11 @@ function initBehindClone(dir: string): { from: string; to: string } {
   git(tmpDir, 'clone', '-q', originDir, dir)
   git(dir, 'config', 'user.email', 'test@example.com')
   git(dir, 'config', 'user.name', 'Test')
-  const from = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  const from = git(dir, 'rev-parse', 'HEAD')
   fs.writeFileSync(path.join(seedDir, 'server.ts'), 'export const port = 5000\n')
   git(seedDir, 'commit', '-qam', 'bump port')
   git(seedDir, 'push', '-q', 'origin', 'main')
-  const to = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim()
+  const to = git(seedDir, 'rev-parse', 'HEAD')
   return { from, to }
 }
 
@@ -745,7 +736,7 @@ describe('startRun — upstream tracking', () => {
 
     // The checkout moved, and the worktree was cut from the NEW tip — the whole
     // point: without the pull the run would have booted `from`.
-    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim()).toBe(to)
+    expect(git(repoDir, 'rev-parse', 'HEAD')).toBe(to)
     const worktrees = lastOpts().worktrees as { localPath: string }[]
     expect(fs.readFileSync(path.join(worktrees[0].localPath, 'server.ts'), 'utf-8')).toBe('export const port = 5000\n')
     expect(lastOpts().repoBranchSnapshots).toEqual([{
@@ -774,7 +765,7 @@ describe('startRun — upstream tracking', () => {
     expect(err.message).toContain('Repo upstream update refused')
     expect(err.statusCode).toBe(409)
     expect(err.repoUpdate).toEqual([expect.objectContaining({ name: 'app', path: repoDir, branch: 'main', reason: 'dirty' })])
-    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim()).toBe(from)
+    expect(git(repoDir, 'rev-parse', 'HEAD')).toBe(from)
     expect(fs.readFileSync(path.join(repoDir, 'server.ts'), 'utf-8')).toBe('export const port = 4000\n')
     expect(h.runStore.list()).toEqual([])
     expect(orchHarness.options).toEqual([])

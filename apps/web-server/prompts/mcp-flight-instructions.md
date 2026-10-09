@@ -35,18 +35,29 @@ Report completion ends the foreground user journey. As soon as get_flight return
 
 ## User input through MCP 2.0
 
-Let the owning MCP command request missing input with SDK 2.0 elicitation
-(`input_required`). The client collects the response and retries the command.
-Do not answer a user form yourself or ask the same question in chat first.
-Existing user instructions and autopilot choices still apply without another ask.
-On `needs-input`, leave work pending after decline/cancel, stale input, or an
-unfinished UI action; never retry or repeat the question automatically. Chat is
-only the fallback when elicitation is unavailable. Never collect passwords, API
-keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
-Setup and reconnection questions still use chat while MCP is unavailable.
+Use the native Canary connector in the requesting chat so SDK 2.0 elicitation
+(`input_required`) reaches the human there. Do not substitute a shell MCP client,
+answer a form yourself, or recreate the question in chat. Existing explicit
+instructions and autopilot choices still apply without another ask.
+
+Form decisions have one shared record. The native form links to the same approval
+in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
+the ID; repeat on `still_waiting`. The human answers once in either surface.
+A browser answer resolves the server decision; some clients keep their native
+form visible until the human dismisses it. Dismissal then returns the stored
+result. Client decline/cancel alone does not represent a human decision.
+
+Without an `approvalId`, leave `needs-input` pending after decline/cancel, stale
+input, or an unfinished UI action; do not automatically retry or repeat the
+question. Setup/reconnection can use chat while MCP is unavailable. Never collect
+passwords, API keys, or access tokens in chat or form elicitation; use the returned
+Canary UI URL for secret entry.
 
 For an unanswered human checkpoint or the docs-source question, call respond_flight_checkpoint(flightId) with no choice. Other external-work checkpoints are agent work, not user questions. Missing environment secrets use URL-mode input in Canary. For attachments use document_source:"upload".
 
 Document discovery: search the frozen intent's repositories, existing feature docs, and explicit user references before asking. Return document_resolution on respond_flight_checkpoint without choice: {status:"resolved",searched,sources:[{path,sha256,reason}]} automatically uses clearly relevant, compatible sources. Missing material uses {status:"missing",searched,reason}; ambiguity/conflicts use that status, searched, question, candidates:[{label,sources}] with 1–5 candidates for ambiguity, or 2–5 for a conflict. Sources use absolute paths and SHA-256 of the bytes read. Preserve prior choices; use only the selected documents and the existing docs handoff. When the user chooses to supply documents, follow document_source:"form"|"upload". Never start a separate coverage job. Never invent requirements or infer them from code/tests without authorization; infer-from-diff is an explicit authorized path. A confidence percentage is not source evidence.
 
 Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.
+
+Flight attention is a server-owned assessment separate from execution history. Read `attention` from `get_flight` and `flightAttention` from feature-change replies. `resolved` means current evidence satisfies the earlier blocked stage: preserve its historical error, describe any remaining work, and do not resume automatically. `unavailable` means current evidence could not be verified; re-read before recommending recovery. `actionable` names the current reason and affected stage. A completed mapping job or passing run alone does not prove the flight coverage target was met.

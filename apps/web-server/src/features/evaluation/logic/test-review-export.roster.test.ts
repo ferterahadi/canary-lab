@@ -1,6 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import {
@@ -15,15 +14,14 @@ import { buildTestReviewPacket, statusBucket, testStatusCounts } from './test-re
 import { sourceKey, specFileOf } from './test-review/ast'
 import { NOT_RUN_STATUS } from './test-review/types'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../shared/run-detail'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-')))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 // The report's central promise: it lists every test the feature DECLARED, and

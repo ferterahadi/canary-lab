@@ -1,3 +1,4 @@
+import { isExternallyDriven } from '../../../../../../shared/flights/ownership'
 // Who is allowed to decide for an externally driven flight.
 //
 // `stageProducer: 'external'` (the default for any flight started over MCP)
@@ -26,18 +27,6 @@ import type { FlightManifest } from '../../../../../../shared/flights/types'
  *  and this is a local single-user server, so the header is an origin TAG
  *  rather than an authentication token. */
 export const MCP_ORIGIN_HEADER = 'x-canary-origin'
-
-/** A flight only reserves its decisions while there is still a driving client
- *  to make them. Once it settles, the agent is gone and the UI owns the record
- *  again — Fly again, Continue from a step, delete. */
-function isLive(status: FlightManifest['status']): boolean {
-  return status === 'running' || status === 'waiting-for-approval' || status === 'paused'
-}
-
-/** True when this flight's decisions belong to the MCP client that started it. */
-export function isExternallyDriven(manifest: FlightManifest): boolean {
-  return manifest.opts.stageProducer === 'external' && isLive(manifest.status)
-}
 
 /** Guard for the flight lifecycle routes that DECIDE something (respond, pause,
  *  resume, autopilot, redo). Returns a 409 body when the caller is the web UI

@@ -25,12 +25,12 @@
 // the list outliving its reason (same trick as the stale PUBLIC check in
 // check-feature-boundaries.mjs).
 
-import { readFileSync, readdirSync, statSync, lstatSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, lstatSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { isFixturePath, personalFixturePathLines } from './fixture-policy.mjs'
+import { REPO, walk } from './lib/fs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
 const ROOTS = ['apps', 'shared', 'tools']
 
 // Coverage-gate floor. Percentage alone does not prove scope: a file lifted out
@@ -64,7 +64,7 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   because it shipped as one 2740-line `tools.ts`; the tool-groups split made it
 //   testable. Measured 389 files at 100/100/100/100 over 7658 tests. The floor
 //   keeps a small margin because the count only includes files a test loaded.
-const MIN_GATED_FILES = 385
+const MIN_GATED_FILES = 387
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']
@@ -78,6 +78,10 @@ const LOWERCASE_TSX_OK = new Map([
   ['config-doc-cache.tsx', 'the config dialog document cache: a provider plus its reader hook'],
   ['stage-meta.tsx', 'stage metadata tables'],
   ['external-client-branding.tsx', 'per-client branding lookups'],
+  ['workspace-actions.tsx', 'the workspace actions context: a provider plus its reader hook'],
+  ['work-state.tsx', 'the workspace work-state context: a provider plus its reader hook'],
+  ['flight-actions.tsx', 'the open flight\'s drill-through context: a provider plus its reader hook'],
+  ['workspace-providers.tsx', 'test scaffolding that mounts the workspace contexts'],
 ])
 
 const BASELINE = {
@@ -100,9 +104,17 @@ const BASELINE = {
   ]),
   // A published `package.json` export is the consumer contract, so its entry
   // file may forward a symbol whose real home is elsewhere. Nothing inside the
-  // repo imports through it.
+  // repo imports through it. The type-only compatibility entries below keep
+  // existing import locations during the explicitly scoped contract extraction;
+  // their shared modules remain the sole declarations.
   'no-re-export': new Map([
     ['shared/e2e-runner/log-marker-fixture.ts', 'entry for `canary-lab/feature-support/log-marker-fixture`; installed suites import resolveRunRepoPath and the Playwright expect/Page types from it'],
+    ['apps/web/src/shared/api/runs.ts', 'preserve existing browser PR type imports while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/shared/gh-cli.ts', 'preserve the GhStatus import location while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/pr/pr-preflight.ts', 'preserve existing preflight type imports while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/pr/propose-fixes.ts', 'preserve the ProposeResult type alias while shared/run-pr owns the transport contract'],
+    ['apps/web-server/src/features/runs/logic/runtime/summary-types.ts', 'preserve reporter type imports while shared/playback owns the persisted event contract'],
+    ['shared/run-detail.ts', 'preserve reader type imports while shared/playback owns the persisted event contract'],
   ]),
 }
 
@@ -115,25 +127,20 @@ function check(rule, rel, message, fix) {
   failures.push({ file: rel, message, fix })
 }
 
-function walk(dir) {
-  const out = []
-  for (const name of readdirSync(dir)) {
-    const p = path.join(dir, name)
-    const rel = path.relative(REPO, p).split(path.sep).join('/')
-    if (!isFixturePath(rel) && (name === 'node_modules' || name === 'dist' || name === 'coverage')) continue
-    if (isFixturePath(rel) && lstatSync(p).isSymbolicLink()) {
-      check('fixture-portability', rel, 'fixture is a symlink', 'keep self-contained, sanitized data in the repository; keep original recordings in the workspace')
-      continue
-    }
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else out.push(p)
+// node_modules/dist/coverage are skipped outside fixtures only; a fixture
+// symlink is reported and never followed.
+function keepEntry(p, name) {
+  const rel = path.relative(REPO, p).split(path.sep).join('/')
+  if (!isFixturePath(rel) && (name === 'node_modules' || name === 'dist' || name === 'coverage')) return false
+  if (isFixturePath(rel) && lstatSync(p).isSymbolicLink()) {
+    check('fixture-portability', rel, 'fixture is a symlink', 'keep self-contained, sanitized data in the repository; keep original recordings in the workspace')
+    return false
   }
-  return out
+  return true
 }
 
 const files = ROOTS.filter((r) => existsSync(path.join(REPO, r)))
-  .flatMap((r) => walk(path.join(REPO, r)))
-  .map((p) => path.relative(REPO, p).split(path.sep).join('/'))
+  .flatMap((r) => walk(path.join(REPO, r), { onEntry: keepEntry, relativeTo: REPO }))
 
 const SOURCE = /\.(ts|tsx|mjs)$/
 const TEST = /\.test\.tsx?$/

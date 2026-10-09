@@ -3,10 +3,10 @@
 // flight, and a TCP probe that never comes up.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { RunContext } from './run-context'
 import type { ServiceSpec } from './run-orchestrator-types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const h = vi.hoisted(() => ({ recordLifecycle: vi.fn() }))
 vi.mock('./run-manifest-writer', async (importOriginal) => ({
@@ -14,19 +14,19 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
   recordLifecycle: h.recordLifecycle,
 }))
 
-const { ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
+const { attemptHttp, ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
+const tempDir = trackTempDirs('cl-svc-boot-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-svc-boot-')))
+  tmpDir = tempDir()
   vi.clearAllMocks()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function svcSpec(over: Partial<ServiceSpec> = {}): ServiceSpec {
@@ -47,6 +47,13 @@ function ctxFor(state: Partial<RunContext> = {}) {
 }
 
 describe('waitForHealth', () => {
+  it('forwards the HTTP attempt to the run checker without changing its result', async () => {
+    const healthCheck = vi.fn(async () => false)
+    const { ctx } = ctxFor({ healthCheck })
+    await expect(attemptHttp(ctx, { url: 'http://example.test/health', timeoutMs: 75 })).resolves.toBe(false)
+    expect(healthCheck).toHaveBeenCalledExactlyOnceWith('http://example.test/health', 75)
+  })
+
   it('returns immediately when the feature declares no services', async () => {
     const { ctx } = ctxFor()
     // A feature with no `services:` entry — nothing to probe, so nothing to
@@ -60,6 +67,15 @@ describe('waitForHealth', () => {
 })
 
 describe('dependency preflight', () => {
+  it('does not capture a baseline or spawn services after cancellation', async () => {
+    const afterPreflight = vi.fn(async () => {})
+    const ptyFactory = vi.fn()
+    const { ctx } = ctxFor({ stopped: true, services: [svcSpec()], ptyFactory })
+    await expect(ensureServicesRunning(ctx, afterPreflight)).resolves.toEqual([])
+    expect(afterPreflight).not.toHaveBeenCalled()
+    expect(ptyFactory).not.toHaveBeenCalled()
+  })
+
   it('rechecks and replaces evidence even when rerun keeps every service process warm', async () => {
     fs.mkdirSync(path.join(tmpDir, 'node_modules'))
     fs.writeFileSync(path.join(tmpDir, 'dependencies-ready'), 'ready')
@@ -270,7 +286,7 @@ describe('pollUntilReady', () => {
   })
 
   it('files a passing probe under the heal phase when a cycle is in flight', async () => {
-    const { ctx } = ctxFor({ status: 'healing' })
+    const { ctx } = ctxFor({ status: 'healing', servicePtys: new Map([['api', {} as never]]) })
     const svc = svcSpec()
 
     await pollUntilReady(ctx, svc, 'tcp', async () => true)
@@ -284,7 +300,7 @@ describe('pollUntilReady', () => {
   })
 
   it('files the same pass under service boot on a normal run', async () => {
-    const { ctx } = ctxFor({ status: 'running' })
+    const { ctx } = ctxFor({ status: 'running', servicePtys: new Map([['api', {} as never]]) })
 
     await pollUntilReady(ctx, svcSpec(), 'tcp', async () => true)
 
@@ -478,7 +494,7 @@ describe('confirmed service failures', () => {
   })
 
   it('stops other readiness polls when a ready service fails', async () => {
-    const { ctx } = ctxFor()
+    const { ctx } = ctxFor({ servicePtys: new Map([['web', {} as never]]) })
     const svc = svcSpec({ name: 'web', safeName: 'web', healthProbe: { tcp: { port: 5999, deadlineMs: 100 } } })
     await pollUntilReady(ctx, svc, 'tcp', async () => {
       ctx.serviceFailure = {

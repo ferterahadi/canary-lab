@@ -2,8 +2,9 @@ import fs from 'fs'
 import path from 'path'
 import { HEAL_MODELS, effortArgs } from '../../../agent-sessions/logic/agent-models'
 import type { StageModelChoice } from '../../../../../../../shared/agent-models'
-import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
-import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
+import { resolveAgentBinary, isAgentCliAvailable, isAgentKind, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
+import { internalAgentInvocationShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 // Heal-agent command builders for the web-server orchestrator. The orchestrator
 // runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter
@@ -54,8 +55,7 @@ export function buildClaudeMcpConfigArg(outputDir: string, configFilePath: strin
       },
     },
   }
-  fs.mkdirSync(path.dirname(configFilePath), { recursive: true })
-  fs.writeFileSync(configFilePath, JSON.stringify(cfg, null, 2))
+  atomicWriteJson(configFilePath, cfg)
   return `--mcp-config ${JSON.stringify(configFilePath)}`
 }
 
@@ -231,7 +231,10 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   const effortFlag = effortArgs(agent, args.models?.effort ?? null)
     .map((arg) => ` ${JSON.stringify(arg)}`)
     .join('')
-  const contextFlags = internalAgentContextShellFlags(agent)
+  // On claude the isolation file stands in for the inline unattended policy:
+  // `writeHealAgentIsolationSettings` folds that policy in, and the command
+  // carries exactly one `--settings` because a second would replace the first.
+  const contextFlags = internalAgentInvocationShellFlags(agent, { claudeSettingsFile: args.isolationSettingsFile })
 
   // Both CLIs spell it `--add-dir`. Claude also gets the suite as read-only
   // context; its isolation settings deny edits and sandbox writes there.
@@ -245,9 +248,7 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     .join('')
 
   if (agent === 'claude') {
-    const isolation = args.isolationSettingsFile
-      ? ` --setting-sources "" --settings ${JSON.stringify(args.isolationSettingsFile)}`
-      : ''
+    const isolation = args.isolationSettingsFile ? ' --setting-sources ""' : ''
     const sid = args.sessionId
       ? (args.resume
         ? ` --resume ${JSON.stringify(args.sessionId)}`
@@ -297,7 +298,7 @@ export function pickAvailableHealAgent(
   envOverride: string | undefined = process.env.CANARY_LAB_HEAL_AGENT,
   deps: AgentResolveDeps = {},
 ): HealAgent | null {
-  if (envOverride === 'claude' || envOverride === 'codex') {
+  if (isAgentKind(envOverride)) {
     return isAgentCliAvailable(envOverride, deps) ? envOverride : null
   }
   if (envOverride !== undefined && envOverride !== '') {

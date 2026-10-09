@@ -74,3 +74,24 @@ test('merchant can connect a Meta template', async ({ page }) => {
 Read the env from the envset's own values (a slot in `envsets/<env>/…`), not from the manifest.
 
 Repo checkouts: get_feature_repo_status(feature, repo) reports the checkout's branch plus where the pinned branch stands against its upstream (upstreamSha, behindUpstream, aheadUpstream; fetch:true by default). When it is behind, update_feature_repo_branch(feature, repo, confirm:true) fast-forwards it so the next run boots the latest commit; it refuses and changes nothing when the checkout is dirty, detached, on another branch or diverged — report the reason, never discard the user's work. checkout_feature_repo_branch switches branches. A repo declared track:'upstream' in feature.config.cjs is fast-forwarded automatically at every run start.
+
+## Shared form approvals
+
+Use the native Canary connector in the requesting chat so SDK 2.0 elicitation
+(`input_required`) reaches the human there. Do not substitute a shell MCP client,
+answer a form yourself, or recreate the question in chat. Existing explicit
+instructions and autopilot choices still apply without another ask.
+
+Form decisions have one shared record. The native form links to the same approval
+in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
+the ID; repeat on `still_waiting`. The human answers once in either surface.
+A browser answer resolves the server decision; some clients keep their native
+form visible until the human dismisses it. Dismissal then returns the stored
+result. Client decline/cancel alone does not represent a human decision.
+
+Without an `approvalId`, leave `needs-input` pending after decline/cancel, stale
+input, or an unfinished UI action; do not automatically retry or repeat the
+question. Setup/reconnection can use chat while MCP is unavailable. Never collect
+passwords, API keys, or access tokens in chat or form elicitation; use the returned
+Canary UI URL for secret entry.

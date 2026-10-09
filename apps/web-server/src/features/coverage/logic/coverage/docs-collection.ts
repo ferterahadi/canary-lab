@@ -1,4 +1,4 @@
-import fs from 'fs'
+import { docsDirFor, documentCandidates, inspectDocumentFile } from './document-files'
 import path from 'path'
 import crypto from 'crypto'
 import { documentHash, readDocumentSelection } from './document-resolution'
@@ -7,11 +7,6 @@ import { documentHash, readDocumentSelection } from './document-resolution'
 // stable hash over it. The hash is what drift detection compares against the
 // summary's stored `docsHash`: when the source docs change, the PRD summary is
 // stale and a regenerate is offered.
-
-const DOCS_DIRNAME = 'docs'
-/** Generated PRD artifacts live in docs/ too; they must NOT feed the hash or the
- *  summary input, or regeneration would chase its own tail. */
-export const GENERATED_DOC_PREFIX = '_prd-'
 
 export interface DocEntry {
   /** Path relative to docs/, e.g. "spec.md". */
@@ -26,14 +21,6 @@ export interface DocsCollection {
   docsHash: string
 }
 
-export function docsDirFor(featureDir: string): string {
-  return path.join(featureDir, DOCS_DIRNAME)
-}
-
-export function isGeneratedDoc(relPath: string): boolean {
-  return path.basename(relPath).startsWith(GENERATED_DOC_PREFIX)
-}
-
 /**
  * Read all source docs (`*.md`/`*.markdown`/`*.txt`, excluding generated
  * `_prd-*`) under features/<feature>/docs/. Missing docs dir → empty
@@ -44,18 +31,9 @@ export function isGeneratedDoc(relPath: string): boolean {
 export function readDocsCollection(featureDir: string, options?: { includeExcluded: boolean }): DocsCollection {
   const docsDir = docsDirFor(featureDir)
   const entries: DocEntry[] = []
-  if (fs.existsSync(docsDir)) {
-    for (const name of fs.readdirSync(docsDir).sort()) {
-      if (!/\.(md|markdown|txt)$/i.test(name)) continue
-      if (isGeneratedDoc(name)) continue
-      const full = path.join(docsDir, name)
-      try {
-        if (!fs.statSync(full).isFile()) continue
-        entries.push({ relPath: name, content: fs.readFileSync(full, 'utf-8') })
-      } catch {
-        /* dangling symlink — skip, surfaced as broken by the docs listing */
-      }
-    }
+  for (const name of documentCandidates(docsDir, { includeGenerated: false, order: 'sorted' })) {
+    const result = inspectDocumentFile(path.join(docsDir, name), true)
+    if (result.kind === 'file') entries.push({ relPath: name, content: result.content.toString('utf-8') })
   }
   // Keep rejected originals available in the Docs rail, but do not feed them
   // back into the summary after a source choice. An edited original is new

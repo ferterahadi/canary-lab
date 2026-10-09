@@ -1,3 +1,4 @@
+import { buildRunPaths } from './run-paths'
 import { serviceLogsFromManifest } from '../../../../../../../shared/lib/service-log-paths'
 import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 import fs from 'fs'
@@ -6,6 +7,8 @@ import { MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
 import { compressLogByTemplate } from './log-template'
 import { writeHealIndex } from './heal-index'
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
+import { formatSize } from '../../../../../../../shared/lib/format-units'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -297,26 +300,6 @@ interface ManifestService {
   logPath?: string
 }
 
-function summaryPathToRunDir(summaryPath: string): string {
-  return path.dirname(summaryPath)
-}
-
-export function manifestPathForSummary(summaryPath: string): string {
-  return path.join(summaryPathToRunDir(summaryPath), 'manifest.json')
-}
-
-function failedDirForSummary(summaryPath: string): string {
-  return path.join(summaryPathToRunDir(summaryPath), 'failed')
-}
-
-export function healIndexPathForSummary(summaryPath: string): string {
-  return path.join(summaryPathToRunDir(summaryPath), 'heal-index.md')
-}
-
-export function journalPathForSummary(summaryPath: string): string {
-  return path.join(summaryPathToRunDir(summaryPath), 'diagnosis-journal.md')
-}
-
 // Rewrite e2e-summary.json so each failed[] entry carries logFiles (paths)
 // instead of logs (full embedded snippets). Keeps the summary small enough to
 // Read in one call — previously it ballooned past Claude's 256KB Read cap.
@@ -325,7 +308,8 @@ export function journalPathForSummary(summaryPath: string): string {
 // same tick can reuse them instead of re-reading + re-parsing the same files.
 export function enrichSummaryWithLogs(): { manifest: Manifest; summary: EnrichedSummary; summaryPath: string; healIndexPath: string; journalPath: string } | null {
   const summaryPath = getSummaryPath()
-  const manifestPath = manifestPathForSummary(summaryPath)
+  const paths = buildRunPaths(path.dirname(summaryPath))
+  const manifestPath = paths.manifestPath
   if (!fs.existsSync(summaryPath) || !fs.existsSync(manifestPath)) return null
 
   const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as EnrichedSummary
@@ -336,8 +320,8 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
       manifest,
       summary,
       summaryPath,
-      healIndexPath: healIndexPathForSummary(summaryPath),
-      journalPath: journalPathForSummary(summaryPath),
+      healIndexPath: paths.healIndexPath,
+      journalPath: paths.diagnosisJournalPath,
     }
   }
 
@@ -345,7 +329,7 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
     .map((e) => (typeof e === 'string' ? e : e.name))
     .filter((n): n is string => typeof n === 'string' && n.length > 0)
   const recordsBySlug = extractAllSliceRecords(slugs, serviceLogsFromManifest(manifest))
-  const failedDir = failedDirForSummary(summaryPath)
+  const failedDir = paths.failedDir
 
   summary.failed = summary.failed.map(
     (entry: string | FailedEntry): FailedEntry => {
@@ -373,8 +357,8 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
     manifest,
     summary,
     summaryPath,
-    healIndexPath: healIndexPathForSummary(summaryPath),
-    journalPath: journalPathForSummary(summaryPath),
+    healIndexPath: paths.healIndexPath,
+    journalPath: paths.diagnosisJournalPath,
   }
 }
 
@@ -385,12 +369,6 @@ export function truncateOneLine(s: string, max = 200): string {
 
 // Human-readable byte size for the heal-index, so the agent can judge at a
 // glance whether a log fits in one Read or needs grepping.
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
 // Render the slice bullet(s) for one failed entry. Prefers the rich sliceMeta
 // (size + source-log path + cap state) so the agent knows up-front whether the
 // slice is complete; falls back to the bare path list for callers/summaries
@@ -399,8 +377,8 @@ export function renderSliceLines(entry: FailedEntry): string[] {
   if (entry.sliceMeta && entry.sliceMeta.length > 0) {
     return entry.sliceMeta.map((m) =>
       m.capped
-        ? `  - slice: ${m.path} (${fmtBytes(m.bytes)}, capped from a ${fmtBytes(m.windowBytes)} window) — middle elided; full service log ${m.fullLog} (${fmtBytes(m.fullLogBytes)}), grep \`<${entry.name}>\`…\`</${entry.name}>\` if head+tail isn't enough`
-        : `  - slice: ${m.path} (${fmtBytes(m.bytes)})`,
+        ? `  - slice: ${m.path} (${formatSize(m.bytes)}, capped from a ${formatSize(m.windowBytes)} window) — middle elided; full service log ${m.fullLog} (${formatSize(m.fullLogBytes)}), grep \`<${entry.name}>\`…\`</${entry.name}>\` if head+tail isn't enough`
+        : `  - slice: ${m.path} (${formatSize(m.bytes)})`,
     )
   }
   if (entry.logFiles && entry.logFiles.length > 0) {
@@ -425,11 +403,7 @@ export interface Manifest {
 }
 
 export function readManifest(file: string = MANIFEST_PATH): Manifest {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Manifest
-  } catch {
-    return {}
-  }
+  return readJsonOr<Manifest>(file, {})
 }
 
 // Matches terminal control sequences: CSI (colors `m`, cursor moves `H`,

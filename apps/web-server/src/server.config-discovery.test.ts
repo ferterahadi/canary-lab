@@ -1,17 +1,18 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { decode } from '@toon-format/toon'
 import { createServer } from './server'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-config-discovery-')
 
 const cleanups: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
 it('keeps REST config reads and connected-agent discovery consistent as candidates change', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canary-config-discovery-')))
-  cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }))
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'shop')
   fs.mkdirSync(featureDir, { recursive: true })

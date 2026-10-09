@@ -239,3 +239,31 @@ describe('shared coverage snapshots', () => {
     expect(monitor.read('shop').freshness.latestRunFailed).toBe(true)
   })
 })
+
+
+it('delivers nested test changes to a waiting agent without an explicit refresh', async () => {
+  monitor.start()
+  let current = monitor.read('shop')
+  const nested = path.join(fixture.featureDir, 'e2e/phase/case.test.js')
+  const renamed = path.join(fixture.featureDir, 'e2e/phase/renamed.test.js')
+  const changes = [
+    () => { fs.mkdirSync(path.dirname(nested), { recursive: true }); fs.writeFileSync(nested, `test('nested', async () => { expect(true).toBe(true) })`) },
+    () => fs.renameSync(nested, renamed),
+    () => fs.writeFileSync(renamed, `test('nested', async () => { expect(true).toBe(false) })`),
+    () => fs.unlinkSync(renamed),
+  ]
+  for (const [index, change] of changes.entries()) {
+    const pending = monitor.wait('shop', current.freshness.revision, 8000)
+    change()
+    const delivered = await pending
+    expect(delivered.changed).toBe(true)
+    expect(delivered.change.measurement?.tests).toBe(index === 3 ? 1 : 2)
+    expect(delivered.change.freshness.revision).not.toBe(current.freshness.revision)
+    current = delivered.change
+  }
+  // A reconnected client brings its old cursor; the authoritative snapshot
+  // catches it up even when it missed every push while disconnected.
+  const recovered = await monitor.wait('shop', 'disconnected-old-cursor', 0)
+  expect(recovered.changed).toBe(true)
+  expect(recovered.change.freshness.revision).toBe(current.freshness.revision)
+}, 20000)

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import type { ConnectAgentSessionOptions } from '@/shared/api/agent-session-socket'
 import { AgentSessionView, type AgentSessionSource } from './AgentSessionView'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   getDiscoveryRepairAgentSession: vi.fn(), getAgentSession: vi.fn(),
@@ -41,7 +42,6 @@ vi.mock('@/shared/api/flights', async (importOriginal) => ({
   getFlightPlanAgentSession: mocks.getFlightPlanAgentSession,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: socket.connect }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const cases: [AgentSessionSource, keyof typeof mocks, string[]][] = [
   [{ kind: 'discovery-repair', taskId: 'repair' }, 'getDiscoveryRepairAgentSession', ['repair']],
@@ -56,14 +56,11 @@ const cases: [AgentSessionSource, keyof typeof mocks, string[]][] = [
 const event = { kind: 'assistant-message' as const, timestamp: '2026-01-01T00:00:00.000Z', text: 'Snapshot event' }
 let root: Root
 let container: HTMLDivElement
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   for (const reader of Object.values(mocks)) reader.mockReset().mockResolvedValue({ agent: 'claude', sessionId: 'session', events: [event] })
   socket.connect.mockReset().mockImplementation(() => ({ close: vi.fn() }))
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
 
 it.each(cases)('routes %j to its REST reader and passes the same source to the socket', async (identity, reader, args) => {
   const source = { ...identity, live: true }

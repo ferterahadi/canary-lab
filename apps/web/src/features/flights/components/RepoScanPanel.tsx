@@ -3,7 +3,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN } from './stage-meta'
-import { distinctRepoPaths } from './stage-metrics'
+import { distinctRepoPaths } from '@shared/lib/repository-paths'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
 // lens onto the SAME data its full surface owns (feature.config.cjs via the

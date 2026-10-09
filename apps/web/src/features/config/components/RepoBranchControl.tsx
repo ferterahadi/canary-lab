@@ -5,6 +5,8 @@ import { BranchSuggestInput, branchSuggestions } from './BranchSuggestInput'
 import { RepoSlice, deriveRepoName } from './repo-slice'
 import { useRepoGitStatus } from '../state/use-repo-git-status'
 import { RepoGitStatusNotice } from './RepoGitStatusNotice'
+import { displayError } from '@/shared/api/error-message'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 export function BranchControl({
   feature,
@@ -23,7 +25,6 @@ export function BranchControl({
   activeRun: boolean
   onChange: (next: RepoSlice) => void
 }) {
-  const [switchHovered, setSwitchHovered] = useState(false)
   const repoName = repoLookupName || repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
   const target = repo.branch ?? ''
   const enabled = Boolean(repoName && localPathStr && !isExpr)
@@ -49,7 +50,7 @@ export function BranchControl({
     try {
       await workspaceApi.checkoutRepoBranch(feature, repoName, target.trim())
     } catch (e) {
-      checkoutError = e instanceof Error ? e.message : 'Checkout failed'
+      checkoutError = displayError(e, 'Checkout failed')
     } finally {
       if (request === generation.current.version) {
         setAction({ identity, switching: false, error: checkoutError })
@@ -66,7 +67,7 @@ export function BranchControl({
     && !switching
     && status.currentBranch !== target.trim()
 
-  // Explain *why* Switch is disabled, surfaced as a native hover tooltip.
+  // Explain *why* Switch is disabled, surfaced as a hover tooltip.
   const switchDisabledReason: string | undefined = (() => {
     if (canSwitch || switching) return undefined
     if (!enabled) return 'Set a folder for this service first'
@@ -99,39 +100,17 @@ export function BranchControl({
               fontFamily: 'var(--font-mono)',
             }}
           />
-          {/* Custom tooltip driven by React state — Tailwind JIT didn't pick up
-              group-hover utilities, and native title tooltips don't fire on
-              disabled buttons. State-driven render is bulletproof. */}
-          <span
-            className="relative shrink-0 inline-flex"
-            style={{ cursor: switchDisabledReason ? 'help' : 'default' }}
-            onMouseEnter={() => setSwitchHovered(true)}
-            onMouseLeave={() => setSwitchHovered(false)}
-          >
+          <DisabledControlTooltip wrapperClassName="shrink-0 inline-flex">
             <button
               type="button"
               disabled={!canSwitch}
+              title={switchDisabledReason}
               onClick={doCheckout}
-              className="cl-button rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
-              style={{
-                pointerEvents: canSwitch || switching ? undefined : 'none',
-              }}
+              className="cl-button shrink-0 rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
             >
               {switching ? 'Switching…' : 'Switch'}
             </button>
-            {switchHovered && switchDisabledReason && (
-              <span
-                role="tooltip"
-                className="cl-popover pointer-events-none absolute left-1/2 bottom-[calc(100%+6px)] -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
-                style={{
-                  color: 'var(--text-primary)',
-                  zIndex: 60,
-                }}
-              >
-                {switchDisabledReason}
-              </span>
-            )}
-          </span>
+          </DisabledControlTooltip>
           <button
             type="button"
             onClick={loadStatus}

@@ -1,18 +1,20 @@
 import { discoveryFailureOutput } from './playwright-list'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   listPlaywrightTests,
   clearPlaywrightListCache,
   type PlaywrightListSpawner,
 } from './playwright-list'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pwl-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pwl-')))
+  tmpDir = tempDir()
   clearPlaywrightListCache()
 })
 
@@ -303,4 +305,53 @@ describe('discoveryFailureOutput', () => {
     for (const stdout of ['compile failed', 'null', '{"errors":[{}]}']) expect(discoveryFailureOutput(stdout, 'stderr')).toBe(`stderr\n${stdout}`)
     expect(discoveryFailureOutput('x'.repeat(10000), '')).toHaveLength(8000)
   })
+})
+
+
+it('invalidates cached discovery on nested same-size edits, additions, renames, and removals', async () => {
+  const dir = path.join(tmpDir, 'e2e/phase')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'case.test.js')
+  fs.writeFileSync(file, '// a')
+  const stat = fs.statSync(file)
+  let calls = 0
+  const spawner: PlaywrightListSpawner = (cwd) => {
+    calls++
+    return jsonSpawner({ config: { rootDir: cwd }, suites: [] })(cwd)
+  }
+  await listPlaywrightTests(tmpDir, { spawner })
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(1)
+  fs.writeFileSync(file, '// b')
+  fs.utimesSync(file, stat.atime, stat.mtime)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(2)
+  const added = path.join(dir, 'added.spec.mts')
+  fs.writeFileSync(added, '// extra')
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(3)
+  const renamed = path.join(dir, 'renamed.spec.mts')
+  fs.renameSync(added, renamed)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(4)
+  fs.unlinkSync(renamed)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(calls).toBe(5)
+})
+
+it('does not cache discovery when spec contents change during the child process', async () => {
+  const file = path.join(tmpDir, 'e2e', 'changing.spec.ts')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, '// before')
+  const payload = { suites: [{ file, specs: [{ title: 'absolute source', file, line: 1 }] }] }
+  const spawner = vi.fn((cwd: string) => ({
+    command: process.execPath,
+    args: ['-e', `require('fs').writeFileSync(${JSON.stringify(file)}, '// after'); process.stdout.write(${JSON.stringify(JSON.stringify(payload))})`],
+    cwd,
+  }))
+  expect(await listPlaywrightTests(tmpDir, { spawner })).toEqual([{ file, line: 1, title: 'absolute source', originFile: file, originLine: 1 }])
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(spawner).toHaveBeenCalledTimes(2)
+  await listPlaywrightTests(tmpDir, { spawner })
+  expect(spawner).toHaveBeenCalledTimes(2)
 })

@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 // @ts-expect-error — plain .mjs helper, no type declarations by design.
 import {
@@ -11,17 +10,9 @@ import {
   referencedDemoRoots,
   removeDemoRoots,
 } from './demo-workspace.mjs'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
-function makeTempDir(prefix: string): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
-  tmpDirs.push(dir)
-  return dir
-}
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const makeTempDir = trackTempDirs('cl-demo-')
 
 describe('demo workspace location', () => {
   it('creates an interactive demo under the user home on every platform', () => {

@@ -1,24 +1,23 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
 import { sourceRows } from '@shared/test-source-diff'
 import { SourceComparisonTable } from './SourceComparisonTable'
 import { ShikiCode } from './TestCodeBlock'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const highlighter = vi.hoisted(() => ({ load: vi.fn(), html: vi.fn() }))
 vi.mock('./code-highlighter', () => ({ getCodeHighlighter: highlighter.load, codeThemeFor: (theme: string) => theme }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let container: HTMLDivElement
 beforeEach(() => {
   highlighter.load.mockReset(); highlighter.html.mockReset()
   highlighter.html.mockImplementation((source: string) => `<pre><code>${source.split('\n').map((line) => `<span class="line"><span style="color:var(--code-keyword)">${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span></span>`).join('\n')}</code></pre>`)
   highlighter.load.mockResolvedValue({ codeToHtml: highlighter.html, themeColors: () => ({ bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: '#7f848e' }) })
-  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 it('does not paint an unchanged statement because the opposite side has a meaningful edit', async () => {
   const review = testFileReview()
   const rows = sourceRows(review).map((row) => ({ ...row, beforeChanged: false, afterChanged: row.afterLine === 5 }))

@@ -8,6 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { resumeFlight } from '../logic/conductor'
 import { applyFlightStageRemedy } from '../logic/stage-remedy'
+import { replyFailure } from '../../../shared/http-error'
 
 export async function registerFlightControlRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -30,9 +31,7 @@ export async function registerFlightControlRoutes(app: FastifyInstance, deps: Fl
         const { manifest: resumed } = resumeFlight(req.params.id, conductorDeps)
         return resumed
       } catch (err) {
-        const statusCode = (err as { statusCode?: number }).statusCode
-        reply.code(typeof statusCode === 'number' ? statusCode : 500)
-        return { error: err instanceof Error ? err.message : String(err) }
+        return replyFailure(reply, err)
       }
     },
   )

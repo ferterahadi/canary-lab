@@ -4,13 +4,14 @@
 // across cycles by design — cycle handoff is a stdin write, not a respawn.
 // Split out of orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
-import type { InterjectResult } from './run-orchestrator-types'
+import type { InterjectResult } from '../run-control-results'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { type HealEnd, type HealSignal } from '../../../../../../../shared/run-state'
 import { classifyHealFailure } from './heal-failure-classifier'
 import { ensureClaudeWorkspaceTrusted } from '../../../agent-sessions/logic/agent-workspace-trust'
+import { loadAgentSessionLog } from '../../../agent-sessions/logic/agent-session-log'
 import type { PtyHandle } from './pty-spawner'
 import { HealCycleState } from './heal-cycle'
 import { ESCALATION_THRESHOLD } from './heal-escalation'
@@ -53,10 +54,6 @@ export async function interjectHealAgent(ctx: RunContext, text: string): Promise
       signal: '.rerun',
       hypothesis: `User interjected mid-heal: ${truncated}`,
       fixDescription: `Sent text to live REPL stdin.`,
-      runId: ctx.runId,
-      manifestPath: ctx.paths.manifestPath,
-      summaryPath: ctx.paths.summaryPath,
-      journalPath: ctx.paths.diagnosisJournalPath,
     })
   } catch { /* journal append is best-effort */ }
 
@@ -113,7 +110,28 @@ export function captureHealAgentCause(ctx: RunContext): HealEnd['agentCause'] {
       fs.writeFileSync(ctx.paths.healAgentTailPath, tail)
     } catch { /* tail persistence is best-effort */ }
   }
-  return classifyHealFailure(tail, ctx.autoHeal?.agent)
+  return classifyHealFailure(`${tail}\n${finalClaudeAssistantText(ctx)}`, ctx.autoHeal?.agent)
+}
+
+// The text claude ended its last turn with, read from its own session log. The
+// PTY tail can miss it entirely: when a dialog opens after the turn, the
+// full-screen TUI repaints over the message, so run 2026-10-09T0458-zk6u's
+// "Login expired · Please run /login" reached the JSONL but never the captured
+// bytes. Only the trailing text blocks count — earlier prose about the app
+// under repair ("the endpoint returns 401") says nothing about why the agent
+// stopped. The ref is the run's sidecar, which the loop persists as soon as a
+// cycle's wait ends, before this give-up path runs.
+function finalClaudeAssistantText(ctx: RunContext): string {
+  const ref = ctx.autoHeal?.agent === 'claude' ? ctx.agentSessionRefs.read()?.sessions.claude : undefined
+  if (!ref) return ''
+  const events = loadAgentSessionLog(ref)
+  const texts: string[] = []
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]
+    if (event.kind !== 'assistant-message') break
+    texts.unshift(event.text)
+  }
+  return texts.join('\n')
 }
 
 // Write the typed give-up reason to the manifest so the Test Run surface can

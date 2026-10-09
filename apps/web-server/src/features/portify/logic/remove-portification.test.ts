@@ -1,12 +1,14 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { readFeatureConfig } from '../../../shared/config-ast'
 
 import { removeFeaturePortification } from './remove-portification'
 import { overlayDir, overlayExists, writeOverlay } from './runtime/overlay'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-remove-portification-')
 
 let root: string
 let featuresDir: string
@@ -22,7 +24,7 @@ function overlay(snapshot: string | null) {
   writeOverlay(suite, { featureName: 'checkout', agent: 'claude', capturedAt: '2026-01-01T00:00:00Z', repos: [{ name: 'app', baseSha: 'fixture', patch: '', touchedFiles: [] }], originalConfig: snapshot })
 }
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-remove-portification-'))
+  root = tempDir()
   featuresDir = path.join(root, 'features')
   suite = path.join(featuresDir, 'checkout')
   fs.mkdirSync(path.join(suite, 'envsets', 'staging'), { recursive: true })
@@ -30,7 +32,6 @@ beforeEach(() => {
   fs.writeFileSync(config, portified)
   events = []
 })
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
 
 it('restores snapshot settings using current environments and announces every successful call once', () => {
   overlay(source())

@@ -28,11 +28,6 @@ export function clientTint(kind: ExternalClientKind): string {
   return 'var(--border-focus)'
 }
 
-export function shortSession(sessionId: string): string {
-  if (sessionId.length <= 12) return sessionId
-  return `${sessionId.slice(0, 6)}…${sessionId.slice(-4)}`
-}
-
 // The "Open Claude/Codex" CTA targets an interactive client the user can launch.
 // Runner-spawned PTY agents (`*-pty`) and undetected (`other`) clients have no
 // app to open, so they get no CTA. Shared by every external panel that offers

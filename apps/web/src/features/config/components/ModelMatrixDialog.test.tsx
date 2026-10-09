@@ -1,12 +1,14 @@
+import type { AgentProbeResponse } from '@shared/agent-probe'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
-import type { AgentProbe } from '@/shared/api/config'
+
 import { MODEL_STAGE_KEYS, recommendedChoice, type KnownModelOption } from '@shared/agent-models'
 import { ModelMatrixDialog } from './ModelMatrixDialog'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -14,10 +16,10 @@ vi.mock('@/shared/api/config', async (importOriginal) => ({
   putProjectConfig: vi.fn(),
 }))
 
-const OK_PROBE = (agent: 'claude' | 'codex', over: Partial<AgentProbe> = {}): AgentProbe => ({
+const OK_PROBE = (agent: 'claude' | 'codex', over: Partial<AgentProbeResponse> = {}): AgentProbeResponse => ({
   agent, state: 'ok', binaryPath: `/usr/local/bin/${agent}`, version: '9.9.9', models: [], remedy: null, ...over,
 })
-// Named separately because `AgentProbe.models` is optional on purpose (older
+// Named separately because `AgentProbeResponse.models` is optional on purpose (older
 // servers predate model discovery). Tests that extend the discovered roster
 // spread THIS list, so what they add to is the same value the snapshot carries.
 const CODEX_MODELS: readonly KnownModelOption[] = [
@@ -31,20 +33,12 @@ const SNAPSHOT = {
   codex: OK_PROBE('codex', { models: CODEX_MODELS }),
 }
 
-let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue(SNAPSHOT)
   vi.mocked(configApi.putProjectConfig).mockReset()
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 function select(label: string): HTMLSelectElement {

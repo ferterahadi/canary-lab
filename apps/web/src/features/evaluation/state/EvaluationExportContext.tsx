@@ -6,6 +6,7 @@ import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
+import { displayError } from '@/shared/api/error-message'
 
 interface EvaluationExportContextValue {
   sync: RecordSyncState
@@ -124,7 +125,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     try {
       await readRecord(taskId, () => evaluationApi.getEvaluationExportTask(taskId))
     } catch (err) {
-      appendLog(taskId, `[evaluation] unable to refresh task: ${err instanceof Error ? err.message : String(err)}\n`)
+      appendLog(taskId, `[evaluation] unable to refresh task: ${displayError(err)}\n`)
     }
   }, [appendLog, readRecord])
 
@@ -159,7 +160,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
         onUnavailable: (err) => appendLog(taskId, `[evaluation] log stream unavailable: ${err}\n`),
       })
     } catch (err) {
-      appendLog(taskId, `[evaluation] log stream unavailable: ${err instanceof Error ? err.message : String(err)}\n`)
+      appendLog(taskId, `[evaluation] log stream unavailable: ${displayError(err)}\n`)
     }
   }, [WebSocketImpl, appendLog, refreshTask, tasksByIdRef, wsBase])
 

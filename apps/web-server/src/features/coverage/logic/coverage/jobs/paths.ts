@@ -7,8 +7,11 @@ export interface CoverageJobPaths {
   manifestPath: string
 }
 
+/** The `<logs>/` subdirectory name — shared with the store's record layout. */
+export const COVERAGE_JOBS_DIR_NAME = 'coverage-jobs'
+
 export function coverageJobsRoot(logsDir: string): string {
-  return path.join(logsDir, 'coverage-jobs')
+  return path.join(logsDir, COVERAGE_JOBS_DIR_NAME)
 }
 
 export function coverageJobsIndexPath(logsDir: string): string {

@@ -1,13 +1,13 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
 const repo = path.resolve(import.meta.dirname, '..')
+const tempDir = trackTempDirs('wire-contract-')
 let temp: string
-beforeEach(() => { temp = fs.mkdtempSync(path.join(os.tmpdir(), 'wire-contract-')) })
-afterEach(() => { fs.rmSync(temp, { recursive: true, force: true }) })
+beforeEach(() => { temp = tempDir() })
 
 // Feed deliberate source drift to the actual checker without modifying the checkout.
 it.each([
@@ -15,9 +15,9 @@ it.each([
   ['apps/web-server/src/shared/ws/workspace-stream.ts', "export type WorkspaceStreamFrame = { type: 'connected' }", 'WorkspaceStreamFrame'],
   ['apps/web/src/shared/api/config.ts', 'export interface GettingStartedSessionState { active: null }', 'GettingStartedSessionState'],
   ['apps/web-server/src/features/config/routes/onboarding.ts', "export type OnboardingWorkflowId = 'run'", 'OnboardingWorkflowId'],
-  ['apps/web/src/features/benchmark/api/benchmark-types.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
+  ['apps/web/src/shared/api/benchmark.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
   ['apps/web-server/src/features/benchmark/logic/runtime/types.ts', "export type BenchmarkStatus = 'done'", 'BenchmarkStatus'],
-  ['apps/web/src/features/benchmark/api/benchmark-types.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
+  ['apps/web/src/shared/api/benchmark.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
   ['apps/web/src/shared/api/runs.ts', 'interface RunManifest { runId: string }', 'RunManifest'],
   ['apps/web-server/src/features/runs/logic/run-detail.ts', 'export type RunSummary = { total: number }', 'RunSummary'],
   ['apps/web/src/features/benchmark/state/benchmark-state.ts', 'bypass', 'BenchmarkIndexEntry'],
@@ -28,7 +28,7 @@ it.each([
   ['apps/web-server/src/features/portify/logic/runtime/store.ts', 'bypass', 'PortifyIndexEntry'],
 ])('rejects drift in %s: %s', (file, mutation, typeName) => {
   const checker = fs.readFileSync(path.join(repo, 'tools/check-wire-contracts.mjs'), 'utf8')
-    .replace("const REPO = path.resolve(import.meta.dirname, '..')", `const REPO = ${JSON.stringify(repo)}`)
+    .replace("import { REPO, walk } from './lib/fs.mjs'", `import { walk } from ${JSON.stringify(path.join(repo, 'tools/lib/fs.mjs'))}\nconst REPO = ${JSON.stringify(repo)}`)
     .replace("return readFileSync(path.join(REPO, rel), 'utf8')", `
       const source = readFileSync(path.join(REPO, rel), 'utf8')
       if (rel !== ${JSON.stringify(file)}) return source
@@ -40,6 +40,7 @@ it.each([
     `)
   const script = path.join(temp, 'check.mjs')
   fs.writeFileSync(script, checker)
+  fs.copyFileSync(path.join(repo, 'tools/shared-behavior-contracts.mjs'), path.join(temp, 'shared-behavior-contracts.mjs'))
   const result = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(typeName)

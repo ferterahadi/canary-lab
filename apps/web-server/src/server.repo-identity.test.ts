@@ -1,11 +1,13 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-identity-wiring-')
 
 let root: string
 let repo: string
@@ -28,7 +30,7 @@ function toolValue(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 beforeEach(async () => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-identity-wiring-')))
+  root = tempDir()
   repo = path.join(root, 'repo'); alias = path.join(root, 'alias')
   fs.mkdirSync(repo); fs.symlinkSync(repo, alias, 'dir')
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo })
@@ -49,7 +51,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close(); await server?.app.close()
   vi.unstubAllEnvs()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each(['rest', 'mcp'] as const)('refuses an alias, queues it, and delivers promotion through production %s wiring', async (transport) => {
@@ -59,10 +60,17 @@ it.each(['rest', 'mcp'] as const)('refuses an alias, queues it, and delivers pro
   try {
     const rest = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'candidate', mode: 'boot', updateRepos: false } })
     expect(rest.statusCode).toBe(409)
+    expect(rest.json()).toMatchObject({ type: 'repo_collision_requires_choice', conflictingRunId: owner, conflictingFeature: 'owner', repoPaths: [repo], options: ['worktree', 'queue'] })
+    // This MCP client declares no form support and the UI is up, so the same
+    // choice becomes one shared approval instead of a bare collision payload.
     const mcp = toolValue(await client.callTool({ name: 'boot_services', arguments: { feature: 'candidate' } }))
-    const collision = { type: 'repo_collision_requires_choice', conflictingRunId: owner, conflictingFeature: 'owner', repoPaths: [repo], options: ['worktree', 'queue'] }
-    expect(rest.json()).toMatchObject(collision)
-    expect(mcp).toMatchObject(collision)
+    expect(mcp).toMatchObject({ status: 'needs-input', approvalId: expect.stringMatching(/^[a-f0-9-]{36}$/), nextSteps: ['wait_for_approval'] })
+    expect(mcp.reviewUrl).toContain(`approval=${mcp.approvalId}`)
+    expect((await app.inject({ url: '/api/approvals' })).json()).toEqual([expect.objectContaining({
+      id: mcp.approvalId, status: 'pending', command: 'boot_services', feature: 'candidate',
+      message: expect.stringContaining('"owner" is already using this app'),
+      schema: expect.objectContaining({ properties: { isolation: expect.objectContaining({ enum: ['worktree', 'queue'] }) } }),
+    })])
     expect(runStore.list()).toHaveLength(1)
     expect(registry.list()).toHaveLength(1)
     expect(ptyFactory).not.toHaveBeenCalled()
@@ -74,7 +82,11 @@ it.each(['rest', 'mcp'] as const)('refuses an alias, queues it, and delivers pro
       expect(response.json()).toMatchObject({ status: 'queued', queueReason: 'repo-collision' })
       queued = response.json().runId
     } else {
-      const response = toolValue(await client.callTool({ name: 'boot_services', arguments: { feature: 'candidate', isolation: 'queue' } }))
+      // Answer as the Canary browser page does; the agent only reads the result.
+      const answered = await app.inject({ method: 'POST', url: `/api/approvals/${mcp.approvalId}/answer`,
+        headers: { origin: 'http://localhost' }, payload: { answer: { isolation: 'queue' } } })
+      expect(answered.json()).toMatchObject({ id: mcp.approvalId, status: 'answered', answer: { isolation: 'queue' } })
+      const response = toolValue(await client.callTool({ name: 'wait_for_approval', arguments: { approvalId: mcp.approvalId, timeout_ms: 0 } }))
       expect(response).toMatchObject({ queued: true, queueReason: 'repo-collision' })
       queued = response.runId
     }

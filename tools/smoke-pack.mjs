@@ -1,17 +1,16 @@
-import { spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { smokeTestReadability } from './smoke-test-readability.mjs'
+import { REPO as repoRoot } from './lib/fs.mjs'
+import { runOrExit } from './lib/run.mjs'
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-smoke-'))
 const cacheDir = path.join(os.tmpdir(), 'canary-lab-npm-cache')
 
 function run(command, args, cwd, extraEnv = {}) {
-  const result = spawnSync(command, args, {
+  runOrExit(command, args, {
     cwd,
-    stdio: 'inherit',
     env: {
       ...process.env,
       npm_config_cache: cacheDir,
@@ -36,10 +35,6 @@ function run(command, args, cwd, extraEnv = {}) {
       ...extraEnv,
     },
   })
-
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1)
-  }
 }
 
 function childDirectories(dir) {

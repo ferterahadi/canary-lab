@@ -1,20 +1,11 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { PortifyRunStore } from './store'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
-})
-function tmpLogs(): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-store-'))
-  roots.push(d)
-  return d
-}
+const tempDir = trackTempDirs('portify-store-')
 
 function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
@@ -34,7 +25,7 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
 
 describe('PortifyRunStore', () => {
   it('save persists the manifest + index entry and get/list read them back', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     expect(store.list()).toEqual([])
     expect(store.get('portify-1')).toBeNull()
@@ -48,7 +39,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('save upserts an existing index entry (status + endedAt update in place)', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     store.save(manifest())
     store.save(manifest({ status: 'saved', endedAt: '2026-06-07T00:05:00.000Z' }))
     const list = store.list()
@@ -57,7 +48,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('emits a changed event on save, and offEvent unsubscribes', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     const events: unknown[] = []
     const fn = (e: unknown) => events.push(e)
     store.onEvent(fn)
@@ -69,7 +60,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('remove drops the index entry + run dir and emits a removed event', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     const events: unknown[] = []
     store.save(manifest())
@@ -85,14 +76,14 @@ describe('PortifyRunStore', () => {
   })
 
   it('a throwing listener does not break persistence', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     store.onEvent(() => { throw new Error('bad listener') })
     expect(() => store.save(manifest())).not.toThrow()
     expect(store.get('portify-1')).not.toBeNull()
   })
 
   it('get returns null for a corrupt manifest, list returns [] for a corrupt index', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     store.save(manifest())
     fs.writeFileSync(path.join(logs, 'portify', 'portify-1', 'portify.json'), '{not json')
@@ -102,7 +93,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('list returns [] when the index JSON is valid but not an array', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     store.save(manifest())
     fs.writeFileSync(path.join(logs, 'portify', 'index.json'), '{"not":"an array"}')
@@ -110,7 +101,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('reconcileInterrupted flips non-terminal workflows to aborted, leaves terminal ones', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     store.save(manifest({ workflowId: 'a', status: 'editing' }))
     store.save(manifest({ workflowId: 'b', status: 'ready-to-save' }))
     store.save(manifest({ workflowId: 'c', status: 'saved' }))
@@ -122,7 +113,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('reconcileInterrupted skips an index entry whose manifest is missing', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     store.save(manifest({ workflowId: 'a', status: 'editing' }))
     fs.rmSync(path.join(logs, 'portify', 'a', 'portify.json'))
@@ -130,7 +121,7 @@ describe('PortifyRunStore', () => {
   })
 
   it('statusOf config callback extracts the manifest status field', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     const statusOf = (store as any).store.config.statusOf as (m: PortifyManifest) => string
     expect(statusOf(manifest({ status: 'planning' }))).toBe('planning')
     expect(statusOf(manifest({ status: 'saved' }))).toBe('saved')
@@ -139,7 +130,7 @@ describe('PortifyRunStore', () => {
   it('renameFeature() re-homes matching workflows and reports the count', () => {
     // A suite rename must carry the new name into the portify history rather
     // than orphaning it behind the old one.
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     store.save(manifest({ workflowId: 'p1', feature: 'old_name' }))
     store.save(manifest({ workflowId: 'p2', feature: 'old_name', status: 'saved' }))
     store.save(manifest({ workflowId: 'p3', feature: 'other' }))
@@ -151,14 +142,14 @@ describe('PortifyRunStore', () => {
   })
 
   it('renameFeature() is a no-op when nothing matches', () => {
-    const store = new PortifyRunStore(tmpLogs())
+    const store = new PortifyRunStore(tempDir())
     store.save(manifest({ workflowId: 'p1', feature: 'kept' }))
     expect(store.renameFeature('absent', 'new_name')).toBe(0)
     expect(store.get('p1')?.feature).toBe('kept')
   })
 
   it('idOfEntry falls back to workflowId for legacy index rows that lack an id field', () => {
-    const logs = tmpLogs()
+    const logs = tempDir()
     const store = new PortifyRunStore(logs)
     store.save(manifest({ workflowId: 'legacy-1' }))
     const indexPath = path.join(logs, 'portify', 'index.json')

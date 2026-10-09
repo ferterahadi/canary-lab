@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { getRunDetail, readRunSummary, readRunLifecycleEvents, readPlaywrightPlaybackEvents } from './run-detail'
 import { writeManifest } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('getRunDetail', () => {
@@ -104,6 +106,7 @@ describe('getRunDetail', () => {
 
     const d = getRunDetail(tmpDir, 'r-artifacts')
     expect(d?.playbackEvents).toHaveLength(2)
+    expect(d?.playbackEvents?.map(event => event.test.id)).toEqual([undefined, undefined])
     expect(d?.playwrightArtifacts).toEqual([
       {
         testName: 'test-case-visual-checkout',

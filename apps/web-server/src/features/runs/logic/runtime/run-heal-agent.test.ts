@@ -4,11 +4,11 @@
 // only show up when the functions are called on their own.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   agentPtyEnv,
   appendAgentOutputTail,
+  captureHealAgentCause,
   cleanupHealAgentPty,
   createHealActivityClock,
   interjectHealAgent,
@@ -23,7 +23,9 @@ import { REPO_PATH_OVERRIDES_ENV } from '../../../../../../../shared/e2e-runner/
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-heal-agent-')
 let tmpDir: string
 
 // cleanupHealAgentPty calls the REAL killTree + scheduleSigkillFallback, which
@@ -35,12 +37,11 @@ let tmpDir: string
 // fires after this suite's mocks are restored stays inert.
 beforeEach(() => {
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-agent-')))
+  tmpDir = tempDir()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 /** A pty whose exit handler the test can fire on demand. */
@@ -462,6 +463,102 @@ describe('createHealActivityClock', () => {
     writeSessionRef(ctx, path.join(tmpDir, 'not-written-yet.jsonl'))
 
     expect(createHealActivityClock(ctx, 1_000)()).toBe(7_000)
+  })
+})
+
+// The no-signal give-up's "why". The PTY tail is not always enough: claude's
+// full-screen TUI can repaint over the message that ended its turn, so the
+// cause is also read from the session log the CLI itself writes.
+describe('captureHealAgentCause', () => {
+  // Shaped like run 2026-10-09T0458-zk6u's log, anonymized: the cycle prompt,
+  // then the CLI's synthetic turn-ending error. Lines that carry no timeline
+  // event (attachments, cost state) follow it, as they did in the real log.
+  const PROMPT_LINE = { type: 'user', timestamp: '2026-10-09T04:58:50.000Z', message: { role: 'user', content: [{ type: 'text', text: 'Read heal-prompt.md and repair the app.' }] } }
+  const LOGIN_EXPIRED_LINE = {
+    type: 'assistant',
+    timestamp: '2026-10-09T04:58:51.000Z',
+    isApiErrorMessage: true,
+    error: 'authentication_failed',
+    message: { model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'Login expired · Please run /login' }] },
+  }
+  const TRAILING_NOISE = [{ type: 'attachment', timestamp: '2026-10-09T04:58:52.000Z' }, { type: 'cost-state' }]
+
+  // What the PTY held instead: a dialog that repainted the screen. Not a hard
+  // blocker on its own, and no login text anywhere.
+  const REPAINTED_TAIL = '\x1b[2J\x1b[H Teach auto mode about your environment?\x1b[0m'
+
+  function assistantText(text: string, timestamp: string): Record<string, unknown> {
+    return { type: 'assistant', timestamp, message: { role: 'assistant', content: [{ type: 'text', text }] } }
+  }
+
+  /** Write `lines` as the session JSONL and point the run's sidecar at it. */
+  function claudeCtx(tail: string, lines: unknown[] | null) {
+    const made = ctxFor({ healAgentOutputTail: tail }, { autoHeal: { agent: 'claude', maxCycles: 1 } })
+    if (lines !== null) {
+      const logPath = path.join(tmpDir, 'session.jsonl')
+      fs.writeFileSync(logPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+      fs.writeFileSync(made.ctx.paths.agentSessionRefPath, JSON.stringify({
+        activeAgent: 'claude',
+        sessions: { claude: { agent: 'claude', sessionId: 'sess-1', logPath } },
+      }))
+    }
+    return made
+  }
+
+  it('classifies a login the TUI painted over from the session log', () => {
+    const { ctx } = claudeCtx(REPAINTED_TAIL, [PROMPT_LINE, LOGIN_EXPIRED_LINE, ...TRAILING_NOISE])
+
+    expect(captureHealAgentCause(ctx)).toBe('auth')
+    // The tail file stays the raw PTY capture — the log is evidence in its own
+    // right and is not copied into it.
+    expect(fs.readFileSync(ctx.paths.healAgentTailPath, 'utf-8')).toBe(REPAINTED_TAIL)
+  })
+
+  it('cannot see the login from the PTY tail alone', () => {
+    // The control for the test above: same tail, no session log located.
+    // Whatever the dialog classifies as, it is not the login that stopped it.
+    const { ctx } = claudeCtx(REPAINTED_TAIL, null)
+
+    expect(captureHealAgentCause(ctx)).not.toBe('auth')
+  })
+
+  it('keeps a logged hard blocker ahead of dialogs and approval prompts in the tail', () => {
+    // The log text lands after the tail, but position never decides: the
+    // first cause in the classifier's table wins, and the hard blockers lead it.
+    const { ctx } = claudeCtx(`${REPAINTED_TAIL}\n Do you want to proceed?\n ❯ 1. Yes`, [PROMPT_LINE, LOGIN_EXPIRED_LINE])
+
+    expect(captureHealAgentCause(ctx)).toBe('auth')
+  })
+
+  it('reads only the text the turn ended with, not earlier prose about the app', () => {
+    // The agent discussing the app under repair ("returns 401") is not why it
+    // stopped; a tool call ends the run of trailing text blocks.
+    const { ctx } = claudeCtx('', [
+      PROMPT_LINE,
+      assistantText('The checkout endpoint returns 401 unauthorized for guests.', '2026-10-09T04:59:00.000Z'),
+      { type: 'assistant', timestamp: '2026-10-09T04:59:01.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'app.ts' } }] } },
+      { type: 'user', timestamp: '2026-10-09T04:59:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'export {}' }] } },
+      assistantText('I traced the guest flow.', '2026-10-09T04:59:03.000Z'),
+      assistantText('I could not pin down the regression.', '2026-10-09T04:59:05.000Z'),
+    ])
+
+    expect(captureHealAgentCause(ctx)).toBe('unknown')
+  })
+
+  it('ignores a claude session log when codex is the heal agent', () => {
+    // A run that switched agents keeps the earlier claude ref; its log says
+    // nothing about why codex went quiet.
+    const { ctx } = claudeCtx('', [PROMPT_LINE, LOGIN_EXPIRED_LINE])
+    ctx.autoHeal = { agent: 'codex', maxCycles: 1 }
+
+    expect(captureHealAgentCause(ctx)).toBeUndefined()
+  })
+
+  it('falls back to the tail when the located log is gone from disk', () => {
+    const { ctx } = claudeCtx(REPAINTED_TAIL, [PROMPT_LINE, LOGIN_EXPIRED_LINE])
+    fs.rmSync(path.join(tmpDir, 'session.jsonl'))
+
+    expect(captureHealAgentCause(ctx)).not.toBe('auth')
   })
 })
 

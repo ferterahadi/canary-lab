@@ -22,6 +22,8 @@ export const BEHAVIOR_CERTIFICATE_CHECKER_FILENAME = 'verify-certificate.mjs'
 export type CertificateSuiteSource = 'run-start-snapshot' | 'live-feature-dir' | 'none'
 
 interface CertificateSuiteBase {
+  /** Absent in historical certificates: only top-level e2e/*.spec.ts was hashed. */
+  specInventoryVersion?: 1 | 2
   /** sha256 over the sorted `<path>\0<sha256>\n` lines of `files` — the same
    *  digest `RunSuiteSnapshot.digest` records at run start. */
   digest: string

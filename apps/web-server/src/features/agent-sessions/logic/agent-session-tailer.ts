@@ -1,7 +1,8 @@
+import type { AgentSessionEvent, SubagentThread } from '../../../../../../shared/agent-session-types'
 import fs from 'fs'
 import path from 'path'
-import { type AgentEvent, type AgentKind, type AgentSessionRef } from './agent-session-log'
-import { type SubagentThread, loadSubagentThread, subagentDirFor } from './agent-session-subagents'
+import { type AgentKind, type AgentSessionRef } from './agent-session-log'
+import { loadSubagentThread, subagentDirFor } from './agent-session-subagents'
 import { claudeSessionLogPath, locateLatestSessionLogForAgent } from './agent-session-paths'
 import { parseAgentSessionLine } from './agent-session-parse'
 
@@ -37,7 +38,7 @@ export interface TailHandle {
  *  in append order, so the two sequences differ. */
 export interface SubagentUpdate {
   thread: Omit<SubagentThread, 'events'>
-  event: AgentEvent
+  event: AgentSessionEvent
   index: number
 }
 
@@ -45,7 +46,7 @@ export interface TailOptions {
   // Initial reference. For codex, `logPath` may not exist yet — the tailer
   // will try `discoverRef` to locate it once it appears on disk.
   ref: AgentSessionRef
-  onEvent(event: AgentEvent): void
+  onEvent(event: AgentSessionEvent): void
   /** Optional: receive events from subagent threads the session spawns. Omit
    *  to tail only the parent log (existing behavior). Never fires for codex. */
   onSubagentEvent?(update: SubagentUpdate): void
@@ -80,7 +81,7 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
   let bytesRead = 0
   let pendingFlush = false
 
-  const emit = (events: AgentEvent[]): void => {
+  const emit = (events: AgentSessionEvent[]): void => {
     for (const ev of events) {
       try { opts.onEvent(ev) } catch { /* subscriber failures must not crash the tailer */ }
     }
@@ -119,7 +120,7 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
     const trailingBytes = Buffer.byteLength(text.slice(lastNl + 1), 'utf-8')
     bytesRead -= trailingBytes
     if (!complete) return
-    const events: AgentEvent[] = []
+    const events: AgentSessionEvent[] = []
     for (const line of complete.split('\n')) {
       for (const ev of parseAgentSessionLine(ref.agent, line)) events.push(ev)
     }

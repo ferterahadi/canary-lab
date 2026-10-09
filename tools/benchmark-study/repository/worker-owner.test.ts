@@ -1,9 +1,11 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { expect, it } from 'vitest'
 import { command, sourceRoot } from '../files'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('repository-lease-')
 
 const helper = path.join(__dirname, 'worker-owner.ts')
 const loader = require.resolve('tsx')
@@ -16,7 +18,7 @@ it('lets a finished worker exit while its scheduler still owns the pipe', async 
 }, 10_000)
 
 it('notifies an orphan worker when its exact scheduler is killed', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repository-lease-'))
+  const root = tempDir()
   const ready = path.join(root, 'worker.pid')
   const receipt = path.join(root, 'receipt')
   const worker = `const fs=require('node:fs');const {watchRepositoryOwner}=require(${JSON.stringify(helper)});watchRepositoryOwner(()=>fs.writeFileSync(${JSON.stringify(receipt)},'owner-disconnected'));fs.writeFileSync(${JSON.stringify(ready)},String(process.pid))`
@@ -32,6 +34,5 @@ it('notifies an orphan worker when its exact scheduler is killed', async () => {
   } finally {
     parent.kill('SIGKILL')
     if (workerPid) { try { process.kill(workerPid, 'SIGKILL') } catch { /* Worker already exited. */ } }
-    fs.rmSync(root, { recursive: true, force: true })
   }
 }, 15_000)

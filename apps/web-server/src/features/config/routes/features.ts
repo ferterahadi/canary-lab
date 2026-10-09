@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../shared/spec-files'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -24,11 +25,11 @@ import type { FeaturesRouteDeps } from './features-route-deps'
 import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { notFound } from '../../../shared/http-error'
+import { notFound, statusCodeOf } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
-  const statusCode = (error as { statusCode?: number }).statusCode ?? 500
-  return reply.code(statusCode).send({ error: error instanceof Error ? error.message : fallback })
+  return reply.code(statusCodeOf(error)).send({ error: errorMessage(error, fallback) })
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
@@ -190,8 +191,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   app.get<{ Params: { name: string }; Querystring: { file?: string } }>(
     '/api/features/:name/dirty-diff',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
+      const feature = findFeature(deps.featuresDir, req.params.name)
       if (!feature || !feature.featureDir) return notFound(reply, 'feature')
       const rel = req.query.file
       if (!rel) {
@@ -203,7 +203,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       const realDir = fs.realpathSync(feature.featureDir)
       const abs = path.join(realDir, rel)
       let currentSource = ''
-      try { currentSource = fs.readFileSync(abs, 'utf8') } catch { /* unreadable — no tests to diff */ }
+      try { currentSource = readSpecSource(abs) } catch { /* unreadable — no tests to diff */ }
       const { tests: currentTests } = extractTestsFromSource(rel, currentSource, feature.semanticRules)
 
       const repoRel = path.relative(root, abs)
@@ -227,8 +227,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   )
 
   app.get<{ Params: { name: string } }>('/api/features/:name/config', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
+    const feature = findFeature(deps.featuresDir, req.params.name)
     if (!feature || !feature.featureDir) return notFound(reply, 'feature')
     const config = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
     if (config) {
@@ -271,7 +270,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
       }),
     }).catch((err: unknown) => {
-      discoveryDiagnostics = err instanceof Error ? err.message : String(err)
+      discoveryDiagnostics = errorMessage(err)
       app.log.warn({ err, feature: feature.name }, 'test discovery failed')
       return null
     })
@@ -283,7 +282,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     for (const file of specFiles) {
       let source = ''
       if (recorded && !recorded.dir) unavailableSources.add(file)
-      else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
+      else try { source = readSpecSource(file) } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')

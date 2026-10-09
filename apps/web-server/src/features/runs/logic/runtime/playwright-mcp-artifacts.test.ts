@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   resolveMcpOutputDir,
@@ -13,15 +12,13 @@ import {
   MAX_FILES_PER_FAILURE,
   MAX_BYTES_PER_FAILURE,
 } from './playwright-mcp-artifacts'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('pw-mcp-')
 let tmp: string
 
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pw-mcp-')))
-})
-
-afterEach(() => {
-  try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
+  tmp = tempDir()
 })
 
 describe('resolveMcpOutputDir', () => {

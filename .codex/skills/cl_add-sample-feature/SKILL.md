@@ -62,7 +62,7 @@ command**, all three pointing at `demo-app/`. The schema does allow one repo
 entry to carry several start commands, but the demo deliberately does not use
 that: one entry per service is the shape a real deployment has, it gives each
 service its own per-run worktree so a repair lands only in the checkout the
-broken service serves from, and it makes the run's Changes tab group repairs by
+broken service serves from, and it makes the run's captured changes group repairs by
 service instead of pooling them under one repo name.
 
 The suite lives at `templates/project/features/storefront-journey/` and ships

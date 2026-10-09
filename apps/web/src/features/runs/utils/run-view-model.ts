@@ -11,7 +11,7 @@ import {
   type TransientAction,
 } from '@shared/run-state'
 import { runWaitingState, type RunWaitingState } from './run-waiting-state'
-import type { RunActionAvailability } from '@shared/run-state'
+import type { RunActionAvailabilitySet } from '@shared/run-state'
 
 export interface RunViewModel {
   waiting?: RunWaitingState
@@ -19,13 +19,7 @@ export interface RunViewModel {
   headline: string
   subtext?: string
   primaryAlert?: { tone: 'info' | 'success' | 'warning' | 'error'; message: string }
-  actions: {
-    pauseHeal: RunActionAvailability
-    stop: RunActionAvailability
-    cancelHeal: RunActionAvailability
-    delete: RunActionAvailability
-    restartHeal: RunActionAvailability
-  }
+  actions: RunActionAvailabilitySet
   recoveryTimeline: RunLifecycleEvent[]
 }
 
@@ -55,43 +49,8 @@ export function deriveRunViewModel(
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),
-    actions: newRunRequired
-      ? { ...deriveRunActionAvailability(status, transient), restartHeal: { enabled: false, reason: 'This attempt is spent; start a fresh run after approval.' } }
-      : executionType === 'verify'
-      ? verifyActionAvailability(status, transient)
-      : executionType === 'boot'
-        ? bootActionAvailability(status, transient)
-        : deriveRunActionAvailability(status, transient),
+    actions: deriveRunActionAvailability(status, transient, { executionType, newRunRequired }),
     recoveryTimeline: events.length > 0 ? events : lifecycle ? [{ ...lifecycle, severity: severityForStatus(status) }] : [],
-  }
-}
-
-function verifyActionAvailability(
-  status: RunStatus,
-  transient: TransientAction | null,
-): RunViewModel['actions'] {
-  const base = deriveRunActionAvailability(status, transient)
-  return {
-    ...base,
-    pauseHeal: { enabled: false, reason: 'Verify is observational and does not start healing.' },
-    cancelHeal: { enabled: false, reason: 'Verify does not start heal cycles.' },
-    restartHeal: { enabled: false, reason: 'Verify results are not healed; start another Verify execution instead.' },
-  }
-}
-
-// A boot-only session boots services and holds them — it never runs tests or
-// heals. Only Stop (tear down + revert env) and, once stopped, Delete apply.
-function bootActionAvailability(
-  status: RunStatus,
-  transient: TransientAction | null,
-): RunViewModel['actions'] {
-  const base = deriveRunActionAvailability(status, transient)
-  const reason = 'Boot-only sessions do not run tests or heal.'
-  return {
-    ...base,
-    pauseHeal: { enabled: false, reason },
-    cancelHeal: { enabled: false, reason },
-    restartHeal: { enabled: false, reason },
   }
 }
 

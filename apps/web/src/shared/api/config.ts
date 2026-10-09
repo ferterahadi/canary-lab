@@ -3,8 +3,10 @@ import type { OnboardingSamples } from '@shared/getting-started'
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { FeatureTests } from './types'
-import type { AgentModelsConfig, KnownModelOption } from '@shared/agent-models'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import type { ProjectConfigResponse } from '@shared/project-config'
+import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
+import type { ConfigValue } from '@shared/config-value'
+import { requestJson, ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions, runId?: string): Promise<FeatureTests> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -32,18 +34,6 @@ export function getFeatureConfig(name: string, opts?: ClientOptions): Promise<Fe
 
 // ─── structured config editing ────────────────────────────────────────────
 
-/** A `$expr`-tagged object stands in for a non-literal expression
- *  (e.g. `__dirname`, `process.env.CI ? 2 : 1`). The UI treats these as
- *  read-only; the server round-trips them through the AST unchanged. */
-export type ConfigValue =
-  | null
-  | boolean
-  | number
-  | string
-  | { $expr: string }
-  | ConfigValue[]
-  | { [k: string]: ConfigValue }
-
 export interface ParsedConfigDoc {
   path: string
   format: 'cjs' | 'js' | 'ts'
@@ -65,16 +55,7 @@ export function putFeatureConfigDoc(
   value: ConfigValue,
   opts?: ClientOptions,
 ): Promise<ParsedConfigDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ParsedConfigDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/config-doc`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ value }),
-    },
-    fetchImpl,
-  )
+  return requestJson<ParsedConfigDoc>(`/api/features/${encodeURIComponent(name)}/config-doc`, 'PUT', { value }, opts)
 }
 
 /** Fully un-portify a feature: restore the pre-Portify feature config (slots +
@@ -98,16 +79,7 @@ export async function deleteFeature(
   confirmName: string,
   opts?: ClientOptions,
 ): Promise<void> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  await request<unknown>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}`,
-    {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ confirmName }),
-    },
-    fetchImpl,
-  )
+  await requestJson<unknown>(`/api/features/${encodeURIComponent(name)}`, 'DELETE', { confirmName }, opts)
 }
 
 export function getPlaywrightConfig(name: string, opts?: ClientOptions): Promise<ParsedConfigDoc> {
@@ -124,16 +96,7 @@ export function putPlaywrightConfig(
   value: ConfigValue,
   opts?: ClientOptions,
 ): Promise<ParsedConfigDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ParsedConfigDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/playwright`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ value }),
-    },
-    fetchImpl,
-  )
+  return requestJson<ParsedConfigDoc>(`/api/features/${encodeURIComponent(name)}/playwright`, 'PUT', { value }, opts)
 }
 
 export interface McpHealth {
@@ -200,16 +163,7 @@ export function createEnvset(
   env: string,
   opts?: ClientOptions,
 ): Promise<{ env: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ env: string }>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ env }),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ env: string }>(`/api/features/${encodeURIComponent(name)}/envsets`, 'POST', { env }, opts)
 }
 
 export async function deleteEnvset(
@@ -230,16 +184,7 @@ export function addEnvsetSlot(
   body: { sourcePath: string; slotName?: string; target?: string; description?: string },
   opts?: ClientOptions,
 ): Promise<{ slot: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ slot: string }>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/slots`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fetchImpl,
-  )
+  return requestJson<{ slot: string }>(`/api/features/${encodeURIComponent(name)}/envsets/slots`, 'POST', body, opts)
 }
 
 export async function deleteEnvsetSlot(
@@ -293,51 +238,10 @@ export function putEnvsetSlot(
   entries: { key: string; value: string }[],
   opts?: ClientOptions,
 ): Promise<EnvsetSlotDoc> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<EnvsetSlotDoc>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entries }),
-    },
-    fetchImpl,
-  )
+  return requestJson<EnvsetSlotDoc>(`/api/features/${encodeURIComponent(name)}/envsets/${encodeURIComponent(env)}/${encodeURIComponent(slot)}`, 'PUT', { entries }, opts)
 }
 
 // ─── project config ───────────────────────────────────────────────────────
-
-// `external` was retired in 2.2.0 — the server migrates a stored value to
-// `claude` on load, so this mirror never sees it.
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
-// `system` remains a launch result and an older-server compatibility value;
-// the settings UI exposes only auto/vscode/cursor.
-export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
-
-export interface ProjectConfig {
-  healAgent: HealAgentChoice
-  editor: EditorChoice
-  /** Optional for the same reason `autoProposePr` is: an older server omits
-   *  them, and every reader falls back (empty plans / false). */
-  agentModels?: AgentModelsConfig
-  /** Ask which models to use at every launch instead of applying
-   *  `agentModels` silently. */
-  askModelsOnLaunch?: boolean
-  personalWikiPath: string | null
-  /** Open a draft PR automatically when a run heals green. Declared here because
-   *  SettingsModal has always read and written it — the field was live on the
-   *  server and in the UI but missing from this mirror, which `apps/web` never
-   *  caught (the build tsconfig covers `shared`/`cli`/runtime only). */
-  autoProposePr?: boolean
-  /** Offer Getting Started from the status bar. The historical field name is
-   *  retained for config compatibility; runnable fixtures now sit inside the
-   *  guided Getting Started journey. Workspace-level, so turning it off
-   *  settles it for the project rather than one browser. Optional for the same
-   *  reason `autoProposePr` is: an older server omits it, and every reader tests
-   *  `!== false` so absent means on. */
-  showDemo?: boolean
-  port?: number
-}
 
 export interface PortChangeResult {
   restarting: boolean
@@ -348,38 +252,16 @@ export interface PortChangeResult {
   activeRuns?: number
 }
 
-export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
+export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfigResponse> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ProjectConfig>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
-}
-
-// Mirrors agent-sessions/logic/agent-probe.ts (the module itself shells out,
-// so the client mirrors the shapes). Informational only — no launch blocks on
-// it; the remedy line feeds the warning strip.
-export type AgentProbeState = 'ok' | 'auth' | 'missing'
-
-export interface AgentProbe {
-  agent: 'claude' | 'codex'
-  state: AgentProbeState
-  binaryPath: string | null
-  version: string | null
-  /** Optional for compatibility with Canary Lab servers from before runtime
-   *  model discovery. Empty means the UI keeps its curated fallback. */
-  models?: readonly KnownModelOption[]
-  remedy: string | null
-}
-
-export interface AgentProbeSnapshot {
-  probedAt: string
-  claude: AgentProbe
-  codex: AgentProbe
+  return request<ProjectConfigResponse>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
 }
 
 /** CLI presence/auth/version and discoverable models behind the model-cockpit
  *  surfaces. `fresh` skips the server's 30s cache. */
-export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshot> {
+export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshotResponse> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<AgentProbeSnapshot>(
+  return request<AgentProbeSnapshotResponse>(
     `${baseUrl}/api/agent-probe${fresh ? '?fresh=1' : ''}`,
     { method: 'GET' },
     fetchImpl,
@@ -395,19 +277,10 @@ export function getOnboardingSamples(opts?: ClientOptions): Promise<OnboardingSa
 }
 
 export function putProjectConfig(
-  config: Partial<ProjectConfig>,
+  config: Partial<ProjectConfigResponse>,
   opts?: ClientOptions,
-): Promise<ProjectConfig> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<ProjectConfig>(
-    `${baseUrl}/api/project-config`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    },
-    fetchImpl,
-  )
+): Promise<ProjectConfigResponse> {
+  return requestJson<ProjectConfigResponse>(`/api/project-config`, 'PUT', config, opts)
 }
 
 // Change the UI/MCP port. The server persists it and restarts the UI; a 409
@@ -418,17 +291,8 @@ export async function changeProjectPort(
   confirm: boolean,
   opts?: ClientOptions,
 ): Promise<PortChangeResult> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
-    return await request<PortChangeResult>(
-      `${baseUrl}/api/project-config/port`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ port, confirm }),
-      },
-      fetchImpl,
-    )
+    return await requestJson<PortChangeResult>(`/api/project-config/port`, 'POST', { port, confirm }, opts)
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object') {
       return e.body as PortChangeResult

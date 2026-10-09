@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ execFileSync: vi.fn() }))
@@ -10,6 +11,7 @@ vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 const { refreshCanaryLabMcp: refresh, findStaleCanaryLabMcp, refreshClaudeDesktopMcpQuietly } = await import('./mcp-refresh')
 const { claudeDesktopConfigPath } = await import('./desktop-registration')
 
+const tempDir = trackTempDirs('cl-refresh-')
 let clientHome: string
 function refreshCanaryLabMcp(opts: Parameters<typeof refresh>[0] = {}) {
   return refresh({ homeDir: clientHome, ...opts })
@@ -18,31 +20,25 @@ function refreshCanaryLabMcp(opts: Parameters<typeof refresh>[0] = {}) {
 // A throwaway home with a Desktop config already in place, so the per-OS layout
 // comes from the resolver rather than a hardcoded macOS path.
 function tmpHomeWithDesktopConfig(contents: unknown): { homeDir: string; configPath: string } {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-refresh-home-'))
-  tmpDirs.push(homeDir)
+  const homeDir = tempDir('cl-refresh-home-')
   const configPath = claudeDesktopConfigPath(homeDir)
   fs.mkdirSync(path.dirname(configPath), { recursive: true })
   fs.writeFileSync(configPath, JSON.stringify(contents))
   return { homeDir, configPath }
 }
 
-const tmpDirs: string[] = []
 function tmpConfig(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-refresh-'))
-  tmpDirs.push(dir)
-  return path.join(dir, 'Claude', 'claude_desktop_config.json')
+  return path.join(tempDir(), 'Claude', 'claude_desktop_config.json')
 }
 
 beforeEach(() => {
   mocks.execFileSync.mockReset()
-  clientHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-refresh-clients-'))
-  tmpDirs.push(clientHome)
+  clientHome = tempDir('cl-refresh-clients-')
   mocks.execFileSync.mockImplementation(fakeMcpClients(clientHome, { available: [] }))
   delete process.env.CANARY_LAB_SKIP_CLIENT_MCP
 })
 afterEach(() => {
   delete process.env.CANARY_LAB_SKIP_CLIENT_MCP
-  for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
 })
 
 const EXEC = '/usr/bin/node'

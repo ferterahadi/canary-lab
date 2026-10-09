@@ -1,6 +1,4 @@
-import type { PortifyStatus } from '../../../../../../../shared/portify-index'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
-import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../../../../shared/run-mode'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
@@ -8,44 +6,6 @@ import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../.
 // PROVEN by booting the stack twice concurrently on different ports. The flow
 // edits the product repo on a dedicated branch in a git worktree, verifies, and
 // ends at a user-confirmed commit. Modeled on the benchmark subsystem.
-
-export interface PortifyBootInstance {
-  /** Slot name → port this boot was assigned. */
-  ports: Record<string, number>
-  ok: boolean
-  /** When !ok, which service failed and why. */
-  failedService?: string
-  detail?: string
-}
-
-export interface PortifyVerification {
-  ok: boolean
-  instances: PortifyBootInstance[]
-  /** Aggregated failure context fed back to the agent on retry. */
-  failureDetail?: string
-  /** True when the boot failed only because a downstream dependency was
-   *  unreachable (e.g. the DB is down) — an ENVIRONMENT problem the port
-   *  rewrite cannot fix. Signals the orchestrator to stop retrying. */
-  notPortFixable?: boolean
-  /** Differential triage on a failed double-boot: one extra SOLO boot decides
-   *  whether the failure is concurrency at all. `baseline-boot-failed` = the
-   *  solo boot fails too — not a port/concurrency defect (fix the boot
-   *  blocker, don't iterate on ports). `concurrency-failure` = solo passes —
-   *  the defect only appears when two instances share the worktree/machine.
-   *  Absent when verification passed, or when the triage boot was skipped
-   *  (dependency-down failures are already classified by notPortFixable). */
-  failureClass?: 'baseline-boot-failed' | 'concurrency-failure'
-}
-
-export interface PortifyRepoState {
-  name: string
-  /** Canonical localPath of the product repo. */
-  path: string
-  /** Toplevel of this repo's isolated scratch worktree (set once setup runs). */
-  worktreePath?: string
-  /** HEAD the scratch worktree was cut from. */
-  baseSha?: string
-}
 
 /** Who drives the port-ification edits.
  *  - `internal`: an agent spawned IN the app process edits the scratch worktree.
@@ -60,43 +20,6 @@ export type PortifyClientKind = ClientKind
 /** The external client that owns an external-producer workflow. Surfaced
  *  status-only in the UI (the agent's transcript lives in the user's client). */
 export type PortifyExternalSession = ExternalSessionMeta
-
-export interface PortifyManifest {
-  workflowId: string
-  feature: string
-  featureDir: string
-  /** Every product repo the workflow edits — one isolated scratch worktree each. */
-  repos: PortifyRepoState[]
-  env?: string
-  agent: HealAgent
-  /** Model+effort the spawned agent runs with, resolved at start (launch
-   *  override → workspace `agentModels.portify` → agent default) and locked to
-   *  this workflow. Absent on pre-2.2.0 records and external-producer
-   *  workflows (the client's own model setup applies there). */
-  models?: StageModelChoice
-  /** Defaults to `internal` (legacy manifests have no field). `external` means the
-   *  agent runs in the user's own client and edits the worktree in place. */
-  producer?: PortifyProducer
-  /** Set only for `producer: 'external'` — the claiming client's identity. */
-  external?: PortifyExternalSession
-  /** Ephemeral scratch-branch name created in the scratch worktree(s) and
-   *  discarded on save/cancel — it never lands in the product repo. */
-  branch: string
-  status: PortifyStatus
-  attempt: number
-  maxAttempts: number
-  /** User-driven revise passes after the first `ready-to-save`. Separate from
-   *  `attempt` (the auto-retry budget) — feedback rounds are unbounded. Optional:
-   *  manifests persisted before this field existed deserialize without it. */
-  feedbackRounds?: number
-  startedAt: string
-  endedAt?: string
-  /** Unified diff of the agent's edits (config + source), for the review screen.
-   *  On `save` this diff is captured as the feature's ephemeral overlay. */
-  diff?: string
-  verification?: PortifyVerification
-  error?: string
-}
 
 export interface StartPortifyInput {
   feature: string

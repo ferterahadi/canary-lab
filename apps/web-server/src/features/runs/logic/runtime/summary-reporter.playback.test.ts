@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { readPlaywrightPlaybackEvents } from '../run-detail'
+import { mkResult, mkTest, summaryReaders } from './__fixtures__/summary-reporter'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 
@@ -38,15 +40,8 @@ afterEach(() => {
   delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
   delete process.env.CANARY_LAB_TARGETED_RERUN
+  delete process.env.CANARY_LAB_EXECUTION
 })
-
-function mkTest(title: string, file = '/spec.ts', line = 1): any {
-  return { title, location: { file, line } }
-}
-
-function mkResult(overrides: Partial<any> = {}): any {
-  return { status: 'passed', duration: 42, retry: 0, ...overrides }
-}
 
 function mkStep(title: string, category: string, file?: string, line?: number): any {
   return {
@@ -56,19 +51,28 @@ function mkStep(title: string, category: string, file?: string, line?: number): 
   }
 }
 
-function readSummary(): any {
-  return JSON.parse(fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'))
-}
-
-function readEvents(runDir = LOGS_DIR): any[] {
-  return fs.readFileSync(path.join(runDir, 'playwright-events.jsonl'), 'utf-8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-}
+const { readSummary, readEvents } = summaryReaders(LOGS_DIR)
 
 describe('SummaryReporter', () => {
+  it('stamps the execution the orchestrator numbered on each test begin and end, never on steps', () => {
+    process.env.CANARY_LAB_EXECUTION = '2'
+    const reporter = new SummaryReporter()
+    const t = mkTest('Stamped', '/specs/stamped.spec.ts', 3)
+    reporter.onTestBegin(t)
+    reporter.onStepBegin(t, mkResult(), mkStep('click', 'pw:api'))
+    reporter.onTestEnd(t, mkResult())
+
+    expect(readEvents().map((e: { type: string; execution?: number }) => [e.type, e.execution])).toEqual([
+      ['test-begin', 2], ['step-begin', undefined], ['test-end', 2],
+    ])
+  })
+
+  it('records no execution stamp when spawned without one', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Unstamped', '/specs/unstamped.spec.ts', 3))
+    expect(readEvents()[0]).not.toHaveProperty('execution')
+  })
+
   it('writes the currently running test on begin and clears it on end', () => {
     const reporter = new SummaryReporter()
     reporter.onTestBegin(mkTest('Currently busy', '/specs/busy.spec.ts', 7))
@@ -184,6 +188,11 @@ describe('SummaryReporter', () => {
         ],
       },
     ])
+    const events = readPlaywrightPlaybackEvents(LOGS_DIR)
+    expect(events).toEqual(readEvents())
+    expect(events?.map(event => event.test.id)).toEqual(Array(4).fill(testIdFor({
+      title: test.title, location: '/specs/checkout.spec.ts:12',
+    })))
   })
 
   it('keeps attachment entries when Playwright only provides a name', () => {

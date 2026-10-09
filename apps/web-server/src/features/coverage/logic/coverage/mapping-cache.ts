@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { coverageJsonDigest } from './json-digest'
 import fs from 'fs'
 import path from 'path'
 import ts from 'typescript'
@@ -6,9 +6,11 @@ import { extractTestMappingContext } from '../../../../shared/ast-extractor'
 import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { fingerprintRequirement } from './fingerprints'
 import type { AnnotateTestInput } from './annotate-engine'
-import { docsDirFor, readDocsCollection } from './docs-collection'
+import { docsDirFor } from './document-files'
+import { readDocsCollection } from './docs-collection'
 import { PRD_SUMMARY_JSON } from './prd-summary-render'
 import { CoverageInputReads } from './input-reads'
+import { mappingInputMatches } from './mapping-validity'
 
 export interface MappingTestInput extends AnnotateTestInput {
   file: string
@@ -29,10 +31,6 @@ export interface MappingInferenceSnapshot {
   requirements: Record<string, string>
   sourceRevision?: string
   readable?: boolean
-}
-
-function hash(value: unknown): string {
-  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
 function portableRelative(featureDir: string, file: string): string {
@@ -60,7 +58,7 @@ function sourceContext(featureDir: string, file: string, options: ts.CompilerOpt
     }
   }
   visit(path.resolve(featureDir, file), true)
-  return hash([...files].sort(([a], [b]) => a.localeCompare(b)))
+  return coverageJsonDigest([...files].sort(([a], [b]) => a.localeCompare(b)))
 }
 
 export function mappingInferenceSnapshot(
@@ -71,7 +69,7 @@ export function mappingInferenceSnapshot(
   reads = new CoverageInputReads(),
 ): MappingInferenceSnapshot {
   const requirementHashes = Object.fromEntries(requirements.filter((r) => !r.deprecated)
-    .map((r) => [r.id, hash([fingerprintRequirement(r), variantDimension])]))
+    .map((r) => [r.id, coverageJsonDigest([fingerprintRequirement(r), variantDimension])]))
   try {
     const host = {
       ...ts.sys,
@@ -100,7 +98,7 @@ export function mappingInferenceSnapshot(
         context = sourceContext(featureDir, test.file, options, reads, host)
         contexts.set(test.file, context)
       }
-      fingerprints[test.name] = hash({
+      fingerprints[test.name] = coverageJsonDigest({
         file: portableRelative(featureDir, path.resolve(featureDir, test.file)),
         body: test.bodySource,
         assertions: test.assertions,
@@ -109,7 +107,7 @@ export function mappingInferenceSnapshot(
       })
     }
     const summaryPath = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
-    const sourceRevision = hash([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
+    const sourceRevision = coverageJsonDigest([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
     return { tests: fingerprints, requirements: requirementHashes, sourceRevision, readable: true }
   } catch {
     // Reuse is optional. If any source/config input cannot be read, re-examine
@@ -125,8 +123,8 @@ export function unexaminedMappingTests(
 ): MappingTestInput[] {
   return tests.filter((test) => {
     const prior = cache?.version === 2 ? cache.tests?.[test.name] : undefined
-    return !snapshot.tests[test.name] || prior?.fingerprint !== snapshot.tests[test.name]
-      || Object.entries(snapshot.requirements).some(([id, fingerprint]) => prior.requirements?.[id] !== fingerprint)
+    return !snapshot.tests[test.name] || !mappingInputMatches(snapshot.tests[test.name], snapshot.requirements,
+      prior ? { fingerprint: prior.fingerprint, requirements: prior.requirements ?? {} } : undefined)
   })
 }
 

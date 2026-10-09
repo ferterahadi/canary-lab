@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { dayTime, formatLocalDateTime, shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, formatSpan, firstLineOf, truncateText, shortSession, joinNatural, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
 import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
@@ -23,6 +23,12 @@ describe('formatDuration', () => {
   })
   it('formats multi-minute durations as Mm Ss', () => {
     expect(formatDuration(125_000)).toBe('2m 5s')
+  })
+  it('rolls a rounded-up second into the next unit instead of printing 60', () => {
+    // 21m 59.6s used to print "21m 60s"; 59.96s used to print "60.0s".
+    expect(formatDuration(1_319_600)).toBe('22m 0s')
+    expect(formatDuration(59_960)).toBe('1m 0s')
+    expect(formatDuration(59_940)).toBe('59.9s')
   })
   it('returns em-dash for negative or non-finite input', () => {
     expect(formatDuration(-1)).toBe('—')
@@ -66,6 +72,58 @@ describe('durationBetween', () => {
   })
 })
 
+describe('formatSpan', () => {
+  const at = (sec: number): string => new Date(Date.UTC(2026, 0, 1, 0, 0, sec)).toISOString()
+  it('prints the span between two stamps as a compact clock', () => {
+    expect(formatSpan(at(0), at(4))).toBe('4s')
+    expect(formatSpan(at(0), at(134))).toBe('2m 14s')
+  })
+  it('rounds to the nearest second', () => {
+    expect(formatSpan('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:59.600Z')).toBe('1m 00s')
+    expect(formatSpan('2026-01-01T00:00:00.000Z', '2026-01-01T00:00:04.400Z')).toBe('4s')
+  })
+  it('is null for a missing, unparseable or reversed pair', () => {
+    expect(formatSpan(undefined, at(4))).toBeNull()
+    expect(formatSpan(at(0), undefined)).toBeNull()
+    expect(formatSpan('nope', at(4))).toBeNull()
+    expect(formatSpan(at(4), at(0))).toBeNull()
+  })
+})
+
+describe('truncateText / firstLineOf', () => {
+  it('caps text with a trailing ellipsis only when it was cut', () => {
+    expect(truncateText('abcdefghij', 5)).toBe('abcd…')
+    expect(truncateText('abcde', 5)).toBe('abcde')
+  })
+  it('takes the first non-blank line, trimmed', () => {
+    expect(firstLineOf('\n\n  hello world  \nsecond')).toBe('hello world')
+  })
+  it('caps the line with an ellipsis', () => {
+    expect(firstLineOf('abcdefghij', 5)).toBe('abcd…')
+    expect(firstLineOf('x'.repeat(200))).toHaveLength(160)
+    expect(firstLineOf('')).toBe('')
+  })
+})
+
+describe('joinNatural', () => {
+  it('writes a list the way a sentence does', () => {
+    expect(joinNatural([])).toBe('')
+    expect(joinNatural(['a'])).toBe('a')
+    expect(joinNatural(['a', 'b'])).toBe('a and b')
+    expect(joinNatural(['a', 'b', 'c'])).toBe('a, b and c')
+  })
+})
+
+describe('shortSession', () => {
+  it('keeps the head and tail of a long id', () => {
+    expect(shortSession('649945f5-79b7-43ae-81c9-be02b0911e88')).toBe('649945…1e88')
+  })
+  it('leaves an id of 12 characters or fewer alone', () => {
+    expect(shortSession('short-id')).toBe('short-id')
+    expect(shortSession('abcdefghijkl')).toBe('abcdefghijkl')
+  })
+})
+
 describe('shortDateTime', () => {
   it('formats a local month, day, and 24-hour time', () => {
     const d = new Date(2026, 9, 1, 14, 2, 30)
@@ -76,6 +134,22 @@ describe('shortDateTime', () => {
   })
   it('falls back to the raw input when it cannot parse', () => {
     expect(shortDateTime('garbage')).toBe('garbage')
+  })
+})
+
+describe('dayTime', () => {
+  it('says "Today" with a 24-hour time for a stamp from the current day', () => {
+    const now = new Date(2026, 9, 6, 18, 0, 0).getTime()
+    expect(dayTime(new Date(2026, 9, 6, 14, 48, 4).toISOString(), now)).toMatch(/^Today 14:48$/)
+  })
+  it('falls back to the short date for any other day', () => {
+    const now = new Date(2026, 9, 6, 18, 0, 0).getTime()
+    const iso = new Date(2026, 9, 3, 22, 27, 33).toISOString()
+    expect(dayTime(iso, now)).toBe(shortDateTime(iso))
+    expect(dayTime(iso, now)).not.toContain('Today')
+  })
+  it('falls back to the raw input when it cannot parse', () => {
+    expect(dayTime('garbage')).toBe('garbage')
   })
 })
 
@@ -94,6 +168,12 @@ describe('formatBytes', () => {
   it('formats across units with sensible rounding', () => {
     expect(formatBytes(0)).toBe('0 B')
     expect(formatBytes(-5)).toBe('0 B')
+    expect(formatBytes(NaN)).toBe('0 B')
+    expect(formatBytes(Infinity)).toBe('0 B')
+    expect(formatBytes(1023)).toBe('1023 B')
+    expect(formatBytes(1024)).toBe('1 KB')
+    expect(formatBytes(1024 ** 2)).toBe('1 MB')
+    expect(formatBytes(1024 ** 3)).toBe('1 GB')
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(2048)).toBe('2 KB')
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')
@@ -143,5 +223,19 @@ describe('shortRunRef', () => {
     expect(shortRunRef('run_z6kc')).toBe('z6kc')
     expect(shortRunRef('ab')).toBe('ab')
     expect(shortRunRef('x-y')).toBe('x-y')
+  })
+})
+
+
+describe('formatLocalDateTime', () => {
+  it('uses local medium date and time and preserves equivalent offset instants', () => {
+    const iso = '2026-10-05T06:02:30Z'
+    const expected = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(iso))
+    expect(formatLocalDateTime(iso)).toBe(expected)
+    expect(formatLocalDateTime('2026-10-05T14:02:30+08:00')).toBe(expected)
+  })
+
+  it.each(['', 'not-a-date'])('retains invalid input %j', (input) => {
+    expect(formatLocalDateTime(input)).toBe(input)
   })
 })

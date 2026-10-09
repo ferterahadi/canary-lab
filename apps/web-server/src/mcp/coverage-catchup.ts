@@ -1,6 +1,7 @@
 import { readNotificationUpdate } from './notification-catchup'
 import type { CanaryLabMcpDeps, CanaryLabToolHandler } from './tool-schemas'
 import { coverageJobStore } from '../features/coverage/logic/coverage/jobs/store'
+import { errorMessage } from '../../../../shared/lib/error-message'
 
 /** Read the same server-owned freshness projection used by the coverage UI and
  * catch-up payloads. Callers decide whether the result is advisory or gating. */
@@ -12,7 +13,7 @@ export async function readCoverageUpdate(feature: string, deps: CanaryLabMcpDeps
       ? response.body
       : { feature, state: 'unavailable', reason: 'Cannot confirm coverage freshness.', detail: response.body }
   } catch (error) {
-    return { feature, state: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
+    return { feature, state: 'unavailable', reason: errorMessage(error) }
   }
 }
 
@@ -38,6 +39,6 @@ export function withCoverageCatchup(name: string, handler: CanaryLabToolHandler,
     }
     if (!feature) return result
     const [notificationUpdate, update] = await Promise.all([readNotificationUpdate(feature, deps), readCoverageUpdate(feature, deps)])
-    return { ...result, content: [...result.content, { type: 'text' as const, text: JSON.stringify({ coverageUpdate: update, notificationUpdate, guidance: 'Use current freshness, not historical percentages. If recovery is within your task, follow nextAction after respecting activeJobId and Flight ownership; otherwise report it. Save the revision for wait_for_feature_change.' }) }] }
+    return { ...result, content: [...result.content, { type: 'text' as const, text: JSON.stringify({ coverageUpdate: update, notificationUpdate, guidance: 'Use current freshness and flightAttention, not historical errors or percentages. Resolved attention does not authorize resuming a paused flight. If recovery is within your task, follow nextAction after respecting activeJobId and Flight ownership; otherwise report it. Save the revision for wait_for_feature_change.' }) }] }
   }
 }

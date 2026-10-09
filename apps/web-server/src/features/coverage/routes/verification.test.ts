@@ -1,8 +1,7 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import type { GettingStartedActiveSession } from '../../../../../../shared/getting-started'
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { verificationRoutes } from './verification'
@@ -10,20 +9,20 @@ import { RunStore } from '../../runs/logic/run-store'
 import { createRegistry, type OrchestratorLike } from '../../runs/logic/run-registry'
 
 import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
+
+const tempDir = trackTempDirs('cl-vroutes-')
 
 let tmpDir: string
 let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-vroutes-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeFeature(): void {
@@ -72,7 +71,7 @@ describe('verification routes', () => {
       featuresDir,
       store,
       startVerification: async () => fakeOrchestrator(),
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
 
     const targets = await app.inject({
@@ -426,6 +425,7 @@ describe('verification routes', () => {
       const store = new RunStore(logsDir, createRegistry())
       const gettingStarted = sessionStore()
       gettingStarted.claim('run', 'external')
+      const activeBeforeConflict = gettingStarted.read().active
       const startVerification = vi.fn()
       const app = Fastify()
       await app.register(verificationRoutes, { featuresDir, store, startVerification, gettingStarted })
@@ -440,6 +440,8 @@ describe('verification routes', () => {
       const body = res.json() as { type: string; error: string; active: GettingStartedActiveSession }
       expect(body.type).toBe('getting_started_busy')
       expect(body.active.workflow).toBe('run')
+      expect(body).toEqual({ type: 'getting_started_busy', error: 'Getting Started is already running run from external.', active: activeBeforeConflict })
+      expect(gettingStarted.read().active).toEqual(activeBeforeConflict)
       // Bounced before any verification started.
       expect(startVerification).not.toHaveBeenCalled()
     })

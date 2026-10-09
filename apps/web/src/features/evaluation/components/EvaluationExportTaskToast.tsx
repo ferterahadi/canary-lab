@@ -1,18 +1,16 @@
+import { ExternalAgentMonitor } from '@/shared/ui/ExternalAgentMonitor'
 import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
-  ExternalAgentCard,
-  ExternalClientCta,
-  ExternalMetaFact,
   ExternalStatusPill,
-  pillPalette,
-  useOpenAgentApp,
+  agentJobTone,
   type PillPalette,
 } from '@/shared/ui/ExternalAgentCard'
+import { evaluationExportStatus } from '@/shared/lib/agent-job-status'
 
 // R29 (canary-first-flight): the standalone evaluation-export dialog is gone —
 // export progress/output renders WHERE the export lives: the flight detail's
@@ -115,65 +113,30 @@ export function evaluationOutputPanel(
 // sessionRef and stream through AgentSessionView instead.)
 export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportTaskView; log: string }) {
   const clientKind = (task.clientKind ?? 'other') as ExternalClientKind
-  const { opening, error: openError, open } = useOpenAgentApp()
-  // Jump-to-agent: prefer the client's own conversation deep-link; otherwise
-  // launch the desktop app for a known client. PTY/unknown → no CTA.
-  const desktopAgent = clientKindToDesktopAgent(clientKind)
   const { label, palette } = exportStatusPill(task.status)
   return (
     <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
-      <ExternalAgentCard
+      <ExternalAgentMonitor
         clientKind={clientKind}
-        eyebrow="External agent session"
-        headline={clientLabel(clientKind)}
-        subtitle={task.conversationName}
+        sessionUrl={task.externalSessionUrl}
+        sessionId={task.sessionId}
+        conversationName={task.conversationName}
         statusPill={<ExternalStatusPill label={label} palette={palette} />}
-        meta={
-          task.sessionId && (
-            <ExternalMetaFact label="Session" title={task.sessionId}>
-              <span style={{ fontFamily: 'var(--font-mono)' }}>{shortSession(task.sessionId)}</span>
-            </ExternalMetaFact>
-          )
-        }
         body={exportBodyCopy(task.status)}
-        action={task.externalSessionUrl ? (
-          <ExternalClientCta label={`Open ${clientLabel(clientKind)}`} href={task.externalSessionUrl} />
-        ) : (
-          desktopAgent && (
-            <ExternalClientCta
-              label={`Open ${desktopAgent === 'claude' ? 'Claude' : 'Codex'}`}
-              onClick={() => open(desktopAgent)}
-              busy={opening !== null}
-            />
-          )
-        )}
-      >
-        <pre
-          data-testid="evaluation-external-log"
-          style={{
-            margin: '12px 0 0', maxHeight: 300, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
-            color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          }}
-        >
-          {log.trim() || 'Waiting for the client to submit the evaluation wording…'}
-        </pre>
-
-        {openError && (
-          <div className="mt-3 text-[11px]" style={{ color: 'var(--danger)' }}>
-            {openError}
-          </div>
-        )}
-      </ExternalAgentCard>
+        displayLog={log.trim() || 'Waiting for the client to submit the evaluation wording…'}
+        logTestId="evaluation-external-log"
+      />
     </div>
   )
 }
 
 // status → pill label/palette. Sky (in-progress) / green (ready) / rose (failed),
-// reusing the shared status hues.
+// the agent-job hues every external panel shares.
 function exportStatusPill(status: EvaluationExportTaskView['status']): { label: string; palette: PillPalette } {
-  if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
-  if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
-  return { label: 'Exporting', palette: pillPalette('var(--accent)') }
+  const palette = agentJobTone(evaluationExportStatus(status))
+  if (status === 'completed') return { label: 'Ready', palette }
+  if (status === 'failed') return { label: 'Failed', palette }
+  return { label: 'Exporting', palette }
 }
 
 function exportBodyCopy(status: EvaluationExportTaskView['status']): string {

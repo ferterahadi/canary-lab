@@ -10,6 +10,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { KNOWN_OLD_HEAL_PROMPTS } from './upgrade-known-prompts'
+import { formatSize } from '../../shared/lib/format-units'
 
 export type HealPromptStatus =
   | 'matches-current'
@@ -361,12 +362,6 @@ function nowIso(): string {
 }
 
 /** Format a byte count as a friendly size string (KB / MB). */
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
 /** Render the migration report as plain text suitable for stdout. */
 export function renderReport(report: MigrationReport): string {
   const lines: string[] = []

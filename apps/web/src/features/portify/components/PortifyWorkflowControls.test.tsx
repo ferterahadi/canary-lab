@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PortifyManifest } from '@shared/portify-index'
 import * as portifyApi from '@/shared/api/portify'
 import * as cleanupApi from '@/shared/api/cleanup'
 import { PortifyWorkflowControls } from './PortifyWorkflowControls'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   savePortify: vi.fn(),
@@ -35,25 +36,18 @@ vi.mock('@/shared/state/invalidation', () => ({
 let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   vi.clearAllMocks()
   mocks.savePortify.mockResolvedValue(manifest('saved'))
   mocks.cancelPortify.mockResolvedValue(manifest('aborted'))
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 function manifest(status: PortifyManifest['status'], over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'wf-1',
     feature: 'checkout',
+    featureDir: '/workspace/features/checkout',
     repos: [{ name: 'api', path: '/repo', worktreePath: '/worktree' }],
     agent: 'claude',
     branch: 'portify/wf-1',

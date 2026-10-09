@@ -1,7 +1,8 @@
+import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../../../../shared/project-config'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { launchSystemTarget } from '../../../shared/system-launch'
 import { launchEditor, launchEditorDir } from '../../../shared/editor-launch'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import {
@@ -12,13 +13,12 @@ import {
   normalizePersonalWikiPath,
   resolveProjectPort,
   saveProjectConfig,
-  type EditorChoice,
-  type HealAgentChoice,
-  type ProjectConfig,
 } from '../../runs/logic/runtime/launcher/project-config'
 import { normalizeAgentModels } from '../../../../../../shared/agent-models'
 import { isWithin } from '../logic/path-containment'
 import { notFound } from '../../../shared/http-error'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -144,19 +144,12 @@ export async function projectConfigRoutes(
 
   app.post<{ Body: { agent: 'claude' | 'codex' } }>('/api/open-agent', async (req, reply) => {
     const agent = req.body?.agent
-    if (agent !== 'claude' && agent !== 'codex') {
+    if (!isAgentKind(agent)) {
       reply.code(400)
       return { error: 'agent must be "claude" or "codex"' }
     }
-    const appName = agent === 'claude' ? 'Claude' : 'Codex'
     try {
-      if (process.platform === 'darwin') {
-        spawn('open', ['-a', appName], { stdio: 'ignore', detached: true }).unref()
-      } else if (process.platform === 'win32') {
-        spawn('cmd', ['/c', 'start', '', appName], { stdio: 'ignore', detached: true }).unref()
-      } else {
-        spawn(appName.toLowerCase(), [], { stdio: 'ignore', detached: true }).unref()
-      }
+      launchSystemTarget({ kind: 'application', agent })
       return { opened: true }
     } catch (err) {
       reply.code(500)
@@ -174,7 +167,7 @@ export async function projectConfigRoutes(
       return { opened: true, path: deps.projectRoot, editor: usedEditor }
     } catch (err) {
       reply.code(200)
-      return { opened: false, path: deps.projectRoot, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: deps.projectRoot, error: errorMessage(err) }
     }
   })
 

@@ -9,10 +9,11 @@ import type {
   FlightStageKey as FlightStageKeyT,
   PlannedFeature as PlannedFeatureT,
   PlanFeaturesTask as PlanFeaturesTaskT,
+  StartFlightRequest as StartFlightRequestT,
 } from '@shared/flights/types'
 import type { AgentStagePlans as AgentStagePlansT } from '@shared/agent-models'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { requestJson, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
  *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
@@ -31,24 +32,15 @@ export function getFlightEntryOptions(
   )
 }
 
-export interface StartFlightBody {
+/** The web launcher's subset of the wire body, with the enumerated fields
+ *  narrowed. Extending the shared request makes every narrowing a compile-time
+ *  check against what the server accepts. */
+export interface StartFlightBody extends Omit<StartFlightRequestT, 'base' | 'yolo' | 'stageProducer'> {
   feature: string
-  /** Omit on continue/redo/jump — repos are frozen; the server reuses the
-   *  stored set and 409s (`flight_frozen`) on a differing one. */
-  repoPaths?: string[]
-  /** Omit on continue/redo/jump — intent is frozen like the repos. */
-  description?: string
-  env?: string
-  coverageTarget?: number
   /** Required when the feature already has a flight record. */
   mode?: 'continue' | 'redo' | 'jump'
   /** Stage to start at (mode "jump", or fresh stage entry). */
   fromStage?: FlightStageKeyT
-  /** Optional context for a deliberate stage re-run. Scoped to that stage's
-   *  agent prompt; a plain resume leaves it absent. */
-  feedback?: string
-  /** Absent = autopilot on; explicit false asks at every checkpoint (R71/W4). */
-  autopilot?: boolean
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
@@ -58,8 +50,6 @@ export interface StartFlightBody {
   models?: AgentStagePlansT
   /** MCP-owned flights only; the web launcher leaves this absent. */
   externalAgentSession?: FlightManifestT['externalAgentSession']
-  /** Marks a Getting Started demo start; ordinary flights omit it. */
-  gettingStartedSource?: 'internal' | 'external'
   /** Which Getting Started card a demo flight belongs to: the author/portify/
    *  export demos run AS a flight but claim their own workflow key so their
    *  card lights. Absent → 'flight'. Only read with gettingStartedSource. */
@@ -69,12 +59,7 @@ export interface StartFlightBody {
 /** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —
  *  the 201 manifest is the just-kicked conductor's snapshot). */
 export function startFlight(body: StartFlightBody, opts?: ClientOptions): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights`, 'POST', body, opts)
 }
 
 export function listFlights(opts?: ClientOptions): Promise<FlightIndexEntryT[]> {
@@ -97,12 +82,7 @@ export function respondFlightCheckpoint(
   response: FlightCheckpointResponseT,
   opts?: ClientOptions,
 ): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/respond`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights/${encodeURIComponent(flightId)}/respond`, 'POST', { response }, opts)
 }
 
 /** Ask the external agent driving the current work hand-off to release this
@@ -125,12 +105,7 @@ export function forceFlightTakeover(
   flightId: string,
   opts?: ClientOptions,
 ): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/takeover/force`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights/${encodeURIComponent(flightId)}/takeover/force`, 'POST', { confirm: true }, opts)
 }
 
 /** Read-time remedy for a failed stage: null = nothing actionable; repos [] =
@@ -149,12 +124,7 @@ export function applyFlightRemedy(
   action: 'stash' | 'commit',
   opts?: ClientOptions,
 ): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/remedy`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights/${encodeURIComponent(flightId)}/remedy`, 'POST', { action }, opts)
 }
 
 export function resumeFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
@@ -173,12 +143,7 @@ export function setFlightAutopilot(
   autopilot: boolean,
   opts?: ClientOptions,
 ): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/autopilot`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ autopilot }) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights/${encodeURIComponent(flightId)}/autopilot`, 'POST', { autopilot }, opts)
 }
 
 export function abortFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
@@ -209,12 +174,7 @@ export function redoFlight(
   body?: { fromStage?: string; feedback?: string },
   opts?: ClientOptions,
 ): Promise<FlightManifestT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/redo`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) },
-    fetchImpl,
-  )
+  return requestJson<FlightManifestT>(`/api/flights/${encodeURIComponent(flightId)}/redo`, 'POST', body ?? {}, opts)
 }
 
 /** Delete a NON-ACTIVE flight record (repos + intent are frozen — deletion is
@@ -234,12 +194,7 @@ export function linkFeatureDocPath(
   targetPath: string,
   opts?: ClientOptions & { relPath?: string; relink?: boolean },
 ): Promise<{ written: boolean; relativePath: string; linked: boolean }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ written: boolean; relativePath: string; linked: boolean }>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/link`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: targetPath, relPath: opts?.relPath, relink: opts?.relink }) },
-    fetchImpl,
-  )
+  return requestJson<{ written: boolean; relativePath: string; linked: boolean }>(`/api/features/${encodeURIComponent(feature)}/docs/link`, 'POST', { path: targetPath, relPath: opts?.relPath, relink: opts?.relink }, opts)
 }
 
 /** Snapshot of a flight stage's agent session (stage = sidecar dir name:
@@ -251,17 +206,10 @@ export async function getFlightAgentSession(
   stage: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+    opts,
+  )
 }
 
 // ─── Plan features (pre-flight intent breakdown, R54) ─────────────────────
@@ -273,12 +221,7 @@ export function planFeatures(
   body: { repoPaths: string[]; description: string; autopilot?: boolean; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
 ): Promise<PlanFeaturesTaskT> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<PlanFeaturesTaskT>(
-    `${baseUrl}/api/flights/plan-features`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    fetchImpl,
-  )
+  return requestJson<PlanFeaturesTaskT>(`/api/flights/plan-features`, 'POST', body, opts)
 }
 
 export function getPlanFeaturesTask(taskId: string, opts?: ClientOptions): Promise<PlanFeaturesTaskT> {
@@ -321,12 +264,7 @@ export function launchPlannedFeatures(
   body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean; agent?: 'claude' | 'codex'; models?: AgentStagePlansT },
   opts?: ClientOptions,
 ): Promise<{ flightIds: string[] }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ flightIds: string[] }>(
-    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/launch`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    fetchImpl,
-  )
+  return requestJson<{ flightIds: string[] }>(`/api/flights/plan-features/${encodeURIComponent(taskId)}/launch`, 'POST', body, opts)
 }
 
 /** Snapshot of the breakdown agent's session. 404 → an `AgentSessionAbsence`
@@ -335,15 +273,8 @@ export async function getFlightPlanAgentSession(
   taskId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
+    opts,
+  )
 }

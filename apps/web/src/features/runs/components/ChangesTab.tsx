@@ -1,9 +1,10 @@
+import { deriveRunCaptureState, type RunCaptureInput } from '@shared/run-capture-state'
 import { useEffect, useState } from 'react'
 import type { RepoBranchSnapshot } from '@shared/run-manifest'
 import type { RunFixCapture, RunPrAttempt, RunProposedPr } from '@shared/run-state'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
-import { RunPane } from './RunPane'
+import { Frame } from './RunPane'
 import { RepairedRepoCard, useRepoOpener } from './RepairedRepoCard'
 import { ProposePrDialog } from './ProposePrDialog'
 
@@ -27,7 +28,8 @@ export function ChangesTab({
   repoBranches,
   worktrees,
   healCycles = 0,
-  runStopped = true,
+  run,
+  framed = true,
 }: {
   runId: string
   fixCapture?: RunFixCapture
@@ -45,13 +47,16 @@ export function ChangesTab({
    *  nothing needed repairing — a different fact from "the agent ran and
    *  changed nothing", and the empty state says which. */
   healCycles?: number
-  /** True after teardown has finalized the patch and ended the run. */
-  runStopped?: boolean
+  /** Authoritative lifecycle evidence used to gate final captured changes. */
+  run: Pick<RunCaptureInput, 'status' | 'endedAt'>
+  /** False when embedded in a pane that already owns the frame and scroller. */
+  framed?: boolean
 }) {
+  const { runStopped, finalCapture } = deriveRunCaptureState({ ...run, fixCapture })
   const [prOpen, setPrOpen] = useState(false)
   useEffect(() => {
-    if (!runStopped) setPrOpen(false)
-  }, [runStopped])
+    if (!finalCapture) setPrOpen(false)
+  }, [finalCapture])
   const repos = fixCapture?.repos ?? []
   const changed = new Map(repos.map((r) => [r.repoName, r]))
   const prByRepo = new Map((proposedPrs ?? []).map((p) => [p.repoName, p]))
@@ -59,18 +64,18 @@ export function ChangesTab({
     (prAttempt?.results ?? []).filter((r) => !r.ok && r.reason).map((r) => [r.repoName, r.reason!]),
   )
   const provisional = fixCapture?.provisional === true
-  const opener = useRepoOpener(runId, repos.length > 0 && runStopped, provisional)
+  const opener = useRepoOpener(runId, repos.length > 0 && finalCapture, provisional)
 
   if (repos.length === 0) {
     return (
-      <RunPane padded>
+      <Frame framed={framed}>
         <EmptyState testId="changes-empty" {...(!runStopped ? EMPTY_COPY.changesWaiting : healCycles > 0 ? EMPTY_COPY.changesNoEdits : EMPTY_COPY.changesPassed)} />
-      </RunPane>
+      </Frame>
     )
   }
 
   return (
-    <RunPane padded>
+    <Frame framed={framed}>
       <ul className="m-0 flex list-none flex-col gap-2 p-0" data-testid="changes-tab">
         {rosterFor(repos.map((r) => r.repoName), repoBranches).map((repoName) => (
           <RepairedRepoCard
@@ -83,7 +88,7 @@ export function ChangesTab({
             auto={prAttempt?.auto === true}
             provisional={provisional}
             liveWorktreeRoot={worktrees?.[repoName]}
-            runStopped={runStopped}
+            canUseFinalCapture={finalCapture}
             onProposeClick={() => setPrOpen(true)}
           />
         ))}
@@ -92,7 +97,7 @@ export function ChangesTab({
       {/* The dialog's write goes through the run store, so the opened PR
           arrives here over the runs WebSocket — nothing to re-poll. */}
       <ProposePrDialog open={prOpen} onClose={() => setPrOpen(false)} runId={runId} />
-    </RunPane>
+    </Frame>
   )
 }
 

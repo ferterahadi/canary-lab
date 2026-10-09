@@ -1,9 +1,11 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Feature } from '../api/types'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useWorkspaceFeatures } from './use-workspace-features'
+import { deferred } from '../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ listFeatures: vi.fn() }))
 vi.mock('../api/features', () => ({
@@ -27,25 +29,16 @@ async function mount() {
   await act(async () => root.render(<InvalidationProvider><Probe /></InvalidationProvider>))
 }
 async function tick() { await act(async () => vi.advanceTimersByTimeAsync(10_000)) }
-function deferred() {
-  let resolve!: (features: Feature[]) => void
-  const promise = new Promise<Feature[]>((done) => { resolve = done })
-  return { promise, resolve }
-}
 
 beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   api.listFeatures.mockResolvedValue([feature('checkout')])
-  container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('retries a failed initial load, initializes once, then reconciles successful reads', async () => {
   api.listFeatures.mockRejectedValueOnce(new Error('offline'))
@@ -76,7 +69,7 @@ it('retains a failed refresh preference until recovery, then consumes it', async
 })
 
 it('does not let a delayed initial response restore a deleted suite or reinitialize selection', async () => {
-  const old = deferred()
+  const old = deferred<Feature[]>()
   api.listFeatures.mockReturnValueOnce(old.promise)
   await mount()
   api.listFeatures.mockResolvedValue([feature('remaining')])
@@ -90,7 +83,7 @@ it('does not let a delayed initial response restore a deleted suite or reinitial
 
 it.each(['event', 'timer'] as const)('ignores an older %s read after a newer recovery response', async (first) => {
   await mount()
-  const old = deferred()
+  const old = deferred<Feature[]>()
   api.listFeatures.mockReturnValueOnce(old.promise).mockResolvedValue([feature('remaining')])
   if (first === 'event') {
     await act(async () => data.refreshFeatures('remaining'))
@@ -107,7 +100,7 @@ it.each(['event', 'timer'] as const)('ignores an older %s read after a newer rec
 
 it('retains the last confirmed list when the latest read fails and an older one resolves', async () => {
   await mount()
-  const old = deferred()
+  const old = deferred<Feature[]>()
   api.listFeatures.mockReturnValueOnce(old.promise).mockRejectedValueOnce(new Error('offline'))
   await tick()
   await act(async () => data.refreshFeatures())
@@ -148,7 +141,7 @@ it('reconciles on focus and online, then releases timers, listeners and late res
   expect(container.textContent).toBe('changed')
   await act(async () => window.dispatchEvent(new Event('online')))
   expect(api.listFeatures).toHaveBeenCalledTimes(3)
-  const old = deferred()
+  const old = deferred<Feature[]>()
   api.listFeatures.mockReturnValueOnce(old.promise)
   await tick()
   const reads = api.listFeatures.mock.calls.length

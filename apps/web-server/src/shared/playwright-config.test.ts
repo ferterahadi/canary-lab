@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   SPEC_SELECTION_RULE,
@@ -9,6 +8,9 @@ import {
   findVariableSpecSelection,
   isPlaywrightConfigPath,
 } from './playwright-config'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pw-config-')
 
 const config = (body: string) =>
   `import { defineConfig } from '@playwright/test'\nexport default defineConfig({ ${body} })\n`
@@ -16,11 +18,7 @@ const config = (body: string) =>
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pw-config-'))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 describe('isPlaywrightConfigPath', () => {

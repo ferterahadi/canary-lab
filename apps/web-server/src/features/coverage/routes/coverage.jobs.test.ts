@@ -4,11 +4,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 // Coverage generation is LLM-only; the route drives the real service, so swap the
 // agent-backed summarizer/mapper for the test fakes at the module boundary.
@@ -39,6 +39,11 @@ import { coverageRoutes, resolveCoverageJobModels } from './coverage'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../logic/coverage/jobs/store'
 
 import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { claudeSessionLogPath } from '../../agent-sessions/logic/agent-session-paths'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-route-')
 
 let tmpDir: string
 
@@ -51,37 +56,24 @@ let app: FastifyInstance
 let events: WorkspaceEvent[]
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-route-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
   app = Fastify()
   events = []
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: { publish: (e) => events.push(e) } })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: captureEvents(events) })
   await app.ready()
 })
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await app.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeFeature(name: string, spec: string, docs: Record<string, string> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), spec)
-  if (Object.keys(docs).length) {
-    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-    for (const [rel, content] of Object.entries(docs)) {
-      fs.writeFileSync(path.join(dir, 'docs', rel), content)
-    }
-  }
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, { specs: { 'a.spec.ts': spec }, docs })
 }
 
 const SPEC = `
@@ -270,15 +262,11 @@ describe('coverage routes', () => {
     await app.ready()
 
     const sessionId = 'test-session-log-' + Date.now()
-    // Write a minimal claude log under ~/.claude/projects/<encoded-tmpDir>/<sessionId>.jsonl
-    const homeDir = os.homedir()
-    const encodedDir = tmpDir.replace(/\//g, '-').replace(/^-/, '')
-    const projectsDir = path.join(homeDir, '.claude', 'projects')
-    // Scan for any existing project dir that matches, or create a synthetic one.
-    // We use a dedicated test subdir so we can clean it up.
-    const testProjectDir = path.join(projectsDir, `test-canary-lab-${Date.now()}`)
+    // Keep the real-filesystem fixture isolated from the user's agent sessions.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(tmpDir, 'claude-config'))
+    const logFile = claudeSessionLogPath(tmpDir, sessionId)
+    const testProjectDir = path.dirname(logFile)
     fs.mkdirSync(testProjectDir, { recursive: true })
-    const logFile = path.join(testProjectDir, `${sessionId}.jsonl`)
     fs.writeFileSync(logFile, JSON.stringify({ type: 'system', subtype: 'init', cwd: tmpDir, version: '1.0.0', tools: [] }) + '\n')
 
     try {
@@ -364,6 +352,8 @@ describe('coverage routes', () => {
       target: { kind: 'coverage-job', id: jobId, feature: 'checkout' },
     })
 
+    const activeBeforeConflict = gettingStarted.read().active
+    const jobsBeforeConflict = (await app.inject('/api/coverage/jobs')).json<Array<{ jobId: string }>>().map((job) => job.jobId)
     // While that demo holds the workspace, a second sourced start bounces.
     const busy = await app.inject({
       method: 'POST',
@@ -375,6 +365,9 @@ describe('coverage routes', () => {
     expect(busyBody.type).toBe('getting_started_busy')
     expect(busyBody.active.workflow).toBe('coverage')
     expect(typeof busyBody.error).toBe('string')
+    expect(busyBody).toEqual({ type: 'getting_started_busy', error: 'Getting Started is already running coverage from external.', active: activeBeforeConflict })
+    expect(gettingStarted.read().active).toEqual(activeBeforeConflict)
+    expect((await app.inject('/api/coverage/jobs')).json<Array<{ jobId: string }>>().map((job) => job.jobId)).toEqual(jobsBeforeConflict)
   })
 
   it('getting-started: a start without a source never claims; a job conflict releases a made claim', async () => {
@@ -487,7 +480,7 @@ describe('resolveCoverageJobModels', () => {
   const savedEnv: Record<string, string | undefined> = {}
 
   beforeEach(() => {
-    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-cov-models-'))
+    projectRoot = tempDir('canary-cov-models-')
     fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({ agentModels: AGENT_MODELS }))
     for (const key of ['CANARY_LAB_HEAL_AGENT', 'CANARY_LAB_CLAUDE_BIN', 'CANARY_LAB_CODEX_BIN']) {
       savedEnv[key] = process.env[key]
@@ -496,7 +489,6 @@ describe('resolveCoverageJobModels', () => {
   })
 
   afterEach(() => {
-    fs.rmSync(projectRoot, { recursive: true, force: true })
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value

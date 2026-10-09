@@ -1,35 +1,27 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
-import Fastify from 'fastify'
-
-import { runsRoutes } from './runs'
 import type { ExternalHealAgentRequest } from './runs-route-support'
 
-import { RunStore } from '../logic/run-store'
-import {
-  createRegistry,
-  type OrchestratorLike,
-  type RestartHealResult,
-  type RestartRunResult,
-} from '../logic/run-registry'
+import type { OrchestratorLike } from '../logic/run-registry'
 
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 
-import { runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildRunsApp, type RunsAppOptions } from './__fixtures__/runs-app'
+
+const tempDir = trackTempDirs('cl-rroutes-')
 
 
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The PR routes are thin plumbing over these two — they're unit-tested in
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
@@ -47,7 +39,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -68,35 +60,7 @@ function writeManifestForRun(runId: string, feature = 'foo', status: 'running' |
   })
 }
 
-async function build(opts: {
-	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
-	  cancelQueuedRun?: (runId: string) => boolean
-	  broker?: Parameters<typeof runsRoutes>[1]['broker']
-	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-	  restartRun?: (runId: string) => Promise<RestartRunResult>
-  queueDiagnostics?: Parameters<typeof runsRoutes>[1]['queueDiagnostics']
-  projectRoot?: string
-  events?: WorkspaceEvent[]
-  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
-} = {}) {
-  const registry = createRegistry()
-  const store = new RunStore(logsDir, registry)
-  const app = Fastify()
-  await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store,
-    queueDiagnostics: opts.queueDiagnostics,
-    broker: opts.broker,
-	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-	    cancelQueuedRun: opts.cancelQueuedRun,
-	    restartHeal: opts.restartHeal,
-    restartRun: opts.restartRun,
-    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
-	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-	  })
-  return { app, registry, store }
-}
+const build = (opts: RunsAppOptions = {}) => buildRunsApp({ logsDir, featuresDir }, opts)
 
 describe('GET /api/runs', () => {
   it('marks a claimed legacy run for a fresh attempt in list and detail reads', async () => {
@@ -308,6 +272,96 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
   })
 })
 
+
+describe('GET /api/runs/:runId/execution-artifacts/:execution/*', () => {
+  it('serves one execution\'s retained copy, not a later execution\'s file of the same name', async () => {
+    writeManifestForRun('r1')
+    const history = path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history')
+    for (const [n, body] of [[1, 'BEFORE'], [2, 'AFTER']] as const) {
+      fs.mkdirSync(path.join(history, `execution-${n}`, 'case-a'), { recursive: true })
+      fs.writeFileSync(path.join(history, `execution-${n}`, 'case-a', 'test-failed-1.png'), body)
+    }
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/1/case-a/test-failed-1.png' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('image/png')
+    expect(res.body).toBe('BEFORE')
+  })
+
+  it('rejects a malformed execution or a path that leaves its execution dir', async () => {
+    writeManifestForRun('r1')
+    fs.mkdirSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history', 'execution-2', 'case-a'), { recursive: true })
+    fs.writeFileSync(path.join(runDirFor(logsDir, 'r1'), 'playwright-artifacts-history', 'execution-2', 'case-a', 'x.png'), 'X')
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/one/case-a/x.png' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/1/..%2Fexecution-2%2Fcase-a%2Fx.png' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/2/case-a/missing.png' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/execution-artifacts/2/case-a' })).statusCode).toBe(404)
+  })
+})
+
+describe('GET /api/runs/:runId/cycle-patches/:iteration', () => {
+  it('serves one cycle\'s persisted diff and 404s a cycle that has none', async () => {
+    writeManifestForRun('r1')
+    const diffs = path.join(runDirFor(logsDir, 'r1'), 'diffs')
+    fs.mkdirSync(diffs, { recursive: true })
+    fs.writeFileSync(path.join(diffs, 'iteration-2.patch'), '--- a/x\n+++ b/x\n')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/2' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ iteration: 2, patchPath: path.join(diffs, 'iteration-2.patch'), diff: '--- a/x\n+++ b/x\n' })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/1' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-patches/..%2F..' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/cycle-patches/1' })).statusCode).toBe(404)
+  })
+})
+
+describe('service log excerpts and windows', () => {
+  function writeRunWithService(): string {
+    const dir = runDirFor(logsDir, 'svc')
+    fs.mkdirSync(dir, { recursive: true })
+    const logPath = buildRunPaths(dir).serviceLog('api')
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'svc', feature: 'foo', featureDir: path.join(featuresDir, 'foo'), startedAt: 'now', status: 'passed', healCycles: 0,
+      playwrightExecutions: 1, services: [{ name: 'api', safeName: 'api', command: 'x', cwd: dir, logPath }],
+    })
+    fs.writeFileSync(logPath, 'boot\n<test-case-pay>\ntotal=95\n</test-case-pay>\n')
+    return dir
+  }
+
+  it('serves one attempt’s span per service, bounded, and rejects malformed queries', async () => {
+    writeRunWithService()
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=test-case-pay' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ execution: 1, excerpts: [{ service: 'api', source: 'live', span: { startLine: 3, endLine: 3 }, window: { lines: ['total=95'] } }] })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=x&name=t' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=t&occurrence=-1' })).statusCode).toBe(400)
+    // An attempt's place must lie among the attempts that share its name.
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=t&occurrence=1&of=1' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=test-case-pay&occurrence=0&of=1' })).json())
+      .toMatchObject({ excerpts: [{ span: { startLine: 3, endLine: 3 } }] })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/service-excerpts?execution=1&name=t' })).statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('serves a window of a known service’s retained log, and 404s anything else', async () => {
+    writeRunWithService()
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1&from=2&count=2' })
+    expect(res.json()).toEqual({ service: 'api', execution: 1, source: 'live', totalLines: 4, firstLine: 2, lines: ['<test-case-pay>', 'total=95'], truncated: true })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1' })).json().lines).toHaveLength(4)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=1&from=a' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/..%2Fmanifest/lines?execution=1' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-logs/api/lines?execution=7' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/service-logs/api/lines?execution=1' })).statusCode).toBe(404)
+    await app.close()
+  })
+})
 
 describe('GET /api/runs/:runId/queue', () => {
   it('reads the live queue only for a queued run, without mutating its manifest', async () => {

@@ -1,4 +1,5 @@
 import { loadStudy } from './study'
+import { sleep } from '../../shared/lib/sleep'
 
 export async function studyStatus(root: string, options: { afterRevision?: number; waitMs?: number } = {}) {
   const waitMs = options.waitMs ?? 0
@@ -17,6 +18,6 @@ export async function studyStatus(root: string, options: { afterRevision?: numbe
     }
     // The file is authoritative. A missed push or a reconnect simply reads the
     // next revision; no watcher event is required for a correctness transition.
-    await new Promise((resolve) => setTimeout(resolve, Math.min(200, Math.max(1, deadline - Date.now()))))
+    await sleep(Math.min(200, Math.max(1, deadline - Date.now())))
   }
 }

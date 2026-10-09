@@ -4,6 +4,7 @@ import { changed, copy, inside, json, sha } from '../files'
 import { loadRepositoryStudy, repositoryScenarios, subjectPackageName, type RepositoryScenario } from './adapter'
 import { CandidateContainers, candidateImage } from './container'
 import { repositoryOracleSpecs, runRepositoryOracle } from './validate'
+import { sleep } from '../../../shared/lib/sleep'
 
 export interface CandidateReceipt {
   schemaVersion: 2
@@ -95,7 +96,7 @@ async function waitForContainerHost(signal: AbortSignal): Promise<void> {
       const response = await fetch('http://127.0.0.1:3411/api/v1/users/me', { signal: AbortSignal.timeout(500) })
       if (response.ok) return
     } catch { /* The container host may still be starting. */ }
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleep(200)
   }
   throw new Error('Container fixture host readiness timed out')
 }

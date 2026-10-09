@@ -1,3 +1,6 @@
+import { readLiveSource } from '../read-live-source'
+import { SPEC_INVENTORY_VERSION } from '../../../../../../../shared/spec-files'
+import type { AdoptSpecEditsResult, RestoreSpecEditsResult } from '../run-control-results'
 // The run-start suite snapshot (D9). Canary Lab's verdict must stay outside the
 // agent's control, and the cheapest way an agent turns a run green is to edit
 // the spec while the run is live. Detection (`dirty-specs`) only *notices*
@@ -22,14 +25,7 @@ import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteRevi
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
-
-export type AdoptSpecEditsResult =
-  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
-
-export type RestoreSpecEditsResult =
-  | { ok: true; restored: string[] }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 export type RestoreReviewedSuiteResult =
   | { ok: true; restored: string[]; revision: string }
@@ -105,7 +101,7 @@ export function recordSpecEdits(ctx: RunContext, decision?: TestReviewDecision):
   const pending = computePendingEdits(ctx.feature.featureDir, ctx.suiteDir)
   ctx.stateSink.patchManifest(ctx.runId, {
     specEdits: { checkedAt: new Date().toISOString(), pending, adopted, ...(reviewDecisions.length ? { reviewDecisions } : {}) },
-    integrity: { hints: deriveIntegrityHints(pending, (rel) => readLive(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+    integrity: { hints: deriveIntegrityHints(pending, (rel) => readLiveSource(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
 }
 
@@ -121,13 +117,6 @@ export function refreshSpecEdits(ctx: RunContext, feature: string): void {
   recordSpecEdits(ctx)
 }
 
-function readLive(featureDir: string, rel: string): string | undefined {
-  try {
-    return fs.readFileSync(path.join(featureDir, rel), 'utf8')
-  } catch {
-    return undefined // deleted since run start — the hint then carries no @req ids
-  }
-}
 
 /** A human lets the live edits into this run: the snapshot is taken again from
  *  the live suite, the dirty baseline re-read from it, the adoption recorded on
@@ -208,7 +197,7 @@ export function restoreSpecEdits(ctx: RunContext, expectedRevision?: string): Re
       restored.push(edit.file)
     }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     ctx.runnerLog?.warn(`restoring spec edits stopped after ${restored.length}/${pending.length}: ${reason}`)
     recordSpecEdits(ctx)
     return { ok: false, reason: 'restore-failed' }
@@ -269,7 +258,7 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
     installedSpecEdits = { checkedAt: at, pending: remaining, adopted: [...(previous?.adopted ?? []), { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }], ...(reviewDecisions.length ? { reviewDecisions } : {}) }
     return {
       specEdits: installedSpecEdits,
-      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLiveSource(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
     }
   }
   if (expectedRevision !== undefined) {
@@ -288,7 +277,7 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
     const latest = readManifest(ctx.paths.manifestPath)?.specEdits ?? installedSpecEdits!
     ctx.stateSink.patchManifest(ctx.runId, {
       specEdits: { ...latest, checkedAt: new Date().toISOString(), pending: remaining },
-      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLiveSource(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
     })
   }
   return { ok: true, adopted }
@@ -324,7 +313,7 @@ export function snapshotSuite(ctx: RunContext): void {
     saveSuiteTestRoster(target)
     ctx.suiteDir = target
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = errorMessage(err)
     // A runtime env target may have been the last copied file. Never retain a
     // partial snapshot that can contain that secret after falling back live.
     try { fs.rmSync(target, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
@@ -343,14 +332,14 @@ export function snapshotSuite(ctx: RunContext): void {
   } catch (error) {
     fs.rmSync(target, { recursive: true, force: true })
     ctx.suiteDir = live
-    const reason = error instanceof Error ? error.message : String(error)
+    const reason = errorMessage(error)
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'unavailable', at: new Date().toISOString(), reason },
     })
     throw new Error(`Suite runtime input setup failed before tests started: ${reason}`)
   }
   ctx.stateSink.patchManifest(ctx.runId, {
-    suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
+    suiteSnapshot: { kind: 'taken', specInventoryVersion: SPEC_INVENTORY_VERSION, dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
   })
 }
 
@@ -380,7 +369,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adopti
     ctx.suiteDir = target
     materializeSuiteRuntimeInputs(ctx)
     ctx.stateSink.patchManifest(ctx.runId, {
-      suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
+      suiteSnapshot: { kind: 'taken', specInventoryVersion: SPEC_INVENTORY_VERSION, dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
       ...adoptionPatch(),
     })
     originalMoved = false
@@ -396,7 +385,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adopti
         ctx.runnerLog?.warn(`suite rollback failed; original retained at ${scratch}: ${String(rollbackError)}`)
       }
     }
-    ctx.runnerLog?.warn(`reviewed suite snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+    ctx.runnerLog?.warn(`reviewed suite snapshot failed: ${errorMessage(error)}`)
     return { ok: false, reason: 'snapshot-failed' }
   } finally {
     if (scratch && !originalMoved) fs.rmSync(scratch, { recursive: true, force: true })

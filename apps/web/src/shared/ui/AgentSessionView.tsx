@@ -1,3 +1,5 @@
+import type { AgentSessionEvent, SubagentThread } from '@shared/agent-session-types'
+import { useElapsed } from '@/shared/state/use-elapsed'
 import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as discoveryRepairApi from '@/shared/api/discovery-repair'
@@ -7,24 +9,21 @@ import * as portifyApi from '@/shared/api/portify'
 import * as coverageApi from '@/shared/api/coverage'
 import * as flightsApi from '@/shared/api/flights'
 import { isAgentSessionAbsence } from '@/shared/api/agent-sessions'
-import type {
-  AgentSessionAbsence,
-  AgentSessionEvent,
-  AgentSessionResponse,
-  SubagentThread,
-} from '@/shared/api/agent-sessions'
+import type { AgentSessionAbsence, AgentSessionResponse } from '@/shared/api/agent-sessions'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
-import { formatElapsedSeconds } from '@/shared/lib/format'
+import { firstLineOf, formatSpan, shortSession } from '@/shared/lib/format'
 import { clientLabel } from './external-client-branding'
-import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
+import { ExternalOpenAction, GLYPH_CHECK, GLYPH_CROSS, GLYPH_DASH, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
 import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
 import {
-  describeEvent, eventSpan, firstLineOf, externalLifecycle, isoSpan, parseSystemLine, shortSession, systemVerb, textKey, type ExternalSessionActivity, type LogLine,
+  describeEvent, eventSpan, externalLifecycle, parseSystemLine, systemVerb, systemLogId, type ExternalSessionActivity, type LogLine,
 } from './activity-log'
 import { EmptyGlyph, EmptyState } from './EmptyState'
 import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
 import { chronologicalActivity, activityDate, type ActivityIdentity } from './agent-activity-timeline'
 import { TIMELINE_CSS } from './agent-session-css'
+import { displayError } from '@/shared/api/error-message'
+import { plural } from '@shared/lib/plural'
 
 // Single agent viewer for every agent surface. Renders the agent CLI's JSONL as
 // one chronological rail of single-line rows (`LogRow`) under a divider per
@@ -278,7 +277,7 @@ function useAgentSession(source: AgentSessionSource): LoadedSession {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(displayError(err))
         setLoading(false)
       })
 
@@ -360,7 +359,7 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
     const occurrence = occurrences.get(line) ?? 0
     occurrences.set(line, occurrence + 1)
     // Hashed: the id rides the `?log=` deep link, and a line can be any length.
-    items.push({ kind: 'system', id: `system:${textKey(line)}:${occurrence}`, source: 'system', sequence: items.length,
+    items.push({ kind: 'system', id: systemLogId(line, occurrence), source: 'system', sequence: items.length,
       timestamp: parseSystemLine(line).timestamp, line })
   }
   externalSessions.forEach((session, index) => {
@@ -444,12 +443,17 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
   const loading = segments.some((segment) => !loaded[sourceIdentityKey(segment.source)] || loaded[sourceIdentityKey(segment.source)].loading)
   let previousDate: string | undefined
   return (
-    <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
+    // The recessed `--bg-base` well belongs to the transcript, not the pane. An
+    // empty view sits on the host's own surface, so its card reads exactly like
+    // the Changes and Journal empty states beside it rather than as a dark hole.
+    <div className="relative flex h-full min-h-0 flex-col" style={rows.length === 0 ? undefined : { background: 'var(--bg-base)' }}>
       <style>{TIMELINE_CSS}</style>
       {segments.map((segment) => <SessionLoader key={sourceIdentityKey(segment.source)} source={segment.source} report={report} />)}
       <div ref={scrollerRef} onScroll={onScroll} className="h-full min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
         {rows.length === 0 && <EmptyState {...(failure ? EMPTY_COPY.agentUnreadable : loading ? EMPTY_COPY.agentLoading : liveSegment ? EMPTY_COPY.agentWaiting : empty ?? EMPTY_COPY.agentNone)} detail={failure ?? empty?.detail} />}
-        <ol className="agentts-rail">
+        {/* No rail under a settled empty state: its bottom padding would overflow
+            the scroller and follow-latest would nudge the card off centre. */}
+        {(rows.length > 0 || liveSegment) && <ol className="agentts-rail">
           {rows.map((row) => {
             const date = activityDate(row.timestamp)
             const dateHeading = date !== previousDate && (dates.size > 1 || date === 'Time unavailable')
@@ -460,7 +464,7 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
             </Fragment>
           })}
           {liveSegment && <LiveTail {...pendingWork(loaded[sourceIdentityKey(liveSegment.source)]?.state?.events ?? [])} />}
-        </ol>
+        </ol>}
       </div>
       {showJumpLatest && <JumpLatestButton onClick={() => {
         const el = scrollerRef.current
@@ -629,7 +633,7 @@ function SessionDivider({ state, live, label, startedAt, sticky, showProvenance 
         {showProvenance && state.model && <span className="agentts-model">{state.model}</span>}
         {showProvenance && state.effort && <span>{state.effort}</span>}
         <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
-        <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
+        <span className="agentts-count">{plural(state.events.length, 'event')}</span>
       </span>
       <span className="agentts-divspace" />
       <span className="agentts-divchip" data-tone={tone} data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">{status}</span>
@@ -642,7 +646,7 @@ function SessionDivider({ state, live, label, startedAt, sticky, showProvenance 
 function ExternalSessionDivider({ session, sticky }: { session: ExternalSessionActivity; sticky: boolean }) {
   const running = session.status === 'running'
   const elapsed = useElapsed(running ? session.startedAt : undefined)
-  const duration = isoSpan(session.startedAt, session.endedAt)
+  const duration = formatSpan(session.startedAt, session.endedAt)
   const status = running ? `Live${elapsed ? ` · ${elapsed}` : ''}` : `${externalLifecycle(session.status, 'end')}${duration ? ` · ${duration}` : ''}`
   const tone = running ? 'live' : session.status === 'failed' ? 'danger' : session.status === 'aborted' ? 'settled' : 'success'
   return (
@@ -666,7 +670,7 @@ function DividerMark({ tone }: { tone: 'live' | 'danger' | 'settled' | 'success'
   return (
     <span className="agentts-divmark" data-tone={tone} aria-hidden="true">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-        {tone === 'danger' ? <path d="M5 5l6 6M11 5l-6 6" /> : tone === 'absent' ? <path d="M4.5 8h7" /> : <path d="M3.5 8.5l3 3 6-6.5" />}
+        {tone === 'danger' ? GLYPH_CROSS : tone === 'absent' ? GLYPH_DASH : GLYPH_CHECK}
       </svg>
     </span>
   )
@@ -710,31 +714,6 @@ export function pendingWork(events: AgentSessionEvent[]): { label: string; since
     if (!settled) return { label: `Running ${last.name}`, since }
   }
   return { label: 'Working', since }
-}
-
-/** Seconds since `iso`, re-rendered once a second. The elapsed clock is the one
- *  liveness signal that survives reduced motion (where the node's sweep and the
- *  dot wave both hold still), and it's what separates a 3-second gap from a
- *  stall — the question a user actually has when they see a pending row. */
-function useElapsed(iso: string | undefined): string | null {
-  const startedAt = useMemo(() => {
-    if (!iso) return null
-    const t = Date.parse(iso)
-    return Number.isFinite(t) ? t : null
-  }, [iso])
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (startedAt === null) return
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [startedAt])
-  if (startedAt === null) return null
-  const ms = now - startedAt
-  // A negative or absurd delta means the transcript's clock disagrees with the
-  // browser's — no figure beats a wrong one.
-  if (ms < 0 || ms > 86_400_000) return null
-  return formatElapsedSeconds(ms / 1000)
 }
 
 function LiveTail({ label, since }: { label: string; since?: string }) {

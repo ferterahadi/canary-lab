@@ -7,6 +7,7 @@ import {
   type ConfigTab,
   type ModelsAgent,
   type RouteDialog,
+  type RunLocation,
   type RunOpenTarget,
   type WorkspaceView,
 } from '../lib/workspace-view-state'
@@ -54,6 +55,11 @@ export interface WorkspaceNavigation {
   reviewFocus?: ReviewFocus
   setReviewFocus: (focus: ReviewFocus | undefined) => void
   specReviewOpen: boolean
+  /** Open the changed-tests review. The focus is always rewritten, so an open
+   *  without one lands on the overview rather than a file a previous open named. */
+  openReview: (focus?: ReviewFocus) => void
+  approval: string | null
+  setApproval: (id: string | null) => void
   notificationsOpen: boolean
   setNotificationsOpen: (open: boolean) => void
   flightStartFor: string | null
@@ -121,10 +127,15 @@ export interface WorkspaceNavigation {
   returnFlight: string | null
   /** R82: which failing test the open run detail should land on, or null. Paired
    *  with its run so a stale focus can never apply to a different one. */
-  focusTest: { runId: string; test: string } | null
+  focusTest: { runId: string; test: string; testId?: string; testLocation?: string; request?: number } | null
   /** Which tab the open run detail should land on, or null. Paired with its run
    *  under the same rule as `focusTest`. */
   runTab: NavState['runTab']
+  /** Where the reader is inside a run's detail, paired with its run, or null
+   *  before the detail has reported one (a cold load seeds it from the URL). */
+  runLocation: NavState['runLocation']
+  /** The run detail reports where its reader is, so the URL can restore it. */
+  setRunLocation: (runId: string, location: RunLocation) => void
   /** Select a freshly-started run into the detail pane (seeds the pending ref). */
   selectStartedRun: (runId: string) => void
   /** Mirror refs read synchronously by the WS handler / refreshFeatures so those
@@ -167,10 +178,15 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigFor(feature, tab)
   }, [setConfigFor])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
+  const [approval, setApproval] = useState<string | null>(SEED.approval ?? null)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
   const [bootFailureFor, setBootFailureFor] = useState<string | null>(SEED.bootFailureFor)
   const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
+  const openReview = useCallback((focus?: ReviewFocus) => {
+    setReviewFocus(focus)
+    setSpecReviewOpen(true)
+  }, [])
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
@@ -195,9 +211,16 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
   const [runTab, setRunTab] = useState<NavState['runTab']>(SEED.runTab)
+  const [runLocation, setRunLocationState] = useState<NavState['runLocation']>(SEED.runLocation)
+  const setRunLocation = useCallback((runId: string, location: RunLocation) => {
+    // Reported on every render that changes it; an equal report keeps the
+    // same object so the persist effect does not rewrite an unchanged URL.
+    setRunLocationState((prev) => (prev?.runId === runId && JSON.stringify(prev.location) === JSON.stringify(location) ? prev : { runId, location }))
+  }, [])
   const [returnFlight, setReturnFlight] = useState<string | null>(SEED.returnFlight)
 
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
+  const focusRequestRef = useRef(0)
   const selectedFeatureRef = useRef<string | null>(null)
   const selectedRunIdRef = useRef<string | null>(PERSISTED.run)
   // Read synchronously by openFlight, which must tell "same flight, coming back"
@@ -223,6 +246,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    approval,
     notificationsOpen,
     bootFailureFor,
     flightStartFor,
@@ -234,6 +258,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     focusTest,
     runTab,
+    runLocation,
     returnFlight,
   }
   const dialog = routedDialog(state)
@@ -252,7 +277,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
+    // runLocation is the same case again, and keeps its identity while unchanged.
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, runLocation, returnFlight, reviewFocus, currentTests, approval])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -281,8 +307,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // clears the previous instead of inheriting it. A named test wins: it already
     // implies the Playwright tab, so honouring a `tab` beside it would fight over
     // the same destination.
-    setFocusTest(target?.test ? { runId, test: target.test } : null)
+    setFocusTest(target?.test ? { runId, test: target.test, testId: target.testId, testLocation: target.testLocation, request: ++focusRequestRef.current } : null)
     setRunTab(!target?.test && target?.tab ? { runId, tab: target.tab } : null)
+    // An arrival replaces where the reader was; the detail reports the new
+    // place once it has landed.
+    setRunLocationState(null)
     // Same rule for the origin: an arrival that names no flight clears one a
     // previous drill-through left behind.
     setReturnFlight(fromFlight)
@@ -315,6 +344,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    approval,
     notificationsOpen,
     flightStartFor,
     flightStartFresh,
@@ -326,8 +356,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     focusTest,
     runTab,
+    runLocation,
+    setRunLocation,
     reviewFocus,
     setReviewFocus,
+    openReview,
     routedDialog: dialog,
     setView,
     setSelectedFeature,
@@ -340,6 +373,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setSpecReviewOpen,
     bootFailureFor,
     setBootFailureFor,
+    setApproval,
     setNotificationsOpen,
     setFlightStartFor,
     setFlightStartNew,

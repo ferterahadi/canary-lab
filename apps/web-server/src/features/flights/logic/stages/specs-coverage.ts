@@ -1,6 +1,7 @@
+import { listSpecFiles } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { captureValidationProcess } from '../../../../shared/capture-validation-process'
 import { createHash } from 'crypto'
 import { computeFeatureCoverage } from '../../../coverage/logic/coverage/service'
 import {
@@ -32,7 +33,7 @@ import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../../../../../../../shared/flights/types'
 
-// The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
+// The specs↔coverage loop: the agent edits <featureDir>/e2e/ recursively in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
 // validation re-reads and gates what landed on disk, a deterministic dry-run
 // (playwright --list + tsc --noEmit) catches specs that don't compile, then
@@ -111,8 +112,8 @@ function coverageStuckOutcome(
   reason: CoverageStopReason,
 ): StageOutcome {
   const message = reason === 'no-progress'
-    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Accept the gaps that are left, or retry after changing the requirements or tests.`
-    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Accept the gaps that are left, or try another pass.`
+    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Continue with these gaps, or retry?`
+    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Continue with these gaps, or try again?`
   return {
     kind: 'checkpoint',
     checkpoint: {
@@ -131,7 +132,7 @@ export function buildSpecsPrompt(args: {
   configPath: string
   requirements: unknown
   gaps: GapRow[]
-  /** Absolute feature dir — the agent edits <featureDir>/e2e/*.spec.ts in place. */
+  /** Absolute feature dir — the agent edits <featureDir>/e2e/ recursively in place. */
   featureDir: string
   iteration: number
   /** Compile/list errors from the previous iteration; '' when it validated clean. */
@@ -167,39 +168,20 @@ export function buildSpecsPrompt(args: {
  *  need to exercise the timeout without a real 2-minute wait. */
 export function tscErrorsForFeature(projectRoot: string, featureDir: string, timeoutMs: number = TSC_TIMEOUT_MS): Promise<string | null> {
   if (!fs.existsSync(path.join(projectRoot, 'tsconfig.json'))) return Promise.resolve(null)
-  return new Promise((resolve) => {
-    let out = ''
-    let settled = false
-    const child = spawn('npx', ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'], { cwd: projectRoot })
-    // No `if (settled) return` guard here: the close/error handlers below
-    // both call clearTimeout synchronously as soon as they set `settled`, so
-    // by the time this callback fires, neither has run yet.
-    const timer = setTimeout(() => {
-      settled = true
-      try { child.kill('SIGKILL') } catch { /* ignore */ }
-      resolve(null)
-    }, timeoutMs)
-    child.stdout.on('data', (b) => { out += b.toString() })
-    child.stderr.on('data', (b) => { out += b.toString() })
-    child.on('error', () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(null)
+  return captureValidationProcess({
+    command: 'npx',
+    args: ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'],
+    cwd: projectRoot,
+    timeoutMs,
+  }).then((result) => {
+    if (result.kind !== 'exit' || result.code === 0) return null
+    const lines = result.combined.split('\n').filter((line) => {
+      const m = line.match(/^(.+?)\(\d+,\d+\): error TS/)
+      if (!m) return false
+      const abs = path.resolve(projectRoot, m[1])
+      return abs === featureDir || abs.startsWith(featureDir + path.sep)
     })
-    child.on('close', (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (code === 0) return resolve(null)
-      const lines = out.split('\n').filter((line) => {
-        const m = line.match(/^(.+?)\(\d+,\d+\): error TS/)
-        if (!m) return false
-        const abs = path.resolve(projectRoot, m[1])
-        return abs === featureDir || abs.startsWith(featureDir + path.sep)
-      })
-      resolve(lines.length > 0 ? `tsc --noEmit:\n${lines.join('\n')}` : null)
-    })
+    return lines.length > 0 ? `tsc --noEmit:\n${lines.join('\n')}` : null
   })
 }
 
@@ -444,7 +426,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     forceInternalMap = false,
   ): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    // The producer edited <featureDir>/e2e/*.spec.ts in place; re-read what
+    // The producer edited <featureDir>/e2e/ recursively in place; re-read what
     // landed on disk and gate it through the same draft validation as the
     // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
     publishProgress(ctx, ledger, prep.target, state, 'validating')
@@ -640,15 +622,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       const m = ctx.manifest()
       const featureDir = featureDirFor(deps, m.feature)
       if (!fs.existsSync(featureDir)) return
-      const e2eDir = path.join(featureDir, 'e2e')
-      let wipedSpecs = false
-      if (fs.existsSync(e2eDir)) {
-        for (const entry of fs.readdirSync(e2eDir)) {
-          if (!entry.endsWith('.spec.ts')) continue
-          fs.rmSync(path.join(e2eDir, entry), { force: true })
-          wipedSpecs = true
-        }
-      }
+      const specs = listSpecFiles(featureDir)
+      for (const file of specs) fs.rmSync(file, { force: true })
+      const wipedSpecs = specs.length > 0
       const docsDir = path.join(featureDir, 'docs')
       for (const name of [COVERAGE_STATE_JSON, LEGACY_MAPPINGS_JSON]) {
         fs.rmSync(path.join(docsDir, name), { force: true })

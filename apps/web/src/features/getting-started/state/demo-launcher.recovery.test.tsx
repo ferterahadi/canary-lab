@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useDemoLauncher } from './demo-launcher'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const api = vi.hoisted(() => ({ getOnboardingSamples: vi.fn(), getProjectConfig: vi.fn() }))
 vi.mock('@/shared/api/config', async (importOriginal) => ({
@@ -13,14 +14,13 @@ vi.mock('@/shared/api/config', async (importOriginal) => ({
   getOnboardingSamples: api.getOnboardingSamples,
   getProjectConfig: api.getProjectConfig,
 }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement
 let invalidate: () => void
 function samples(suite: string | null): OnboardingSamples {
   return { sampleSuite: suite, sampleFlightRepo: null, sampleFlightDescription: null, workflows: [], session: { active: null, completed: {} } }
 }
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
+
 function Probe() {
   const value = useDemoLauncher([], [])
   const bus = useInvalidation()

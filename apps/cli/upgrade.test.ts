@@ -1,7 +1,6 @@
 import { recordManagedSkill } from './agent-skill-ownership'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 // Stub the MCP refresh so upgrade tests never shell out to the real
@@ -22,25 +21,22 @@ vi.mock('./install-browsers', () => ({ main: browserMock.main }))
 
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-up-')
 function mkProjectRoot(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-up-'))
-  tmpDirs.push(dir)
-  const root = fs.realpathSync(dir)
+  const root = tempDir()
   fs.mkdirSync(path.join(root, 'features'))
   return root
 }
 
 afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 
 beforeEach(() => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
-  tmpDirs.push(home)
+  const home = tempDir('cl-agent-home-')
   vi.stubEnv('CANARY_LAB_AGENT_HOME', home)
   mcpRefreshMocks.refreshCanaryLabMcp.mockClear()
   mcpRefreshMocks.findStaleCanaryLabMcp.mockClear()
@@ -139,8 +135,7 @@ describe('applyGitignoreRules', () => {
 
 describe("main (upgrade orchestration)", () => {
   it("exits silently when no project root (no features/ anywhere)", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cl-up-noroot-"))
-    tmpDirs.push(root)
+    const root = tempDir('cl-up-noroot-')
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
     await main(["--silent"])
@@ -292,8 +287,7 @@ describe("main (upgrade orchestration)", () => {
 
   it("refreshes only existing user-level agent integrations on upgrade", async () => {
     const root = mkProjectRoot()
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-upgrade-'))
-    tmpDirs.push(home)
+    const home = tempDir('cl-agent-upgrade-')
     vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
     vi.stubEnv("CANARY_LAB_AGENT_HOME", home)
     vi.spyOn(console, "log").mockImplementation(() => {})

@@ -5,12 +5,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as benchmarkApi from '@/shared/api/benchmark'
 import { ApiError } from '@/shared/api/internal'
-import { BenchmarkDetail } from '../components/BenchmarkDetail'
-import type { BenchmarkManifest } from '../api/benchmark-types'
-import type { BenchmarkIndexEntry } from '@shared/benchmark-index'
+import { BenchmarkDetail, openWorktreeAction, previewWorktreeClear } from '../components/BenchmarkDetail'
+import type { BenchmarkManifest, BenchmarkIndexEntry } from '@shared/benchmark-index'
 import { BenchmarkProvider, useBenchmark, useBenchmarkDetail, useBenchmarks } from './BenchmarkContext'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 // The reducer and frame mapper are covered against the real rules in
 // benchmark-state.test.ts. This suite owns the provider: the socket lifecycle
@@ -21,30 +19,9 @@ vi.mock('@/shared/api/benchmark', async (importOriginal) => ({
   startBenchmark: vi.fn(),
   abortBenchmark: vi.fn(),
   getBenchmark: vi.fn(),
+  clearBenchmarkWorktrees: vi.fn(),
+  openBenchmarkWorktree: vi.fn(),
 }))
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: unknown }) => void) | null = null
-  onclose: (() => void) | null = null
-  closed = false
-  readyState = 0
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closed = true
-    this.readyState = 3
-    this.onclose?.()
-  }
-
-  fire(frame: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(frame) })
-  }
-}
 
 function entry(over: Partial<BenchmarkIndexEntry> = {}): BenchmarkIndexEntry {
   return {
@@ -457,4 +434,46 @@ it('the actual detail view replaces indefinite loading with failure, missing, an
   vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Synthetic outcome', startedAt: '2026-01-01', arms: [], results: [] }))
   await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!.click() })
   expect(container.textContent).toContain('Synthetic outcome')
+})
+
+it.each([[0, '0 B'], [1024, '1 KB'], [Number.NaN, '0 B']] as const)('uses shared units when confirming cleanup of %s bytes', async (bytes, expected) => {
+  vi.mocked(benchmarkApi.clearBenchmarkWorktrees).mockResolvedValue({ freedBytes: bytes, alreadyCleared: false } as Awaited<ReturnType<typeof benchmarkApi.clearBenchmarkWorktrees>>)
+  await expect(previewWorktreeClear('bm-1')).resolves.toBe(expected)
+  expect(benchmarkApi.clearBenchmarkWorktrees).toHaveBeenCalledWith('bm-1', false)
+})
+
+it('asks nothing when the worktrees are already cleared', async () => {
+  vi.mocked(benchmarkApi.clearBenchmarkWorktrees).mockResolvedValue({ freedBytes: 0, alreadyCleared: true } as Awaited<ReturnType<typeof benchmarkApi.clearBenchmarkWorktrees>>)
+  await expect(previewWorktreeClear('bm-1')).resolves.toBeNull()
+})
+
+it('confirms worktree cleanup in-app, naming the size, then removes them', async () => {
+  vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'done', sabotageSha: 'abc', startedAt: '2026-01-01', arms: [], results: [] }))
+  vi.mocked(benchmarkApi.clearBenchmarkWorktrees).mockResolvedValue({ freedBytes: 1024, alreadyCleared: false } as Awaited<ReturnType<typeof benchmarkApi.clearBenchmarkWorktrees>>)
+  await act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+    <BenchmarkDetail id="bm-1" onClose={vi.fn()} onNew={vi.fn()} />
+  </BenchmarkProvider>) })
+  const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
+  await act(async () => { button('Clear worktrees')!.click() })
+  expect(container.textContent).toContain('Reclaims 1 KB.')
+  await act(async () => { button('Clear')!.click() })
+  expect(benchmarkApi.clearBenchmarkWorktrees).toHaveBeenLastCalledWith('bm-1', true)
+  expect(container.textContent).not.toContain('Reclaims 1 KB.')
+})
+
+it('reports an editor that could not open, or failed, instead of a browser prompt', async () => {
+  vi.mocked(benchmarkApi.openBenchmarkWorktree).mockResolvedValueOnce({ opened: false, path: '/tmp/wt/frozen' } as Awaited<ReturnType<typeof benchmarkApi.openBenchmarkWorktree>>)
+  await expect(openWorktreeAction('bm-1', 'frozen')).resolves.toBe('Could not launch your editor. The worktree is at /tmp/wt/frozen')
+  vi.mocked(benchmarkApi.openBenchmarkWorktree).mockResolvedValueOnce({ opened: true, path: '/tmp/wt/A' } as Awaited<ReturnType<typeof benchmarkApi.openBenchmarkWorktree>>)
+  await expect(openWorktreeAction('bm-1', 'A')).resolves.toBeNull()
+  vi.mocked(benchmarkApi.openBenchmarkWorktree).mockRejectedValueOnce(new ApiError(404, { error: 'worktree gone' }))
+  await expect(openWorktreeAction('bm-1', 'B')).resolves.toBe('worktree gone')
+})
+
+it('renders a zero-byte cleanup receipt instead of hiding its size', async () => {
+  vi.mocked(benchmarkApi.getBenchmark).mockResolvedValue(manifest({ status: 'error', error: 'Fixture', startedAt: '2026-01-01', arms: [], results: [], worktreesCleared: true, worktreesClearedBytes: 0 }))
+  await act(async () => { root.render(<BenchmarkProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+    <BenchmarkDetail id="bm-1" onClose={vi.fn()} onNew={vi.fn()} />
+  </BenchmarkProvider>) })
+  expect(container.textContent).toContain('reclaimed 0 B')
 })

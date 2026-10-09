@@ -1,24 +1,20 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { StageAdapters } from '../logic/flight-stages'
 import { flightsRoutes } from './flights'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { waitForFlightStatus } from './__fixtures__/flights-app'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-demo-')
 
 let tmpDir: string
 let repoDir: string
 
-function allDone(): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((key) => [key, {
-    run: async () => ({ kind: 'done' as const }),
-    teardown: () => null,
-  }])) as StageAdapters
-}
-
-async function appWith(gettingStarted: GettingStartedSessionStore, adapters: StageAdapters = allDone()) {
+async function appWith(gettingStarted: GettingStartedSessionStore, adapters: StageAdapters = allDoneAdapters()) {
   const app = Fastify({ logger: false })
   await app.register(flightsRoutes, {
     featuresDir: path.join(tmpDir, 'features'),
@@ -33,23 +29,13 @@ async function appWith(gettingStarted: GettingStartedSessionStore, adapters: Sta
 /** Adapters whose first stage parks a checkpoint, so the flight stays active
  *  (waiting-for-approval) long enough to be paused and resumed. */
 function parking(): StageAdapters {
-  const adapters = allDone()
+  const adapters = allDoneAdapters()
   adapters.scout = {
     run: async () => ({ kind: 'checkpoint' as const, checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     onCheckpointResponse: async () => ({ kind: 'done' as const }),
     teardown: () => null,
   }
   return adapters
-}
-
-async function waitForStatus(app: Awaited<ReturnType<typeof appWith>>, flightId: string, statuses: string[]): Promise<void> {
-  const deadline = Date.now() + 3000
-  for (;;) {
-    const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })).json() as { status?: string }
-    if (statuses.includes(String(manifest.status))) return
-    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
 }
 
 function mkRepo(name: string): string {
@@ -73,7 +59,7 @@ async function startParkedFlight(
   })
   expect(response.statusCode).toBe(201)
   const flightId = response.json<{ flightId: string }>().flightId
-  await waitForStatus(app, flightId, ['waiting-for-approval'])
+  await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
   return flightId
 }
 
@@ -81,12 +67,10 @@ const startParkedDemoFlight = (app: Awaited<ReturnType<typeof appWith>>) =>
   startParkedFlight(app, { feature: 'flight-app', repoPath: repoDir, gettingStartedSource: 'internal' })
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-demo-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'flight-app')
   fs.mkdirSync(repoDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('Getting Started flight admission', () => {
   it('claims and links the flight before returning its owner page id', async () => {
@@ -123,6 +107,7 @@ describe('Getting Started flight admission', () => {
     })
     expect(response.statusCode).toBe(409)
     expect(response.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(response.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(active).message, active: active })
   })
 
   it('propagates a claim failure that is not the busy conflict', async () => {
@@ -196,6 +181,7 @@ describe('Getting Started flight admission', () => {
 
     expect(resumed.statusCode).toBe(409)
     expect(resumed.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(resumed.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
   })
 
   it('releases the re-claim when the resume itself is refused', async () => {
@@ -214,7 +200,7 @@ describe('Getting Started flight admission', () => {
       method: 'POST', url: `/api/flights/${flightId}/respond`,
       payload: { response: { choice: 'approve' } },
     })
-    await waitForStatus(app, flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
     const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
 
     expect(resumed.statusCode).toBe(409)
@@ -299,6 +285,7 @@ describe('Getting Started flight admission', () => {
     const busy = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
     expect(busy.statusCode).toBe(409)
     expect(busy.json()).toMatchObject({ type: 'getting_started_busy' })
+    expect(busy.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
   })
 
   it('matches the demo by repo basename on resume, so a de-conflicted feature name still re-claims', async () => {
@@ -400,6 +387,7 @@ describe('Getting Started flight admission', () => {
     })
     expect(busy.statusCode).toBe(409)
     expect(busy.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+    expect(busy.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(otherDemo).message, active: otherDemo })
 
     const broken = await app.inject({
       method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },

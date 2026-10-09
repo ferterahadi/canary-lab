@@ -1,10 +1,11 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useProjectConfig } from '@/shared/state/use-project-config'
 import { CHANGED_ELSEWHERE, useEditableDraft } from '@/shared/state/use-editable-draft'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import * as configApi from '@/shared/api/config'
-import type { ProjectConfig } from '@/shared/api/config'
+
 import { EMPTY_AGENT_MODELS, type ModelAgentKind } from '@shared/agent-models'
 import { Section } from '@/shared/ui/atoms'
 import { HintIcon, SlidersIcon } from '@/shared/ui/Icons'
@@ -31,6 +32,8 @@ import {
   migrateLegacyHealAgent,
   stagePlanSummary,
 } from './settings-options'
+import { displayError } from '@/shared/api/error-message'
+import { plural } from '@shared/lib/plural'
 
 interface Props {
   onClose: () => void
@@ -183,7 +186,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
   const resource = useProjectConfig()
   const config = resource.value
   const editable = useEditableDraft({ key: 'project-settings', doc: config, fields: true,
-    extract: (value: ProjectConfig) => ({ ...value, personalWikiPath: value.personalWikiPath ?? null,
+    extract: (value: ProjectConfigResponse) => ({ ...value, personalWikiPath: value.personalWikiPath ?? null,
       autoProposePr: value.autoProposePr !== false, showDemo: value.showDemo !== false, askModelsOnLaunch: value.askModelsOnLaunch === true }),
     initialize: (value) => ({ ...value, healAgent: migrateLegacyHealAgent(value.healAgent), editor: migrateLegacyEditor(value.editor) }),
   })
@@ -214,7 +217,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
     portBaseline.current = next
   }, [configuredPort])
   const editableFields = ['healAgent', 'editor', 'personalWikiPath', 'autoProposePr', 'showDemo', 'askModelsOnLaunch'] as const
-  const patch = Object.fromEntries(editableFields.filter((key) => key in editable.patch).map((key) => [key, editable.patch[key]])) as Partial<ProjectConfig>
+  const patch = Object.fromEntries(editableFields.filter((key) => key in editable.patch).map((key) => [key, editable.patch[key]])) as Partial<ProjectConfigResponse>
   const dirty = Object.keys(patch).length > 0
   const error = saveError ?? resource.error ?? (editable.changedElsewhere ? CHANGED_ELSEWHERE : null)
 
@@ -227,7 +230,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
       if (!resource.accept(next)) return
       if (editable.acceptSaved(next, draft)) onClose()
     } catch (e: unknown) {
-      if (mounted()) setError(e instanceof Error ? e.message : 'Save failed')
+      if (mounted()) setError(displayError(e, 'Save failed'))
     } finally {
       if (mounted()) setSaving(false)
     }
@@ -261,7 +264,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
         })
       }
     } catch (e: unknown) {
-      if (mounted()) setPortError(e instanceof Error ? e.message : 'Port change failed')
+      if (mounted()) setPortError(displayError(e, 'Port change failed'))
     } finally {
       if (mounted()) setPortBusy(false)
     }
@@ -360,7 +363,7 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                     }}
                   >
                     <span className="min-w-0 flex-1">
-                      {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.
+                      {plural(pendingConfirm, 'active run')} will be aborted by the restart.
                     </span>
                     <button
                       type="button"

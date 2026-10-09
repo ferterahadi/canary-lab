@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { findFeature, listSpecFiles, loadFeatures } from '../../../../shared/feature-loader'
@@ -19,7 +20,8 @@ import {
 } from './state'
 import { readCoverageRunState } from './run-state'
 import { coverageJobStore } from './jobs/store'
-import { GENERATED_DOC_PREFIX, readDocsCollection } from './docs-collection'
+import { GENERATED_DOC_PREFIX } from './document-files'
+import { readDocsCollection } from './docs-collection'
 import { readPrdSummary } from './prd-summary-render'
 import { mappingInputs } from './coverage-engine'
 import { mappingInferenceSnapshot } from './mapping-cache'
@@ -78,7 +80,7 @@ export function collectTests(featureDir: string): CollectedTests {
   const byName = new Map<string, CollectedTest>()
   for (const file of listSpecFiles(featureDir)) {
     let source = ''
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    try { source = readSpecSource(file) } catch { continue }
     const extracted = extractCoverageTestsFromSource(file, source)
     if (extracted.parseError) throw new Error(`Cannot parse ${path.relative(featureDir, file)}: ${extracted.parseError}`)
     for (const t of extracted.tests) {
@@ -128,7 +130,7 @@ export function readPersistedCoverageState(featureDir: string): PersistedCoverag
   // The suite list needs annotation presence, not a translated coverage ledger.
   const hasAnnotatedTests = listSpecFiles(featureDir).some((file) => {
     let source: string
-    try { source = fs.readFileSync(file, 'utf8') } catch { return false }
+    try { source = readSpecSource(file) } catch { return false }
     return extractTestMetadataFromSource(file, source).tests.some((test) => (test.requirements?.length ?? 0) > 0)
   })
   return derivePersistedCoverageState({

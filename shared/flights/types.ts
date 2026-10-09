@@ -15,6 +15,8 @@
 import type { ClientKind } from '../run-mode'
 import type { RunBootFailure } from '../run-state'
 import type { AgentStagePlans } from '../agent-models'
+import type { FlightAttention } from './attention'
+import type { GettingStartedOwner } from '../getting-started'
 
 /** Canonical stage-record order. This stays stable for persisted manifests;
  *  normal drive priority and restart boundaries live in
@@ -459,6 +461,8 @@ export interface FlightExternalAgentSession {
 }
 
 export interface FlightManifest {
+  /** Server-owned read projection, absent from persisted execution history. */
+  attention?: FlightAttention
   flightId: string
   /** Feature this flight targets (created by the flight, or matched by the
    *  similarity stage). */
@@ -509,6 +513,7 @@ export interface FlightManifest {
 }
 
 export interface FlightIndexEntry {
+  attention?: FlightAttention
   id: string
   createdAt: string
   flightId: string
@@ -744,6 +749,58 @@ export interface PlanFeaturesTask {
   cancelledAt?: string
   createdAt: string
   updatedAt: string
+}
+
+/** `POST /api/flights` body as the server accepts it. Untrusted input, so the
+ *  enumerated fields stay `string`/`unknown` here and the route validates them;
+ *  a client narrows its own subset (the web `StartFlightBody`, the CLI's start
+ *  body) without redeclaring the wire. */
+export interface StartFlightRequest {
+  feature?: string
+  /** Omit on continue/redo/jump — repos are frozen; the server reuses the
+   *  stored set and 409s (`flight_frozen`) on a differing one. */
+  repoPaths?: string[]
+  /** Omit on continue/redo/jump — intent is frozen like the repos. */
+  description?: string
+  env?: string
+  coverageTarget?: number
+  base?: string
+  yolo?: boolean
+  /** Absent = on; only an explicit false opts out (R71/W4). */
+  autopilot?: boolean
+  /** R79: which CLI conducts the flight's stage agents; sticky per
+   *  record (jump/continue reuse the stored one). Absent → claude. */
+  agent?: string
+  /** Who executes the hand-off-capable stages (scout, docs,
+   *  specs-coverage): the local CLI, or the MCP client driving the
+   *  flight. Sticky per record. Absent → internal. A GUI start never
+   *  sends it — there is no MCP client to hand work to. */
+  stageProducer?: string
+  /** Launch-gate override: this flight's per-stage model+effort plan
+   *  for the conducting agent, laid over the workspace `agentModels`
+   *  config. The merged plan is persisted on the record at start
+   *  (sticky like `agent`); the override itself is never written back
+   *  to config. */
+  models?: unknown
+  /** The Claude/Codex conversation driving an external Flight. */
+  externalAgentSession?: unknown
+  /** continue | redo | jump — required when the feature already has a
+   *  flight record (409 flight_exists_requires_choice otherwise). */
+  mode?: string
+  /** Stage to start at (jump / fresh stage entry), prereq-validated. */
+  fromStage?: string
+  /** "What went wrong last time" (R74), scoped to the entry stage's
+   *  agent prompt. Redo/jump only — the conductor drops it otherwise.
+   *  Reachable here (not only on `/:id/redo`) because an externally
+   *  driven flight re-enters a stage through start_flight, and without
+   *  it the agent could repeat a step but never say why. */
+  feedback?: string
+  /** Marks a Getting Started demo start; ordinary flights omit it. */
+  gettingStartedSource?: GettingStartedOwner
+  /** Which Getting Started card this start belongs to. The
+   *  author/portify/export demos run AS a flight but must claim their
+   *  own workflow key so their card lights. Absent/unknown → 'flight'. */
+  gettingStartedWorkflow?: string
 }
 
 /** Feature name derived from a repo path — the ONE slug rule shared by the

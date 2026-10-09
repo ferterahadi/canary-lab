@@ -1,25 +1,21 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastHost, type ToastItem } from '@/shared/ui/Toasts'
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
   vi.useFakeTimers()
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 const toast = (over: Partial<ToastItem> = {}): ToastItem => ({
   id: 'fl_1',

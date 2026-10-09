@@ -1,5 +1,6 @@
-import { spawn } from 'child_process'
-import fs from 'fs'
+import { listSpecFiles, readSpecSource } from '../../../../../../shared/spec-files'
+import { createHash } from 'node:crypto'
+import { captureValidationProcess } from '../../../shared/capture-validation-process'
 import path from 'path'
 
 // Asks Playwright to enumerate the resolved test list for a feature directory
@@ -72,19 +73,10 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>()
 
 function cacheSignature(featureDir: string): string {
-  const e2eDir = path.join(featureDir, 'e2e')
-  if (!fs.existsSync(e2eDir)) return 'no-e2e'
-  const parts: string[] = []
-  for (const entry of fs.readdirSync(e2eDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
-      const p = path.join(e2eDir, entry.name)
-      try {
-        const stat = fs.statSync(p)
-        parts.push(`${entry.name}:${stat.mtimeMs}:${stat.size}`)
-      } catch { /* ignore */ }
-    }
-  }
-  return parts.join('|')
+  return listSpecFiles(featureDir).map((file) => {
+    const digest = createHash('sha256').update(readSpecSource(file)).digest('hex')
+    return `${path.relative(featureDir, file)}:${digest}`
+  }).join('|')
 }
 
 function collectSpecs(
@@ -154,65 +146,41 @@ export async function listPlaywrightTests(
   opts: ListPlaywrightTestsOpts = {},
 ): Promise<PlaywrightListEntry[] | null> {
   if (opts.fresh) cache.delete(featureDir)
-  const signature = cacheSignature(featureDir)
   const cached = cache.get(featureDir)
-  if (cached && cached.signature === signature) return cached.entries
+  const cachedSignature = cached ? cacheSignature(featureDir) : undefined
+  if (cached && cached.signature === cachedSignature) return cached.entries
 
   const spawner = opts.spawner ?? defaultPlaywrightListSpawner
   const timeoutMs = opts.timeoutMs ?? 15_000
   const inv = spawner(featureDir)
 
-  const stdout = await new Promise<string | null>((resolve) => {
-    let out = ''
-    let err = ''
-    let settled = false
-    const child = spawn(inv.command, inv.args, {
-      cwd: inv.cwd,
-      env: { ...process.env, ...(opts.env ?? {}), ...(inv.env ?? {}) },
-    })
-    // The single re-entry guard for all three outcomes — timeout, spawn
-    // failure, exit. It has to be one place rather than one check per handler,
-    // because a failed spawn emits 'error' AND then 'close': the second arrival
-    // must neither resolve again nor emit a second diagnostic line. Returns
-    // whether this call is the one that settled, so a caller can skip its own
-    // side effects when it lost the race.
-    const settle = (value: string | null, diagnostic?: string): boolean => {
-      if (settled) return false
-      settled = true
-      clearTimeout(timer)
-      if (diagnostic) opts.onDiagnostics?.(diagnostic)
-      resolve(value)
-      return true
+  const discovery = captureValidationProcess({
+    command: inv.command,
+    args: inv.args,
+    cwd: inv.cwd,
+    env: { ...process.env, ...(opts.env ?? {}), ...(inv.env ?? {}) },
+    timeoutMs,
+  }).then((result): string | null => {
+    if (result.kind === 'timeout') {
+      opts.onDiagnostics?.(`playwright test --list timed out after ${timeoutMs}ms\n${result.stderr}`.trim())
+      return null
     }
-    const timer = setTimeout(() => {
-      try { child.kill('SIGKILL') } catch { /* ignore */ }
-      settle(null, `playwright test --list timed out after ${timeoutMs}ms\n${err}`.trim())
-    }, timeoutMs)
-    child.stdout.on('data', (b) => { out += b.toString() })
-    child.stderr.on('data', (b) => { err += b.toString() })
-    child.on('error', (e) => {
-      settle(null, `playwright test --list failed to spawn: ${String(e)}`)
-    })
-    child.on('close', (code) => {
-      // `--list` exits 0 when discovery succeeded; any non-zero indicates a
-      // discovery failure and stdout may not be valid JSON.
-      if (code === 0) { settle(out); return }
-      // The UI needs the actual discovery error, not the preceding config dump.
-      const failure = discoveryFailureOutput(out, err)
-      // Both the gate and the payload read `failure`, never `err`: Playwright
-      // reports discovery errors inside its JSON stdout and leaves stderr to
-      // the package runner, which on npm 12 always writes a `npm notice run`
-      // banner there. Echoing `err` printed that banner in place of the
-      // failure, and gating on it made the banner itself the trigger. The
-      // console is the only place a human sees this — the server runs
-      // `logger: false`, so the callers' `app.log.warn` is a no-op — so the
-      // line names the directory, since one process lists every feature.
-      if (settle(null, `playwright test --list exited with code ${code}\n${failure}`.trim()) && failure) {
-        process.stderr.write(`[playwright-list] exit ${code} in ${inv.cwd}: ${failure.slice(0, 500)}\n`)
-      }
-    })
+    if (result.kind === 'spawn-error') {
+      opts.onDiagnostics?.(`playwright test --list failed to spawn: ${String(result.error)}`)
+      return null
+    }
+    if (result.code === 0) return result.stdout
+    // Playwright reports discovery errors inside JSON stdout; npm notices on
+    // stderr must not displace the actual failure or trigger a duplicate report.
+    const failure = discoveryFailureOutput(result.stdout, result.stderr)
+    opts.onDiagnostics?.(`playwright test --list exited with code ${result.code}\n${failure}`.trim())
+    if (failure) process.stderr.write(`[playwright-list] exit ${result.code} in ${inv.cwd}: ${failure.slice(0, 500)}\n`)
+    return null
   })
 
+  // Start the cold Playwright process before source enrichment pays its reads.
+  const signature = cachedSignature ?? cacheSignature(featureDir)
+  const stdout = await discovery
   if (stdout === null) return null
 
   let report: PwListReport
@@ -227,7 +195,8 @@ export async function listPlaywrightTests(
   const entries: PlaywrightListEntry[] = []
   collectSpecs(report.suites, rootDir, entries)
 
-  cache.set(featureDir, { signature, entries })
+  if (signature === cacheSignature(featureDir)) cache.set(featureDir, { signature, entries })
+  else cache.delete(featureDir)
   return entries
 }
 

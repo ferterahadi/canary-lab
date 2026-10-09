@@ -1,20 +1,23 @@
+import { coverageJsonDigest } from './json-digest'
+import { waitForCondition } from '../../../../shared/wait-for-condition'
 import fs from 'fs'
 import path from 'path'
 import { COVERAGE_RECONCILE_MS, type FeatureCoverageChange } from '../../../../../../../shared/coverage/freshness'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { WorkspaceEventBus } from '../../../../shared/workspace-events'
-import { coverageRevision } from './freshness'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
 import { CoverageSnapshotCache } from './snapshot-cache'
+import { TaskListeners } from '../../../../../../../shared/lib/file-backed-task-store'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 /** One process-owned observer backs the UI, inbox, and agent waits. Filesystem
  * events are hints; content reconciliation also follows links and catches
  * changes made while the process or a socket was disconnected. */
 export class CoverageFreshnessMonitor {
   private readonly values = new Map<string, FeatureCoverageChange>()
-  private readonly listeners = new Set<(change: FeatureCoverageChange) => void>()
+  private readonly listeners = new TaskListeners<FeatureCoverageChange>()
   private readonly watchers = new Map<string, fs.FSWatcher>()
-  private readonly waiting = new Set<() => void>()
+  private readonly shutdown = new AbortController()
   private timer?: ReturnType<typeof setInterval>
   private pending?: ReturnType<typeof setTimeout>
   private unsubscribe?: () => void
@@ -41,8 +44,8 @@ export class CoverageFreshnessMonitor {
       change = this.observe(ledger)
     } catch (error) {
       change = { feature, delivery: 'tool-response-and-wait', freshness: {
-        revision: coverageRevision(String(error)), checkedAt: new Date().toISOString(),
-        state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + (error instanceof Error ? error.message : String(error))],
+        revision: coverageJsonDigest(String(error)), checkedAt: new Date().toISOString(),
+        state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + errorMessage(error)],
         changedTests: [], latestRunFailed: false,
       } }
       this.accept(change)
@@ -61,7 +64,7 @@ export class CoverageFreshnessMonitor {
     const previous = this.values.get(change.feature)
     this.values.set(change.feature, change)
     if (previous?.freshness.revision === change.freshness.revision) return
-    for (const listener of this.listeners) listener(change)
+    this.listeners.emit(change)
     this.events.publish({ type: 'coverage-changed', feature: change.feature, revision: change.freshness.revision })
   }
 
@@ -149,26 +152,25 @@ export class CoverageFreshnessMonitor {
   async wait(feature: string, afterRevision: string | undefined, timeoutMs: number): Promise<{ changed: boolean; change: FeatureCoverageChange }> {
     const first = this.read(feature)
     if (!afterRevision || first.freshness.revision !== afterRevision || timeoutMs <= 0) return { changed: first.freshness.revision !== afterRevision, change: first }
-    return new Promise((resolve) => {
-      let settled = false
-      const finish = (change: FeatureCoverageChange): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        this.listeners.delete(listener)
-        this.waiting.delete(cancel)
-        resolve({ changed: change.freshness.revision !== afterRevision, change })
-      }
-      const cancel = (): void => finish({ ...first, freshness: { ...first.freshness, state: 'unavailable', reasons: ['Server is shutting down; reconnect to confirm freshness.'] } })
-      const listener = (change: FeatureCoverageChange): void => {
-        if (change.feature === feature && change.freshness.revision !== afterRevision) finish(change)
-      }
-      const timer = setTimeout(() => finish(this.read(feature)), Math.min(timeoutMs, 30_000))
-      timer.unref()
-      this.listeners.add(listener)
-      this.waiting.add(cancel)
-      const current = this.read(feature)
-      if (current.freshness.revision !== afterRevision) finish(current)
+    const result = (change: FeatureCoverageChange) => ({ changed: change.freshness.revision !== afterRevision, change })
+    let observed: FeatureCoverageChange | undefined
+    return waitForCondition({
+      read: () => {
+        const change = observed ?? this.read(feature)
+        return change.freshness.revision !== afterRevision ? result(change) : null
+      },
+      subscribe: (notify) => {
+        const listener = (change: FeatureCoverageChange): void => {
+          if (change.feature === feature && change.freshness.revision !== afterRevision) { observed = change; notify() }
+        }
+        this.listeners.add(listener)
+        return () => { this.listeners.delete(listener) }
+      },
+      timeoutMs, maxWaitMs: 30_000,
+      onTimeout: () => result(this.read(feature)),
+      cancellation: { signal: this.shutdown.signal, result: () => result({ ...first, freshness: {
+        ...first.freshness, state: 'unavailable', reasons: ['Server is shutting down; reconnect to confirm freshness.'],
+      } }) },
     })
   }
 
@@ -177,7 +179,7 @@ export class CoverageFreshnessMonitor {
     clearInterval(this.timer)
     clearTimeout(this.pending)
     this.unsubscribe?.()
-    for (const cancel of this.waiting) cancel()
+    this.shutdown.abort()
     for (const watcher of this.watchers.values()) watcher.close()
     this.watchers.clear()
     this.snapshots.clear()

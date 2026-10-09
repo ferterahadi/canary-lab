@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -93,11 +94,7 @@ vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: mocks.getRepoGitStatus,
   openEditor: mocks.openEditor,
 }))
-vi.mock('@/shared/api/internal', () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
-  },
-}))
+vi.mock('@/shared/api/internal', async () => (await import('./__fixtures__/flight-page-mocks')).apiInternalMock())
 
 // The agent timeline is its own tested component with live transports — stub it.
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
@@ -174,6 +171,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -191,12 +190,12 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 })
 
 import { FlightPage } from './FlightPage'
+import { manifest } from './__fixtures__/flight-page-part7-fixtures'
+import { renderFlightPage } from './__fixtures__/FlightPageHarness'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -236,48 +235,14 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
-
-function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl_1',
-    feature: 'checkout',
-    repoPaths: ['/repo/shop'],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'scout',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
-}
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
 // remount key per call remounts FlightPage, which re-runs its fetch effect —
 // the same observable effect, without a prop lever.
-let renderSeq = 0
-
-async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
-  renderSeq += 1
-  await act(async () => {
-    root.render(
-      <InvalidationProvider>
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
-      </InvalidationProvider>,
-    )
-  })
-}
+const render = (flightId: string, extraProps?: Record<string, unknown>) => renderFlightPage(root, FlightPage, flightId, extraProps)
 
 describe('trailer model (R14–R18)', () => {
   it('R27: a running specs-coverage stage speaks the loop — pass line, timeline, authoring agent live', async () => {
@@ -721,6 +686,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it("the latest run's numbers are a quiet stats line, not a second band of metric tiles", async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -761,6 +727,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('a service that never came up keeps its danger hue — the verdict chip does not say that', async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'failed', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -792,6 +759,7 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('R82: while the run is live the hero shows the repair state and the failures found so far — no repair journal', async () => {
+    mocks.listRuns.mockResolvedValue([{ runId: 'run-9', feature: 'checkout', status: 'healing', startedAt: '2026-01-01T00:00:00Z' }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: { runId: 'run-9', status: 'healing', healCycles: 1 },
@@ -1191,14 +1159,14 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="feature-setup-skeleton"]')).toBeNull()
   })
 
-  it('Requirements: both halves render — source docs and the distilled output', async () => {
+  it('Requirements: one card holds both halves — the summary slot and the source docs', async () => {
     await open('docs')
     const panel = container.querySelector('[data-testid="flight-docs-panel"]')
     expect(panel).not.toBeNull()
     // Not "No source docs." — that sentence reads as a finding on a step that
     // has not run yet.
     expect(panel?.textContent).not.toContain('No source docs')
-    expect(container.querySelector('[data-testid="flight-distilled-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="flight-requirements-card"]')).not.toBeNull()
     expect(panel?.querySelectorAll('[data-testid="skeleton-bar"]').length ?? 0).toBeGreaterThan(0)
   })
 
@@ -1234,10 +1202,10 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
   })
 
-  it('Test Run: the hero renders its shape before any run exists', async () => {
+  it('Test Run: a confirmed empty history explains that no runs exist', async () => {
     await open('run')
     expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Latest run')
-    expect(container.querySelector('[data-testid="test-run-hero-skeleton"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('No test runs yet')
     // The history band announces the three core metrics a completed first run
     // will populate, so its resting and settled shapes match.
     const facts = container.querySelector('[data-testid="stage-facts"]')

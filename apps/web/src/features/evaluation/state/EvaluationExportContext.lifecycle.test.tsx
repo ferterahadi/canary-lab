@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as evaluationApi from '@/shared/api/evaluation'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/evaluation')>()),
@@ -17,29 +16,6 @@ vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
   downloadEvaluationExportTask: vi.fn(),
   cancelEvaluationExportTask: vi.fn(),
 }))
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: (() => void) | null = null
-  closeCalls = 0
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = 3
-    this.onclose?.()
-  }
-
-  fire(message: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent)
-  }
-}
 
 let container: HTMLDivElement
 

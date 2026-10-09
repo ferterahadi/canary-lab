@@ -7,7 +7,7 @@ import type {
 } from '@shared/flights/types'
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { CoverageJobIndexEntry } from '@shared/coverage/types'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret, PlaneIcon } from '@/shared/ui/Icons'
 import { Modal } from '@/shared/ui/Overlays'
 import { flightNeedsAttention } from '@shared/flights/attention'
 import type { FeatureActivity } from '../state/feature-activity'
@@ -16,12 +16,12 @@ import { Tooltip } from '@/shared/ui/Tooltip'
 import { useLiveCoverageStates } from '@/shared/state/use-live-coverage'
 import { FLIGHT_OVERVIEW, presentStageStatus, stageStatusTone } from './stage-meta'
 import { coverageStageWarning, isCoverageWarningRow, type CoverageStageWarning } from './coverage-stage-warning'
-import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
+import { usePersistedGroupOpen } from '@/shared/state/use-persisted-group-open'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
 import { presentedIndexStages } from '../lib/external-work'
 import { activityRowKey, presentedFlightRows } from './presented-flight-rows'
-import type { StageRailRow } from './StageRail'
+import { stageRowKey, type StageRailRow } from './StageRail'
 
 /** One tiny cell per USER-VISIBLE stage (same rows as the flight detail rail —
  *  similarity hidden unless it needs a human, run+heal merged), colored by
@@ -72,7 +72,7 @@ export function FlightsPickerDialog({
   features: Array<{ name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }>
   coverageJobs?: CoverageJobIndexEntry[]
   portifyWorkflows?: PortifyIndexEntry[]
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
   onPickPreFlight: (taskId: string) => void
@@ -121,7 +121,7 @@ export function FlightsPickerDialog({
       subheader={
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
           <input className="cl-input min-w-0 flex-1 px-3 py-2 text-xs" aria-label="Search flights" placeholder="Search flights…" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs input <span className="ml-1">{attentionCount}</span></button>
+          <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs attention <span className="ml-1">{attentionCount}</span></button>
         </div>
       }
       footer={<p className="mr-auto text-[11px] text-secondary">Stage indicators show current step state and coverage freshness.</p>}
@@ -196,7 +196,7 @@ export function PickerRow({
   portifyWorkflows?: PortifyIndexEntry[]
   derivedStages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
   coverageWarning?: CoverageStageWarning
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
 }) {
@@ -215,7 +215,12 @@ export function PickerRow({
         <button
           type="button"
           data-testid={`flight-open-${row.flight.flightId}`}
-          onClick={() => onPick(row.flight!.flightId)}
+          onClick={() => {
+            const flight = row.flight!
+            const target = flight.attention?.stage ?? flight.currentStage
+            if (flightNeedsAttention(flight) && target) onPick(flight.flightId, stageRowKey(target))
+            else onPick(flight.flightId)
+          }}
           className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
           style={{ border: '1px solid transparent' }}
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
@@ -270,13 +275,12 @@ export function PickerGroupSection({
   derivedStagesByName?: ReadonlyMap<string, Array<{ key: FlightStageKey; status: FlightStageStatus }> | undefined>
   coverageWarnings?: ReadonlyMap<string, CoverageStageWarning>
   expandInitially?: boolean
-  onPick: (flightId: string | null) => void
+  onPick: (flightId: string | null, stage?: FlightStageKey) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
 }) {
   const group = section.group!
-  const [open, setOpen] = useState(() => expandInitially || readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, false))
-  const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
+  const { open, toggle } = usePersistedGroupOpen({ storageKey: GROUPS_OPEN_STORAGE_KEY, group, defaultOpen: false, expandInitially })
   // The worst row drives the section's summary chip (same comparator).
   const worst = section.rows.reduce((acc, r) =>
     featureChipState(r.flight, r.activity, r.derived).rank < featureChipState(acc.flight, acc.activity, acc.derived).rank ? r : acc, section.rows[0])
@@ -290,13 +294,7 @@ export function PickerGroupSection({
         className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left cl-hover-row"
         style={{ border: '1px solid transparent' }}
       >
-        <span
-          aria-hidden="true"
-          className="inline-flex shrink-0 transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={open} />
         <span className="cl-rubric min-w-0 flex-1 truncate">
           {group}
         </span>
@@ -434,10 +432,7 @@ export function PreFlightRow({
         title={`${chip.title} — ${task.description}`}
       >
         <span aria-hidden="true" className="shrink-0" style={{ color: 'var(--text-muted)' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 2 11 13" />
-            <path d="M22 2 15 22l-4-9-9-4Z" />
-          </svg>
+          <PlaneIcon size={12} />
         </span>
         <span className="min-w-0 flex-1 truncate text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
           {task.description}

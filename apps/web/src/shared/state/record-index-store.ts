@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react'
 import { createDetailHydration } from './detail-hydration'
 import { createObservedReads } from './observed-reads'
-import { connectRecordStream, type ConnectionState } from './record-stream'
+import { useRecordStream, type ConnectionState } from './record-stream'
+import type { RecordIndexFrame } from '@shared/record-index-frame'
 
 // The browser half of a record store whose server pushes the whole manifest on
 // every change: an index list (newest first) plus the manifests it has, fed by a
-// `snapshot` frame and then `update`/`removed` deltas. Portify and benchmark are
+// `snapshot` frame and then `update`/`removed` deltas. Flight, Portify and Benchmark are
 // both this shape. Their list and id keys stay their own (`workflows` +
 // `workflowId`, `benchmarks` + `benchmarkId`) because the frames carry them on
 // the wire and the views read them, so the keys are parameters here, not a
@@ -21,19 +22,15 @@ export type RecordIndexState<Entry, Detail, List extends string> = Record<List, 
   connection: ConnectionState
 }
 
-/** The server's frames. `detail-missing` is in the union only because the wire
- *  type lists it; the stream never sends it, and it is ignored if it arrives. */
-export type RecordIndexFrame<Entry, Detail, List extends string, Id extends string> =
-  | ({ type: 'snapshot'; details: Record<string, Detail> } & Record<List, Entry[]>)
-  | ({ type: 'update'; manifest: Detail } & Record<Id, string>)
-  | ({ type: 'removed' } & Record<Id, string>)
-  | ({ type: 'detail-missing' } & Record<Id, string>)
-
+/** The server's frames plus two local actions: `detail-missing`, which detail
+ *  hydration dispatches when a read finds the record gone (the stream never
+ *  sends it, and `frameToAction` drops it if it arrives), and `connection`. */
 export type RecordIndexAction<Entry, Detail, List extends string, Id extends string> =
   | RecordIndexFrame<Entry, Detail, List, Id>
+  | ({ type: 'detail-missing' } & Record<Id, string>)
   | { type: 'connection'; status: ConnectionState }
 
-type Indexed<Id extends string> = Record<Id, string> & { startedAt: string }
+type Indexed<Id extends string> = Record<Id, string>
 
 export interface RecordIndex<Entry, Detail, List extends string, Id extends string> {
   keys: RecordIndexKeys<List, Id>
@@ -43,7 +40,7 @@ export interface RecordIndex<Entry, Detail, List extends string, Id extends stri
     action: RecordIndexAction<Entry, Detail, List, Id>,
   ): RecordIndexState<Entry, Detail, List>
   /** A WS frame as a reducer action; an unknown frame type → null. */
-  frameToAction(frame: RecordIndexFrame<Entry, Detail, List, Id>): RecordIndexAction<Entry, Detail, List, Id> | null
+  frameToAction(frame: unknown): RecordIndexFrame<Entry, Detail, List, Id> | null
 }
 
 /** The reducer and frame decoder for one record store. `entryOf` derives the
@@ -53,9 +50,10 @@ export function createRecordIndex<
   Detail,
   List extends string,
   Id extends string,
->({ keys, entryOf }: {
+>({ keys, entryOf, compareEntries }: {
   keys: RecordIndexKeys<List, Id>
   entryOf: (detail: Detail) => Entry
+  compareEntries: (a: Entry, b: Entry) => number
 }): RecordIndex<Entry, Detail, List, Id> {
   type State = RecordIndexState<Entry, Detail, List>
   type Action = RecordIndexAction<Entry, Detail, List, Id>
@@ -84,7 +82,7 @@ export function createRecordIndex<
         const id = action[keys.id]
         return withList(
           state,
-          [entryOf(action.manifest), ...without(state, id)].sort(byStartedDesc),
+          [entryOf(action.manifest), ...without(state, id)].sort(compareEntries),
           { ...state.details, [id]: action.manifest },
         )
       }
@@ -99,12 +97,13 @@ export function createRecordIndex<
     }
   }
 
-  function frameToAction(frame: Frame): Action | null {
-    switch (frame.type) {
+  function frameToAction(frame: unknown): Frame | null {
+    if (!frame || typeof frame !== 'object') return null
+    switch ((frame as { type?: unknown }).type) {
       case 'snapshot':
       case 'update':
       case 'removed':
-        return frame
+        return frame as Frame
       default:
         return null
     }
@@ -113,7 +112,7 @@ export function createRecordIndex<
   return { keys, initialState, reducer, frameToAction }
 }
 
-/** Newest first, the order every index list is kept in. */
+/** Newest start first, used by Portify and Benchmark. */
 export function byStartedDesc(a: { startedAt: string }, b: { startedAt: string }): number {
   return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
@@ -168,7 +167,7 @@ export function useRecordIndexStore<
   const stateRef = useRef(state)
   stateRef.current = state
   // `index` and `read` must be stable (module constants at every call site): a
-  // new one rebuilds the hydration and so reconnects the stream.
+  // new one rebuilds hydration and cancels its pending recovery reads.
   const hydration = useMemo(() => createRecordIndexHydration({
     index, reads: readsRef.current, read, errorMessage,
     apply: (action) => dispatchRef.current(action),
@@ -176,17 +175,17 @@ export function useRecordIndexStore<
   }), [index, read, errorMessage])
   useEffect(() => {
     hydration.start()
-    const connection = connectRecordStream({
-      url,
-      WebSocketImpl,
-      reads: readsRef.current,
-      decode: (frame) => index.frameToAction(frame as RecordIndexFrame<Entry, Detail, List, Id>),
-      recordId: (action) => action.type === 'update' || action.type === 'removed' ? action[index.keys.id] : null,
-      dispatch: (action) => { dispatchRef.current(action); hydration.observe(action) },
-      onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
-    })
-    return () => { connection.close(); hydration.stop() }
-  }, [url, WebSocketImpl, hydration, index])
+    return () => hydration.stop()
+  }, [hydration])
+  useRecordStream({
+    url,
+    WebSocketImpl,
+    reads: readsRef.current,
+    decode: index.frameToAction,
+    recordId: (action) => action.type === 'update' || action.type === 'removed' ? action[index.keys.id] : null,
+    dispatch: (action) => { dispatchRef.current(action); hydration.observe(action) },
+    onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
+  })
   return { state, hydration }
 }
 

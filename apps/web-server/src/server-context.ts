@@ -1,3 +1,4 @@
+import type { FlightAttentionReader } from './features/flights/logic/attention'
 import type { RepositoryObserver } from './shared/repository-observer'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
@@ -84,6 +85,7 @@ export interface ServerContext {
   portifyStore: PortifyRunStore
   coverageJobStore: CoverageJobRunStore
   coverageMonitor?: CoverageFreshnessMonitor
+  flightAttention?: FlightAttentionReader
   flightStore: FlightRunStore
   planStore: PlanFeaturesStore
   dirtySpecStore: DirtySpecStore

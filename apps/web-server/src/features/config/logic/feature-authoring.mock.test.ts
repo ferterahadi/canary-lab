@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 // A separate suite from feature-authoring.test.ts because `vi.mock` is per-file:
 // these cases need `checkoutBranch` to fail in ways real git never produces, and
@@ -22,18 +22,16 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
   return { ...actual, checkoutBranch: checkoutBranchMock }
 })
 
-const roots: string[] = []
+const tempDir = trackTempDirs('cl-fa-mock-')
 
 afterEach(() => {
   checkoutBranchMock.mockReset()
-  for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
 })
 
 // One feature with one repo, enough for findFeature + findRepo to resolve before
 // the mocked checkoutBranch is reached.
 function fixture(): { ctx: { projectRoot: string; featuresDir: string }; repoDir: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fa-mock-')))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
   const repoDir = path.join(root, 'app')

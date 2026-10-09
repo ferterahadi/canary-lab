@@ -4,7 +4,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { DEFAULT_MCP_PROFILE, McpCommandOptions, resolveDefaultMcpUrl, stripProfile } from './mcp'
 import { inferMcpClientKind } from './mcp-client-kind'
-import { checkHealth, ensureMcpServerReachable, isAttachableServer, sleep, urlWithContext } from './mcp-reachability'
+import { checkHealth, ensureMcpServerReachable, isAttachableServer, urlWithContext } from './mcp-reachability'
+import { sleep } from '../../shared/lib/sleep'
 
 // Structural transport shape shared by the SDK's stdio + streamable-HTTP
 // transports — just enough for the bridge to forward and reconnect.

@@ -1,8 +1,9 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 import { Suspense, lazy, memo, type ReactNode } from 'react'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { LOG_KIND_LABEL, type ExternalSessionActivity, type LogLine } from './activity-log'
-import { clientKindToDesktopAgent, clientLabel } from './external-client-branding'
-import { useOpenAgentApp } from './ExternalAgentCard'
+import { clientLabel } from './external-client-branding'
+import { useExternalClientAction } from './ExternalAgentCard'
 
 // The markdown stack (react-markdown + remark-gfm → micromark) is the heaviest
 // dependency in the bundle and only agent prose needs it — loaded lazily so a
@@ -100,6 +101,12 @@ export function GlyphSvg({ children }: { children: ReactNode }) {
   )
 }
 
+/** Outcome marks on the 16-unit glyph grid, shared by the row glyphs and the
+ *  session divider so a pass, a failure and an absence read the same in both. */
+export const GLYPH_CHECK = <path d="M3.5 8.5l3 3 6-6.5" />
+export const GLYPH_CROSS = <path d="M5 5l6 6M11 5l-6 6" />
+export const GLYPH_DASH = <path d="M4.5 8h7" />
+
 export const SYSTEM_GLYPH: LogGlyph = {
   icon: <GlyphSvg><path d="M3.5 4.5l3 3-3 3" /><path d="M8.5 11h4.5" /></GlyphSvg>,
   color: 'var(--text-muted)',
@@ -126,8 +133,8 @@ export function eventGlyph(event: AgentSessionEvent, hasThreads = false): LogGly
         : { icon: <GlyphSvg>{toolGlyph(event.name)}</GlyphSvg>, color: 'var(--warning)' }
     case 'tool-result':
       return event.isError
-        ? { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color: 'var(--danger)' }
-        : { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color: 'var(--text-muted)' }
+        ? { icon: <GlyphSvg>{GLYPH_CROSS}</GlyphSvg>, color: 'var(--danger)' }
+        : { icon: <GlyphSvg>{GLYPH_CHECK}</GlyphSvg>, color: 'var(--text-muted)' }
   }
 }
 
@@ -138,9 +145,9 @@ export function externalGlyph(phase: 'start' | 'end', status: ExternalSessionAct
     : status === 'aborted' ? 'var(--text-muted)'
     : 'var(--running)'
   if (phase === 'start') return { icon: <GlyphSvg><circle cx="8" cy="8" r="3" /></GlyphSvg>, color: status === 'running' ? color : 'var(--text-muted)' }
-  if (status === 'done' || status === 'ready') return { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color }
-  if (status === 'failed') return { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color }
-  return { icon: <GlyphSvg><path d="M4.5 8h7" /></GlyphSvg>, color }
+  if (status === 'done' || status === 'ready') return { icon: <GlyphSvg>{GLYPH_CHECK}</GlyphSvg>, color }
+  if (status === 'failed') return { icon: <GlyphSvg>{GLYPH_CROSS}</GlyphSvg>, color }
+  return { icon: <GlyphSvg>{GLYPH_DASH}</GlyphSvg>, color }
 }
 
 // Assistant/prompt prose is genuine markdown (headers, GFM tables, status
@@ -203,27 +210,26 @@ export function Timestamp({ value }: { value: string }) {
  *  the client app. One home for the session divider and the log modal, which
  *  both have to send the reader to where the conversation actually lives. */
 export function ExternalOpenAction({ session }: { session: ExternalSessionActivity }) {
-  const { opening, error, open } = useOpenAgentApp()
-  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
+  const { action, error } = useExternalClientAction({ clientKind: session.clientKind, sessionUrl: session.sessionUrl })
   const agent = clientLabel(session.clientKind, 'External agent')
-  if (session.sessionUrl) {
+  if (action?.kind === 'link') {
     return (
-      <a href={session.sessionUrl} target="_blank" rel="noreferrer" className="agentts-extaction" aria-label={`Open ${agent} session`}>
+      <a href={action.href} target="_blank" rel="noreferrer" className="agentts-extaction" aria-label={`Open ${agent} session`}>
         Open in {agent} <span aria-hidden>→</span>
       </a>
     )
   }
-  if (!desktopAgent) return null
+  if (!action) return null
   return (
     <>
       <button
         type="button"
         className="agentts-extaction"
         title={`No exact session link was provided; opens the ${agent} app.`}
-        disabled={opening !== null}
-        onClick={() => open(desktopAgent)}
+        disabled={action.busy}
+        onClick={action.open}
       >
-        {opening ? 'Opening…' : `Open ${agent} app`} {!opening && <span aria-hidden>→</span>}
+        {action.busy ? 'Opening…' : `Open ${agent} app`} {!action.busy && <span aria-hidden>→</span>}
       </button>
       {error && <span className="agentts-exterror" role="alert">{error}</span>}
     </>

@@ -1,3 +1,5 @@
+import { withApprovals } from './approval-context'
+import { registerApprovalTools } from './tool-groups/approvals'
 import type {
   Icon,
   ToolAnnotations,
@@ -53,10 +55,11 @@ export function createCanaryLabToolRegistry(
     if (captured.has(toolName)) {
       throw new Error(`MCP tool is registered more than once: ${name}`)
     }
-    captured.set(toolName, { name: toolName, config, handler: withCoverageCatchup(toolName, handler, baseContext.deps) })
+    captured.set(toolName, { name: toolName, config, handler: withApprovals(toolName, withCoverageCatchup(toolName, handler, baseContext.deps), baseContext.deps) })
   }) as unknown as ToolGroupContext['registerTool']
 
   const ctx: ToolGroupContext = { ...baseContext, registerTool }
+  registerApprovalTools(ctx)
   registerReadTools(ctx)
   registerWorkflowGuideTools(ctx)
   registerAuthoringTools(ctx)

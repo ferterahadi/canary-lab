@@ -1,11 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { register } from './index'
 import type { ServerContext } from '../../server-context'
 import type { FlightIndexEntry } from '../../../../../shared/flights/types'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-notifications-reg-')
 
 // The registrar's own wiring: which store events rebuild the inbox, what a
 // store it cannot read does to the event that triggered the rebuild, and what
@@ -40,7 +42,7 @@ let runStore: ReturnType<typeof stubStore<never>>
 let dirtySpecStore: ReturnType<typeof stubStore<never>>
 
 beforeEach(async () => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-notifications-reg-')))
+  dir = tempDir()
   flightStore = stubStore([flight])
   runStore = stubStore<never>([])
   dirtySpecStore = stubStore<never>([])
@@ -53,7 +55,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 const inbox = async (): Promise<unknown[]> => (await app.inject('/api/notifications')).json()

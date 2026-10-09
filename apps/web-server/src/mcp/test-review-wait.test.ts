@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { RunStore } from '../features/runs/logic/run-store'
 import { suiteReviewRevision } from '../features/runs/logic/runtime/suite-review'
 import { testReviewOutcome, waitForTestReview } from './test-review-wait'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-test-review-wait-')
 
 // What the wait branches on is the manifest it re-reads and whether a store event
 // arrives, so the store is a fake that scripts those reads: a real RunStore would
@@ -72,26 +74,22 @@ describe('waitForTestReview', () => {
   })
 
   it('keeps an unchanged terminal snapshot reviewable, but marks changed source bytes ended', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-test-review-wait-'))
-    try {
-      const suite = path.join(root, 'run', 'suite')
-      const feature = path.join(root, 'feature')
-      for (const dir of [suite, feature]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-      fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), 'recorded\n')
-      fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'candidate\n')
-      const revision = suiteReviewRevision(suite, feature)
-      const store = {
-        get: () => ({ manifest: {
-          status: 'passed', featureDir: feature, suiteSnapshot: { kind: 'taken', dir: suite }, specEdits: { reviewDecisions: [] },
-        } }),
-      } as unknown as RunStore
+    const root = tempDir()
+    const suite = path.join(root, 'run', 'suite')
+    const feature = path.join(root, 'feature')
+    for (const dir of [suite, feature]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), 'recorded\n')
+    fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'candidate\n')
+    const revision = suiteReviewRevision(suite, feature)
+    const store = {
+      get: () => ({ manifest: {
+        status: 'passed', featureDir: feature, suiteSnapshot: { kind: 'taken', dir: suite }, specEdits: { reviewDecisions: [] },
+      } }),
+    } as unknown as RunStore
 
-      expect(testReviewOutcome(store, 'run1', revision)).toBeNull()
-      fs.appendFileSync(path.join(feature, 'e2e/a.spec.ts'), 'newer\n')
-      expect(testReviewOutcome(store, 'run1', revision)).toMatchObject({ status: 'run-ended' })
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true })
-    }
+    expect(testReviewOutcome(store, 'run1', revision)).toBeNull()
+    fs.appendFileSync(path.join(feature, 'e2e/a.spec.ts'), 'newer\n')
+    expect(testReviewOutcome(store, 'run1', revision)).toMatchObject({ status: 'run-ended' })
   })
 
   it('waits when a decision exists without its durable receipt', () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,21 +8,17 @@ import {
   readActiveServers,
   registerActiveServer,
   resolveActiveServer,
+  resolveServerBase,
   unregisterActiveServer,
 } from './active-servers'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-active-')
 function mkHome(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-active-')))
-  tmpDirs.push(dir)
-  return dir
+  return tempDir()
 }
 const alwaysAlive = () => true
 const alwaysDead = () => false
-
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
 
 describe('active-servers', () => {
   it('registers and reads back a live server', () => {
@@ -255,6 +251,32 @@ describe('resolveActiveServer', () => {
     expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(7420)
   })
 
+  // `/tmp` is a temp root even where os.tmpdir() points elsewhere (macOS's
+  // `/var/folders/…/T`): a throwaway project in a Claude Code scratchpad under
+  // `/private/tmp` must lose the unpinned pick just like a demo does.
+  it.skipIf(process.platform === 'win32')('prefers a durable workspace over a newer one under /private/tmp', () => {
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-01-01T00:00:00.000Z' }),
+      base({ projectRoot: '/private/tmp/claude-0/scratchpad/project', port: 50259, updatedAt: '2026-03-01T00:00:00.000Z' }),
+    ]
+    expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(7420)
+  })
+
+  // ...while a session working inside that scratchpad project still reaches it:
+  // the enclosing-cwd match runs before the temp tiebreak.
+  it.skipIf(process.platform === 'win32')('still resolves a /tmp workspace that encloses the cwd', () => {
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-03-01T00:00:00.000Z' }),
+      base({ projectRoot: '/private/tmp/claude-0/scratchpad/project', port: 50259 }),
+    ]
+    const match = resolveActiveServer({
+      servers,
+      cwd: '/private/tmp/claude-0/scratchpad/project/features/x',
+      env: {} as NodeJS.ProcessEnv,
+    })
+    expect(match?.port).toBe(50259)
+  })
+
   // But reachable beats unreachable: when the demo is the only thing running, an
   // agent asking for it must still be able to find it.
   it('uses a temp workspace when it is the only live server', () => {
@@ -296,5 +318,38 @@ describe('liveRegistryHome', () => {
 
   it('defaults the record path to the real home', () => {
     expect(activeServersPath()).toBe(path.join(os.homedir(), '.canary-lab', 'active-servers.json'))
+  })
+})
+
+describe('resolveServerBase', () => {
+  const configPort = () => 7421
+
+  it('follows the live record for this exact project root', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work/a', port: 7420, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    registerActiveServer({ projectRoot: '/work/b', port: 7500, pid: 222 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a/', configPort, { homeDir, isAlive: alwaysAlive })).toBe('http://127.0.0.1:7420')
+  })
+
+  it('never borrows another workspace or an enclosing root and falls back to the configured port', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work', port: 7500, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a', () => 7600, { homeDir, isAlive: alwaysAlive })).toBe('http://127.0.0.1:7600')
+  })
+
+  it('ignores a dead record for the same root', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work/a', port: 7420, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a', configPort, { homeDir, isAlive: alwaysDead })).toBe('http://127.0.0.1:7421')
+  })
+
+  it('reads the default live registry when no home is injected', () => {
+    const missingHome = path.join(mkHome(), 'missing')
+    vi.stubEnv('CANARY_LAB_LIVE_REGISTRY_HOME', missingHome)
+    try {
+      expect(resolveServerBase('/work/a', configPort)).toBe('http://127.0.0.1:7421')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

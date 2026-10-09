@@ -14,7 +14,8 @@ import { addCodeLineMarkers, qualityLabel, rationaleForAudience, renderAssertion
 import { buildTestReviewPacket } from './test-review/packet'
 import { applyEvaluationTextSlotRewrite, evaluationTextSlots, normalizeEvaluationRewrite, resolveRewrite } from './test-review/rewrite'
 import { evaluationAgentModel, parseEvaluationRewrite, parseEvaluationTextSlotRewrite, previewAgentOutput } from './test-review/rewrite-agent'
-import { formatMs, safeFilename, statusClass, uniqueSectionIds } from './test-review/text'
+import { safeFilename, statusClass, uniqueSectionIds } from './test-review/text'
+import { formatMs } from '../../../../../../shared/lib/format-units'
 import { readableHelperName } from '../../../shared/readable-tests/language'
 import type { AssertionExport, AssertionHtmlOptions } from './test-review/types'
 

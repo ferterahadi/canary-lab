@@ -5,7 +5,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkPathExists, getGitRemote, getRepoGitStatus } from '@/shared/api/workspace'
 import { getFeatureConfigDoc, removePortifyOverlay, type ParsedConfigDoc } from '@/shared/api/config'
-import { getPortify, type PortifyManifest } from '@/shared/api/portify'
+import { getPortify } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { openPortifyProject } from '@/shared/api/cleanup'
 import { PortsTab } from './PortsTab'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
@@ -55,7 +56,6 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   mockWorkflows = []
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -431,6 +431,7 @@ function savedManifest(): PortifyManifest {
   return {
     workflowId: 'wf_saved',
     feature: 'cns_exactly_once_fallback',
+    featureDir: '/workspace/features/cns_exactly_once_fallback',
     repos: [{ name: 'my-backend', path: '~/Documents/my-backend' }],
     agent: 'claude',
     branch: 'portify/scratch',

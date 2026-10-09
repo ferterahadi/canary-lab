@@ -3,7 +3,6 @@ import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }))
@@ -37,6 +36,9 @@ import type { Requirement } from '../../../../../../../shared/coverage/types'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
 import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-annotate-rec-')
 
 const REQS: Requirement[] = [
   { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
@@ -150,9 +152,6 @@ describe('defaultRunAgent — pre-aborted signal', () => {
     const controller = new AbortController()
     controller.abort()
 
-    // spawn still returns a fake child but abort path should kick in before events
-    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT, delayMs: 50 }))
-
     await expect(proposeCoverageMappings(
       {
         requirements: REQS,
@@ -161,6 +160,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
       },
       { resolveAgents: () => ['claude'] },
     )).rejects.toThrow(/Coverage mapping failed/)
+    expect(mockSpawn).not.toHaveBeenCalled()
   })
 })
 
@@ -515,7 +515,7 @@ describe('spawnScope', () => {
 
 describe('agentJob descriptor', () => {
   it('forwards a record descriptor so the coverage mapper is logged too', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-'))
+    const logsDir = tempDir()
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
     await proposeCoverageMappings(
       {
@@ -526,11 +526,10 @@ describe('agentJob descriptor', () => {
       { resolveAgents: () => ['claude'] },
     )
     expect(agentJobStore(logsDir).get('fl-1:coverage-map')).toMatchObject({ stage: 'coverage-map', status: 'done' })
-    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 
   it('records a codex mapper, which pins no session', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-codex-'))
+    const logsDir = tempDir('cl-annotate-rec-codex-')
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
     await proposeCoverageMappings(
       {
@@ -543,14 +542,13 @@ describe('agentJob descriptor', () => {
     const rec = agentJobStore(logsDir).get('fl-1:coverage-map')!
     expect(rec.agent).toBe('codex')
     expect(rec.sessionId).toBeUndefined()
-    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })
 
 
 describe('cancellation waits for the persisted agent job', () => {
   it('keeps the operation and record running until the process closes', async () => {
-    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-coverage-close-'))
+    const logsDir = tempDir('cl-coverage-close-')
     const controller = new AbortController()
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(), stderr: new EventEmitter(),
@@ -561,24 +559,21 @@ describe('cancellation waits for the persisted agent job', () => {
       record: { jobId: 'wait-for-close', feature: 'checkout', stage: 'coverage-map', agent: 'codex' as const },
       logsDir,
     }
-    const pending = proposeCoverageMappings({ requirements: REQS, tests: [{ name: 'creates a todo' }], signal: controller.signal, agentJob }, { resolveAgents: () => ['codex'] })
+    const pending = proposeCoverageMappings({ requirements: REQS, tests: [{ name: 'creates a todo' }], signal: controller.signal, agentJob }, { resolveAgents: () => ['codex', 'claude'] })
     const finished = vi.fn()
     const observed = pending.then(finished, finished)
-    try {
-      controller.abort()
-      await Promise.resolve()
-      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
-      expect(finished).not.toHaveBeenCalled()
-      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({ status: 'running' })
-      child.emit('close', null, 'SIGTERM')
-      await expect(pending).rejects.toThrow('coverage annotate cancelled')
-      await observed
-      expect(finished).toHaveBeenCalledTimes(1)
-      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
-        status: 'failed', endedAt: expect.any(String),
-      })
-    } finally {
-      fs.rmSync(logsDir, { recursive: true, force: true })
-    }
+    controller.abort()
+    await Promise.resolve()
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(finished).not.toHaveBeenCalled()
+    expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({ status: 'running' })
+    child.emit('close', null, 'SIGTERM')
+    await expect(pending).rejects.toThrow('coverage annotate cancelled')
+    await observed
+    expect(finished).toHaveBeenCalledTimes(1)
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
+      status: 'failed', endedAt: expect.any(String),
+    })
   })
 })

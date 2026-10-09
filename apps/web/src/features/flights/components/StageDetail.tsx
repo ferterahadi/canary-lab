@@ -1,3 +1,9 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
+import { useRuns } from '@/features/runs/state/RunsContext'
+import { useState } from 'react'
+import { FlightAttentionSummary } from './FlightAttentionSummary'
+import { attentionFailureHistory, flightAttentionOnStage } from '../lib/attention-history'
+import { featureTestRuns } from '@/shared/lib/feature-test-runs'
 import { ACTIVITY_CHIP } from './FlightChipState'
 import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -19,9 +25,7 @@ import { FeatureSetupPanel } from './FeatureSetupPanel'
 import { FlightDocsPanel } from './FlightDocsPanel'
 import { RepoScanPanel } from './RepoScanPanel'
 import { RequirementsFork } from './RequirementsFork'
-import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress } from './stage-meta'
+import { StageColumn, StageStatusChip, STAGE_BLURB, type StagePresentation, portifyWorkflowId, specsCoverageProgress } from './stage-meta'
 import { evaluationTaskId, FactsGrid, stageFacts } from './StageFacts'
 import { stageRowKey, type StageRailRow } from './StageRail'
 import { stageStateLine } from './StageStatusLines'
@@ -29,9 +33,9 @@ import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExpo
 import { PortifyWorkflowControls } from '@/features/portify/components/PortifyWorkflowControls'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
-import type { FlightDrillThroughs } from './FlightPage'
+import { useFlightActions } from '../state/flight-actions'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
-import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { flightRowModelChips } from '@shared/flights/stage-models'
@@ -49,8 +53,10 @@ import {
   EvaluationDeliverablePanel,
   OverlayPanel,
 } from './StageEvidencePanels'
-import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
+import { SpecsPassTimeline, StageActivityRail } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
+import { plural } from '@shared/lib/plural'
+import { asRecord } from '../lib/as-record'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -93,7 +99,7 @@ export function externalSessionActivity(
   const client = clientLabel(clientKind, 'external agent')
   const owner = clientKind === 'other' ? 'your external agent session' : `your ${client} session`
   const fileCount = trace.itemCount != null
-    ? ` · ${trace.itemCount} file${trace.itemCount === 1 ? '' : 's'} applied`
+    ? ` · ${plural(trace.itemCount, 'file')} applied`
     : ''
   let message: string
   if (trace.status === 'running') {
@@ -231,10 +237,10 @@ export function StageDetail({
   flightId,
   flight,
   row,
+  presentation,
   stage: recordedStage,
   companion: recordedCompanion,
   runLive,
-  activeRunId,
   activePortifyWorkflowId,
   activity,
   externalHistory,
@@ -246,24 +252,16 @@ export function StageDetail({
   externalMutationOwner,
   onResponded,
   onActionError,
-  onStartFlight,
-  onOpenConfig,
-  onOpenSpecReview,
-  configRefreshKey,
-  docsRefreshKey,
-  drill,
 }: {
   flightId: string
   flight: FlightManifest
   row: StageRailRow
+  presentation: StagePresentation
   stage: FlightStage
   /** The folded half of a pair-merged row (heal / env-capture / prd-summary). */
   companion: FlightStage | null
   /** A run for this feature is live right now (R64) — the run row polls. */
   runLive?: boolean
-  /** Run identity supplied by the live run stream for a derived Flight. Real
-   *  flight records keep their own stage/link identity instead. */
-  activeRunId?: string
   /** Portify's own live-store identity. Unlike the one-verb feature Activity
    *  map, this survives when a simultaneous test run is the louder activity. */
   activePortifyWorkflowId?: string
@@ -285,15 +283,11 @@ export function StageDetail({
   onResponded: () => void
   /** R71/W1: run-control failures surface on the header's inline error line. */
   onActionError?: (msg: string) => void
-  /** R75: the Repo scan panel's "Change…" → launcher handoff. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
-  /** The run hero's link into the changed-tests review. */
-  onOpenSpecReview?: () => void
-  configRefreshKey?: number
-  docsRefreshKey?: number
-  drill: FlightDrillThroughs
 }) {
+  // R75: `onStartFlight` is the Repo scan panel's "Change…" → launcher handoff;
+  // `onOpenSpecReview` is the run hero's link into the changed-tests review.
+  const actions = useFlightActions()
+  const { onStartFlight, onOpenConfig, onOpenSpecReview, onOpenRun } = actions
   const coverageHistory = stageCoverageJobs(coverageJobs, flight.feature, recordedStage.key)
   const latestCoverageJob = coverageHistory.at(-1)
   const coverageStageStart = (recordedStage.key === 'docs' ? recordedCompanion?.startedAt : recordedStage.startedAt)
@@ -325,6 +319,9 @@ export function StageDetail({
         ? 'docs'
         : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
   const runMerged = stage.key === 'run'
+  const runIndex = useRuns({ reconcile: runMerged })
+  const suiteRuns = featureTestRuns(runIndex.runs, flight.feature)
+  const latestRun = suiteRuns[0]
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
   // R83: the pane keeps its settled layout in every state. Missing slots stay
@@ -375,6 +372,9 @@ export function StageDetail({
   // the stage's own idle, failed, or unavailable treatment takes over.
   const awaitingData = band.pending ? 'live' : awaiting
   const facts = stageFacts(dataStage, flight, companion ?? undefined, band)
+  const noLocalServices = (stage.key === 'scaffold' || stage.key === 'env-capture') && band.config?.services === 0
+  const setupProof = noLocalServices && band.boot?.manifest.services?.length === 0
+    && band.boot.manifest.status === 'passed' ? band.boot : null
   // Read off the ROW key, so the merged pairs report their companion's spawns
   // too (Test run carries heal, Requirements carries the summary distiller).
   const coverageAgent = coverageJob?.sessionRef?.agent
@@ -383,9 +383,12 @@ export function StageDetail({
     mapping: coverageJob?.models?.mapping?.[coverageAgent],
   } : undefined
   const modelChips = flightRowModelChips(row.key, coverageOwnsCurrent ? coverageModels : flight.opts.models)
-  const drillThrough = stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
+  // The run shortcut shares the suite selection; other stages drill into their own evidence.
+  const drillThrough = runMerged
+    ? latestRun && onOpenRun ? { label: 'Latest run →', onClick: () => onOpenRun?.(flight.feature, latestRun.runId) } : null
+    : stageDrillThrough(dataStage, flight, actions, companion)
   const runId = runMerged
-    ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
+    ? latestRun?.runId
     : undefined
   const pausedKind = coverageOwnsCurrent ? null : pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
@@ -393,8 +396,9 @@ export function StageDetail({
   // the run detail poll, so StageDetail no longer fetches it here (R80). The
   // hero renders from this evidence immediately (before its first poll) and
   // enriches from the live run detail; healEnd rides the run stage's evidence.
-  const runEv = (stage.evidence ?? {}) as Record<string, unknown>
-  const runCev = (companion?.evidence ?? {}) as Record<string, unknown>
+  const recordedRunId = (stage.evidence as Record<string, unknown> | undefined)?.runId ?? flight.links?.runId
+  const runEv = (recordedRunId === runId ? stage.evidence ?? {} : {}) as Record<string, unknown>
+  const runCev = (recordedRunId === runId ? companion?.evidence ?? {} : {}) as Record<string, unknown>
   const runEvidence: RunStageEvidence = {
     runId,
     status: typeof runEv.status === 'string' ? runEv.status : undefined,
@@ -409,6 +413,11 @@ export function StageDetail({
     stage.status === 'waiting-for-approval' ? stage
     : companion?.status === 'waiting-for-approval' ? companion
     : null
+  const attentionOnStage = flightAttentionOnStage(flight, stage.key, companion?.key)
+  const historicalFailure = attentionFailureHistory(flight, stage.key, companion?.key)
+  const [localLogId, setLocalLogId] = useState<string | null>(null)
+  const selectedLogId = onOpenLogChange ? openLogId : localLogId
+  const selectLog = onOpenLogChange ?? setLocalLogId
   const error = stage.error ?? companion?.error
   // Detail travels with whichever half's error is showing.
   const errorDetail = stage.error != null ? stage.errorDetail : companion?.errorDetail
@@ -537,6 +546,104 @@ export function StageDetail({
   // internal session as current.
   const activitySource = sessionSources.length > 0 || externalOwnsCurrent || coverageOwnsCurrent ? undefined : localActivitySource
 
+  const evidenceToolbar = (
+    <div data-testid="stage-evidence-toolbar" className="cl-stage-evidence-toolbar">
+      <div className="cl-stage-evidence-heading">
+        <div className="cl-stage-evidence-title">
+          <h2 className="m-0 truncate text-sm font-medium text-primary" title={row.label}>{row.label}</h2>
+          <StageStatusChip presentation={presentation} />
+        </div>
+        <div data-testid="stage-actions" className="cl-stage-evidence-actions">
+          <div className="cl-stage-evidence-control">
+            {modelChips.length > 0 && (
+              <div className="flex shrink-0">
+                <ModelPlanPopover
+                  align="right"
+                  panelTestId="stage-models-plan"
+                  rows={modelChips.map((chip) => ({ key: chip.stage, label: chip.label, value: chip.value }))}
+                >
+                  {({ open, toggle }) => (
+                    <Chip
+                      testId="stage-models"
+                      chrome="border"
+                      labelColor="var(--text-secondary)"
+                      fontWeight={400}
+                      onClick={toggle}
+                      expanded={open}
+                      title={`${plural(modelChips.length, 'model choice')} this step's agents were pinned to when this flight started — click for which agent runs on what`}
+                      label={(
+                        <span className="inline-flex items-baseline gap-1.5">
+                          <span className="cl-rubric">models</span>
+                          <span className="font-mono">{modelChips.length}</span>
+                          <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
+                        </span>
+                      )}
+                    />
+                  )}
+                </ModelPlanPopover>
+              </div>
+            )}
+          </div>
+          <div className="cl-stage-evidence-control">
+            {/* Advanced setup appears once the config EXISTS on disk — approved
+                (done) or pre-existing (skipped, the scaffold had nothing to do).
+                Not while generating, and not at the approval checkpoint: there the
+                in-place editor (per-service ✎) is the one editing surface, so the
+                fork stays a two-button decision. */}
+            {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && onOpenConfig && (
+              <DisabledControlTooltip>
+                <button
+                  type="button"
+                  data-testid="feature-setup-advanced"
+                  /* Locked while the flight is running (the run/authoring stages own
+                     the config) — matches the inline FeatureSetupPanel's `editable`
+                     gate below; only editable once the flight is idle. */
+                  disabled={flight.status === 'running' || externalMutationOwner != null}
+                  onClick={() => onOpenConfig(flight.feature)}
+                  className="cl-button min-h-6 shrink-0 px-2 py-0.5"
+                  title={externalMutationOwner
+                    ? externalMutationTooltip(externalMutationOwner, 'change advanced setup')
+                    : flight.status === 'running'
+                    ? 'Advanced setup is locked while the flight is running'
+                    : undefined}
+                >
+                  ⚙ Advanced setup
+                </button>
+              </DisabledControlTooltip>
+            )}
+            {drillThrough && (
+              <button
+                type="button"
+                data-testid={`stage-drill-${stage.key}`}
+                onClick={drillThrough.onClick}
+                className="cl-button min-h-6 shrink-0 px-2 py-0.5"
+              >
+                {drillThrough.label}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="cl-stage-evidence-description">
+        {attentionOnStage ? (
+          <FlightAttentionSummary
+            flight={flight}
+            freshness={band.ledger?.freshness}
+            coverageConfirmed={band.ledgerConfirmed}
+            onViewFailure={historicalFailure ? () => {
+              onActivityOpenChange(true)
+              selectLog(historicalFailure.id)
+            } : undefined}
+          />
+        ) : (
+          <span className="line-clamp-2 text-xs text-muted" title={presentation.title}>
+            {noLocalServices ? 'This suite requires no local services.' : presentation.title ?? STAGE_BLURB[row.key]}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* R66: header, facts and stage panels scroll here; the activity band
@@ -547,134 +654,6 @@ export function StageDetail({
           the panes showing above an Activity band dragged all the way up. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
       <div className="flex flex-1 flex-col p-3">
-      {/* R85: the chip + actions share a top edge with the first card instead of
-          sitting on a row of their own above it. The cards are capped at
-          STAGE_COLUMN (92ch) while the pane is wider, so the leftover width to
-          their right was empty anyway — the old dedicated row spent 36px of
-          vertical space to put a chip in it, pushing "At a glance" that much
-          further from the stage rail it belongs to.
-          `order-last` paints the column on the right while keeping the chip and
-          its actions FIRST in DOM (and so in tab order), where they read as the
-          stage's header. `items-start` keeps the actions at the top rather than
-          centring them against a pane-tall card stack. */}
-      <div className="flex items-start gap-2">
-      {/* min-h-6 (=the .cl-button height) locks the actions row height, so
-          neither the chip nor an action button drops when a stage carries one
-          (Advanced setup, drill-through, download) versus the plain chip-only
-          stages.
-
-          The lane is a FIXED width, not the cluster's own. Sized to its content
-          it stole a variable slice of the column: a chip-only stage left the
-          column at its 92ch cap while Suite setup's extra "⚙ Advanced setup"
-          button pushed the cards 19px narrower, so switching tabs re-flowed
-          every card's right edge. A fixed lane makes that slice the same on
-          every stage — and a cluster too wide for it wraps to a second line
-          inside the lane (`flex-wrap`), which costs nothing: the lane sits in
-          the empty gutter beside cards that are top-aligned anyway, so nothing
-          below it moves.
-
-          220px is that lane sized to the widest cluster that must stay on ONE
-          line: the status chip (90px at "Needs approval", 118px at the longest
-          waiting label) + gap + the longest action label ("⚙ Advanced setup",
-          114px) = 212. At 180 it was 17px short of the old
-          "Open test coverage →", so Requirements and Tests & coverage dropped
-          their button under a lonely "✓ Done" — a wrap that reads as a mistake
-          rather than a composition. The column measures 988px against a card
-          capped at 851px (STAGE_COLUMN's 92ch), so the extra 40px comes out of
-          empty gutter, not card width.
-
-          The models chip takes its OWN line (below) so this line always holds
-          the same two things. No stage carries both "⚙ Advanced setup" and a
-          drill-through, and a waiting chip only appears while the stage runs —
-          when `stageDrillThrough` returns nothing — so 212 really is the
-          ceiling. */}
-      <div data-testid="stage-actions" className="order-last flex min-h-6 w-[220px] shrink-0 flex-wrap items-center justify-end gap-2">
-        {/* The models this step's agents were pinned to — a passive fact, so it
-            gets its OWN line above the status chip and the action buttons
-            rather than a place among them. A step left on the agent default
-            shows nothing at all, which is what makes the chip mean "this one
-            was deliberately tuned". ONE chip that opens the plan, not one chip
-            per spawn: a bare `opus · high` named a model with no subject, and a
-            merged row put two such subjectless chips side by side. Spelling the
-            subject inline instead just traded that for a header full of prose.
-            The panel is the strip's, via ModelPlanPopover — same spawn → knobs
-            rows, scoped to this step.
-
-            Why a line of its own: it is the widest thing in the cluster, so
-            sharing the line made the wrap point depend on which stage you were
-            looking at — the status chip and its action landed together on some
-            stages and split across two lines on others. Now the split is always
-            the same one: what this step was tuned to, then what it did and
-            where to go. */}
-        {modelChips.length > 0 && (
-          <div className="flex w-full justify-end">
-            <ModelPlanPopover
-              /* The stage's chips live in a right-aligned cluster; a
-                 left-anchored panel would hang off the pane. */
-              align="right"
-              panelTestId="stage-models-plan"
-              rows={modelChips.map((chip) => ({ key: chip.stage, label: chip.label, value: chip.value }))}
-            >
-              {({ open, toggle }) => (
-                <Chip
-                  testId="stage-models"
-                  chrome="border"
-                  labelColor="var(--text-secondary)"
-                  fontWeight={400}
-                  onClick={toggle}
-                  expanded={open}
-                  title={`${modelChips.length} model choice${modelChips.length === 1 ? '' : 's'} this step's agents were pinned to when this flight started — click for which agent runs on what`}
-                  label={(
-                    <span className="inline-flex items-baseline gap-1.5">
-                      <span className="cl-rubric">models</span>
-                      <span className="font-mono">{modelChips.length}</span>
-                      <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
-                    </span>
-                  )}
-                />
-              )}
-            </ModelPlanPopover>
-          </div>
-        )}
-        <StageStatusChip status={row.status} rowKey={stageRowKey(stage.key)} activity={activity && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stageRowKey(stage.key) ? activity : undefined} />
-        {/* Advanced setup appears once the config EXISTS on disk — approved
-            (done) or pre-existing (skipped, the scaffold had nothing to do).
-            Not while generating, and not at the approval checkpoint: there the
-            in-place editor (per-service ✎) is the one editing surface, so the
-            fork stays a two-button decision. */}
-        {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && onOpenConfig && (
-          <DisabledControlTooltip>
-            <button
-              type="button"
-              data-testid="feature-setup-advanced"
-              /* Locked while the flight is running (the run/authoring stages own
-                 the config) — matches the inline FeatureSetupPanel's `editable`
-                 gate below; only editable once the flight is idle. */
-              disabled={flight.status === 'running' || externalMutationOwner != null}
-              onClick={() => onOpenConfig(flight.feature)}
-              className="cl-button min-h-6 shrink-0 px-2 py-0.5"
-              title={externalMutationOwner
-                ? externalMutationTooltip(externalMutationOwner, 'change advanced setup')
-                : flight.status === 'running'
-                ? 'Advanced setup is locked while the flight is running'
-                : undefined}
-            >
-              ⚙ Advanced setup
-            </button>
-          </DisabledControlTooltip>
-        )}
-        {drillThrough && (
-          <button
-            type="button"
-            data-testid={`stage-drill-${stage.key}`}
-            onClick={drillThrough.onClick}
-            className="cl-button min-h-6 shrink-0 px-2 py-0.5"
-          >
-            {drillThrough.label}
-          </button>
-        )}
-      </div>
-
       {/* The stage's own content column — every card on STAGE_COLUMN, stacked on
           the same gap the pane used to carry. */}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
@@ -696,7 +675,22 @@ export function StageDetail({
           has evidence, placeholders where it doesn't yet, sweeping while it
           works. A stage pane no longer collapses to a bare sentence, and a value
           lands in the slot its placeholder held. */}
-      <FactsGrid facts={facts} awaiting={awaitingData} />
+      {!runMerged && <FactsGrid facts={facts} awaiting={awaitingData} toolbar={evidenceToolbar} footer={
+        setupProof ? (
+          <div data-testid="suite-setup-proof" className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-xs">
+            <span className="text-success" aria-hidden="true">✓</span>
+            <span className="min-w-0 flex-1">Setup confirmed by an existing successful run</span>
+            {onOpenRun && (
+              <button type="button" className="cl-button px-2 py-1" onClick={() => onOpenRun?.(flight.feature, setupProof.runId)}>
+                View run →
+              </button>
+            )}
+          </div>
+        ) : undefined
+      } />}
+      {band.setupError && (
+        <StageColumn><div role="status" className="text-xs text-warning">Setup evidence could not be refreshed: {band.setupError}. Retrying automatically.</div></StageColumn>
+      )}
 
       {/* The recovery card always follows At a glance. Test Run owns a separate
           facts band inside TestRunPanel, so that panel receives the same card in
@@ -726,7 +720,7 @@ export function StageDetail({
           digest below is editable INPUT, a different kind of thing. Putting the
           config first separated a number from the evidence behind it by a
           screenful of start commands. */}
-      {(stage.key === 'scaffold' || stage.key === 'env-capture') && (
+      {(stage.key === 'scaffold' || stage.key === 'env-capture') && !noLocalServices && (
         <BootCheckPanel
           awaiting={awaitingData}
           boot={band.boot ?? null}
@@ -751,7 +745,6 @@ export function StageDetail({
             : flight.status === 'running'
               ? 'Suite setup is locked while the flight is running'
               : undefined}
-          refreshKey={configRefreshKey}
         />
       )}
 
@@ -767,7 +760,6 @@ export function StageDetail({
           <RequirementsFork
             flightId={flightId}
             flight={flight}
-            refreshKey={docsRefreshKey}
             onResponded={onResponded}
             listing={band.docsListing}
           />
@@ -776,7 +768,6 @@ export function StageDetail({
             feature={flight.feature}
             awaiting={awaiting}
             approved={stage.status === 'done'}
-            refreshKey={docsRefreshKey}
             listing={band.docsListing}
             summaryStatus={companion ? presentedStageStatus(companion) : undefined}
             summaryStage={companion ?? undefined}
@@ -805,11 +796,16 @@ export function StageDetail({
       {runMerged && (
         <TestRunPanel
           feature={flight.feature}
+          factsToolbar={evidenceToolbar}
           runId={runId}
+          featureRuns={suiteRuns}
+          indexLoaded={runIndex.indexLoaded}
+          indexError={runIndex.indexError}
+          connection={runIndex.connection}
           awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
-          onOpenRun={drill.onOpenRun}
+          onOpenRun={onOpenRun}
           onOpenSpecReview={onOpenSpecReview}
           onError={onActionError}
           pausedNotice={pausedNotice}
@@ -888,8 +884,8 @@ export function StageDetail({
         )
       })()}
 
-      {(row.status === 'failed' && error) && (
-        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} mutationLockedReason={externalMutationOwner
+      {(row.status === 'failed' && error && !(attentionOnStage && flight.attention?.state === 'resolved')) && (
+        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} historyInActivity={!!historicalFailure} mutationLockedReason={externalMutationOwner
           ? externalMutationTooltip(externalMutationOwner, 'apply a repository remedy')
           : undefined} />
       )}
@@ -910,13 +906,12 @@ export function StageDetail({
       </div>
       </div>
       </div>
-      </div>
       {/* R66: one activity rail per stage — the conductor's tagged system lines
           and the stage's agent timeline (if any) on a single block. The run
           stage is agentless at the flight level (its repair agent's timeline is
           on the run detail drill-through), so R80 cut its near-empty band; the
           hero carries a collapsed "Repairs" disclosure instead. */}
-      {!runMerged && (
+      {(!runMerged || historicalFailure) && (
         <StageActivityRail
           stageKey={stage.key}
           evaluationTaskId={stage.key === 'evaluation-export' ? activityEvalTask?.taskId ?? null : undefined}
@@ -925,18 +920,15 @@ export function StageDetail({
           live={live || evaluationLive || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}
+          leadingSystemRows={historicalFailure ? [historicalFailure.line] : undefined}
           externalSessions={externalSessions}
           open={activityOpen}
           onOpenChange={onActivityOpenChange}
-          openLogId={openLogId}
-          onOpenLogChange={onOpenLogChange}
+          openLogId={selectedLogId}
+          onOpenLogChange={selectLog}
           {...(stage.key === 'portify' ? { empty: EMPTY_COPY.portifyNoTranscript } : {})}
         />
       )}
     </div>
   )
-}
-
-export function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }

@@ -1,20 +1,18 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { json, readJson, sha, write } from '../files'
 import type { Attempt, StudyManifest, UsageAttribution, PolicyAdherence } from '../types'
 import { writeRepositoryFailureContext } from './failure-context'
 import { freezeChildAudit, prepareChildAudit, reviewChildAudit } from './child-audit'
 import { freezeChildReadGuard } from './child-read-guard'
 import { recoverWorkerEvidence } from '../worker-evidence'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('child-audit-')
 function setup(backend?: 'local-v1') {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'child-audit-')))
-  roots.push(root)
+  const root = tempDir()
   const authFile = path.join(root, 'synthetic-auth.json')
   json(authFile, { auth_mode: 'chatgpt', tokens: { account_id: 'synthetic-account' } })
   const catalogFile = path.join(root, 'synthetic-catalog.json')

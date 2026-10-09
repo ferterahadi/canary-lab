@@ -1,19 +1,23 @@
+import type { EditorChoice } from '../../../../../../shared/project-config'
 import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
-import type { BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
-import type { SabotageLevel } from '../../../../../../shared/benchmark-index'
+import type { BenchmarkManifest } from '../../../../../../shared/benchmark-index'
+import type { StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
+import { normalizeSabotageLevel } from '../logic/sabotage-level'
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { findFeature } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
-import { notFound } from '../../../shared/http-error'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
+import { notFound, replyFailure } from '../../../shared/http-error'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
 // injected BenchmarkStore; the start path delegates to the injected
@@ -45,14 +49,6 @@ interface StartBody {
   level?: string
   iterations?: number
   agent?: string
-}
-
-const LEVELS: ReadonlySet<SabotageLevel> = new Set<SabotageLevel>(['min', 'med', 'max'])
-
-function normalizeLevel(value: unknown): SabotageLevel {
-  return typeof value === 'string' && LEVELS.has(value as SabotageLevel)
-    ? (value as SabotageLevel)
-    : 'med'
 }
 
 export async function benchmarkRoutes(
@@ -161,7 +157,7 @@ export async function benchmarkRoutes(
           dir = await ensureInspectWorktree(deps.logsDir, manifest)
         } catch (err) {
           reply.code(500)
-          return { error: err instanceof Error ? err.message : String(err) }
+          return { error: errorMessage(err) }
         }
       } else {
         const arm = manifest.arms.find((a) => a.arm === target)
@@ -180,7 +176,7 @@ export async function benchmarkRoutes(
       } catch (err) {
         // Best-effort: report the path so the UI can offer a copy-path fallback.
         reply.code(200)
-        return { opened: false, path: dir, error: err instanceof Error ? err.message : String(err) }
+        return { opened: false, path: dir, error: errorMessage(err) }
       }
     },
   )
@@ -237,13 +233,11 @@ export async function benchmarkRoutes(
         : 1
     const skill =
       typeof body.skill === 'string' && body.skill.trim() ? body.skill.trim() : 'default'
-    const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
+    const agent = isAgentKind(body.agent) ? body.agent : undefined
     try {
-      return await deps.startBenchmark({ feature, skill, level: normalizeLevel(body.level), iterations, agent })
+      return await deps.startBenchmark({ feature, skill, level: normalizeSabotageLevel(body.level), iterations, agent })
     } catch (err) {
-      const statusCode = (err as { statusCode?: number }).statusCode ?? 500
-      reply.code(statusCode)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 }

@@ -1,29 +1,10 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 import { describe, expect, it, vi } from 'vitest'
 import { connectAgentSessionStream } from './agent-session-socket'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+import { FakeWebSocket } from '../../../../../tools/test-helpers/fake-websocket'
 
 // Tiny fake WebSocket that records the url it was constructed with and
 // exposes hooks for tests to drive `onmessage` / `onclose` / `onerror`.
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  url: string
-  readyState = 0 // CONNECTING
-  onmessage?: (ev: { data: string }) => void
-  onclose?: () => void
-  onerror?: () => void
-  closed = false
-
-  constructor(url: string) {
-    this.url = url
-    FakeWebSocket.instances.push(this)
-  }
-
-  send(): void { /* not used */ }
-  close(): void {
-    this.closed = true
-    this.readyState = 3 // CLOSED
-  }
-}
 
 function reset(): void {
   FakeWebSocket.instances = []

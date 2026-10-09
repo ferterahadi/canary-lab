@@ -1,10 +1,12 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { INSTRUCTIONS_DELIVERED_WINDOW, WORKFLOW_GUIDES } from './instructions'
 import { applyExternalDraftFiles, externalTestFileRules } from '../features/config/logic/feature-authoring'
 import { SPEC_SELECTION_RULE } from '../shared/playwright-config'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-draft-')
 
 // A suite declares ONE roster of tests and every run of it declares the same
 // one. Playwright builds that roster by walking the suite with the config's
@@ -101,45 +103,37 @@ describe('spec-selection guardrail — delivery, not just presence', () => {
   it('refuses a draft that carries an envset-dependent config, naming the field', async () => {
     // The prose above is advice; this is the door. An agent that ignores the
     // rule still cannot land the config through Canary Lab.
-    const featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-draft-'))
-    try {
-      const result = await applyExternalDraftFiles({
-        featureDir,
-        files: [
-          { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },
-          {
-            path: 'playwright.config.ts',
-            content: "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
-          },
-        ],
-      })
-      expect(result).toEqual({ ok: false, error: expect.stringContaining('computed testMatch') })
-      expect(fs.existsSync(path.join(featureDir, 'playwright.config.ts'))).toBe(false)
-      // Refused before ANY write — a half-applied draft would leave the suite in
-      // a state neither the agent nor the human asked for.
-      expect(fs.existsSync(path.join(featureDir, 'e2e'))).toBe(false)
-    } finally {
-      fs.rmSync(featureDir, { recursive: true, force: true })
-    }
+    const featureDir = tempDir()
+    const result = await applyExternalDraftFiles({
+      featureDir,
+      files: [
+        { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },
+        {
+          path: 'playwright.config.ts',
+          content: "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
+        },
+      ],
+    })
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('computed testMatch') })
+    expect(fs.existsSync(path.join(featureDir, 'playwright.config.ts'))).toBe(false)
+    // Refused before ANY write — a half-applied draft would leave the suite in
+    // a state neither the agent nor the human asked for.
+    expect(fs.existsSync(path.join(featureDir, 'e2e'))).toBe(false)
   })
 
   it('applies a draft whose config keeps selection constant', async () => {
-    const featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-draft-'))
-    try {
-      const result = await applyExternalDraftFiles({
-        featureDir,
-        files: [
-          { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },
-          {
-            path: 'playwright.config.ts',
-            content: "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: '**/*.spec.ts' })\n",
-          },
-        ],
-      })
-      expect(result.ok).toBe(true)
-      expect(fs.existsSync(path.join(featureDir, 'playwright.config.ts'))).toBe(true)
-    } finally {
-      fs.rmSync(featureDir, { recursive: true, force: true })
-    }
+    const featureDir = tempDir()
+    const result = await applyExternalDraftFiles({
+      featureDir,
+      files: [
+        { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },
+        {
+          path: 'playwright.config.ts',
+          content: "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: '**/*.spec.ts' })\n",
+        },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    expect(fs.existsSync(path.join(featureDir, 'playwright.config.ts'))).toBe(true)
   })
 })

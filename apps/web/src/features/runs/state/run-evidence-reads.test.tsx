@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AuditEntry } from '@/shared/api/types-wizard'
 import type { JournalSection } from '@shared/run-detail'
@@ -9,6 +9,8 @@ import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidati
 import { JournalTab } from '../components/JournalTab'
 import { useExternalAudit } from './use-external-audit'
 import { useRunJournal } from './use-run-journal'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 const api = vi.hoisted(() => ({ listJournal: vi.fn(), getRunAudit: vi.fn(), connection: 'live' }))
 vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
@@ -16,7 +18,6 @@ vi.mock('@/shared/api/runs', async (importOriginal) => ({
   getRunAudit: api.getRunAudit,
 }))
 vi.mock('./RunsContext', () => ({ useRuns: () => ({ connection: api.connection }) }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement
 let sequence = 0
@@ -25,7 +26,7 @@ let invalidate: () => void
 let journal: ReturnType<typeof useRunJournal>
 const entry = (text: string, outcome = 'pending'): JournalSection => ({ iteration: 1, timestamp: '2026-01-01T00:00:00Z', feature: 'synthetic', run: id, outcome, hypothesis: text, body: `- hypothesis: ${text}` })
 const auditEntry = (action: string): AuditEntry => ({ ts: '2026-01-01T00:00:00Z', sessionId: null, clientKind: null, action })
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
+
 function Journal({ runId = id, feature = 'synthetic' }: { runId?: string; feature?: string }) {
   journal = useRunJournal(feature, runId)
   const bus = useInvalidation()
@@ -39,9 +40,24 @@ const renderJournal = async (runId = id, feature = 'synthetic') => { await act(a
 const renderAudit = async (runId = id, status: RunStatus = 'running') => { await act(async () => root.render(<Audit runId={runId} status={status} />)) }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); api.connection = 'live'; id = `evidence-${++sequence}`
-  element = document.createElement('div'); document.body.appendChild(element); root = createRoot(element)
 })
-afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container: element, root } = mounted) })
+
+it('orders journal entries after invalidation without remounting the reader', async () => {
+  const first = { ...entry('first'), iteration: 1 }
+  const second = { ...entry('second'), iteration: 2 }
+  const legacy = { ...entry('legacy'), iteration: null }
+  api.listJournal.mockResolvedValue([first, legacy, second])
+  await renderJournal()
+  const output = element.querySelector('output')
+  expect(journal.value).toEqual([second, first, legacy])
+  const newest = { ...entry('newest'), iteration: 3 }
+  api.listJournal.mockResolvedValue([legacy, first, newest, second])
+  await act(async () => invalidate())
+  expect(element.querySelector('output')).toBe(output)
+  expect(journal.value).toEqual([newest, second, first, legacy])
+})
 
 it('does not let an older journal poll restore pending evidence after accepted completion', async () => {
   const older = deferred<JournalSection[]>()
