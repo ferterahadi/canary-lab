@@ -492,8 +492,8 @@ describe('captureHealAgentCause', () => {
   }
 
   /** Write `lines` as the session JSONL and point the run's sidecar at it. */
-  function claudeCtx(tail: string, lines: unknown[] | null) {
-    const made = ctxFor({ healAgentOutputTail: tail }, { autoHeal: { agent: 'claude', maxCycles: 1 } })
+  function claudeCtx(tail: string, lines: unknown[] | null, healAgent: 'claude' | 'codex' = 'claude') {
+    const made = ctxFor({ healAgentOutputTail: tail }, { autoHeal: { agent: healAgent, maxCycles: 1 } })
     if (lines !== null) {
       const logPath = path.join(tmpDir, 'session.jsonl')
       fs.writeFileSync(logPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
@@ -548,8 +548,7 @@ describe('captureHealAgentCause', () => {
   it('ignores a claude session log when codex is the heal agent', () => {
     // A run that switched agents keeps the earlier claude ref; its log says
     // nothing about why codex went quiet.
-    const { ctx } = claudeCtx('', [PROMPT_LINE, LOGIN_EXPIRED_LINE])
-    ctx.autoHeal = { agent: 'codex', maxCycles: 1 }
+    const { ctx } = claudeCtx('', [PROMPT_LINE, LOGIN_EXPIRED_LINE], 'codex')
 
     expect(captureHealAgentCause(ctx)).toBeUndefined()
   })

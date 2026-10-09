@@ -37,7 +37,7 @@ it('tracks the real location of a symlinked shared tsconfig, so retargeting the 
   // the lookup whose real path matters. Each shared config maps `@support/*`
   // relative to its own real directory, and no file's bytes change across the
   // retarget, so only the realpath probe can notice it.
-  for (const [name, value] of [['config-a', 1], ['config-b', 2]]) {
+  for (const [name, value] of [['config-a', 1], ['config-b', 2]] as const) {
     fs.mkdirSync(path.join(featureDir, 'packages', name, 'support'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'packages', name, 'tsconfig.json'), '{"compilerOptions":{"paths":{"@support/*":["./support/*"]}}}')
     fs.writeFileSync(path.join(featureDir, 'packages', name, 'support/helper.ts'), `export const value = ${value}`)
