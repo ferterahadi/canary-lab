@@ -82,9 +82,13 @@ function CycleFileView({ file, cycle, mode, onModeChange, picker }: {
   }, [file, cycle])
   const changes = useMemo(() => file.sources ? [...new Set(input.rows.flatMap((row) => row.change == null ? [] : [row.change]))] : [], [file.sources, input.rows])
   // English folds the rows differently, so a format switch re-centres too.
+  // One English row can be taller than the panel; it then opens at its top,
+  // where its first sentence is.
   useLayoutEffect(() => {
-    if (!changes.length) return
-    scrollRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView?.({ block: 'center', behavior: 'instant' })
+    const scroller = scrollRef.current
+    const row = scroller?.querySelector<HTMLElement>('[data-selected="true"]')
+    if (!changes.length || !row) return
+    row.scrollIntoView?.({ block: row.offsetHeight > scroller!.clientHeight ? 'start' : 'center', behavior: 'instant' })
   }, [changes.length, index, mode])
   // The server sends no sources exactly when a file is patch-only.
   const codeOnly = file.recovery.kind === 'patch-only'

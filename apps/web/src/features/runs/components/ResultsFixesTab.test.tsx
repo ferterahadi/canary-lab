@@ -520,6 +520,13 @@ describe('repair notes and code changes', () => {
       act(() => { changes.querySelector<HTMLButtonElement>('[data-testid="test-presentation-english-tab"]')!.click() })
       expect(scrolled).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
       expect(scrolled.mock.contexts.at(-1)).toBe(changes.querySelector('[data-selected="true"]'))
+      // A row taller than the panel opens at its top.
+      const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(5000)
+      const panel = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+      act(() => { changes.querySelector<HTMLButtonElement>('[aria-label="Previous change"]')!.click() })
+      tall.mockRestore()
+      panel.mockRestore()
+      expect(scrolled).toHaveBeenLastCalledWith({ block: 'start', behavior: 'instant' })
     } finally {
       scrolled.mockRestore()
     }
