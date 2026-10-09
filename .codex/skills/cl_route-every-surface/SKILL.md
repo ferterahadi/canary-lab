@@ -76,7 +76,11 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?dialog=settings&models=codex                      → Project Settings with Codex models open
 ?feature=checkout&run=7cvh&test=cart%20fails        → run detail focused on a failure
 ?feature=checkout&run=7cvh&tests=recorded           → recorded tests for that run
-?feature=checkout&run=7cvh&runtab=changes           → run detail arrival on Changes
+?feature=checkout&run=7cvh&runtab=changes           → legacy arrival: Results & Fixes, run-wide view
+?feature=checkout&run=7cvh&runtab=results&test=cart%20fails&cycle=2&journal=entry
+                                                    → that test's repair cycle 2, its journal entry open
+?feature=checkout&run=7cvh&runtab=services&svc=api&exec=3&lines=120-140
+                                                    → api's retained log for execution 3, lines highlighted
 ```
 
 `RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' |
@@ -85,6 +89,12 @@ dialog open-state to localStorage or broadcast it cross-tab.
 `stage` only qualifies an open flight. `tab` only qualifies `dialog=config`;
 `models` only qualifies `dialog=settings`; `review*` params only qualify
 `dialog=tests-review`; `test`, `runtab`, and `tests` qualify a selected run.
+Inside a run, the detail reports the reader's place (`RunLocation`: `runtab`,
+`rview`, `test`, `cycle`, `journal`, `svc`, `exec`/`lines`/`match`) through
+`setRunLocation`; each qualifier is gated on the one it belongs to, a reported
+place supersedes the arrival that opened the run, and a stale name is explained
+by the view (`stale-*-link`) rather than dropped. Embedded run details pass no
+`onLocationChange` and stay unrouted.
 `from` records the flight a workspace/coverage drill-through came from and is
 dropped on the flights view. `persistView`/`readPersistedView` own these gates.
 Because the config dialog is qualified by the DURABLE `feature` param, any opener
