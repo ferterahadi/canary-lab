@@ -4,6 +4,9 @@ import type { ReadableStoryItem } from '../readable-tests/types'
 import type { TestFileReview } from '../test-review'
 import { sourceRows } from '../test-source-diff'
 import {
+  alignedEnglishAvailable,
+  alignedGutterWidth,
+  alignedSideLabels,
   alignedTestViewRows,
   bodyLineForSourceLine,
   buildTestViewRows,
@@ -285,5 +288,32 @@ describe('alignedTestViewRows', () => {
     expect(aligned[1].after?.marks.changes).toEqual(new Set())
     const blank = alignedTestViewRows({ review: data, rows: [{ id: 'odd', before: null, after: 'x', beforeLine: 1, afterLine: 1 }], mode: 'code' })
     expect(blank[0].before?.code).toBe('')
+  })
+})
+
+describe('aligned view facts', () => {
+  it('offers English for a spec file always, and for a supporting file only when a side has a story', () => {
+    const spec = review(['a'], ['a'])
+    expect(alignedEnglishAvailable(spec)).toBe(true)
+    const supporting = review(['a'], ['a'], { supportingFile: true })
+    expect(alignedEnglishAvailable(supporting)).toBe(false)
+    expect(alignedEnglishAvailable({ ...supporting, after: { source: 'a', tests: [], story: { steps: [fileStep('a', 1)] } } })).toBe(true)
+    expect(alignedEnglishAvailable({ ...supporting, before: { source: 'a', tests: [], story: { steps: [fileStep('a', 1)] } } })).toBe(true)
+    expect(alignedEnglishAvailable({ ...supporting, after: { source: 'a', tests: [], story: { steps: [] } } })).toBe(false)
+  })
+
+  it('names the baseline column after what the current source is compared against', () => {
+    expect(alignedSideLabels(review(['a'], ['a']))).toEqual({ before: 'Committed tests · Git HEAD', after: 'Current source' })
+    expect(alignedSideLabels(review(['a'], ['a'], { baseline: 'run-start' }))).toEqual({ before: 'Recorded tests', after: 'Current source' })
+  })
+
+  it('keeps the two-character gutter until a line label outgrows it', () => {
+    const short = review(['a', 'b'], ['a', 'b'])
+    expect(alignedGutterWidth(alignedTestViewRows({ review: short, rows: sourceRows(short), mode: 'code' }))).toBe(2)
+    const lines = ['import {', '  api,', '  fixture,', '} from "./fixture";']
+    const story = { steps: [fileStep('import', 1, 4)] }
+    const folded = review(lines, lines, { after: { source: lines.join('\n'), tests: [], story } })
+    expect(alignedGutterWidth(alignedTestViewRows({ review: folded, rows: sourceRows(folded), mode: 'english' }))).toBe(3)
+    expect(alignedGutterWidth([])).toBe(2)
   })
 })

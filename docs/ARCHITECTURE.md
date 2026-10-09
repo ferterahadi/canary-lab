@@ -731,9 +731,12 @@ already-described continuation lines and opens the complete header in Code mode.
 It reuses the story walker and falls back to the exhaustive syntax grammar for
 constructs without concise wording. Conditions contain their actions directly;
 the redundant `then` story row is omitted, and `Else` aligns with its sibling `If`.
-`SourceComparisonTable` retains aligned source rows while sharing
-`ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization), and
-`TestLanguageSwitch` with the ordinary test cards.
+`TestPresentation` renders every test view: `view: 'single'` is the Tests
+column and coverage card, `view: 'aligned'` is the "Compare test versions"
+review — one table, one scroller, rows paired across the two sides from
+`shared/test-view/render-model.ts`, sharing `ReadableStoryText`,
+`useCodeHighlight` (full-source Shiki tokenization) and the `TestLanguageSwitch`
+in its header with the ordinary test cards.
 English sentences open Code mode at their source range, highlighting and focusing
 the chosen Before or After side. Clicking that code range returns to the saved
 English sentence, scroll position, and change cursor, even after browsing other

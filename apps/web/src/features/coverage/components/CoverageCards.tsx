@@ -795,6 +795,7 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
         <div className="clcov-rowdetail clcov-source" data-testid={`test-source-${cardName}`}>
           {source ? (
             <TestPresentation
+              view="single"
               test={source.test}
               sourceFile={source.absFile}
             />

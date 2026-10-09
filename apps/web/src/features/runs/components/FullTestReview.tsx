@@ -3,16 +3,17 @@ import { createPortal } from 'react-dom'
 import type { TestFileReview, VersionTest } from '@shared/test-review'
 import * as featuresApi from '@/shared/api/features'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import { SourceComparisonTable, type ReviewSourceSelection } from '@/shared/ui/SourceComparisonTable'
 import { TestLanguageSwitch } from '@/shared/ui/TestLanguageSwitch'
+import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { assessmentsForRows, comparedTestRows } from '@/shared/lib/test-review-model'
 import { englishLines, englishSourceRange } from '@shared/readable-tests/source-lines'
 import { sourceRows, rowsForTest, type ContextRow } from '@shared/test-source-diff'
+import type { TestViewSelection } from '@shared/test-view/render-model'
 import { noTestAssessmentCopy, testAssessmentFinding, testAssessmentReason } from '@/shared/lib/test-assessment-copy'
 import type { ReviewFocus } from '@/shared/lib/workspace-view-state'
 import { displayError } from '@/shared/api/error-message'
 interface EnglishReturnPoint {
-  selection: ReviewSourceSelection
+  selection: TestViewSelection
   top: number
   left: number
   cursor: number
@@ -31,7 +32,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
   const [loading, setLoading] = useState(true)
   const [mode, setMode] = useState<'english' | 'code'>(focus?.mode ?? 'english')
   const [cursor, setCursor] = useState<number | null>(null)
-  const [selection, setSelection] = useState<ReviewSourceSelection | null>(null)
+  const [selection, setSelection] = useState<TestViewSelection | null>(null)
   const [englishReturn, setEnglishReturn] = useState<EnglishReturnPoint | null>(null)
   const scroll = useRef<HTMLDivElement>(null)
   // Keep the loaded file and highlighting mounted while changing tests, but
@@ -62,8 +63,6 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
   const sourceTest = selectedTest && (data?.[testSide].tests.find((test) => test.line === selectedTest.line && test.name === selectedTest.name)
     ?? data?.[testSide].tests.find((test) => test.name === selectedTest.name))
   const change = runId && !data?.supportingFile ? undefined : changes[index]
-  const supportingEnglish = !!data?.supportingFile && Boolean(data.before.story?.steps.length || data.after.story?.steps.length)
-  const displayMode = data?.supportingFile && !supportingEnglish ? 'code' : mode
   const selectedRows = sourceTest && data ? rowsForTest(rows, { key: `${testSide}:${sourceTest.line}`, side: testSide, test: sourceTest }, data)
     : rows.filter((row) => change != null && row.change === change)
   const sourceLine = selectedRows.find((row) => row.afterLine != null)?.afterLine ?? focus?.line ?? 1
@@ -118,14 +117,14 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     setCursor(next)
     updateFocus(rows.find((row) => row.change === changes[next] && row.afterLine != null)?.afterLine)
   }
+  const header = <>
+    {selectedTest && <><span className="text-xs text-secondary">{focus?.change === 'removed' ? 'Removed test' : focus?.change === 'added' ? 'Added test' : 'Changed test'}</span>
+      <span className="min-w-0 truncate text-xs text-secondary" title={selectedTest.previous && selectedTest.previous.name !== selectedTest.name ? `${selectedTest.previous.name} → ${selectedTest.name}` : selectedTest.name} data-testid="review-selected-test">{selectedTest.name}</span></>}
+    {baselineControl}
+  </>
+  const ready = !loading && !error && data !== null
   return <>
-    <div className="cl-context-toolbar">
-      {data?.supportingFile && !supportingEnglish ? <span className="text-xs text-secondary">Supporting file · Code</span> : <TestLanguageSwitch mode={mode} onChange={changeMode} />}
-      {selectedTest && <><span className="text-xs text-secondary">{focus?.change === 'removed' ? 'Removed test' : focus?.change === 'added' ? 'Added test' : 'Changed test'}</span>
-        <span className="min-w-0 truncate text-xs text-secondary" title={selectedTest.previous && selectedTest.previous.name !== selectedTest.name ? `${selectedTest.previous.name} → ${selectedTest.name}` : selectedTest.name} data-testid="review-selected-test">{selectedTest.name}</span></>}
-      {baselineControl}
-    </div>
-    {!loading && !error && selectedTest && !sourceTest && <p role="status" className="px-3 py-2 text-xs text-warning">This test is in the {testSide === 'before' ? 'recorded' : 'current'} test list, but its matching declaration is unavailable in this source snapshot. Showing file context; no test is highlighted.</p>}
+    {!ready && <div className="cl-context-toolbar"><TestLanguageSwitch mode={mode} onChange={changeMode} />{header}</div>}
     {navigationTarget && createPortal(
       <div className="cl-review-change-nav" role="group" aria-label="Edit blocks in this file" title="Each block is a consecutive group of edited lines in this file. A block may contain imports, setup, or several tests. This is not the suite's changed-test count.">
         <button className="cl-icon-button" aria-label="Previous change" disabled={index === 0 || loading || !!error} onClick={() => navigate(index - 1)}>←</button>
@@ -133,8 +132,8 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
         <button className="cl-icon-button" aria-label="Next change" disabled={index >= changes.length - 1 || loading || !!error} onClick={() => navigate(index + 1)}>→</button>
       </div>, navigationTarget)}
     {error ? <div role="alert" className="flex-1 p-4 text-sm">{error}<button className="cl-button ml-3 px-3 py-1" onClick={() => setRetry(retry + 1)}>Retry</button></div>
-      : loading || !data ? <div role="status" className="flex-1 p-4 text-sm text-secondary">Loading complete test source…</div>
-      : <div className="cl-context-table min-h-0 flex-1"><SourceComparisonTable review={data} rows={rows} mode={displayMode} change={change} scrollRef={scroll}
+      : !ready ? <div role="status" className="flex-1 p-4 text-sm text-secondary">Loading complete test source…</div>
+      : <TestPresentation view="aligned" review={data} rows={rows} mode={mode} onModeChange={changeMode} header={header} change={change} scrollRef={scroll}
         emptySide={selectedTest && focus?.change === 'removed' ? 'after' : selectedTest && focus?.change === 'added' ? 'before' : undefined}
         returnSelection={englishReturn?.selection} onReturnToEnglish={() => changeMode('english')}
         selection={selection} onSelectSource={(next) => {
@@ -142,7 +141,8 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
           const pane = scroll.current!
           setEnglishReturn({ selection: next, top: pane.scrollTop, left: pane.scrollLeft, cursor: index })
           setCursor(index); setSelection(next); setMode('code'); updateFocus(next.line, 'code')
-        }} /></div>}
+        }} />}
+    {ready && selectedTest && !sourceTest && <p role="status" className="px-3 py-2 text-xs text-warning">This test is in the {testSide === 'before' ? 'recorded' : 'current'} test list, but its matching declaration is unavailable in this source snapshot. Showing file context; no test is highlighted.</p>}
     <div className="cl-context-assessment" aria-live="polite">
       {!loading && !error && data && <>
       {data.assessment.reasons?.map((reason) => <p key={reason} className="text-warning">{testAssessmentReason(reason)}</p>)}

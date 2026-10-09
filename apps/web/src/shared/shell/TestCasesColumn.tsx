@@ -600,6 +600,7 @@ function TestCard({
             }
           >
             {sourceUnavailable ? <p className="text-xs text-secondary">Source was not retained for this test. Its status comes from the recorded run.</p> : <TestPresentation
+              view="single"
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}

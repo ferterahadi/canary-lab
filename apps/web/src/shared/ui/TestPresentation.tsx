@@ -1,44 +1,111 @@
-import { TestLanguageSwitch } from './TestLanguageSwitch'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
+import { storyEndLine } from '@shared/readable-tests/source-lines'
 import { storyCodeLineNumbers, storyItemIdForSourceLine } from '@shared/readable-tests/story-source-map'
+import type { TestFileReview } from '@shared/test-review'
+import type { ContextRow } from '@shared/test-source-diff'
 import {
+  alignedEnglishAvailable,
+  alignedGutterWidth,
+  alignedSideLabels,
+  alignedTestViewRows,
   bodyLineForSourceLine,
   buildTestViewRows,
   markedRowIndexes,
   sourceLineForBodyLine,
   storyChangeMarks,
   testViewSource,
+  type TestViewAlignedRow,
+  type TestViewMode,
+  type TestViewSelection,
+  type TestViewSide,
 } from '@shared/test-view/render-model'
 import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step-status'
-import { ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
-import { ShikiCode, SourceOpenShell } from './TestCodeBlock'
+import { ComparisonTable } from './ComparisonTable'
+import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
+import { ShikiCode, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
+import { TestLanguageSwitch } from './TestLanguageSwitch'
+import { useCodeHighlight } from './use-code-highlight'
 
-type PresentationMode = 'english' | 'code'
+interface TestPresentationShellProps {
+  /** The format on show. Supplying it makes the toggle controlled; absent, the
+   * view keeps its own and opens in English. */
+  mode?: TestViewMode
+  onModeChange?: (mode: TestViewMode) => void
+  /** Content beside the format toggle in the header row. */
+  header?: ReactNode
+}
 
-export function TestPresentation({
-  test,
-  sourceFile,
-  executionHighlight,
-  changedLines: suppliedChangedLines,
-  showOpenButton = true,
-}: {
+/** One test's story and body: the Tests column and the coverage cards. */
+export interface TestPresentationSingleProps extends TestPresentationShellProps {
+  view: 'single'
   test: ExtractedTest
   sourceFile: string
   executionHighlight?: TestExecutionLineHighlight | null
   changedLines?: Set<number>
   showOpenButton?: boolean
-}) {
+}
+
+/** A whole file before and after with its rows paired across the two sides:
+ * the "Compare test versions" review. One table with one scroller — two
+ * independent cards would lose the pairing after an insertion or deletion,
+ * each side's English folding, and the review's edit navigation. */
+export interface TestPresentationAlignedProps extends TestPresentationShellProps {
+  view: 'aligned'
+  review: TestFileReview
+  rows: ContextRow[]
+  /** The edit whose rows read as selected. */
+  change?: number
+  /** The side an added or removed test is absent from; its first row says so. */
+  emptySide?: TestViewSide
+  /** The Code-mode range opened from an English row. */
+  selection?: TestViewSelection | null
+  onSelectSource?: (selection: TestViewSelection) => void
+  /** The Code-mode rows that lead back to the English row they were opened from. */
+  returnSelection?: TestViewSelection
+  onReturnToEnglish?: () => void
+  scrollRef?: Ref<HTMLDivElement>
+}
+
+export type TestPresentationProps = TestPresentationSingleProps | TestPresentationAlignedProps
+
+/** A view's props once the shell has settled which format shows. */
+type Resolved<P extends TestPresentationShellProps> = Omit<P, 'mode' | 'onModeChange'> & {
+  mode: TestViewMode
+  onModeChange: (mode: TestViewMode) => void
+}
+
+export function TestPresentation(props: TestPresentationProps) {
+  const [ownMode, setOwnMode] = useState<TestViewMode>('english')
+  const mode = props.mode ?? ownMode
+  const changeMode = (next: TestViewMode): void => {
+    if (props.mode === undefined) setOwnMode(next)
+    props.onModeChange?.(next)
+  }
+  return props.view === 'aligned'
+    ? <AlignedTestView {...props} mode={mode} onModeChange={changeMode} />
+    : <SingleTestView {...props} mode={mode} onModeChange={changeMode} />
+}
+
+function SingleTestView({
+  test,
+  sourceFile,
+  executionHighlight,
+  changedLines: suppliedChangedLines,
+  showOpenButton = true,
+  mode,
+  onModeChange,
+  header,
+}: Resolved<TestPresentationSingleProps>) {
   const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
     ? new Set(test.sourceChanges.changedLines.map((line) => bodyLineForSourceLine(test, line)))
     : undefined), [suppliedChangedLines, test])
-  const [mode, setMode] = useState<PresentationMode>('english')
   const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
 
   const selectSource = (selection: ReadableSourceSelection) => {
     setSelectedSource(selection)
-    setMode('code')
+    onModeChange('code')
   }
   const code = testViewSource(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
@@ -73,7 +140,8 @@ export function TestPresentation({
   return (
     <div data-testid="test-presentation">
       <div className="mb-2 flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--border-subtle)' }}>
-        <TestLanguageSwitch mode={mode} onChange={setMode} />
+        <TestLanguageSwitch mode={mode} onChange={onModeChange} />
+        {header}
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
             English representation is incomplete
@@ -118,7 +186,7 @@ export function TestPresentation({
               <button
                 type="button"
                 className="shrink-0 font-medium underline underline-offset-2"
-                onClick={() => setMode('code')}
+                onClick={() => onModeChange('code')}
               >
                 View exact diff
               </button>
@@ -167,6 +235,74 @@ export function TestPresentation({
       )}
     </div>
   )
+}
+
+/** Diff rows stay source-aligned while sharing the single view's English
+ * grammar, Shiki tokenization and format toggle. Neither baseline is ever
+ * translated here: both sides arrive as the server reviewed them. */
+function AlignedTestView({
+  review, rows, mode, onModeChange, header, change, emptySide, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish,
+}: Resolved<TestPresentationAlignedProps>) {
+  const englishAvailable = alignedEnglishAvailable(review)
+  const shownMode = englishAvailable ? mode : 'code'
+  const before = useCodeHighlight(review.before.source)
+  const after = useCodeHighlight(review.after.source)
+  const aligned = useMemo(() => alignedTestViewRows({ review, rows, mode: shownMode, change, selection }), [change, shownMode, review, rows, selection])
+  const render = (pair: TestViewAlignedRow, side: TestViewSide) => {
+    const cell = side === 'before' ? pair.before : pair.after
+    const source = pair.source[side]
+    if (cell === undefined || source == null) return emptySide === side && pair.source === rows[0]
+      ? <span className="cl-comparison-empty">{side === 'after' ? 'Removed from current source' : 'Not present in recorded tests'}</span>
+      : <span className="sr-only">No corresponding line</span>
+    const line = cell.sourceLine
+    const highlighted = side === 'before' ? before : after
+    const content = cell.english
+      ? <span>{cell.english.map(({ step, depth }) => onSelectSource
+        ? <button key={step.id} type="button" className="cl-review-story-line cl-review-story-link" style={{ paddingLeft: `${depth * 12}px` }}
+          title={`Show ${side === 'before' ? 'Before' : 'After'} code at line ${step.source.startLine}`}
+          onClick={() => onSelectSource({ side, line: step.source.startLine, endLine: storyEndLine(step) })}>
+          <ReadableStoryText step={step} />
+        </button>
+        : <span key={step.id} className="cl-review-story-line" style={{ paddingLeft: `${depth * 12}px` }}><ReadableStoryText step={step} /></span>)}</span>
+      : cell.continued ? <span aria-label="Continued above">{' '}</span>
+        : shownMode === 'english' && source.trim()
+          ? <span style={{ color: 'var(--semantic-attention)' }}>English unavailable · View code</span>
+          : <ShikiSourceLine source={source} html={highlighted?.lines[line - 1]} />
+    const Tag = cell.marks.changes.size === 0 ? 'span' : side === 'before' ? 'del' : 'ins'
+    const sourceContent = shownMode === 'english' && onSelectSource && !cell.english && !cell.continued && source.trim()
+      ? <button type="button" className="cl-review-story-link" title={`Show ${side === 'before' ? 'Before' : 'After'} code at line ${line}`}
+        onClick={() => onSelectSource({ side, line, endLine: line })}>{content}</button>
+      : content
+    const canReturn = shownMode === 'code' && onReturnToEnglish && returnSelection?.side === side && line >= returnSelection.line && line <= returnSelection.endLine
+    const Line = canReturn ? 'button' : 'div'
+    return <Line className={`cl-review-source-line${canReturn ? ' cl-review-story-link' : ''}`} data-source-line={line} data-source-end-line={cell.endLine} data-source-continuation={cell.continued || undefined} data-side={side} data-source-selected={cell.marks.selected || undefined}
+      type={canReturn ? 'button' : undefined} title={canReturn ? `Show English for line ${returnSelection.line}` : undefined}
+      onClick={canReturn ? onReturnToEnglish : undefined}
+      tabIndex={cell.marks.selected ? -1 : undefined} style={{ color: highlighted?.canvas.fg }}>
+      <Tag aria-label={cell.marks.changes.size === 0 ? undefined : `${side === 'before' ? 'Removed' : 'Added'} source at line ${line}`}>{sourceContent}</Tag>
+    </Line>
+  }
+  const displayRows = aligned.map((pair) => ({ ...pair.source, beforeLine: pair.before?.label, afterLine: pair.after?.label, fullSource: true, code: true,
+    selected: pair.selected, sourceChanged: pair.sourceChanged,
+    beforeContent: render(pair, 'before'), afterContent: render(pair, 'after') }))
+  const labels = alignedSideLabels(review)
+  return <>
+    <div className="cl-context-toolbar">
+      {englishAvailable
+        ? <TestLanguageSwitch mode={mode} onChange={onModeChange} />
+        : <span className="text-xs text-secondary">Supporting file · Code</span>}
+      {header}
+    </div>
+    <div className="cl-context-table min-h-0 flex-1">
+      <div className="cl-review-source-canvas" style={{
+        background: after?.canvas.bg ?? before?.canvas.bg,
+        '--code-comment': after?.canvas.comment ?? before?.canvas.comment ?? 'var(--text-muted)',
+        '--review-gutter-width': `${alignedGutterWidth(aligned)}ch`,
+      } as CSSProperties}>
+        <ComparisonTable rows={displayRows} beforeLabel={labels.before} afterLabel={labels.after} ariaLabel="Full test comparison" scrollRef={scrollRef} />
+      </div>
+    </div>
+  </>
 }
 
 function formatSourceLines(lines: readonly number[]): string {

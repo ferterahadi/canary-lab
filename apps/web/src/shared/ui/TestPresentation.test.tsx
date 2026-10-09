@@ -137,7 +137,7 @@ mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) 
 
 describe('TestPresentation', () => {
   it('opens in English and keeps the complete test source one action away', async () => {
-    act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
@@ -187,6 +187,7 @@ describe('TestPresentation', () => {
 
   it('uses source change markers without a caller converting absolute lines', async () => {
     await act(async () => root.render(<TestPresentation
+      view="single"
       test={{ ...TEST, sourceChanges: { changedLines: [11], count: 1 } }}
       sourceFile="/repo/e2e/checkout.spec.ts"
     />))
@@ -210,6 +211,7 @@ describe('TestPresentation', () => {
     }
     act(() => root.render(
       <TestPresentation
+        view="single"
         test={dirty}
         sourceFile="/repo/e2e/checkout.spec.ts"
         changedLines={new Set([2, 3])}
@@ -232,7 +234,7 @@ describe('TestPresentation', () => {
   })
 
   it('reveals a helper snippet in Code when its English node is selected', async () => {
-    act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     await act(async () => {
       ;(container.querySelector('[data-testid="readable-story-item-helper-check"]') as HTMLButtonElement).click()
@@ -325,6 +327,7 @@ describe('TestPresentation', () => {
     }
     act(() => root.render(
       <TestPresentation
+        view="single"
         test={nested}
         sourceFile="/repo/e2e/checkout.spec.ts"
         executionHighlight={{ kind: 'running', bodyLine: 4 }}
@@ -414,6 +417,7 @@ describe('TestPresentation', () => {
     }
     act(() => root.render(
       <TestPresentation
+        view="single"
         test={formatted}
         sourceFile="/repo/e2e/checkout.spec.ts"
         executionHighlight={{ kind: 'running', bodyLine: 3 }}
@@ -498,7 +502,7 @@ describe('TestPresentation', () => {
         },
       },
     }
-    act(() => root.render(<TestPresentation test={formatted} sourceFile={sourceFile} />))
+    act(() => root.render(<TestPresentation view="single" test={formatted} sourceFile={sourceFile} />))
 
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
@@ -532,7 +536,7 @@ describe('TestPresentation', () => {
       ...TEST,
       readable: { ...TEST.readable, story: undefined },
     }
-    act(() => root.render(<TestPresentation test={withoutStory} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(<TestPresentation view="single" test={withoutStory} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
@@ -545,7 +549,7 @@ describe('TestPresentation', () => {
   })
 
   it('highlights every line in an exact same-file source range', async () => {
-    act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     await act(async () => {
       ;(container.querySelector('[data-testid="readable-story-item-checkout-step"]') as HTMLButtonElement).click()
@@ -596,6 +600,7 @@ describe('TestPresentation', () => {
     }
     act(() => root.render(
       <TestPresentation
+        view="single"
         test={helperCollision}
         sourceFile="/repo/e2e/checkout.spec.ts"
         executionHighlight={{ kind: 'running', bodyLine: 2 }}
@@ -616,7 +621,7 @@ describe('TestPresentation', () => {
 
   it('keeps the Code view synchronized with light and dark themes', async () => {
     localStorage.setItem('canary-lab.theme', 'light')
-    act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
@@ -629,8 +634,22 @@ describe('TestPresentation', () => {
   })
 })
 
+it('follows a controlled format and reports the switch instead of taking it', async () => {
+  const onModeChange = vi.fn()
+  await act(async () => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" mode="code" onModeChange={onModeChange} header={<span data-testid="shell-header">Suite header</span>} />))
+  expect(container.querySelector('[data-testid="test-presentation-code"]')).not.toBeNull()
+  expect(container.querySelector('[data-testid="shell-header"]')?.textContent).toBe('Suite header')
+  await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-english-tab"]')!.click() })
+  expect(onModeChange).toHaveBeenCalledWith('english')
+  expect(container.querySelector('[data-testid="test-presentation-code"]')).not.toBeNull()
+  await act(async () => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" mode="english" onModeChange={onModeChange} />))
+  await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-helper-check"]')!.click() })
+  expect(onModeChange).toHaveBeenLastCalledWith('code')
+  expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
+})
+
 it('retains the recorded failure when the same source line is also edited', async () => {
-  await act(async () => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" changedLines={new Set([2])} executionHighlight={{ kind: 'failed', bodyLine: 2 }} />))
+  await act(async () => root.render(<TestPresentation view="single" test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" changedLines={new Set([2])} executionHighlight={{ kind: 'failed', bodyLine: 2 }} />))
   await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')!.click() })
   const line = container.querySelector('[data-execution-highlight="failed"]')
   expect(line?.getAttribute('data-changed-line')).toBe('true')

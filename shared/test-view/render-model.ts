@@ -306,3 +306,23 @@ export function alignedTestViewRows({ review, rows, mode, change, selection }: T
   }
   return aligned
 }
+
+/** Which formats the aligned view can offer. A supporting file with no English
+ * on either side reads as code only, since the toggle would open an empty view;
+ * a spec file always offers English, its untranslated rows saying so one by one. */
+export function alignedEnglishAvailable(review: TestFileReview): boolean {
+  return !review.supportingFile || Boolean(review.before.story?.steps.length || review.after.story?.steps.length)
+}
+
+export interface TestViewSideLabels { before: string; after: string }
+
+/** Column headings name the baseline the current source is compared against. */
+export function alignedSideLabels(review: TestFileReview): TestViewSideLabels {
+  return { before: review.baseline === 'run-start' ? 'Recorded tests' : 'Committed tests · Git HEAD', after: 'Current source' }
+}
+
+/** Gutter width in characters: the standalone code viewer's two-character
+ * minimum, grown for a wider line label so code never shifts over the numbers. */
+export function alignedGutterWidth(rows: readonly TestViewAlignedRow[]): number {
+  return Math.max(2, ...rows.flatMap((pair) => [pair.before?.label?.length ?? 0, pair.after?.label?.length ?? 0]))
+}
