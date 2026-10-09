@@ -5,9 +5,13 @@ import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 // tried and couldn't" and "the agent never really ran" (usage limit, auth).
 //
 // No I/O — the orchestrator captures the output tail (a ring buffer of the
-// PTY bytes) and hands it here. Deliberately conservative: an unmatched but
-// non-empty tail returns 'unknown' (the agent said something we don't
-// recognize), and an empty tail returns undefined (nothing to go on).
+// PTY bytes), appends the agent's final logged text when it has one (a TUI can
+// repaint over the message that explains the stop), and hands it here.
+// Deliberately conservative: an unmatched but non-empty tail returns 'unknown'
+// (the agent said something we don't recognize), and an empty tail returns
+// undefined (nothing to go on). Matching is over the whole text and the first
+// cause in table order wins, so where a line sits in the input never changes
+// precedence.
 
 import type { HealEnd } from '../../../../../../../shared/run-state'
 import type { LocalHealAgent } from '../../../../../../../shared/run-manifest'
@@ -137,7 +141,8 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
 /**
  * Classify the agent's terminal-output tail into a `HealEnd.agentCause`.
  *
- * @param tail   the last N bytes of the heal agent's PTY output (may be '')
+ * @param tail   the last N bytes of the heal agent's PTY output, plus any
+ *               final text from its session log (may be '')
  * @param _agent which CLI produced it — reserved for agent-specific tie-breaks
  *               (both agents share the fingerprint table today)
  * @returns the matched cause, `'unknown'` when the tail is non-empty but
