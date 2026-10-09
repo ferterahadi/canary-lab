@@ -6,9 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageStateSummary } from '@/shared/api/coverage'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { FLIGHT_STAGE_KEYS, type FlightIndexEntry } from '@shared/flights/types'
-import { FlightsPill } from './FlightsPill'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { FlightsPillHarness } from './__fixtures__/FlightsPillHarness'
 
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
 vi.mock('@/shared/api/coverage', async (importOriginal) => ({
@@ -74,7 +72,7 @@ describe('Flights picker coverage freshness', () => {
     await act(async () => {
       root.render(<InvalidationProvider>
         <InvalidationTap />
-        <FlightsPill flights={[]} features={[{ name: 'cns_better_auth', group: 'CNS', stages }]} open onOpenFlight={vi.fn()} />
+        <FlightsPillHarness flights={[]} features={[{ name: 'cns_better_auth', group: 'CNS', stages }]} open onOpenFlight={vi.fn()} />
       </InvalidationProvider>)
     })
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="flight-group-toggle-CNS"]')!.click())
@@ -112,7 +110,7 @@ describe('Flights picker coverage freshness', () => {
       stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' })),
     }
     await act(async () => {
-      root.render(<InvalidationProvider><FlightsPill flights={[flight]} open onOpenFlight={vi.fn()} /></InvalidationProvider>)
+      root.render(<InvalidationProvider><FlightsPillHarness flights={[flight]} open onOpenFlight={vi.fn()} /></InvalidationProvider>)
     })
     const row = document.querySelector<HTMLElement>('[data-testid="flight-open-fl_auth"]')!
     const cell = row.querySelector<HTMLElement>('[data-testid="stage-mini-cell-specs-coverage"]')!
@@ -128,7 +126,7 @@ describe('Flights picker coverage freshness', () => {
     const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'scout' ? 'done' as const : 'pending' as const }))
     await act(async () => root.render(<InvalidationProvider>
       <InvalidationTap />
-      <FlightsPill flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
+      <FlightsPillHarness flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
     </InvalidationProvider>))
 
     const row = document.querySelector<HTMLButtonElement>('[data-testid="derived-open-cns_better_auth"]')!
@@ -154,7 +152,7 @@ describe('Flights picker coverage freshness', () => {
     listCoverageStates.mockResolvedValue([missingRequirements()])
     const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const }))
     await act(async () => root.render(<InvalidationProvider>
-      <FlightsPill flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
+      <FlightsPillHarness flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
     </InvalidationProvider>))
     const row = document.querySelector<HTMLButtonElement>('[data-testid="not-flown-cns_better_auth"]')!
     const docs = row.querySelector<HTMLElement>('[data-testid="stage-mini-cell-docs"]')!

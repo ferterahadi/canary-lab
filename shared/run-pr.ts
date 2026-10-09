@@ -1,5 +1,20 @@
 import type { RunProposedPr } from './run-state'
 
+export interface ApplyFixResult {
+  repoName: string
+  /** True when the patch applied (cleanly or 3-way merged) into the repo. */
+  ok: boolean
+  /** Failure reason (git stderr) when `ok` is false — e.g. a 3-way conflict or
+   *  a patch that no longer applies because the repo moved on. */
+  reason?: string
+}
+
+/** POST /api/runs/:runId/apply-fixes response. */
+export interface ApplyFixesOutcome {
+  results: ApplyFixResult[]
+  allOk: boolean
+}
+
 export interface GhStatus {
   /** `gh` is on PATH. */
   installed: boolean

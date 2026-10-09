@@ -14,7 +14,7 @@ vi.mock('./logic/runtime/heal-agent-spawn', () => ({
   },
 }))
 
-const { pickConfiguredHealAgent } = await import('./pick-heal-agent')
+const { pickConfiguredHealAgent, resolveAgentsFor } = await import('./pick-heal-agent')
 
 beforeEach(() => {
   picked.calls = []
@@ -61,6 +61,24 @@ describe('pickConfiguredHealAgent', () => {
       // Probing would be wrong, not merely wasteful: these two choices mean the
       // heal is somebody else's job, so a local agent must never be selected.
       expect(picked.calls).toEqual([])
+    })
+  }
+})
+
+describe('resolveAgentsFor', () => {
+  it('tries a named adapter first, then each CLI, without duplicates', () => {
+    picked.answer = 'codex'
+
+    expect(resolveAgentsFor('codex')).toEqual(['codex'])
+
+    expect(picked.calls).toEqual(['codex', 'claude', 'codex'])
+  })
+
+  for (const adapter of ['auto', 'deterministic', undefined]) {
+    it(`keeps the environment default for adapter ${String(adapter)}`, () => {
+      expect(resolveAgentsFor(adapter)).toEqual(['claude'])
+
+      expect(picked.calls).toEqual([undefined, 'claude', 'codex'])
     })
   }
 })

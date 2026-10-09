@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { readPlaywrightPlaybackEvents } from '../run-detail'
+import { mkResult, mkTest, summaryReaders } from './__fixtures__/summary-reporter'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 
@@ -41,14 +42,6 @@ afterEach(() => {
   delete process.env.CANARY_LAB_TARGETED_RERUN
 })
 
-function mkTest(title: string, file = '/spec.ts', line = 1): any {
-  return { title, location: { file, line } }
-}
-
-function mkResult(overrides: Partial<any> = {}): any {
-  return { status: 'passed', duration: 42, retry: 0, ...overrides }
-}
-
 function mkStep(title: string, category: string, file?: string, line?: number): any {
   return {
     title,
@@ -57,17 +50,7 @@ function mkStep(title: string, category: string, file?: string, line?: number): 
   }
 }
 
-function readSummary(): any {
-  return JSON.parse(fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'))
-}
-
-function readEvents(runDir = LOGS_DIR): any[] {
-  return fs.readFileSync(path.join(runDir, 'playwright-events.jsonl'), 'utf-8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-}
+const { readSummary, readEvents } = summaryReaders(LOGS_DIR)
 
 describe('SummaryReporter', () => {
   it('writes the currently running test on begin and clears it on end', () => {

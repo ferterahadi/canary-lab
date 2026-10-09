@@ -4,8 +4,8 @@ import {
   writeFeatureConfig,
   readPlaywrightConfig,
   writePlaywrightConfig,
-  type ConfigValue,
 } from './config-ast'
+import type { ConfigValue } from '../../../../shared/config-value'
 
 // ─── feature.config patterns ────────────────────────────────────────────────
 

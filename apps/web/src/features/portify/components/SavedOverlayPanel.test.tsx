@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { openPortifyProject } from '@/shared/api/cleanup'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { SavedOverlayPanel } from './SavedOverlayPanel'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The panel opens the saved overlay folder via the client; stub it.
 vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
@@ -16,17 +17,9 @@ vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
 let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   vi.mocked(openPortifyProject).mockReset().mockResolvedValue({ opened: true, paths: ['/wt'], editor: 'vscode' })
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 describe('SavedOverlayPanel', () => {
@@ -120,6 +113,7 @@ function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'wf1',
     feature: 'cns',
+    featureDir: '/workspace/features/cns',
     repos: [{ name: 'app', path: '~/app' }],
     agent: 'claude',
     branch: 'portify/scratch',

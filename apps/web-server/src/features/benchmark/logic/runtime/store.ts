@@ -3,8 +3,9 @@ import {
   isActiveBenchmarkStatus,
   type BenchmarkIndexEntry,
 } from '../../../../../../../shared/benchmark-index'
-import type { BenchmarkManifest } from './types'
+import type { BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, legacyEntryId, abortOnRestart } from '../../../../../../../shared/lib/file-backed-task-store'
+import { BENCHMARKS_DIR_NAME } from './paths'
 
 // File-backed, event-emitting benchmark store (the benchmark analogue of
 // RunStore). A thin wrapper over the shared FileBackedTaskStore: it owns the
@@ -47,7 +48,7 @@ export class BenchmarkRunStore implements BenchmarkStore {
   constructor(logsDir: string) {
     this.store = new FileBackedTaskStore<BenchmarkManifest>({
       logsDir,
-      dirName: 'benchmarks',
+      dirName: BENCHMARKS_DIR_NAME,
       recordFile: 'benchmark.json',
       idOf: (m) => m.benchmarkId,
       statusOf: (m) => m.status,

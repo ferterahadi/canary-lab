@@ -1,19 +1,12 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import { DeleteIconButton, RetestIconButton } from './RunActionsKebab'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe.each(['retest', 'delete'] as const)('%s icon interaction', (kind) => {
   function render(disabled: boolean, stopClick = false) {

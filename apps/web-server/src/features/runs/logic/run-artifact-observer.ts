@@ -3,6 +3,8 @@ import path from 'path'
 import { createHash } from 'crypto'
 import type { RunStore, RunStoreEvent } from './run-store'
 import { startRunFileWatcher, type RunFileWatcher, type WatchDirectory } from './run-file-watcher'
+import { OBSERVATION_LEASE_MS, createCappedDebounce, type CappedDebounce } from '../../../shared/debounced-watch'
+import { RUN_MANIFEST_FILE, runsRoot } from './runtime/run-paths'
 
 export interface RunArtifactObserver {
   observe(runId: string): void
@@ -10,11 +12,8 @@ export interface RunArtifactObserver {
 }
 
 const JOURNAL = 'diagnosis-journal.md'
-const DETAIL = ['manifest.json', 'lifecycle-events.jsonl'] as const
+const DETAIL = [RUN_MANIFEST_FILE, 'lifecycle-events.jsonl'] as const
 const FILES = [...DETAIL, JOURNAL]
-const LEASE_MS = 90_000
-const DEBOUNCE_MS = 250
-const MAX_DELAY_MS = 1000
 
 interface Observation {
   directory: string
@@ -22,8 +21,7 @@ interface Observation {
   fingerprints: Map<string, string>
   watcher?: RunFileWatcher
   lease?: ReturnType<typeof setTimeout>
-  debounce?: ReturnType<typeof setTimeout>
-  firstChange?: number
+  debounce: CappedDebounce
   failed: boolean
 }
 
@@ -39,14 +37,14 @@ export function createRunArtifactObserver(deps: {
   const fingerprint = (entry: Observation, name: string): string | undefined => {
     try {
       const bytes = fs.readFileSync(path.join(entry.directory, name))
-      if (name === 'manifest.json') {
+      if (name === RUN_MANIFEST_FILE) {
         const manifest: unknown = JSON.parse(bytes.toString('utf8'))
         if (!manifest || typeof manifest !== 'object' || !('runId' in manifest) || !('status' in manifest)) return undefined
       }
       return createHash('sha256').update(bytes).digest('hex')
     } catch (error) {
       // Partial writes and read failures retain the last accepted fingerprint.
-      return name !== 'manifest.json' && (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : undefined
+      return name !== RUN_MANIFEST_FILE && (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : undefined
     }
   }
   const capture = (entry: Observation, names: readonly string[]): boolean => {
@@ -62,7 +60,7 @@ export function createRunArtifactObserver(deps: {
   const release = (id: string, entry: Observation) => {
     entries.delete(id)
     clearTimeout(entry.lease)
-    clearTimeout(entry.debounce)
+    entry.debounce.cancel()
     entry.watcher?.close()
   }
   const unchangedDirectory = (entry: Observation): boolean => {
@@ -76,12 +74,10 @@ export function createRunArtifactObserver(deps: {
   }
   const flush = (id: string, entry: Observation) => {
     if (!unchangedDirectory(entry)) { release(id, entry); return }
-    entry.debounce = undefined
-    entry.firstChange = undefined
     const journalChanged = capture(entry, [JOURNAL])
     // Do not certify a transiently invalid manifest, or consume its pending
     // lifecycle changes before a later valid observation can publish them.
-    const detailChanged = fingerprint(entry, 'manifest.json') !== undefined && capture(entry, DETAIL)
+    const detailChanged = fingerprint(entry, RUN_MANIFEST_FILE) !== undefined && capture(entry, DETAIL)
     if (journalChanged) deps.store.recordJournalChange(id)
     if (detailChanged) deps.store.notifyDetailChanged(id)
   }
@@ -101,7 +97,7 @@ export function createRunArtifactObserver(deps: {
       let directory: string
       let identity: string
       try {
-        const root = fs.realpathSync(path.join(deps.store.logsDir, 'runs'))
+        const root = fs.realpathSync(runsRoot(deps.store.logsDir))
         directory = fs.realpathSync(path.join(root, id))
         if (path.dirname(directory) !== root) return
         const stat = fs.statSync(directory)
@@ -115,30 +111,28 @@ export function createRunArtifactObserver(deps: {
       if (entry && (entry.identity !== identity || entry.failed)) { release(id, entry); entry = undefined }
       if (!entry) {
         if (entries.size >= (deps.maxWatches ?? 256)) return
-        entry = { directory, identity, fingerprints: new Map(), failed: false }
-        if (fingerprint(entry, 'manifest.json') === undefined) return
+        const created: Observation = { directory, identity, fingerprints: new Map(), failed: false, debounce: createCappedDebounce(() => flush(id, created)) }
+        entry = created
+        if (fingerprint(entry, RUN_MANIFEST_FILE) === undefined) return
         capture(entry, FILES)
         entries.set(id, entry)
         const current = entry
         current.watcher = startRunFileWatcher({
           directory, filenames: FILES, watchDirectory: deps.watchDirectory,
           onChange() {
-            current.firstChange ??= Date.now()
-            clearTimeout(current.debounce)
-            current.debounce = setTimeout(() => flush(id, current), Math.min(DEBOUNCE_MS, Math.max(0, MAX_DELAY_MS - (Date.now() - current.firstChange))))
-            current.debounce.unref()
+            current.debounce.schedule()
           },
           onError(error) {
             current.failed = true
             current.watcher?.close()
-            clearTimeout(current.debounce)
+            current.debounce.cancel()
             deps.log(error)
           },
         })
       }
       clearTimeout(entry.lease)
       const current = entry
-      current.lease = setTimeout(() => release(id, current), LEASE_MS)
+      current.lease = setTimeout(() => release(id, current), OBSERVATION_LEASE_MS)
       current.lease.unref()
     },
     dispose() {

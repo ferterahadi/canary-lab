@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import type { GitRepoStatus } from '@/shared/api/workspace'
+import { blurOnEnter } from '@/shared/ui/keyboard'
 
 // One home for the branch-picking UI: the Advanced setup Service tab
 // (BranchControl) and the flight Suite setup panel render the SAME input +
@@ -69,7 +70,7 @@ export function BranchSuggestInput({
           setFilter(e.target.value)
           onChange(e.target.value)
         }}
-        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        onKeyDown={blurOnEnter}
         spellCheck={false}
         className={inputClassName}
         style={inputStyle}

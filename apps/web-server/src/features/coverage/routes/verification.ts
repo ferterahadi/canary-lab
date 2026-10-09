@@ -16,8 +16,7 @@ import {
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { notFound } from '../../../shared/http-error'
-import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { notFound, replyFailure } from '../../../shared/http-error'
 
 export interface VerificationRouteDeps {
   featuresDir: string
@@ -78,8 +77,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(201)
         return created
       } catch (err) {
-        reply.code(statusCodeOf(err))
-        return { error: errorMessage(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -99,8 +97,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         if (!config) return notFound(reply, 'verification config')
         return config
       } catch (err) {
-        reply.code(statusCodeOf(err))
-        return { error: errorMessage(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -151,8 +148,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
           return { runId: orch.runId, executionType: 'verify' }
         })
       } catch (err) {
-        reply.code(statusCodeOf(err))
-        return { error: errorMessage(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -219,8 +215,3 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return Object.values(value).every((entry) => typeof entry === 'string')
 }
 
-function statusCodeOf(err: unknown): number {
-  return typeof (err as { statusCode?: unknown })?.statusCode === 'number'
-    ? (err as { statusCode: number }).statusCode
-    : 500
-}

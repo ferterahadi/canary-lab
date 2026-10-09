@@ -19,9 +19,11 @@ import {
   FLIGHT_STAGE_KEYS,
   type FlightOptions,
   type FlightStageKey,
+  type StartFlightRequest,
 } from '../../../../../../shared/flights/types'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
  *  the flight-start claim must land under the DEMO's workflow key, not
@@ -43,51 +45,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
   }
 
   app.post<{
-    Body:
-      | {
-          feature?: string
-          repoPaths?: string[]
-          description?: string
-          env?: string
-          coverageTarget?: number
-          base?: string
-          yolo?: boolean
-          /** Absent = on; only an explicit false opts out (R71/W4). */
-          autopilot?: boolean
-          /** R79: which CLI conducts the flight's stage agents; sticky per
-           *  record (jump/continue reuse the stored one). Absent → claude. */
-          agent?: string
-          /** Who executes the hand-off-capable stages (scout, docs,
-           *  specs-coverage): the local CLI, or the MCP client driving the
-           *  flight. Sticky per record. Absent → internal. A GUI start never
-           *  sends it — there is no MCP client to hand work to. */
-          stageProducer?: string
-          /** Launch-gate override: this flight's per-stage model+effort plan
-           *  for the conducting agent, laid over the workspace `agentModels`
-           *  config. The merged plan is persisted on the record at start
-           *  (sticky like `agent`); the override itself is never written back
-           *  to config. */
-          models?: unknown
-          /** The Claude/Codex conversation driving an external Flight. */
-          externalAgentSession?: unknown
-          /** continue | redo | jump — required when the feature already has a
-           *  flight record (409 flight_exists_requires_choice otherwise). */
-          mode?: string
-          /** Stage to start at (jump / fresh stage entry), prereq-validated. */
-          fromStage?: string
-          /** "What went wrong last time" (R74), scoped to the entry stage's
-           *  agent prompt. Redo/jump only — the conductor drops it otherwise.
-           *  Reachable here (not only on `/:id/redo`) because an externally
-           *  driven flight re-enters a stage through start_flight, and without
-           *  it the agent could repeat a step but never say why. */
-          feedback?: string
-          gettingStartedSource?: GettingStartedOwner
-          /** Which Getting Started card this start belongs to. The
-           *  author/portify/export demos run AS a flight but must claim their
-           *  own workflow key so their card lights. Absent/unknown → 'flight'. */
-          gettingStartedWorkflow?: string
-        }
-      | undefined
+    Body: StartFlightRequest | undefined
   }>('/api/flights', async (req, reply) => {
     const body = req.body ?? {}
     if (body.mode !== undefined && !['continue', 'redo', 'jump'].includes(body.mode)) {
@@ -146,7 +104,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     }
     const resolved = resolution.paths
 
-    const agent = body.agent === 'claude' || body.agent === 'codex' ? body.agent : undefined
+    const agent = isAgentKind(body.agent) ? body.agent : undefined
     const opts: FlightOptions = {
       env: body.env ?? 'local',
       coverageTarget,

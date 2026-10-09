@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import { RunRow } from './RunRow'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const run: RunIndexEntry = { runId: 'run-z6kc', feature: 'checkout', startedAt: '2026-05-31T10:00:00.000Z', status: 'failed' }
 const detail = {
@@ -19,16 +18,10 @@ const detail = {
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function renderRow(props: Partial<Parameters<typeof RunRow>[0]> = {}): void {
   act(() => {

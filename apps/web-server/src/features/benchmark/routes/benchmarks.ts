@@ -5,7 +5,8 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
-import type { BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
+import type { BenchmarkManifest } from '../../../../../../shared/benchmark-index'
+import type { StartBenchmarkInput, StartBenchmarkResult } from '../logic/runtime/types'
 import { normalizeSabotageLevel } from '../logic/sabotage-level'
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
@@ -14,7 +15,8 @@ import { findFeature } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
-import { notFound } from '../../../shared/http-error'
+import { notFound, replyFailure } from '../../../shared/http-error'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 // REST surface for benchmarks, mirroring routes/runs.ts. Reads go through the
@@ -231,13 +233,11 @@ export async function benchmarkRoutes(
         : 1
     const skill =
       typeof body.skill === 'string' && body.skill.trim() ? body.skill.trim() : 'default'
-    const agent = body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
+    const agent = isAgentKind(body.agent) ? body.agent : undefined
     try {
       return await deps.startBenchmark({ feature, skill, level: normalizeSabotageLevel(body.level), iterations, agent })
     } catch (err) {
-      const statusCode = (err as { statusCode?: number }).statusCode ?? 500
-      reply.code(statusCode)
-      return { error: errorMessage(err) }
+      return replyFailure(reply, err)
     }
   })
 }

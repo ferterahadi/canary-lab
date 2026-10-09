@@ -1,7 +1,7 @@
 import { createRecordIndex } from '@/shared/state/record-index-store'
 import { parseRecordFrame } from '@/shared/state/record-stream'
 import type { FlightIndexEntry, FlightManifest } from '@shared/flights/types'
-import { flightIndexEntry } from '@shared/flights/index-entry'
+import { flightIndexEntry, type FlightsStreamFrame } from '@shared/flights/index-entry'
 
 // Pure reducer behind the `/ws/flights` push channel. Mirrors
 // portify-state.ts / runs-state.ts so it unit-tests in the node vitest config
@@ -12,11 +12,6 @@ import { flightIndexEntry } from '@shared/flights/index-entry'
 // never arrived. The server now pushes the full manifest on every store write,
 // so a driving flight's rail advances from the push itself — no round trip, no
 // poll, and no window where the list is stale because one frame was lost.
-
-export type FlightsStreamFrame =
-  | { type: 'snapshot'; flights: FlightIndexEntry[]; details: Record<string, FlightManifest> }
-  | { type: 'update'; flightId: string; manifest: FlightManifest }
-  | { type: 'removed'; flightId: string }
 
 export interface FlightsStreamState {
   /** The index, newest-first — exactly what `GET /api/flights` returns, so

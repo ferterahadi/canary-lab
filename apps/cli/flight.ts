@@ -6,20 +6,19 @@ import readline from 'readline'
 import { banner, section, ok, fail, info, dim, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { isCanaryLabWorkspace } from '../../shared/runtime/project-root'
-import {
-  DEFAULT_PORT,
-  loadProjectConfig,
-  resolveProjectPort,
-} from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { resolveServerBase } from '../../shared/runtime/active-servers'
+import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { relaunchUiDetached } from './ui-command'
 import { main as initProject } from './init-project'
 import {
+  deriveFeatureSlug,
   isActiveFlightStatus,
   type FlightCheckpoint,
   type FlightCheckpointResponse,
   type FlightIndexEntry,
   type FlightManifest,
   type FlightStageStatus,
+  type StartFlightRequest,
 } from '../../shared/flights/types'
 import { sleep } from '../../shared/lib/sleep'
 
@@ -151,10 +150,7 @@ export function parseFlightArgs(argv: string[], isDir: (p: string) => boolean = 
 
 /** Feature name when `--feature` is absent: a slug of the first repo's basename. */
 export function deriveFeatureName(repoPaths: string[], explicit?: string): string {
-  if (explicit) return explicit
-  const baseName = path.basename(repoPaths[0])
-  const slug = baseName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return slug || 'first-flight'
+  return explicit || deriveFeatureSlug(repoPaths[0])
 }
 
 /** Nearest enclosing Canary Lab workspace (init's dependency marker — a bare
@@ -166,14 +162,6 @@ export function findWorkspaceRoot(startDir: string): string | null {
     const parent = path.dirname(current)
     if (parent === current) return null
     current = parent
-  }
-}
-
-function serverBase(workspaceRoot: string): string {
-  try {
-    return `http://localhost:${resolveProjectPort(loadProjectConfig(workspaceRoot))}`
-  } catch {
-    return `http://localhost:${DEFAULT_PORT}`
   }
 }
 
@@ -377,7 +365,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     info(`No Canary Lab workspace found — creating one at ${dim(workspaceRoot)}.`)
     await initProject([workspaceRoot])
   }
-  const base = serverBase(workspaceRoot)
+  const base = resolveServerBase(workspaceRoot, () => resolveProjectPort(loadProjectConfig(workspaceRoot)))
   await ensureServer(workspaceRoot, base)
 
   // Resume-or-start: an interrupted flight for the same repo set picks up from
@@ -392,7 +380,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       ? latestForRepos(allFlights, flight.repoPaths)
       : (allFlights.find((f) => f.feature === feature) ?? null)
 
-  const startBody = (mode?: string, fromStage?: string) => ({
+  const startBody = (mode?: string, fromStage?: string): StartFlightRequest => ({
     feature,
     // Repos + intent are frozen after the first start: on a mode re-entry that
     // omitted them, leave them out so the server reuses the stored values (a

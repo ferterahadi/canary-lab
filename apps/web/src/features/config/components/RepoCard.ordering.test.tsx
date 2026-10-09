@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { act, useState, type Dispatch, type SetStateAction } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { RepoCard } from './RepoCard'
 import type { RepoSlice } from './repo-slice'
 import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 const api = vi.hoisted(() => ({ getGitRemote: vi.fn(), checkPathExists: vi.fn(), cloneRepository: vi.fn() }))
 const folder = vi.hoisted(() => ({ choose: (_: string) => {}, clone: (_: string) => {} }))
 vi.mock('@/shared/api/workspace', () => ({
@@ -30,15 +31,12 @@ function Host({ cloneUrl }: { cloneUrl?: string }) {
 
 const button = (label: string) => [...container.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)!
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.resetAllMocks()
   api.checkPathExists.mockResolvedValue({ exists: false })
   api.getGitRemote.mockResolvedValue({ cloneUrl: null })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('ignores delayed A after B and preserves edits made during remote detection', async () => {
   const a = deferred<unknown>()

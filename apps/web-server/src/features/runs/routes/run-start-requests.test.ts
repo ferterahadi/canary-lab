@@ -13,6 +13,7 @@ import type { RunStartRequest, TestReviewRequiredInfo } from '../../../../../../
 import { RunStartRequests } from '../logic/run-start-requests'
 import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('canary-run-request-')
 
@@ -53,7 +54,7 @@ async function fixture() {
   const events: WorkspaceEvent[] = []
   const app = Fastify()
   apps.push(app)
-  await app.register(runsRoutes, { featuresDir, store, startRun, workspaceEvents: { publish: (event) => events.push(event) } })
+  await app.register(runsRoutes, { featuresDir, store, startRun, workspaceEvents: captureEvents(events) })
   const begin = async (payload: Record<string, unknown> = {}) => {
     const result = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'checkout', env: 'dev', ...payload } })
     expect(result.statusCode).toBe(409)

@@ -1,8 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { build } from 'vite'
+import { REPO as repoRoot } from './lib/fs.mjs'
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const sourceTemplates = path.join(repoRoot, 'templates')
 const distTemplates = path.join(repoRoot, 'dist', 'templates')
 const sourcePrompts = path.join(repoRoot, 'apps', 'web-server', 'prompts')

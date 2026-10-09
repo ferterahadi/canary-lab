@@ -2,13 +2,12 @@ import { runCoverageAgentAttempts, type CoverageAgentSession, type CoverageAgent
 import { missingFromRoster as missingRosterNames } from './mapping-roster'
 import { canonicalPathTypes } from '../../../../../../../shared/coverage/path-types'
 import path from 'path'
-import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentsFor } from '../../../runs/pick-heal-agent'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import type { PerAgentStageChoices } from '../../../../../../../shared/agent-models'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
-import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
@@ -233,7 +232,7 @@ export function buildAnnotatePrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
-  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
+  return resolveAgentsFor(adapter)
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: CoverageAgentRunOptions): Promise<string> {

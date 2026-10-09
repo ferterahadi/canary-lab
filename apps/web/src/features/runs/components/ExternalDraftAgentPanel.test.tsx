@@ -29,7 +29,6 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
 
 describe('ExternalDraftAgentPanel', () => {
   it('updates and removes an error without replacing the mounted card or session link', () => {
-    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     const container = document.createElement('div')
     const root = createRoot(container)
     const show = (over: Partial<DraftRecord>) => act(() => root.render(<ExternalDraftAgentPanel draft={draft(over)} stageView="generating" />))

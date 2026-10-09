@@ -10,18 +10,19 @@ import type { PortifyCleanupEntry } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph } from './CleanupTableParts'
-import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
+import { SEVEN_DAYS_MS } from './cleanup-rows'
+import { AGENT_JOB_COLOR, portifyTraceStatus } from '@/shared/lib/agent-job-status'
 import { pluralSuffix } from '@shared/lib/plural'
+import { useWorkspaceActions } from '@/shared/state/workspace-actions'
 
 // Self-contained port-ification record inventory: every workflow under
 // <logs>/portify/<id> with its disk size. This is the home for pruning stale
 // portify records (the × that used to live in the Ports-tab history) — Open
 // opens its feature at Flight → Parallel setup; Delete drops it from history. The scratch
 // worktrees these spawned are reclaimed on the Worktrees tab (PORTIFY owner).
-export function PortifySection({ now, onNavigateToPortify }: {
-  now: number
-  onNavigateToPortify?: (feature: string) => void
-}) {
+// Open is present only when the workspace provides that destination.
+export function PortifySection({ now }: { now: number }) {
+  const { openPortifyStage: onNavigateToPortify } = useWorkspaceActions()
   const inventory = useCleanupInventory('portify', cleanupApi.cleanupPortify)
   const workflows = inventory.value?.workflows ?? []
   const { initialLoading: loading, error: err, refresh: load } = inventory
@@ -82,7 +83,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
       >
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <tr className="cl-rubric" style={{ textAlign: 'left' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Suite</th>
               <th className="py-1 pr-3">Status</th>
@@ -105,7 +106,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                   />
                 </td>
                 <td className="py-1 pr-3" style={{ color: 'var(--text-primary)' }}>{w.feature}</td>
-                <td className="py-1 pr-3"><span style={{ color: PORTIFY_STATUS_COLOR[w.status] }}>{w.status}</span></td>
+                <td className="py-1 pr-3"><span style={{ color: AGENT_JOB_COLOR[portifyTraceStatus(w.status)] }}>{w.status}</span></td>
                 <td className="py-1 pr-3">{timeAgo(w.startedAt, now)}</td>
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
                 <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import { FeatureConfigEditor } from './FeatureConfigEditor'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The tabs each fetch their own document; this suite is about which tab is
 // SHOWN, so every body is stubbed down to a marker.
@@ -16,17 +17,7 @@ vi.mock('./PlaywrightTab', () => ({ PlaywrightTab: () => <div data-testid="body-
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 /** Which body marker is mounted — the tab the dialog is actually showing. */
 function shownTab(): string | null {

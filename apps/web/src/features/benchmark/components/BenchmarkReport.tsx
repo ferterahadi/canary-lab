@@ -5,11 +5,12 @@ import type {
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 import { cell } from './BenchmarkArmMatrix'
 import { Centered } from './BenchmarkConfigScreen'
 import { FAILED, HEALED } from './BenchmarkDetail'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 
 export function ReportView({ m }: { m: BenchmarkManifest }) {
   const rep = m.report
@@ -115,7 +116,7 @@ export function CompareRow({ label, hValue, bValue, hText, bText, betterIsLower 
   const bBetter = !tie && !hBetter
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px', padding: '6px 0' }}>
-      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 600 }}>{label}</div>
+      <CapsLabel>{label}</CapsLabel>
       <Bar pct={hPct} color="var(--boot)" text={hText} better={hBetter} />
       <Bar pct={bPct} color="var(--assistant)" text={bText} better={bBetter} />
     </div>

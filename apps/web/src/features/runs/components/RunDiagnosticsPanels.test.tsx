@@ -5,8 +5,6 @@ import { RecoveryTimeline } from './RunDiagnosticsPanels'
 import { formatLocalDateTime } from '@/shared/lib/format'
 import type { TimelineRow } from '../utils/run-timeline'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 it('updates local timestamp tooltips without replacing the timeline row', () => {
   const container = document.createElement('div')
   document.body.appendChild(container)

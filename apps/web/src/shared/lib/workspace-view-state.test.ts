@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readPersistedView, persistView, onViewChangedInOtherTab, type PersistedView } from './workspace-view-state'
+import { readPersistedView, persistView, onViewChangedInOtherTab, viewHref, benchmarkSurfaceRequested, type PersistedView } from './workspace-view-state'
 
 const KEY = 'cl.workspace.view'
 
@@ -634,4 +634,33 @@ it('does not retain an approval qualifier when opening notifications without a s
   window.history.replaceState(null, '', '/?dialog=notifications&approval=stale')
   persistView(view({ dialog: 'notifications' }))
   expect(window.location.search).not.toContain('approval=')
+})
+
+describe('viewHref', () => {
+  it('serializes a link with the same gates persistView applies, ignoring the current URL', () => {
+    window.history.replaceState(null, '', '/?view=coverage&feature=other&showBenchmark=true')
+    expect(viewHref({ feature: 'checkout', run: 'r1', dialog: 'tests-review' })).toBe('?feature=checkout&run=r1&dialog=tests-review')
+    expect(viewHref({ feature: 'checkout', run: 'r1', dialog: null })).toBe('?feature=checkout&run=r1')
+    // A qualifier outside its owning dialog/view is dropped exactly as on persist.
+    expect(viewHref({ feature: 'checkout', configTab: 'ports', flight: 'fl_1' })).toBe('?feature=checkout')
+    // Building a link never touches the address bar or the durable mirror.
+    expect(window.location.search).toBe('?view=coverage&feature=other&showBenchmark=true')
+    expect(localStorage.getItem(KEY)).toBeNull()
+  })
+  it('round-trips through readPersistedView', () => {
+    window.history.replaceState(null, '', `/${viewHref({ view: 'flights', flight: 'fl_1', flightStage: 'docs' })}`)
+    expect(readPersistedView()).toEqual(view({ view: 'flights', flight: 'fl_1', flightStage: 'docs' }))
+  })
+})
+
+describe('benchmarkSurfaceRequested', () => {
+  it('is on only for an explicit showBenchmark=true, and persisting a view keeps it', () => {
+    expect(benchmarkSurfaceRequested()).toBe(false)
+    window.history.replaceState(null, '', '/?showBenchmark=1')
+    expect(benchmarkSurfaceRequested()).toBe(false)
+    window.history.replaceState(null, '', '/?showBenchmark=true')
+    expect(benchmarkSurfaceRequested()).toBe(true)
+    persistView(view({ feature: 'checkout' }))
+    expect(benchmarkSurfaceRequested()).toBe(true)
+  })
 })

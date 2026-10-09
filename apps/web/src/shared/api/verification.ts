@@ -1,13 +1,8 @@
 // Deployed-environment verification: targets, configs, execution.
 // Split out of client.ts; see that barrel for the shared surface.
 
-import type { VerificationConfig, VerificationTarget } from '@shared/verification'
+import type { VerificationConfig, VerificationTargetIndex } from '@shared/verification'
 import { requestJson, defaultOpts, request, type ClientOptions } from './internal'
-
-export interface VerificationTargetIndex {
-  targets: VerificationTarget[]
-  targetUrls: Record<string, string>
-}
 
 export function getVerificationTargets(
   feature: string,

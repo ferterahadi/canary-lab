@@ -7,12 +7,13 @@ import type {
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { ArmComparisonPage, badgeStyle } from './BenchmarkArmMatrix'
 import { BenchmarkHeader } from './BenchmarkHeader'
 import { displayError } from '@/shared/api/error-message'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ export function ConfigScreen({
           the child grow to content+padding so the footer gets real breathing room. */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px 22px 96px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
         <div style={{ width: 'min(720px, 100%)' }}>
-          <Label>Sabotage skill</Label>
+          <CapsLabel style={{ margin: '6px 0 8px' }}>Sabotage skill</CapsLabel>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
             {skills.map((s) => (
               <div
@@ -131,7 +132,7 @@ export function ConfigScreen({
 
           {selected && (
             <>
-              <Label style={{ marginTop: 16 }}>What the sabotage agent is told</Label>
+              <CapsLabel style={{ margin: '16px 0 8px' }}>What the sabotage agent is told</CapsLabel>
               <div style={{
                 background: 'var(--bg-base)', border: '1px solid var(--border-default)',
                 borderRadius: 'var(--radius-md)', padding: '11px 13px', fontSize: 11.5,
@@ -200,9 +201,9 @@ export function ConfigScreen({
               background: 'transparent', border: 'none', padding: '2px 0', marginTop: 18, cursor: 'pointer',
             }}
           >
-            <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, flex: 'none' }}>
+            <CapsLabel as="span" style={{ flex: 'none' }}>
               What each arm gets
-            </span>
+            </CapsLabel>
             <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               — only canary-lab’s curated failure context differs
             </span>
@@ -281,10 +282,6 @@ export function DynamicPortsGate({
 
 export function Centered({ children }: { children: React.ReactNode }) {
   return <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 13 }}>{children}</div>
-}
-
-export function Label({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', margin: '6px 0 8px', fontWeight: 600, ...style }}>{children}</div>
 }
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {

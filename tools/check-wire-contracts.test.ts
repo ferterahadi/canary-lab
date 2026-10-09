@@ -15,9 +15,9 @@ it.each([
   ['apps/web-server/src/shared/ws/workspace-stream.ts', "export type WorkspaceStreamFrame = { type: 'connected' }", 'WorkspaceStreamFrame'],
   ['apps/web/src/shared/api/config.ts', 'export interface GettingStartedSessionState { active: null }', 'GettingStartedSessionState'],
   ['apps/web-server/src/features/config/routes/onboarding.ts', "export type OnboardingWorkflowId = 'run'", 'OnboardingWorkflowId'],
-  ['apps/web/src/features/benchmark/api/benchmark-types.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
+  ['apps/web/src/shared/api/benchmark.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
   ['apps/web-server/src/features/benchmark/logic/runtime/types.ts', "export type BenchmarkStatus = 'done'", 'BenchmarkStatus'],
-  ['apps/web/src/features/benchmark/api/benchmark-types.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
+  ['apps/web/src/shared/api/benchmark.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
   ['apps/web/src/shared/api/runs.ts', 'interface RunManifest { runId: string }', 'RunManifest'],
   ['apps/web-server/src/features/runs/logic/run-detail.ts', 'export type RunSummary = { total: number }', 'RunSummary'],
   ['apps/web/src/features/benchmark/state/benchmark-state.ts', 'bypass', 'BenchmarkIndexEntry'],
@@ -28,7 +28,7 @@ it.each([
   ['apps/web-server/src/features/portify/logic/runtime/store.ts', 'bypass', 'PortifyIndexEntry'],
 ])('rejects drift in %s: %s', (file, mutation, typeName) => {
   const checker = fs.readFileSync(path.join(repo, 'tools/check-wire-contracts.mjs'), 'utf8')
-    .replace("const REPO = path.resolve(import.meta.dirname, '..')", `const REPO = ${JSON.stringify(repo)}`)
+    .replace("import { REPO, walk } from './lib/fs.mjs'", `import { walk } from ${JSON.stringify(path.join(repo, 'tools/lib/fs.mjs'))}\nconst REPO = ${JSON.stringify(repo)}`)
     .replace("return readFileSync(path.join(REPO, rel), 'utf8')", `
       const source = readFileSync(path.join(REPO, rel), 'utf8')
       if (rel !== ${JSON.stringify(file)}) return source

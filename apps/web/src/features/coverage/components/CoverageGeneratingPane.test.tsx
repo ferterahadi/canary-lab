@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageJobManifest } from '@shared/coverage/types'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // AgentSessionView pulls a REST snapshot and (when live) opens a WS. Stub both so
 // the mount is inert — we only assert that the pane reaches into AgentSessionView.
@@ -32,17 +31,10 @@ const BASE_JOB: CoverageJobManifest = {
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function render(job: CoverageJobManifest): void {
   act(() => {

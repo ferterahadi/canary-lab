@@ -27,8 +27,8 @@ import { runSabotage } from './sabotage'
 import { buildBaselineHealPrompt, baselinePlaywrightSpawner } from './arm-config'
 import { loadBundledSabotageSkills } from './skills'
 import { worktreeFeatureDir } from './worktree-feature-dir'
-import type { ArmIterationResult } from './report'
-import type { ArmMode, BenchmarkManifest, StartBenchmarkInput, StartBenchmarkResult } from './types'
+import type { ArmIterationResult, ArmMode, BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
+import type { StartBenchmarkInput, StartBenchmarkResult } from './types'
 
 // Wires the real I/O behind the (tested) BenchmarkOrchestrator: git worktrees,
 // the sabotage agent, and per-arm RunOrchestrators. Built as a factory taking

@@ -4,8 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as portifyApi from '@/shared/api/portify'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry, PortifyManifest } from '@shared/portify-index'
 import {
   PortifyProvider,
   useActivePortify,
@@ -14,8 +13,6 @@ import {
   usePortifyDetail,
 } from './PortifyContext'
 import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // The reducer, the frame mapper and `isActivePortify` are covered against the
 // real rules in portify-state.test.ts. This suite owns the provider: the socket

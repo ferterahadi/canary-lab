@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { notificationTarget, type WorkspaceNotification } from '@shared/notifications/types'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn(), resolveNotificationAction: vi.fn() }))
 vi.mock('@/shared/api/notifications', () => api)
@@ -10,7 +11,6 @@ import { NotificationCenter } from './NotificationCenter'
 import { useNotifications } from './use-notifications'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
-let container: HTMLDivElement
 let root: Root
 let rows: WorkspaceNotification[]
 const target = { kind: 'test-review' as const, feature: 'shop', runId: 'run-1' }
@@ -21,9 +21,8 @@ beforeEach(() => {
   api.resolveNotificationAction.mockImplementation(async (id: string) => ({ status: 'current', items: [...rows], target: notificationTarget(rows.find((row) => row.id === id)!) }))
   api.deleteNotification.mockImplementation(async (id) => { rows = rows.filter((row) => row.id !== id) })
   api.readNotification.mockImplementation(async (id) => { rows = rows.map((row) => row.id === id ? { ...row, readAt: 'now' } : row) })
-  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
 const labelled = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
 

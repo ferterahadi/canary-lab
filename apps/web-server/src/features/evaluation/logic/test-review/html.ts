@@ -12,7 +12,8 @@ import { ASSERTION_HTML_SCRIPT } from './report-script'
 import { ASSERTION_HTML_CSS } from './report-styles'
 import { THEME_BOOT_SCRIPT, THEME_SWITCH_HTML } from './report-theme'
 import { flattenHelpers } from './source-analysis'
-import { comparableTitle, dedupe, escapeAttr, escapeHtml, formatMs, inline, splitAnnotations, statusClass, titleCaseFeatureName, uniqueSectionIds } from './text'
+import { comparableTitle, dedupe, escapeAttr, escapeHtml, inline, splitAnnotations, statusClass, titleCaseFeatureName, uniqueSectionIds } from './text'
+import { formatMs } from '../../../../../../../shared/lib/format-units'
 import type { AssertionHtmlOptions, AssertionQuality, EvaluationRewrite, HelperDefinition, NavGroup, TestFlowchart, TestReviewAssertion, TestReviewCase, TestReviewPacket, TestStatusCounts } from './types'
 
 // Display labels for coverage's per-test STRENGTH (depth axis), used when a feature

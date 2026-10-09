@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import type { ExecutionType } from '@shared/verification'
 import { type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { PauseIcon, StopIcon } from './RunLaunchControl'
+import { activateOnKey } from '@/shared/ui/keyboard'
 
 export function RunActionsKebab({
   view,
@@ -89,11 +91,7 @@ export function RunActionsKebab({
               label={isStopping ? 'Stopping...' : 'Stop'}
               variant="danger"
               disabled={isStopping}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                </svg>
-              )}
+              icon={<StopIcon size={11} />}
               onClick={() => { onStop(); onClose() }}
             />
           )}
@@ -102,12 +100,7 @@ export function RunActionsKebab({
               label={isPausing ? 'Pausing...' : 'Pause & Heal'}
               variant="warning"
               disabled={isPausing}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="3" height="10" rx="1" />
-                  <rect x="10" y="3" width="3" height="10" rx="1" />
-                </svg>
-              )}
+              icon={<PauseIcon size={11} />}
               onClick={() => { onPause(); onClose() }}
             />
           )}
@@ -116,11 +109,7 @@ export function RunActionsKebab({
               label={isCancellingHeal ? 'Cancelling...' : 'Stop Heal'}
               variant="danger"
               disabled={isCancellingHeal}
-              icon={(
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                </svg>
-              )}
+              icon={<StopIcon size={11} />}
               onClick={() => { onCancelHeal(); onClose() }}
             />
           )}
@@ -212,9 +201,7 @@ export function ActionButton({
       tabIndex={0}
       aria-disabled={disabled}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(e as unknown as React.MouseEvent) }
-      }}
+      onKeyDown={activateOnKey((e) => onClick(e as unknown as React.MouseEvent), { stopPropagation: true })}
       className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors duration-150 ${tone} ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
     >
       <span aria-hidden="true" className="inline-flex h-3 w-3 items-center justify-center">{icon}</span>
@@ -241,13 +228,7 @@ function RunIconAction({ disabled, label, onClick, className, children }: {
         if (disabled) { e.stopPropagation(); return }
         onClick(e)
       }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation()
-          onClick(e as unknown as React.MouseEvent)
-        }
-      }}
+      onKeyDown={disabled ? undefined : activateOnKey((e) => onClick(e as unknown as React.MouseEvent), { stopPropagation: true })}
       className={className}
     >
       {children}

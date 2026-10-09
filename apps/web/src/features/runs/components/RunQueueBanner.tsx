@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
 import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { RunIndexEntry } from '@shared/run-index'
 import { getRunQueue } from '@/shared/api/runs'
+import { useLiveResource } from '@/shared/state/use-live-resource'
+import { viewHref } from '@/shared/lib/workspace-view-state'
 import { useRuns } from '../state/RunsContext'
 import { runWaitingState } from '../utils/run-waiting-state'
 import { displayError } from '@/shared/api/error-message'
@@ -13,26 +14,21 @@ export function queueExplanation(d: RunQueueDiagnostics): string {
   return `The ${d.reason === 'memory' ? 'available-memory' : 'CPU'} budget allows ${d.slotBudget} estimated slots. Active runs use ${d.usedSlots}; this run needs ${d.candidateCost} more. Each service and test runner counts as one slot.`
 }
 
+type QueueRead = { diagnostics: RunQueueDiagnostics | null; error?: string }
+
 export function RunQueueBanner({ runId }: { runId: string }) {
   const { runs, connection } = useRuns()
-  const [retry, setRetry] = useState(0)
-  const [result, setResult] = useState<{ runId: string; diagnostics: RunQueueDiagnostics | null; error?: string } | null>(null)
-  const [loading, setLoading] = useState(false)
   // The runs stream is the trigger: a completed run can release capacity, and
-  // pending review can explain why an active run is still holding it.
-  const runState = JSON.stringify(runs.map((r) => [r.runId, r.status, r.pendingSpecEdits]))
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    getRunQueue(runId).then(({ diagnostics }) => {
-      if (alive) setResult({ runId, diagnostics })
-    }).catch((err) => {
-      if (alive) setResult({ runId, diagnostics: null, error: displayError(err) })
-    }).finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [runId, runState, connection, retry])
-  const current = result?.runId === runId ? result : null
-  return <QueueNotice diagnostics={current?.diagnostics ?? null} error={current?.error} runs={runs} loading={loading} onRefresh={() => setRetry((n) => n + 1)} />
+  // pending review can explain why an active run is still holding it. There is
+  // no workspace topic for queue state, so the bus is opted out explicitly.
+  const runState = JSON.stringify([connection, runs.map((r) => [r.runId, r.status, r.pendingSpecEdits])])
+  // A failed read resolves to an errored result rather than rejecting: the
+  // notice clears the explanation and shows the error, while `retainOnError`
+  // keeps the previous result on screen through each refetch of the same run.
+  const { value: current, loading, refresh } = useLiveResource(null, runId, (id): Promise<QueueRead> =>
+    getRunQueue(id).then(({ diagnostics }) => ({ diagnostics }), (err: unknown) => ({ diagnostics: null, error: displayError(err) })),
+  { refreshKey: runState, retainOnError: true })
+  return <QueueNotice diagnostics={current?.diagnostics ?? null} error={current?.error} runs={runs} loading={loading} onRefresh={refresh} />
 }
 
 export function QueueNotice({ diagnostics: d, error, runs, loading, onRefresh }: {
@@ -51,9 +47,8 @@ export function QueueNotice({ diagnostics: d, error, runs, loading, onRefresh }:
           {relevant.map((run) => {
             const entry = runs.find((r) => r.runId === run.runId)
             const waiting = runWaitingState(entry)
-            const params = new URLSearchParams({ feature: run.feature, run: run.runId })
-            if (waiting?.kind === 'test-review') params.set('dialog', 'tests-review')
-            return <li key={run.runId}><a className="text-accent underline" href={`?${params}`}>{run.feature} · {waiting?.label ?? entry?.status ?? 'Active'} →</a></li>
+            const href = viewHref({ feature: run.feature, run: run.runId, dialog: waiting?.kind === 'test-review' ? 'tests-review' : null })
+            return <li key={run.runId}><a className="text-accent underline" href={href}>{run.feature} · {waiting?.label ?? entry?.status ?? 'Active'} →</a></li>
           })}
         </ul>
       </div>}

@@ -13,7 +13,7 @@ import type { AgentSessionAbsence, AgentSessionResponse } from '@/shared/api/age
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { firstLineOf, formatSpan, shortSession } from '@/shared/lib/format'
 import { clientLabel } from './external-client-branding'
-import { ExternalOpenAction, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
+import { ExternalOpenAction, GLYPH_CHECK, GLYPH_CROSS, GLYPH_DASH, LogRow, SYSTEM_GLYPH, eventGlyph, externalGlyph } from './AgentSessionRows'
 import { ActivityLogModal, type LogEntry } from './ActivityLogModal'
 import {
   describeEvent, eventSpan, externalLifecycle, parseSystemLine, systemVerb, systemLogId, type ExternalSessionActivity, type LogLine,
@@ -670,7 +670,7 @@ function DividerMark({ tone }: { tone: 'live' | 'danger' | 'settled' | 'success'
   return (
     <span className="agentts-divmark" data-tone={tone} aria-hidden="true">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-        {tone === 'danger' ? <path d="M5 5l6 6M11 5l-6 6" /> : tone === 'absent' ? <path d="M4.5 8h7" /> : <path d="M3.5 8.5l3 3 6-6.5" />}
+        {tone === 'danger' ? GLYPH_CROSS : tone === 'absent' ? GLYPH_DASH : GLYPH_CHECK}
       </svg>
     </span>
   )

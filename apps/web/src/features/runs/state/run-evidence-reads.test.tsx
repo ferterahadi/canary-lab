@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AuditEntry } from '@/shared/api/types-wizard'
 import type { JournalSection } from '@shared/run-detail'
@@ -10,6 +10,7 @@ import { JournalTab } from '../components/JournalTab'
 import { useExternalAudit } from './use-external-audit'
 import { useRunJournal } from './use-run-journal'
 import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 const api = vi.hoisted(() => ({ listJournal: vi.fn(), getRunAudit: vi.fn(), connection: 'live' }))
 vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
@@ -17,7 +18,6 @@ vi.mock('@/shared/api/runs', async (importOriginal) => ({
   getRunAudit: api.getRunAudit,
 }))
 vi.mock('./RunsContext', () => ({ useRuns: () => ({ connection: api.connection }) }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement
 let sequence = 0
@@ -40,9 +40,9 @@ const renderJournal = async (runId = id, feature = 'synthetic') => { await act(a
 const renderAudit = async (runId = id, status: RunStatus = 'running') => { await act(async () => root.render(<Audit runId={runId} status={status} />)) }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); api.connection = 'live'; id = `evidence-${++sequence}`
-  element = document.createElement('div'); document.body.appendChild(element); root = createRoot(element)
 })
-afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container: element, root } = mounted) })
 
 it('orders journal entries after invalidation without remounting the reader', async () => {
   const first = { ...entry('first'), iteration: 1 }

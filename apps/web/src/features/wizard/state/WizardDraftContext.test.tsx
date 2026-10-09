@@ -7,8 +7,6 @@ import * as wizardApi from '@/shared/api/wizard'
 import { WizardDraftProvider, isActiveWizardTask, isVisibleWizardTask, useWizardDrafts } from './WizardDraftContext'
 import { Probe, draft, workspaceSocket } from './__fixtures__/wizard-draft-context-fixtures'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 vi.mock('@/shared/api/wizard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/wizard')>()),
   listDrafts: vi.fn(),

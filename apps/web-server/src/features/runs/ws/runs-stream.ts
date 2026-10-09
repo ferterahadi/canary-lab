@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { RunStore, RunStoreEvent } from '../logic/run-store'
-import type { RunDetail } from '../../../../../../shared/run-detail'
+import type { RunDetail, RunsStreamFrame } from '../../../../../../shared/run-detail'
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
@@ -19,26 +19,6 @@ export interface RunsStreamDeps {
   store: RunStore
   featuresDir: string
 }
-
-// Wire-format frames. Stable: the web client treats unknown `type` values as
-// no-ops, so adding fields is non-breaking; renaming a frame type IS
-// breaking. Keep additive.
-export type RunsStreamFrame =
-  /** Sent once when the connection opens. Carries everything the client
-   *  needs to render its initial UI without making any HTTP calls. */
-  | { type: 'snapshot'; runs: RunIndexEntry[]; details: Record<string, RunDetail> }
-  /** A single run changed (created, status flipped, finalized). The client
-   *  patches `state.details[runId]` with `detail` and inserts/updates the
-   *  matching `state.runs` entry. */
-  | { type: 'update'; runId: string; detail: RunDetail }
-  /** A run was removed from history (DELETE on a terminal run). The client
-   *  drops it from both `state.runs` and `state.details`. */
-  | { type: 'removed'; runId: string }
-  /** A list-level change with no specific runId (today: the boot-time
-   *  reaper). The client refreshes its `state.runs` snapshot from the
-   *  attached payload and reconciles details for any newly-active rows
-   *  via the next `update` frame. */
-  | { type: 'list-changed'; runs: RunIndexEntry[] }
 
 export async function runsStreamRoutes(
   app: FastifyInstance,

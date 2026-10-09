@@ -1,10 +1,11 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Feature } from '../api/types'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useWorkspaceFeatures } from './use-workspace-features'
 import { deferred } from '../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ listFeatures: vi.fn() }))
 vi.mock('../api/features', () => ({
@@ -33,15 +34,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   api.listFeatures.mockResolvedValue([feature('checkout')])
-  container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('retries a failed initial load, initializes once, then reconciles successful reads', async () => {
   api.listFeatures.mockRejectedValueOnce(new Error('offline'))

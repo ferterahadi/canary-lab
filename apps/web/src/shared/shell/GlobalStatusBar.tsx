@@ -1,4 +1,4 @@
-import type { ReviewFocus } from '../lib/workspace-view-state'
+import { benchmarkSurfaceRequested, type ReviewFocus } from '../lib/workspace-view-state'
 import { useEffect, useRef, useState } from 'react'
 import type { Feature } from '../api/types'
 import type { RunDetail } from '@shared/run-detail'
@@ -19,6 +19,8 @@ import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
 import { Tooltip } from '../ui/Tooltip'
 import { usePersistedFlag } from '@/shared/state/browser-storage'
+import { useWorkspaceActions } from '@/shared/state/workspace-actions'
+import { useWorkState } from '@/shared/state/work-state'
 
 interface ReviewControl {
   features?: Feature[]
@@ -41,18 +43,13 @@ interface Props {
   onRunLatestTests?: (feature: string) => void
   runStartPending?: boolean
   onOpenCleanup?: () => void
-  /** App owns the live flight data and routed picker actions. */
+  /** The Flights picker's routed open-state; its data and destinations come
+   *  from WorkState and WorkspaceActions. */
   flightPill?: FlightsPillProps
   review?: ReviewControl
   gettingStarted?: { available: boolean; unseen: boolean; onOpen: () => void }
   returnToFlight?: { flightId: string; label?: string | null; onOpen: (flightId: string) => void } | null
-  /** Open a feature's Flight directly at Parallel setup. */
-  onOpenPortify?: (feature: string) => void
-  /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
-  onNavigateToRun?: (feature: string, runId: string) => void
 }
-
-const EMPTY_FLIGHT_PILL: FlightsPillProps = { flights: [], onOpenFlight: () => {} }
 
 // Always-visible top bar showing whether any run is currently active across
 // all features. Single source of truth for "is something running right now?"
@@ -79,13 +76,15 @@ export function GlobalStatusBar({
   onRunLatestTests,
   runStartPending = false,
   onOpenCleanup,
-  flightPill = EMPTY_FLIGHT_PILL,
+  flightPill,
   gettingStarted,
-  onOpenPortify,
-  onNavigateToRun,
   returnToFlight,
 }: Props) {
   const { connection, runs } = useRuns()
+  // The Deploy-check pill opens its run; the benchmark window opens a suite's
+  // Flight at Parallel setup. Absent actions keep both inert.
+  const { navigateToRun, openPortifyStage } = useWorkspaceActions()
+  const work = useWorkState()
   const [acceptedReview, setAcceptedReview] = useState<{ feature: string; revision: string; detail?: RunDetail | null } | null>(null)
   const runInProgress = runStartPending || isUnsettledRunStatus(activeRunDetail?.manifest.status)
     || runs.some((run) => isUnsettledRunStatus(run.status))
@@ -118,11 +117,11 @@ export function GlobalStatusBar({
   const activeBenchmark = benchmarks.find((b) => b.status === 'sabotaging' || b.status === 'running')
   // Benchmark is an internal-experiment surface (product surface retired in
   // 1.0.0) — hidden unless explicitly requested via ?showBenchmark=true.
-  const showBenchmark = new URLSearchParams(window.location.search).get('showBenchmark') === 'true'
+  const showBenchmark = benchmarkSurfaceRequested()
   // Aggregate "something's happening" count shown on the toggle when collapsed,
   // so an active benchmark / flight / run / portify / authoring job is never
   // hidden behind the chevron. Mirrors the Flights pill's own attention set.
-  const activeFlightCount = summarizeFlightActivity(flightPill.flights, flightPill.preFlights ?? [], flightPill.activity ?? new Map()).activeCount
+  const activeFlightCount = summarizeFlightActivity(work.flights ?? [], work.preFlights ?? [], work.activity ?? new Map()).activeCount
   const actionsActiveCount =
     (showBenchmark && activeBenchmark ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
@@ -245,7 +244,7 @@ export function GlobalStatusBar({
               name="Deploy check"
               detail={verifyRuns[0].verificationConfigName ?? verifyRuns[0].feature}
               count={verifyRuns.length > 1 ? verifyRuns.length : undefined}
-              onClick={() => onNavigateToRun?.(verifyRuns[0].feature, verifyRuns[0].runId)}
+              onClick={() => navigateToRun?.(verifyRuns[0].feature, verifyRuns[0].runId)}
               title={`Verifying the deployed environment (record-only): ${verifyRuns.map((r) => r.feature).join(', ')}`}
               ariaLabel={`Open deploy check (${verifyRuns.length} active)`}
             />
@@ -331,7 +330,7 @@ export function GlobalStatusBar({
           onClose={() => setBenchmarkOpen(false)}
           onOpenPortify={(feature) => {
             setBenchmarkOpen(false)
-            onOpenPortify?.(feature)
+            openPortifyStage?.(feature)
           }}
         />
       )}

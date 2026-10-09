@@ -16,7 +16,7 @@ import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { isAuxiliaryExecution } from '../../../../../../shared/verification'
+import { isSuiteVerdictRun } from '../../../../../../shared/run-index'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 
 // Read-time stage evidence, probed from the workspace for stages that never
@@ -144,12 +144,7 @@ function portifyEvidence({ deps, feature, featureDir, config }: EvidenceContext)
 /** The latest SETTLED test run for this feature. Boots/benchmarks/verifies are
  *  not feature runs, and an active run has no verdict to report yet. */
 function latestSettledRun(deps: WorkspaceEvidenceDeps, feature: string): { runId: string; status: string } | undefined {
-  const runs = listRuns(deps.logsDir, { feature }).filter(
-    (r) =>
-      !isAuxiliaryExecution(r.executionType) &&
-      r.executionType !== 'verify' &&
-      (r.status === 'passed' || r.status === 'failed'),
-  )
+  const runs = listRuns(deps.logsDir, { feature }).filter((r) => isSuiteVerdictRun(r, ['passed', 'failed']))
   const latest = runs[0]
   return latest ? { runId: latest.runId, status: latest.status } : undefined
 }

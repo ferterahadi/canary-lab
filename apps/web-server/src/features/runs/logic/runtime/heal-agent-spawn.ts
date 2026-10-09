@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { HEAL_MODELS, effortArgs } from '../../../agent-sessions/logic/agent-models'
 import type { StageModelChoice } from '../../../../../../../shared/agent-models'
-import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
+import { resolveAgentBinary, isAgentCliAvailable, isAgentKind, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
 import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
@@ -297,7 +297,7 @@ export function pickAvailableHealAgent(
   envOverride: string | undefined = process.env.CANARY_LAB_HEAL_AGENT,
   deps: AgentResolveDeps = {},
 ): HealAgent | null {
-  if (envOverride === 'claude' || envOverride === 'codex') {
+  if (isAgentKind(envOverride)) {
     return isAgentCliAvailable(envOverride, deps) ? envOverride : null
   }
   if (envOverride !== undefined && envOverride !== '') {

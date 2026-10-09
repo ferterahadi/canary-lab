@@ -1,23 +1,12 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-
 import path from 'path'
 
-import Fastify from 'fastify'
-
-import { runsRoutes } from './runs'
 import type { ExternalHealAgentRequest } from './runs-route-support'
 
-import { RunStore } from '../logic/run-store'
-import {
-  createRegistry,
-  type OrchestratorLike,
-  type RestartHealResult,
-  type RestartRunResult,
-} from '../logic/run-registry'
+import type { OrchestratorLike } from '../logic/run-registry'
 
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
@@ -26,12 +15,13 @@ import { runDirFor } from '../logic/runtime/run-paths'
 
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildRunsApp, type RunsAppOptions } from './__fixtures__/runs-app'
 
 const tempDir = trackTempDirs('cl-rroutes-')
 
 
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The PR routes are thin plumbing over these two — they're unit-tested in
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
@@ -70,35 +60,7 @@ function writeManifestForRun(runId: string, feature = 'foo', status: 'running' |
   })
 }
 
-async function build(opts: {
-	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
-	  cancelQueuedRun?: (runId: string) => boolean
-	  broker?: Parameters<typeof runsRoutes>[1]['broker']
-	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-	  restartRun?: (runId: string) => Promise<RestartRunResult>
-  queueDiagnostics?: Parameters<typeof runsRoutes>[1]['queueDiagnostics']
-  projectRoot?: string
-  events?: WorkspaceEvent[]
-  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
-} = {}) {
-  const registry = createRegistry()
-  const store = new RunStore(logsDir, registry)
-  const app = Fastify()
-  await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store,
-    queueDiagnostics: opts.queueDiagnostics,
-    broker: opts.broker,
-	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-	    cancelQueuedRun: opts.cancelQueuedRun,
-	    restartHeal: opts.restartHeal,
-    restartRun: opts.restartRun,
-    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
-	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-	  })
-  return { app, registry, store }
-}
+const build = (opts: RunsAppOptions = {}) => buildRunsApp({ logsDir, featuresDir }, opts)
 
 describe('GET /api/runs', () => {
   it('marks a claimed legacy run for a fresh attempt in list and detail reads', async () => {

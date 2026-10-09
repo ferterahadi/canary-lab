@@ -73,8 +73,3 @@ export function titleCaseFeatureName(input: string): string {
     .trim()
     .replace(/\b[a-zA-Z]/g, (char) => char.toUpperCase())
 }
-
-export function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}

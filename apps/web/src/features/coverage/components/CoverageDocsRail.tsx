@@ -6,6 +6,7 @@ import { DocPill, EmptyDropzone } from './DocPill'
 import { DocTree } from '@/shared/ui/DocTree'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 import { displayError } from '@/shared/api/error-message'
 import { joinNatural } from '@/shared/lib/format'
 
@@ -269,9 +270,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             {sourceCount}
           </span>
           <span aria-hidden="true" style={{ marginTop: 'auto', color: 'var(--text-muted)' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
+            <ChevronRightIcon size={14} strokeWidth={2} />
           </span>
         </button>
       </div>

@@ -4,7 +4,7 @@ import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import type { CoverageLedger, TestCoverage } from '@shared/coverage/types'
 import { BootCheckPanel, CoverageCompositionPanel, DoubleBootPanel, OverlayPanel, EvaluationDeliverablePanel } from './StageEvidencePanels'
 
@@ -17,7 +17,6 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

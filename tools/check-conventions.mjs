@@ -25,12 +25,12 @@
 // the list outliving its reason (same trick as the stale PUBLIC check in
 // check-feature-boundaries.mjs).
 
-import { readFileSync, readdirSync, statSync, lstatSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, lstatSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { isFixturePath, personalFixturePathLines } from './fixture-policy.mjs'
+import { REPO, walk } from './lib/fs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
 const ROOTS = ['apps', 'shared', 'tools']
 
 // Coverage-gate floor. Percentage alone does not prove scope: a file lifted out
@@ -78,6 +78,10 @@ const LOWERCASE_TSX_OK = new Map([
   ['config-doc-cache.tsx', 'the config dialog document cache: a provider plus its reader hook'],
   ['stage-meta.tsx', 'stage metadata tables'],
   ['external-client-branding.tsx', 'per-client branding lookups'],
+  ['workspace-actions.tsx', 'the workspace actions context: a provider plus its reader hook'],
+  ['work-state.tsx', 'the workspace work-state context: a provider plus its reader hook'],
+  ['flight-actions.tsx', 'the open flight\'s drill-through context: a provider plus its reader hook'],
+  ['workspace-providers.tsx', 'test scaffolding that mounts the workspace contexts'],
 ])
 
 const BASELINE = {
@@ -123,25 +127,20 @@ function check(rule, rel, message, fix) {
   failures.push({ file: rel, message, fix })
 }
 
-function walk(dir) {
-  const out = []
-  for (const name of readdirSync(dir)) {
-    const p = path.join(dir, name)
-    const rel = path.relative(REPO, p).split(path.sep).join('/')
-    if (!isFixturePath(rel) && (name === 'node_modules' || name === 'dist' || name === 'coverage')) continue
-    if (isFixturePath(rel) && lstatSync(p).isSymbolicLink()) {
-      check('fixture-portability', rel, 'fixture is a symlink', 'keep self-contained, sanitized data in the repository; keep original recordings in the workspace')
-      continue
-    }
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else out.push(p)
+// node_modules/dist/coverage are skipped outside fixtures only; a fixture
+// symlink is reported and never followed.
+function keepEntry(p, name) {
+  const rel = path.relative(REPO, p).split(path.sep).join('/')
+  if (!isFixturePath(rel) && (name === 'node_modules' || name === 'dist' || name === 'coverage')) return false
+  if (isFixturePath(rel) && lstatSync(p).isSymbolicLink()) {
+    check('fixture-portability', rel, 'fixture is a symlink', 'keep self-contained, sanitized data in the repository; keep original recordings in the workspace')
+    return false
   }
-  return out
+  return true
 }
 
 const files = ROOTS.filter((r) => existsSync(path.join(REPO, r)))
-  .flatMap((r) => walk(path.join(REPO, r)))
-  .map((p) => path.relative(REPO, p).split(path.sep).join('/'))
+  .flatMap((r) => walk(path.join(REPO, r), { onEntry: keepEntry, relativeTo: REPO }))
 
 const SOURCE = /\.(ts|tsx|mjs)$/
 const TEST = /\.test\.tsx?$/

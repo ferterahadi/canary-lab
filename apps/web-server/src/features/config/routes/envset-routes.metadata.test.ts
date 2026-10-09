@@ -8,6 +8,7 @@ import { registerFeatureEnvTools } from '../../../mcp/tool-groups/authoring-env'
 import { captureTools, type CapturedTools } from '../../../mcp/tool-groups/__fixtures__/tool-group-harness'
 import { readFeatureConfig } from '../../../shared/config-ast'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-envset-metadata-')
 
@@ -31,7 +32,7 @@ beforeEach(async () => {
   fs.writeFileSync(source, 'KEY=secret-fixture-value\n')
   metadata = path.join(suite, 'envsets', 'envsets.config.json')
   events = []
-  const deps = { projectRoot: root, featuresDir, workspaceEvents: { publish: (event: WorkspaceEvent) => events.push(event) } }
+  const deps = { projectRoot: root, featuresDir, workspaceEvents: captureEvents(events) }
   app = Fastify()
   await registerEnvsetRoutes(app, deps)
   tools = captureTools(registerFeatureEnvTools, deps)

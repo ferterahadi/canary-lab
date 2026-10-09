@@ -10,6 +10,7 @@ import { SlotEditor } from './SlotEditor'
 import { NEW_ENV_SENTINEL, NEW_SLOT_SENTINEL, stripFeaturePrefix } from './envset-diff'
 import { useCachedDoc } from './config-doc-cache'
 import { displayError } from '@/shared/api/error-message'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 export function EnvsetsTab({ feature }: { feature: string }) {
   // Cached for the dialog's lifetime, so returning to this tab paints the env
@@ -107,10 +108,10 @@ export function EnvsetsTab({ feature }: { feature: string }) {
   }
 
   if (error && !index) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{error}</div>
+    return <ConfigLoadGuard error={error} />
   }
   if (!index) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <ConfigLoadGuard />
   }
 
   const envObj = index.envs.find((e) => e.name === env) ?? index.envs[0]

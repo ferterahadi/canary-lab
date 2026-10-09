@@ -18,14 +18,6 @@ export function isEvaluationExportable(status: string): boolean {
   return isAssertionExportable(status)
 }
 
-export function assertionFilename(feature: string, runId: string): string {
-  return evaluationFilename(feature, runId)
-}
-
-export function assertionHref(runId: string): string {
-  return evaluationHref(runId)
-}
-
 export function evaluationFilename(feature: string, runId: string): string {
   return evaluationArchiveFilename(feature, runId)
 }

@@ -19,8 +19,6 @@ vi.mock('@/shared/api/agent-session-socket', () => ({
   connectAgentSessionStream: mocks.connectAgentSessionStream,
 }))
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 describe('StageActivityRail multi-session chronology', () => {
   let container: HTMLDivElement
   let root: Root

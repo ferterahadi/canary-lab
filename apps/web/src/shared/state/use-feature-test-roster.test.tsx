@@ -1,19 +1,19 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/internal'
 import type { FeatureSpecFile } from '../api/types'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useFeatureTestRoster } from './use-feature-test-roster'
 import { deferred } from '../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 const api = vi.hoisted(() => ({ getFeatureTests: vi.fn() }))
 vi.mock('../api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/config')>()),
   getFeatureTests: api.getFeatureTests,
 }))
 let root: Root
-let element: HTMLDivElement
 let value: ReturnType<typeof useFeatureTestRoster>
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']
 type Options = Parameters<typeof useFeatureTestRoster>[0]
@@ -25,10 +25,9 @@ const tick = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms))
 beforeEach(() => {
   vi.useFakeTimers()
   api.getFeatureTests.mockReset().mockResolvedValue(roster('current.spec.ts'))
-  element = document.createElement('div')
-  root = createRoot(element)
 })
-afterEach(() => { act(() => root.unmount()); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: false, onMount: (mounted) => ({ root } = mounted) })
 
 it('makes exactly three attempts one second apart for non-removal failures, then stops', async () => {
   api.getFeatureTests.mockRejectedValue(new Error('offline'))

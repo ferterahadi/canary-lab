@@ -158,6 +158,23 @@ export function resolveActiveServer(
   return byRecency.find((server) => !isUnderTempDir(server.projectRoot)) ?? byRecency[0]
 }
 
+/** Base URL of the UI server for ONE project root — what a thin CLI client
+ *  (`boot`, `flight`) talks to. The live record for this exact root wins, so
+ *  the client follows the port the running UI actually bound; without one, the
+ *  project's configured port (the server a fresh `ui` would bind). Unlike
+ *  `resolveActiveServer` there is no cwd or recency guess: a client acting on a
+ *  named workspace must never reach a different workspace's server. The config
+ *  read is injected so this module stays free of the server's config loader. */
+export function resolveServerBase(
+  projectRoot: string,
+  configPort: () => number,
+  opts: { homeDir?: string; isAlive?: IsAlive } = {},
+): string {
+  const resolved = path.resolve(projectRoot)
+  const live = readActiveServers(opts).find((server) => sameWorkspacePath(server.projectRoot, resolved))
+  return `http://127.0.0.1:${live ? live.port : configPort()}`
+}
+
 function isAtOrUnder(child: string, parent: string): boolean {
   const c = path.normalize(child)
   const p = path.normalize(parent)

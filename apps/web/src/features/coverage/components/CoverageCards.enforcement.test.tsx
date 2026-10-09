@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it } from 'vitest'
 import type { RequirementCoverage, RequirementEnforcement } from '@shared/coverage/types'
 import { RequirementCard, compareRequirements, verdictView } from './CoverageCards'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The time axis on a requirement row (D11). The four `EnforcementState` ids are the
 // derivation and stay verbatim on the agent surfaces; what a HUMAN reads is
@@ -15,16 +16,7 @@ import { RequirementCard, compareRequirements, verdictView } from './CoverageCar
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function rc(enforcement: RequirementEnforcement | undefined, extra: Partial<RequirementCoverage['requirement']> = {}): RequirementCoverage {
   return {

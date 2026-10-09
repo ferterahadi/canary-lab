@@ -1,7 +1,6 @@
-import { isExecutingPortifyStatus } from '@shared/portify-index'
+import { isExecutingPortifyStatus, type PortifyManifest } from '@shared/portify-index'
 import { useState } from 'react'
 import * as portifyApi from '@/shared/api/portify'
-import type { PortifyManifest } from '@/shared/api/portify'
 import { useInvalidation } from '@/shared/state/invalidation'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { usePortify } from '../state/PortifyContext'

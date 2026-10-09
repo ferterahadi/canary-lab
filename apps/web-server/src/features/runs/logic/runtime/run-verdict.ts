@@ -16,6 +16,7 @@ import { loadFeatures } from '../../../../shared/feature-loader'
 import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
 import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
+import { failedNames } from './summary-names'
 
 export interface SummaryShape extends ApplicabilitySummary {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
@@ -260,10 +261,7 @@ export function computeVerificationPlan(
 }
 
 export function extractFailedSlugs(summary: SummaryShape): string[] {
-  const failed = Array.isArray(summary.failed) ? summary.failed : []
-  return failed
-    .map((f) => (typeof f?.name === 'string' ? (f.name as string) : ''))
-    .filter((n) => n.length > 0)
+  return failedNames(summary)
 }
 
 export function extractFailedLocations(summary: SummaryShape): string[] {

@@ -1,7 +1,6 @@
 import { buildRunActionsResponse } from '../logic/run-actions'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
-import path from 'path'
 import type { RunStore } from '../logic/run-store'
 import {
   ExternalHealBroker,
@@ -11,7 +10,8 @@ import {
 import type { ExternalHealSessionStatus } from '../../../../../../shared/run-manifest'
 import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
 import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../logic/heal/external-heal-surface'
-import { runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { appendJsonLine } from '../../../shared/json-lines'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../shared/single-attempt'
 import {
   isActiveRunStatus,
@@ -330,8 +330,7 @@ export async function externalHealRoutes(
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
       if (!detail) return notFound(reply, 'run')
-      const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-      const auditPath = path.join(runDir, 'external-commands.jsonl')
+      const auditPath = buildRunPaths(runDirFor(deps.store.logsDir, req.params.runId)).externalCommandsPath
       if (!fs.existsSync(auditPath)) return { entries: [] }
       const raw = fs.readFileSync(auditPath, 'utf-8')
       const entries: ExternalHealAuditEntry[] = []
@@ -382,12 +381,7 @@ function hasText(value: unknown): value is string {
 export function makeExternalHealAuditLogger(logsDir: string) {
   return (runId: string, entry: ExternalHealAuditEntry): void => {
     try {
-      const runDir = runDirFor(logsDir, runId)
-      fs.mkdirSync(runDir, { recursive: true })
-      fs.appendFileSync(
-        path.join(runDir, 'external-commands.jsonl'),
-        JSON.stringify(entry) + '\n',
-      )
+      appendJsonLine(buildRunPaths(runDirFor(logsDir, runId)).externalCommandsPath, entry)
     } catch {
       // Best-effort; never let audit failures break the request.
     }

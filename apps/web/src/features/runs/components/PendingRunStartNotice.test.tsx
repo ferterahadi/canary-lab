@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RunStartRequest } from '@shared/test-review'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ getRunStartRequest: vi.fn(), cancelRunStartRequest: vi.fn() }))
 vi.mock('@/shared/api/runs', () => ({
@@ -26,15 +27,14 @@ function View() {
 }
 const mount = async () => { await act(async () => { root.render(<InvalidationProvider><View /></InvalidationProvider>) }) }
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.clearAllMocks()
   vi.useFakeTimers()
   request = { requestId: pending.requestId, feature: pending.feature, owner: { kind: 'internal' }, status: 'awaiting-review', version: 1, createdAt: 'now', updatedAt: 'now', review: { runId: 'source-run', revision: 'revision-1' } }
   api.getRunStartRequest.mockImplementation(async () => ({ ...request }))
   api.cancelRunStartRequest.mockImplementation(async () => { request = { ...request, version: 2, status: 'cancelled' }; return request })
-  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 const button = (text: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === text)!
 
 it('observes an internally resumed request without replaying start or depending on review-close events', async () => {

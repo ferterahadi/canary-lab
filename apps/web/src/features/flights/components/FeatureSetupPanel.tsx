@@ -12,7 +12,9 @@ import {
 import { STAGE_COLUMN } from './stage-meta'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { blurOnEnter } from '@/shared/ui/keyboard'
 import { asRecord } from '../lib/as-record'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 // ─── Feature Setup: the editable config digest (R43) ────────────────────────
 // The fields the user cares about at approval time, editable IN PLACE — every
@@ -45,7 +47,6 @@ export interface RepoBlock {
 export function FeatureSetupPanel({
   feature,
   editable,
-  refreshKey,
   awaiting,
   lockedTitle,
 }: {
@@ -55,12 +56,12 @@ export function FeatureSetupPanel({
   /** Why the controls are inert. Present keeps the normal edit controls in
    *  place and exposes the destination through their tooltip. */
   lockedTitle?: string
-  /** Bumped on features-changed so an Advanced-setup save shows here live. */
-  refreshKey?: number
   /** R83: the suite isn't on disk yet — hold the digest's place with its
    *  skeleton so the stage pane keeps the shape it will settle into. */
   awaiting?: AwaitingState
 }) {
+  // Bumped on features-changed so an Advanced-setup save shows here live.
+  const refreshKey = useInvalidationKey('repos')
   const configEditor = useImmediateConfig(feature, 'feature', refreshKey)
   const playwrightEditor = useImmediateConfig(feature, 'playwright', refreshKey)
   const config = configEditor.value
@@ -385,7 +386,7 @@ export function NameInput({ value, onSave, testId }: {
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
-      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      onKeyDown={blurOnEnter}
       spellCheck={false}
       className="cl-input w-full px-2 py-1 cl-type-data font-mono"
     />
@@ -450,7 +451,7 @@ export function SetupField({ label, value, editable, onSave, testId }: {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => { if (draft.trim() !== '' && draft !== value) onSave(draft) }}
-        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        onKeyDown={blurOnEnter}
         spellCheck={false}
         className="w-full rounded border bg-transparent px-2 py-1 cl-type-data outline-none border-line text-primary font-mono"
       />

@@ -12,7 +12,7 @@ import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-restore-')
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 let tmpDir: string
 

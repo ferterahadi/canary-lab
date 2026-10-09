@@ -7,9 +7,10 @@ import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
   ExternalStatusPill,
-  pillPalette,
+  agentJobTone,
   type PillPalette,
 } from '@/shared/ui/ExternalAgentCard'
+import { evaluationExportStatus } from '@/shared/lib/agent-job-status'
 
 // R29 (canary-first-flight): the standalone evaluation-export dialog is gone —
 // export progress/output renders WHERE the export lives: the flight detail's
@@ -130,11 +131,12 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
 }
 
 // status → pill label/palette. Sky (in-progress) / green (ready) / rose (failed),
-// reusing the shared status hues.
+// the agent-job hues every external panel shares.
 function exportStatusPill(status: EvaluationExportTaskView['status']): { label: string; palette: PillPalette } {
-  if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
-  if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
-  return { label: 'Exporting', palette: pillPalette('var(--accent)') }
+  const palette = agentJobTone(evaluationExportStatus(status))
+  if (status === 'completed') return { label: 'Ready', palette }
+  if (status === 'failed') return { label: 'Failed', palette }
+  return { label: 'Exporting', palette }
 }
 
 function exportBodyCopy(status: EvaluationExportTaskView['status']): string {

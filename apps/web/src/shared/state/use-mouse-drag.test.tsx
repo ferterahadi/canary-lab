@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import { useMouseDrag } from './use-mouse-drag'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let container: HTMLDivElement
 let root: Root
 let start: (origin: { x: number }) => void
@@ -13,12 +13,7 @@ function Harness({ onMove }: { onMove: (origin: { x: number }, event: MouseEvent
   start = drag.start
   return <div data-origin={drag.origin?.x ?? 'none'} />
 }
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
-})
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 const move = (x: number, buttons = 1) => document.dispatchEvent(new MouseEvent('mousemove', { clientX: x, buttons }))
 
 it('captures the origin synchronously and uses current callbacks without resetting a drag', () => {

@@ -7,7 +7,7 @@ import * as configApi from '../api/config'
 import { capitalizeFirst, shortTime } from '@/shared/lib/format'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { CopyField } from '@/shared/ui/CopyField'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret } from '@/shared/ui/Icons'
 import { displayError } from '@/shared/api/error-message'
 import { usePersistedFlag } from '@/shared/state/browser-storage'
 import { clampToViewport } from '@/shared/lib/viewport'
@@ -191,13 +191,7 @@ function McpConnectGuide({ healthy }: { healthy: boolean }) {
           <PlugIcon />
           Connect a client
         </span>
-        <span
-          aria-hidden="true"
-          className="transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={open} className="" />
       </button>
       {open && (
         <ol className="flex flex-col gap-2 px-3 pb-3 pt-0.5">

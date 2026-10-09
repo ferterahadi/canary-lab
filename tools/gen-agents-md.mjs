@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { REPO as repoRoot } from './lib/fs.mjs'
 
 // AGENTS.md is generated from CLAUDE.md so the two never drift. CLAUDE.md is the
 // single source of truth; this script reframes it for Codex (and any agent that
@@ -7,7 +8,6 @@ import path from 'node:path'
 // editing CLAUDE.md, or rely on the build (`npm run build`) to regenerate it.
 // `--check` exits non-zero if AGENTS.md is stale (used by smoke/verify).
 
-const repoRoot = path.resolve(import.meta.dirname, '..')
 const sourcePath = path.join(repoRoot, 'CLAUDE.md')
 const targetPath = path.join(repoRoot, 'AGENTS.md')
 

@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import type { RequirementCoverage, RequirementEnforcement, TestCoverage } from '@shared/coverage/types'
 import { GAP_META, RequirementCard, TestCard } from './CoverageCards'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // Both ledgers are one-line rows at rest. A requirement row is id · title · how
 // much is covered (one segment per path, or per path×variant cell) · a dot only
@@ -14,16 +15,7 @@ import { GAP_META, RequirementCard, TestCard } from './CoverageCards'
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 const PROVEN: RequirementEnforcement = {
   state: 'proven-unchanged',

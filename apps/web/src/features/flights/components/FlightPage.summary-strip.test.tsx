@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -89,11 +90,7 @@ vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: mocks.getRepoGitStatus,
   openEditor: mocks.openEditor,
 }))
-vi.mock('@/shared/api/internal', () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
-  },
-}))
+vi.mock('@/shared/api/internal', async () => (await import('./__fixtures__/flight-page-mocks')).apiInternalMock())
 
 // The agent timeline is its own tested component with live transports — stub it.
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
@@ -176,12 +173,11 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
   }
 })
 
-import { FlightPage } from './FlightPage'
+import { FlightPageHarness } from './__fixtures__/FlightPageHarness'
+import { manifest } from './__fixtures__/flight-page-part7-fixtures'
 import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -221,31 +217,8 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
-
-function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl_1',
-    feature: 'checkout',
-    repoPaths: ['/repo/shop'],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'scout',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
-}
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
@@ -266,7 +239,7 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
     root.render(
       <InvalidationProvider>
         <InvalidationTap />
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
+        <FlightPageHarness key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
       </InvalidationProvider>,
     )
   })

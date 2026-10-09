@@ -1,6 +1,6 @@
 import type { InjectOptions, LightMyRequestResponse } from 'fastify'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
-import type { GettingStartedRunWorkflow } from '../features/config/routes/onboarding'
+import type { GettingStartedRunWorkflow } from '../../../../shared/getting-started'
 import type { RepoUpdateRefusal } from '../features/runs/logic/runtime/repo-upstream-update'
 import { MCP_ORIGIN_HEADER } from '../features/flights/routes/flight-decision-origin'
 

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DirtySpecStore } from './store'
+import { DirtySpecStore, dirtySpecRecordPath } from './store'
 import * as detect from './detect'
 import { git } from '../../../../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
@@ -64,6 +64,13 @@ describe('DirtySpecStore', () => {
     )
     expect(onDisk.status).toBe('dirty')
     expect(onDisk.message).toContain('Tests have been modified')
+  })
+
+  it('names the record file the store writes, for readers that watch its bytes', async () => {
+    writeSpec(PASS)
+    await new DirtySpecStore(logsDir).captureRunStart('checkout', featureDir)
+    expect(dirtySpecRecordPath(logsDir, 'checkout')).toBe(path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json'))
+    expect(fs.existsSync(dirtySpecRecordPath(logsDir, 'checkout'))).toBe(true)
   })
 
   // Every emit becomes a `tests-dirty-changed` push and a full `/api/features`

@@ -1,10 +1,12 @@
 import { deriveRunCaptureState } from '@shared/run-capture-state'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { repositoryConsumerKey } from '@shared/repository-observation'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { RepairedRepoCard, useRepoOpener } from './RepairedRepoCard'
+import { advanceAct as advance } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let root: Root
 let host: HTMLDivElement
@@ -21,14 +23,13 @@ function Reader({ runId, enabled = true, provisional = false }: { runId: string;
   return <>{reader.confirm}<RepairedRepoCard {...reader.cardProps('app')} repoName="app" repo={repo} auto={false} provisional={provisional} canUseFinalCapture={finalCapture} onProposeClick={() => {}} /></>
 }
 const render = (runId = 'one', enabled = true, provisional = false) => act(async () => { root.render(<InvalidationProvider><Reader runId={runId} enabled={enabled} provisional={provisional} /></InvalidationProvider>) })
-const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 const open = () => host.querySelector<HTMLButtonElement>('[data-testid="changes-open-repo-app"]')!
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0); files = ['foreign.ts']
   fetcher.mockReset().mockImplementation(async () => reply()); vi.stubGlobal('fetch', fetcher)
-  host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
 })
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container: host, root } = mounted) })
 
 it('updates a mounted card and open confirmation through scoped events, reconnect and missed-event recovery', async () => {
   await render(); expect(fetcher).toHaveBeenCalledTimes(1)

@@ -5,6 +5,7 @@ import type { OnboardingSamples } from '@shared/getting-started'
 import type { FeatureTests } from './types'
 import type { ProjectConfigResponse } from '@shared/project-config'
 import type { AgentProbeSnapshotResponse } from '@shared/agent-probe'
+import type { ConfigValue } from '@shared/config-value'
 import { requestJson, ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions, runId?: string): Promise<FeatureTests> {
@@ -32,18 +33,6 @@ export function getFeatureConfig(name: string, opts?: ClientOptions): Promise<Fe
 }
 
 // ─── structured config editing ────────────────────────────────────────────
-
-/** A `$expr`-tagged object stands in for a non-literal expression
- *  (e.g. `__dirname`, `process.env.CI ? 2 : 1`). The UI treats these as
- *  read-only; the server round-trips them through the AST unchanged. */
-export type ConfigValue =
-  | null
-  | boolean
-  | number
-  | string
-  | { $expr: string }
-  | ConfigValue[]
-  | { [k: string]: ConfigValue }
 
 export interface ParsedConfigDoc {
   path: string

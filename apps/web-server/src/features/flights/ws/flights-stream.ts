@@ -2,7 +2,7 @@ import { isActiveFlightStatus } from '../../../../../../shared/flights/types'
 import type { FastifyInstance } from 'fastify'
 import type { FlightStore, FlightStoreEvent } from '../logic/store'
 import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
-import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
+import type { FlightsStreamFrame } from '../../../../../../shared/flights/index-entry'
 
 // `/ws/flights` — push channel for the flights list and the open flight detail,
 // mirroring ws/portify-stream.ts. On connect: one `snapshot` frame (the index,
@@ -22,11 +22,6 @@ import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/
 export interface FlightsStreamDeps {
   store: Pick<FlightStore, 'list' | 'get' | 'onEvent' | 'offEvent'>
 }
-
-export type FlightsStreamFrame =
-  | { type: 'snapshot'; flights: FlightIndexEntry[]; details: Record<string, FlightManifest> }
-  | { type: 'update'; flightId: string; manifest: FlightManifest }
-  | { type: 'removed'; flightId: string }
 
 export async function flightsStreamRoutes(
   app: FastifyInstance,

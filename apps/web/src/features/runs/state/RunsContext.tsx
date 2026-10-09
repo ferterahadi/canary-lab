@@ -4,7 +4,7 @@ import * as runsApi from '@/shared/api/runs'
 import * as verificationApi from '@/shared/api/verification'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import type { StageModelChoice } from '@shared/agent-models'
-import type { RunDetail } from '@shared/run-detail'
+import type { RunDetail, RunsStreamFrame } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import { deriveDisplayStatus } from '@shared/run-state'
 import {
@@ -22,7 +22,6 @@ import {
   initialRunsState,
   runsReducer,
   type RunsState,
-  type RunsStreamFrame,
 } from './runs-state'
 
 // Single React-side store for everything runs-related: the index list, the
@@ -414,7 +413,7 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
 // Drives the top-right runs control + its badge count.
 //
 // Memoized on `state.runs`, not recomputed per render: consumers put the
-// returned array in dep arrays (`useFeatureActivity` memoizes on it), and a
+// returned array in dep arrays (`useFeatureWorkState` memoizes on it), and a
 // fresh `.filter()` identity every render silently defeated every one of those
 // memos — the exact unstable-dep pattern behind the 3877ms workspace-load
 // incident.

@@ -3,9 +3,8 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { FlightIndexEntry } from '@shared/flights/types'
-import { FlightsPill } from './FlightsPill'
+import { FlightsPillHarness } from './__fixtures__/FlightsPillHarness'
 vi.mock('@/shared/state/use-live-coverage', () => ({ useLiveCoverageStates: () => ({ value: [], confirmed: true }) }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 it('uses the server assessment for the count and destination, and clears it without closing the picker', async () => {
   const container = document.createElement('div')
@@ -17,7 +16,7 @@ it('uses the server assessment for the count and destination, and clears it with
     status: 'paused', pauseReason: 'stage-failed', currentStage: 'specs-coverage',
     attention: { state: 'actionable', stage: 'specs-coverage', title: 'Flight paused', reason: 'Below target', checkedAt: 'now', revision: 'a' },
   }
-  const render = async (flight: FlightIndexEntry) => act(async () => root.render(<FlightsPill flights={[flight]} open onOpenFlight={onOpenFlight} />))
+  const render = async (flight: FlightIndexEntry) => act(async () => root.render(<FlightsPillHarness flights={[flight]} open onOpenFlight={onOpenFlight} />))
   try {
     await render(entry)
     const picker = document.querySelector('[data-testid="flights-task-menu"]')

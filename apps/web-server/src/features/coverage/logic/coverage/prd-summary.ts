@@ -1,10 +1,9 @@
 import { runCoverageAgentAttempts, type CoverageAgentSession, type CoverageAgentRunOptions, type CoverageAgentRunner } from './coverage-agent-attempts'
 import path from 'path'
-import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentsFor } from '../../../runs/pick-heal-agent'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import type { PerAgentStageChoices } from '../../../../../../../shared/agent-models'
 import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
-import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import type { PrdSummary, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type DocsCollection } from './docs-collection'
@@ -102,7 +101,7 @@ export function buildPrdSummaryPrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: SummarizeAdapter): HealAgent[] {
-  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
+  return resolveAgentsFor(adapter)
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: CoverageAgentRunOptions): Promise<string> {

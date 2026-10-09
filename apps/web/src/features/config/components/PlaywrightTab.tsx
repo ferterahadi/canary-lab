@@ -1,5 +1,6 @@
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { Section } from '@/shared/ui/atoms'
 import { ComplexValueBadge, FieldRow, NumberInput, Select, Toggle } from '@/shared/ui/FormFields'
 import {
@@ -8,6 +9,7 @@ import {
 } from '@shared/configs/playwright-modes'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 interface Slice {
   fullyParallel?: boolean
@@ -89,8 +91,8 @@ export function PlaywrightTab({ feature }: { feature: string }) {
     save: (payload) => configApi.putPlaywrightConfig(feature, payload as ConfigValue),
   })
 
-  if (ed.error && !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
-  if (ed.loading || !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+  if (ed.error && !ed.draft) return <ConfigLoadGuard error={ed.error} />
+  if (ed.loading || !ed.draft) return <ConfigLoadGuard />
 
   const numberOrExprField = (
     label: string,

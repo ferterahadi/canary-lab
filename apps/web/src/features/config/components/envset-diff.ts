@@ -1,8 +1,8 @@
+import type { KvEntry } from '@shared/lib/dotenv-edit'
+
 export const NEW_ENV_SENTINEL = '__new_env__'
 
 export const NEW_SLOT_SENTINEL = '__new_slot__'
-
-export interface KvEntry { key: string; value: string }
 
 export function stripFeaturePrefix(slot: string, feature: string): string {
   return slot.startsWith(`${feature}.`) ? slot.slice(feature.length + 1) : slot

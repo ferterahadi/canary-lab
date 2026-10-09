@@ -4,21 +4,18 @@ import fs from 'fs'
 
 import path from 'path'
 
-import Fastify, { type FastifyInstance } from 'fastify'
-
-import { flightsRoutes } from './flights'
+import type { FastifyInstance } from 'fastify'
 
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 
 import type { StageAdapters } from '../logic/flight-stages'
-
-import type { FlightAgentSpawner } from '../logic/stages/context'
 
 import { issueCheckpointInput } from '../logic/checkpoint-input'
 
 import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { buildFlightsApp, waitForFlightStatus } from './__fixtures__/flights-app'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-flight-routes-')
@@ -28,23 +25,6 @@ let tmpDir: string
 let repoDir: string
 
 let app: FastifyInstance
-
-async function buildApp(
-  adapters: StageAdapters,
-  flightStore?: FlightStore,
-  planAgent?: FlightAgentSpawner,
-): Promise<FastifyInstance> {
-  const instance = Fastify({ logger: false })
-  await instance.register(flightsRoutes, {
-    featuresDir: path.join(tmpDir, 'features'),
-    logsDir: tmpDir,
-    projectRoot: tmpDir,
-    adapters,
-    ...(flightStore ? { flightStore } : {}),
-    ...(planAgent ? { planAgent } : {}),
-  })
-  return instance
-}
 
 /** A store stub whose `get` throws a non-Error value, so error handlers that
  *  branch on `err instanceof Error` take the `String(err)` fallback path. */
@@ -97,17 +77,6 @@ const startBody = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3000): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const resp = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
-    const manifest = resp.json() as Record<string, unknown>
-    if (statuses.includes(String(manifest.status))) return manifest
-    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
 describe('flights routes', () => {
   it('allows a URL-invited human response only for the reviewed external checkpoint', async () => {
     const adapters = allDoneAdapters()
@@ -117,10 +86,10 @@ describe('flights routes', () => {
       onCheckpointResponse: async () => ({ kind: 'done' }),
     }
     const store = new FlightRunStore(tmpDir)
-    app = await buildApp(adapters, store)
+    app = await buildFlightsApp(tmpDir, adapters, store)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ stageProducer: 'external' }) })
     const flightId = started.json().flightId as string
-    await waitForStatus(flightId, ['waiting-for-approval'])
+    await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
     const manifest = store.get(flightId)!
     const token = issueCheckpointInput(manifest)
     const url = `/api/flights/${flightId}/respond`
@@ -139,10 +108,10 @@ describe('flights routes', () => {
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
       onCheckpointResponse: async () => ({ kind: 'done' as const }),
     }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['waiting-for-approval'])
+    await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
 
     const bad = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/respond`, body: {} })
     expect(bad.statusCode).toBe(400)
@@ -153,7 +122,7 @@ describe('flights routes', () => {
       body: { response: { choice: 'approve' } },
     })
     expect(responded.statusCode).toBe(200)
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const again = await app.inject({
       method: 'POST',
@@ -174,10 +143,10 @@ describe('flights routes', () => {
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
       onCheckpointResponse: async () => ({ kind: 'done' as const }),
     }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['waiting-for-approval'])
+    await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
 
     expect((await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })).statusCode).toBe(200)
     const late = await app.inject({
@@ -190,10 +159,10 @@ describe('flights routes', () => {
   })
 
   it('R78: POST /autopilot flips the preference on a settled flight; a non-boolean body is a 400', async () => {
-    app = await buildApp(allDoneAdapters())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const off = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/autopilot`, body: { autopilot: false } })
     expect(off.statusCode).toBe(200)
@@ -213,15 +182,15 @@ describe('flights routes', () => {
       teardown: () => null,
       run: async () => (fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }),
     }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['paused'])
+    await waitForFlightStatus(app, flightId, ['paused'])
 
     fail = false
     const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
     expect(resumed.statusCode).toBe(200)
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const reResumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
     expect(reResumed.statusCode).toBe(409)
@@ -245,10 +214,10 @@ describe('flights routes', () => {
           ? { kind: 'failed', error: 'portify start rejected (409): repo "r" has uncommitted changes — commit or stash them first' }
           : { kind: 'done' },
     }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['paused'])
+    await waitForFlightStatus(app, flightId, ['paused'])
 
     const listed = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })
     expect(listed.statusCode).toBe(200)
@@ -262,7 +231,7 @@ describe('flights routes', () => {
     fail = false
     const applied = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/remedy`, body: { action: 'stash' } })
     expect(applied.statusCode).toBe(200)
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
     expect(git(repoDir, 'status', '--porcelain')).toBe('')
     expect(git(repoDir, 'stash', 'list')).toContain('canary-lab: pre-flight stash')
 
@@ -274,10 +243,10 @@ describe('flights routes', () => {
   it('remedy: null for a non-matching failure and 409 on apply', async () => {
     const adapters = allDoneAdapters()
     adapters.docs = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'no docs' }) }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['paused'])
+    await waitForFlightStatus(app, flightId, ['paused'])
 
     const listed = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })
     expect((listed.json() as { remedy: unknown }).remedy).toBeNull()
@@ -286,7 +255,7 @@ describe('flights routes', () => {
   })
 
   it('404s respond and abort for an unknown flight (real "not found" Error)', async () => {
-    app = await buildApp(allDoneAdapters())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const respond = await app.inject({
       method: 'POST',
       url: '/api/flights/fl_nope/respond',
@@ -301,7 +270,7 @@ describe('flights routes', () => {
   })
 
   it('falls back to String(err) when respond/resume/abort throw a non-Error', async () => {
-    app = await buildApp(allDoneAdapters(), throwingStore('boom'))
+    app = await buildFlightsApp(tmpDir, allDoneAdapters(), throwingStore('boom'))
 
     const respond = await app.inject({
       method: 'POST',
@@ -346,7 +315,7 @@ describe('flights routes', () => {
       stages: [{ key: 'scout', status: 'failed', error: 'repo has uncommitted changes' }],
     } as unknown as FlightManifest
     const store: FlightStore = { ...throwingStore('unused'), get: () => manifest, save: () => { throw 'resume exploded' } }
-    app = await buildApp(allDoneAdapters(), store)
+    app = await buildFlightsApp(tmpDir, allDoneAdapters(), store)
 
     const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_x/remedy', body: { action: 'stash' } })
 
@@ -355,7 +324,7 @@ describe('flights routes', () => {
   })
 
   it('404s a redo for an unknown flight (real "not found" Error)', async () => {
-    app = await buildApp(allDoneAdapters())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/redo' })
     expect(resp.statusCode).toBe(404)
     expect(resp.json()).toMatchObject({ error: 'flight not found: fl_nope' })
@@ -364,10 +333,10 @@ describe('flights routes', () => {
   it('400s a redo that jumps to a stage whose prerequisite is missing', async () => {
     // The jump is rejected by the same validator the start route uses, and the
     // dialog switches on `type` to show the prerequisite instead of a raw error.
-    app = await buildApp(allDoneAdapters())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     const resp = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo`, body: { fromStage: 'evaluation-export' } })
 
@@ -378,7 +347,7 @@ describe('flights routes', () => {
 
   describe('agent-session', () => {
     it('400s when the stage query is missing or malformed', async () => {
-      app = await buildApp(allDoneAdapters())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters())
       const missing = await app.inject({ method: 'GET', url: '/api/flights/fl_x/agent-session' })
       expect(missing.statusCode).toBe(400)
 
@@ -390,7 +359,7 @@ describe('flights routes', () => {
     })
 
     it('404s when no agent-session ref exists for the stage', async () => {
-      app = await buildApp(allDoneAdapters())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters())
       const resp = await app.inject({ method: 'GET', url: '/api/flights/fl_x/agent-session?stage=scout' })
       expect(resp.statusCode).toBe(404)
       expect(resp.json()).toEqual({ reason: 'no-session' })
@@ -398,7 +367,7 @@ describe('flights routes', () => {
 
     it('returns the agent session when a ref is on disk', async () => {
       const store = new FlightRunStore(tmpDir)
-      app = await buildApp(allDoneAdapters(), store)
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), store)
       const stageDir = path.join(store.flightDir('fl_x'), 'scout')
       fs.mkdirSync(stageDir, { recursive: true })
       const logPath = path.join(stageDir, 'session.jsonl')
@@ -448,14 +417,14 @@ describe('flights routes', () => {
       ['autopilot', { method: 'POST' as const, url: '/api/flights/fl_x/autopilot', body: { autopilot: false } }],
       ['redo', { method: 'POST' as const, url: '/api/flights/fl_x/redo' }],
     ])('409s a browser %s', async (_name, req) => {
-      app = await buildApp(allDoneAdapters(), external())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), external())
       const resp = await app.inject(req)
       expect(resp.statusCode).toBe(409)
       expect(resp.json()).toMatchObject({ type: 'flight_externally_driven' })
     })
 
     it('lets the MCP client resume the same flight', async () => {
-      app = await buildApp(allDoneAdapters(), external())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), external())
       const resp = await app.inject({
         method: 'POST',
         url: '/api/flights/fl_x/resume',
@@ -467,7 +436,7 @@ describe('flights routes', () => {
     // Abort is the escape hatch when the driving client has gone away, and the
     // read routes were never in question — a viewer has to be able to view.
     it('leaves abort and the read routes open to the browser', async () => {
-      app = await buildApp(allDoneAdapters(), external())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), external())
       expect((await app.inject({ method: 'GET', url: '/api/flights/fl_x' })).statusCode).toBe(200)
       expect((await app.inject({ method: 'POST', url: '/api/flights/fl_x/abort' })).statusCode).toBe(200)
     })
@@ -501,13 +470,13 @@ describe('flights routes', () => {
         body: startBody({ stageProducer: 'external' }),
       })
       const flightId = (started.json() as { flightId: string }).flightId
-      await waitForStatus(flightId, ['waiting-for-approval'])
+      await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
       return flightId
     }
 
     it('requests a cooperative takeover, rejects submit, then starts internally after release', async () => {
       const store = new FlightRunStore(tmpDir)
-      app = await buildApp(handOffAdapters(), store)
+      app = await buildFlightsApp(tmpDir, handOffAdapters(), store)
       const flightId = await startExternalHandOff()
 
       const requested = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/takeover/request` })
@@ -556,13 +525,13 @@ describe('flights routes', () => {
         body: { response: { choice: 'run-internally' } },
       })
       expect(released.statusCode).toBe(200)
-      const done = await waitForStatus(flightId, ['done']) as unknown as FlightManifest
+      const done = await waitForFlightStatus(app, flightId, ['done']) as unknown as FlightManifest
       expect(done.stages.find((stage) => stage.key === 'scout')?.log)
         .toContain('The external agent released this step — Canary is taking over')
     })
 
     it('forces only a requested takeover and records the unsafe hand-off', async () => {
-      app = await buildApp(handOffAdapters())
+      app = await buildFlightsApp(tmpDir, handOffAdapters())
       const flightId = await startExternalHandOff()
 
       expect((await app.inject({
@@ -579,16 +548,16 @@ describe('flights routes', () => {
         method: 'POST', url: `/api/flights/${flightId}/takeover/force`, body: { confirm: true },
       })
       expect(forced.statusCode).toBe(200)
-      const done = await waitForStatus(flightId, ['done']) as unknown as FlightManifest
+      const done = await waitForFlightStatus(app, flightId, ['done']) as unknown as FlightManifest
       expect(done.stages.find((stage) => stage.key === 'scout')?.log)
         .toContain('User forced takeover — Canary is starting this step here')
     })
 
     it('rejects takeover when there is no external work hand-off', async () => {
-      app = await buildApp(allDoneAdapters())
+      app = await buildFlightsApp(tmpDir, allDoneAdapters())
       const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
       const flightId = (started.json() as { flightId: string }).flightId
-      await waitForStatus(flightId, ['done'])
+      await waitForFlightStatus(app, flightId, ['done'])
       const settled = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/takeover/request` })
       expect(settled.statusCode).toBe(409)
       expect(settled.json()).toMatchObject({ type: 'flight_takeover_unavailable' })
@@ -616,7 +585,7 @@ describe('flights routes', () => {
         createdAt: '2026-08-25T00:00:00.000Z',
         updatedAt: '2026-08-25T00:00:00.000Z',
       } as FlightManifest)
-      app = await buildApp(allDoneAdapters(), store)
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), store)
       const response = await app.inject({
         method: 'POST', url: '/api/flights/fl_malformed/takeover/request',
       })
@@ -625,7 +594,7 @@ describe('flights routes', () => {
     })
 
     it('maps non-Error takeover store failures on both routes', async () => {
-      app = await buildApp(allDoneAdapters(), throwingStore('takeover store failed'))
+      app = await buildFlightsApp(tmpDir, allDoneAdapters(), throwingStore('takeover store failed'))
       const requested = await app.inject({
         method: 'POST', url: '/api/flights/fl_x/takeover/request',
       })

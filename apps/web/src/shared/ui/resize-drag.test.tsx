@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ResizablePanels } from './ResizablePanels'
 import { VerticalSplit } from './VerticalSplit'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
@@ -17,17 +16,13 @@ beforeEach(() => {
     observe(): void {}
     disconnect(): void {}
   })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('tracks horizontal dragging immediately and saves the final widths once', () => {
   const setItem = vi.spyOn(window.localStorage, 'setItem')

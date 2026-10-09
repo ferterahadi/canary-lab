@@ -28,6 +28,7 @@ import path from 'path'
 import { applyAgentSessionMetaLine, parseAgentSessionLine } from './agent-session-parse'
 import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, safeMtimeMs } from './agent-session-paths'
 import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { isAgentKind } from './agent-binary'
 
 export type AgentKind = 'claude' | 'codex'
 
@@ -61,7 +62,7 @@ export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | nul
   }
 
   const out: AgentSessionRefFile = { sessions: {} }
-  if (obj.activeAgent === 'claude' || obj.activeAgent === 'codex') {
+  if (isAgentKind(obj.activeAgent)) {
     out.activeAgent = obj.activeAgent
   }
   if (obj.sessions && typeof obj.sessions === 'object') {
@@ -83,7 +84,7 @@ export function selectAgentSessionRef(file: AgentSessionRefFile, preferredAgent?
 function normalizeAgentSessionRef(value: unknown): AgentSessionRef | null {
   if (!value || typeof value !== 'object') return null
   const ref = value as { agent?: unknown; sessionId?: unknown; logPath?: unknown }
-  if (ref.agent !== 'claude' && ref.agent !== 'codex') return null
+  if (!isAgentKind(ref.agent)) return null
   if (typeof ref.sessionId !== 'string' || typeof ref.logPath !== 'string') return null
   return { agent: ref.agent, sessionId: ref.sessionId, logPath: ref.logPath }
 }

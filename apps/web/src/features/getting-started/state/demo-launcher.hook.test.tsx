@@ -8,8 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DemoLauncher } from './demo-launcher'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 // The derivation (`deriveDemoAvailability`, `demoFlightLaunch`, the seen flag) is
 // covered against the real rules in demo-launcher.test.ts. This suite owns what
 // the hook adds: three fetches, the fallback poll, the invalidation-keyed

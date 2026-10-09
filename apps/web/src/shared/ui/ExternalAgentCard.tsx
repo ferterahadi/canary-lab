@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useOpenAgentApp } from '@/shared/state/use-open-agent-app'
 import { BrandMark, clientTint, clientKindToDesktopAgent, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { AGENT_JOB_COLOR, type AgentJobStatus } from '@/shared/lib/agent-job-status'
 
 // The shared shell for every "an external MCP client is driving this in its own
 // window" surface — external heal, draft authoring, port-ification, and coverage
@@ -24,6 +25,12 @@ export function pillPalette(color: string): PillPalette {
     bg: `color-mix(in srgb, ${color} 12%, transparent)`,
     border: `color-mix(in srgb, ${color} 40%, transparent)`,
   }
+}
+
+/** The pill palette for an agent job's lifecycle — normalize the job's own
+ *  status with one of the `agent-job-status` mappers first. */
+export function agentJobTone(status: AgentJobStatus): PillPalette {
+  return pillPalette(AGENT_JOB_COLOR[status])
 }
 
 export function ExternalStatusPill({ label, palette }: { label: string; palette: PillPalette }) {

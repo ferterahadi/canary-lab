@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as portifyApi from '@/shared/api/portify'
 import * as benchmarkApi from '@/shared/api/benchmark'
 import * as runsApi from '@/shared/api/runs'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import type { RunDetail } from '@shared/run-detail'
-import type { BenchmarkManifest } from '@/features/benchmark/api/benchmark-types'
+import type { BenchmarkManifest } from '@shared/benchmark-index'
 import { PortifyProvider, usePortify } from '@/features/portify/state/PortifyContext'
 import { BenchmarkProvider, useBenchmarks } from '@/features/benchmark/state/BenchmarkContext'
 import { RunsProvider, useRuns, useRun } from '@/features/runs/state/RunsContext'
@@ -25,7 +25,6 @@ vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
   getRunDetail: vi.fn(),
 }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 class Socket {
   static instances: Socket[] = []
   readyState = 0

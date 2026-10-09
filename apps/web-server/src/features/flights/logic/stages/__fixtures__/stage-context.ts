@@ -1,6 +1,9 @@
+import fs from 'fs'
 import path from 'path'
-import type { FlightManifest, FlightStage, FlightStageKey } from '../../../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../../../../../../../../shared/flights/types'
 import type { StageContext } from '../../flight-stages'
+import type { FlightStageDeps } from '../context'
+import { fakeFlightInject } from './flight-inject'
 
 // One StageContext test double for every stage suite.
 //
@@ -97,5 +100,56 @@ export function flightStageCtx(m: FlightManifest, opts: FlightStageCtxOptions): 
     }),
     current: () => state.m,
     setStage,
+  }
+}
+
+export interface StageDirs {
+  tmpDir: string
+  featuresDir: string
+  logsDir: string
+  repoDir: string
+}
+
+/** The workspace a stage suite runs in, laid out under one temp root: the
+ *  features and logs directories, and a product repo beside them. All three
+ *  exist on return. */
+export function stageDirs(tmpDir: string): StageDirs {
+  const featuresDir = path.join(tmpDir, 'features')
+  const logsDir = path.join(tmpDir, 'logs')
+  const repoDir = path.join(tmpDir, 'product-repo')
+  fs.mkdirSync(featuresDir, { recursive: true })
+  fs.mkdirSync(logsDir, { recursive: true })
+  fs.mkdirSync(repoDir, { recursive: true })
+  return { tmpDir, featuresDir, logsDir, repoDir }
+}
+
+/** Stage deps over that workspace. `inject` answers nothing, so a stage that
+ *  calls an endpoint its suite did not stub gets a 500 naming it. */
+export function stageDeps(
+  base: Pick<FlightStageDeps, 'featuresDir' | 'logsDir' | 'projectRoot'>,
+  over: Partial<FlightStageDeps> = {},
+): FlightStageDeps {
+  return {
+    ...base,
+    inject: fakeFlightInject(() => undefined),
+    ...over,
+  }
+}
+
+/** A running flight for the `checkout` feature over `repoDir`, every stage
+ *  pending, at a fixed time. */
+export function stageManifest(repoDir: string, over: Partial<FlightManifest> = {}): FlightManifest {
+  return {
+    flightId: 'fl-test',
+    feature: 'checkout',
+    repoPaths: [repoDir],
+    description: 'checkout flow',
+    opts: { env: 'local', coverageTarget: 100, yolo: false },
+    status: 'running',
+    currentStage: 'similarity',
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...over,
   }
 }

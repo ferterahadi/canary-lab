@@ -6,7 +6,7 @@ import { PortifyRunStore } from './store'
 import { buildPortifyPaths, portifyDir } from './paths'
 import { createBranchAndWorktree } from './git-ops'
 import { reclaimOrphanedPortify } from './reclaim'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 

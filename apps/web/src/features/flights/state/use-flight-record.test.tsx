@@ -1,10 +1,12 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
 import type { FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useFlightRecord } from './use-flight-record'
+import { advanceAct as advance } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ getFlight: vi.fn() }))
 vi.mock('@/shared/api/flights', async (importOriginal) => ({
@@ -22,12 +24,11 @@ function Reader({ id, live, missing = false }: { id: string | null; live?: Fligh
   return <div>{record.missing ? 'Deleted' : record.manifest?.status}</div>
 }
 const render = (props: Parameters<typeof Reader>[0]) => act(async () => { root.render(<InvalidationProvider><Reader {...props} /></InvalidationProvider>) })
-const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0); api.getFlight.mockReset().mockResolvedValue(manifest())
-  host = document.createElement('div'); root = createRoot(host)
 })
-afterEach(() => { act(() => root.unmount()); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: false, onMount: (mounted) => ({ container: host, root } = mounted) })
 
 it('uses pushes immediately, avoids duplicate reads, and retires a removed record without retaining its REST snapshot', async () => {
   await render({ id: 'one' }); expect(record.manifest?.status).toBe('running')

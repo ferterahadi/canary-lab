@@ -8,8 +8,6 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 const paneTerminalState = vi.hoisted(() => ({
   props: [] as Array<{ paneId?: string; onExit?: (code: number) => void }>,
 }))

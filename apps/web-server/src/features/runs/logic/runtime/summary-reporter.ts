@@ -12,6 +12,8 @@ import { enrichSummaryWithLogs, stripAnsi } from './log-enrichment'
 import { classifyJournalOutcome, updateLatestPendingJournalOutcome } from './heal-journal'
 import { writeHealIndex } from './heal-index'
 import { getSummaryPath } from './paths'
+import { buildRunPaths } from './run-paths'
+import { appendJsonLine } from '../../../../shared/json-lines'
 import { extractTraceSummary } from './trace-enrichment'
 import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
 import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
@@ -494,10 +496,7 @@ class SummaryReporter implements Reporter {
   }
 
   private writePlaybackEvent(event: PlaybackEvent): void {
-    const summaryPath = getSummaryPath()
-    const eventPath = path.join(path.dirname(summaryPath), 'playwright-events.jsonl')
-    fs.mkdirSync(path.dirname(eventPath), { recursive: true })
-    fs.appendFileSync(eventPath, JSON.stringify(event) + '\n')
+    appendJsonLine(buildRunPaths(path.dirname(getSummaryPath())).playwrightEventsPath, event)
   }
 
   private reconcileJournalOutcome(): void {

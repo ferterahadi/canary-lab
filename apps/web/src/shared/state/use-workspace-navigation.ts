@@ -54,6 +54,9 @@ export interface WorkspaceNavigation {
   reviewFocus?: ReviewFocus
   setReviewFocus: (focus: ReviewFocus | undefined) => void
   specReviewOpen: boolean
+  /** Open the changed-tests review. The focus is always rewritten, so an open
+   *  without one lands on the overview rather than a file a previous open named. */
+  openReview: (focus?: ReviewFocus) => void
   approval: string | null
   setApproval: (id: string | null) => void
   notificationsOpen: boolean
@@ -174,6 +177,10 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [bootFailureFor, setBootFailureFor] = useState<string | null>(SEED.bootFailureFor)
   const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
+  const openReview = useCallback((focus?: ReviewFocus) => {
+    setReviewFocus(focus)
+    setSpecReviewOpen(true)
+  }, [])
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
@@ -333,6 +340,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     runTab,
     reviewFocus,
     setReviewFocus,
+    openReview,
     routedDialog: dialog,
     setView,
     setSelectedFeature,

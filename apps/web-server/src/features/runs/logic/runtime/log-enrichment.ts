@@ -8,6 +8,7 @@ import { compressLogByTemplate } from './log-template'
 import { writeHealIndex } from './heal-index'
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
+import { formatSize } from '../../../../../../../shared/lib/format-units'
 
 // Cap each per-test slice at head + tail to keep per-failure files readable in
 // a single Read tool call. Errors are almost always near the end of the window,
@@ -368,12 +369,6 @@ export function truncateOneLine(s: string, max = 200): string {
 
 // Human-readable byte size for the heal-index, so the agent can judge at a
 // glance whether a log fits in one Read or needs grepping.
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
 // Render the slice bullet(s) for one failed entry. Prefers the rich sliceMeta
 // (size + source-log path + cap state) so the agent knows up-front whether the
 // slice is complete; falls back to the bare path list for callers/summaries
@@ -382,8 +377,8 @@ export function renderSliceLines(entry: FailedEntry): string[] {
   if (entry.sliceMeta && entry.sliceMeta.length > 0) {
     return entry.sliceMeta.map((m) =>
       m.capped
-        ? `  - slice: ${m.path} (${fmtBytes(m.bytes)}, capped from a ${fmtBytes(m.windowBytes)} window) — middle elided; full service log ${m.fullLog} (${fmtBytes(m.fullLogBytes)}), grep \`<${entry.name}>\`…\`</${entry.name}>\` if head+tail isn't enough`
-        : `  - slice: ${m.path} (${fmtBytes(m.bytes)})`,
+        ? `  - slice: ${m.path} (${formatSize(m.bytes)}, capped from a ${formatSize(m.windowBytes)} window) — middle elided; full service log ${m.fullLog} (${formatSize(m.fullLogBytes)}), grep \`<${entry.name}>\`…\`</${entry.name}>\` if head+tail isn't enough`
+        : `  - slice: ${m.path} (${formatSize(m.bytes)})`,
     )
   }
   if (entry.logFiles && entry.logFiles.length > 0) {

@@ -10,7 +10,7 @@ import {
 } from './runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import type { RunIndexEntry } from '../../../../../../shared/run-index'
-import { runDirFor } from './runtime/run-paths'
+import { runDirFor, runManifestPath } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 import {
   isActiveRunStatus,
@@ -57,7 +57,7 @@ export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexE
  *  envset rather than silently reading as "no envset". */
 function fillIndexProvenance(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
   if (entry.healCycles !== undefined && entry.healMode !== undefined && entry.env !== undefined) return entry
-  const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(logsDir, entry.runId)))
   if (!manifest) return entry
   return {
     ...entry,
@@ -85,7 +85,7 @@ export function renameRunFeature(logsDir: string, from: string, to: string): num
     entries.map((e) => (e.feature === from ? { ...e, feature: to } : e)),
   )
   for (const entry of matching) {
-    const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
+    const manifestPath = runManifestPath(runDirFor(logsDir, entry.runId))
     if (!fs.existsSync(manifestPath)) continue
     updateManifest(manifestPath, { feature: to })
   }

@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { FlightManifest, FlightStage } from '@shared/flights/types'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useStageBandData } from './use-stage-band-data'
 import { stageFacts, type StageBandData } from './StageFacts'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({ config: vi.fn(), detail: vi.fn(), runs: vi.fn() }))
 vi.mock('@/shared/api/config', () => ({ getFeatureConfigDoc: mocks.config }))
@@ -38,15 +39,11 @@ beforeEach(() => {
   mocks.config.mockResolvedValue(config())
   mocks.runs.mockResolvedValue([])
   mocks.detail.mockResolvedValue({ runId: 'ordinary', manifest: { services: [], status: 'passed' } })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('uses the nested proof reference rather than searching for a dedicated boot run', async () => {
   await render(capture('ordinary'))

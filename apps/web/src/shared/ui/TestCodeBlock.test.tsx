@@ -1,24 +1,21 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShikiCode } from './TestCodeBlock'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const highlighter = vi.hoisted(() => ({ load: vi.fn() }))
 vi.mock('./code-highlighter', () => ({ getCodeHighlighter: highlighter.load, codeThemeFor: () => 'test' }))
 const openEditor = vi.hoisted(() => vi.fn().mockResolvedValue({}))
 vi.mock('../api/workspace', () => ({ openEditor }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let root: Root
 let container: HTMLDivElement
 beforeEach(() => {
   highlighter.load.mockReset()
   openEditor.mockClear()
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 const escapedHighlighter = {
   codeToHtml: (source: string) => `<pre><code>${source.split('\n').map((line) => `<span class="line">${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>`).join('\n')}</code></pre>`,

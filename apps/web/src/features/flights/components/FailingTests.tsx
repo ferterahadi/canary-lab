@@ -3,8 +3,10 @@ import { findSummaryTest } from '@shared/summary-test-identity'
 import { playbackCaseKey } from '@shared/playback-identity'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { shortSourceLocation } from '@shared/lib/source-location'
+import { formatMs } from '@shared/lib/format-units'
 import type { RunSummary, RunSummaryFailedEntry } from '@shared/run-detail'
 import { HERO_ROW } from './stage-meta'
+import { PATH_DESC } from '@/features/coverage/components/CoverageCards'
 
 // The failing tests, rendered as evidence instead of a list of truncated slugs.
 //
@@ -44,8 +46,6 @@ interface ParsedFailure {
   /** Absolute path + line, for the tooltip and Open-in-editor. */
   fullLoc?: string
 }
-
-const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
 
 /** How many failures the summary shows before handing off. A run with 12
  *  failures rendered 12 two-line rows, which made this band four times taller
@@ -246,8 +246,4 @@ function deslug(name: string): string {
     rest = rest.slice(m[0].length)
   }
   return [...tags, rest.replace(/-/g, ' ')].join(' ').trim()
-}
-
-function formatMs(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }

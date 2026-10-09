@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { newTaskId } from '../../../../../shared/task-id'
 import type { CoverageJobKind, CoverageJobManifest } from '../../../../../../../../shared/coverage/types'
 import type { CoverageJobStore } from './store'
 
@@ -25,7 +25,7 @@ export function createCoverageJobManifest(
 ): InitialCoverageJob {
   const { newJobId, now } = deps
   return {
-    jobId: newJobId ? newJobId() : `cj_${crypto.randomBytes(6).toString('hex')}`,
+    jobId: newJobId ? newJobId() : newTaskId('cj'),
     feature: args.feature,
     kind: args.kind,
     status: 'running',

@@ -8,7 +8,7 @@ import {
   writeRunsIndex,
 } from './runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
-import { runDirFor, runsRoot } from './runtime/run-paths'
+import { runDirFor, runManifestPath, runsRoot } from './runtime/run-paths'
 import { FileRunStateSink } from './runtime/run-state-sink'
 import {
   HEARTBEAT_STALE_MS,
@@ -42,7 +42,7 @@ export async function reapStaleRuns(
 
   for (const entry of all) {
     if (!isUnsettledRunStatus(entry.status)) continue
-    const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
+    const manifestPath = runManifestPath(runDirFor(logsDir, entry.runId))
     const manifest = readManifest(manifestPath)
     if (!manifest) {
       // Unsettled index entry with no readable manifest. A live run always writes

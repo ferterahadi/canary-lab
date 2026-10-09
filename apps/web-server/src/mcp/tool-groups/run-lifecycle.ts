@@ -5,7 +5,7 @@
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
-import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-counts'
+import { normalizeRunCounts } from '../../../../../shared/run-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import {

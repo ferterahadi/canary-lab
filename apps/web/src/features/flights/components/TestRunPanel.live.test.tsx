@@ -9,7 +9,6 @@ import { RunsProvider, useRuns } from '@/features/runs/state/RunsContext'
 import { featureTestRuns } from '@/shared/lib/feature-test-runs'
 import { TestRunPanel } from './TestRunPanel'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/runs', async (original) => ({ ...await original<typeof import('@/shared/api/runs')>(), listRuns: vi.fn(), getRunDetail: vi.fn() }))
 class Socket {
   static instances: Socket[] = []

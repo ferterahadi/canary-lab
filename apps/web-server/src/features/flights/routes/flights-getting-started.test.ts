@@ -6,6 +6,7 @@ import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../
 import type { StageAdapters } from '../logic/flight-stages'
 import { flightsRoutes } from './flights'
 import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { waitForFlightStatus } from './__fixtures__/flights-app'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-flight-demo-')
@@ -37,16 +38,6 @@ function parking(): StageAdapters {
   return adapters
 }
 
-async function waitForStatus(app: Awaited<ReturnType<typeof appWith>>, flightId: string, statuses: string[]): Promise<void> {
-  const deadline = Date.now() + 3000
-  for (;;) {
-    const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })).json() as { status?: string }
-    if (statuses.includes(String(manifest.status))) return
-    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-}
-
 function mkRepo(name: string): string {
   const dir = path.join(tmpDir, name)
   fs.mkdirSync(dir, { recursive: true })
@@ -68,7 +59,7 @@ async function startParkedFlight(
   })
   expect(response.statusCode).toBe(201)
   const flightId = response.json<{ flightId: string }>().flightId
-  await waitForStatus(app, flightId, ['waiting-for-approval'])
+  await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
   return flightId
 }
 
@@ -209,7 +200,7 @@ describe('Getting Started flight admission', () => {
       method: 'POST', url: `/api/flights/${flightId}/respond`,
       payload: { response: { choice: 'approve' } },
     })
-    await waitForStatus(app, flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
     const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
 
     expect(resumed.statusCode).toBe(409)

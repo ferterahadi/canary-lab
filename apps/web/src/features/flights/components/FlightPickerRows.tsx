@@ -7,7 +7,7 @@ import type {
 } from '@shared/flights/types'
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { CoverageJobIndexEntry } from '@shared/coverage/types'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret, PlaneIcon } from '@/shared/ui/Icons'
 import { Modal } from '@/shared/ui/Overlays'
 import { flightNeedsAttention } from '@shared/flights/attention'
 import type { FeatureActivity } from '../state/feature-activity'
@@ -294,13 +294,7 @@ export function PickerGroupSection({
         className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left cl-hover-row"
         style={{ border: '1px solid transparent' }}
       >
-        <span
-          aria-hidden="true"
-          className="inline-flex shrink-0 transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={open} />
         <span className="cl-rubric min-w-0 flex-1 truncate">
           {group}
         </span>
@@ -438,10 +432,7 @@ export function PreFlightRow({
         title={`${chip.title} — ${task.description}`}
       >
         <span aria-hidden="true" className="shrink-0" style={{ color: 'var(--text-muted)' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 2 11 13" />
-            <path d="M22 2 15 22l-4-9-9-4Z" />
-          </svg>
+          <PlaneIcon size={12} />
         </span>
         <span className="min-w-0 flex-1 truncate text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
           {task.description}

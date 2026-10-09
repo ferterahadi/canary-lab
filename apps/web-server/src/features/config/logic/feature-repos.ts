@@ -6,6 +6,7 @@ import { resolveRepoPath } from '../../../shared/repo-identity'
 import { describeFastForward, describeRepoCheckout, fastForwardToUpstream, type RepoCheckoutStatus } from '../../../shared/git-upstream'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { statusCodeOf } from '../../../shared/http-error'
 
 export interface FeatureRepoDeps {
   repositoryObserver?: RepositoryObserver
@@ -62,7 +63,7 @@ export async function checkoutFeatureRepo(deps: FeatureRepoDeps, target: RepoTar
     return {
       ok: false,
       error: errorMessage(err),
-      statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number' ? (err as { statusCode: number }).statusCode : 500,
+      statusCode: statusCodeOf(err),
     }
   }
 }

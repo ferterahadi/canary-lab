@@ -1,5 +1,5 @@
 import { sameRepoSet } from '../../../shared/repo-identity'
-import crypto from 'crypto'
+import { newTaskId } from '../../../shared/task-id'
 import path from 'path'
 import {
   FileBackedTaskStore,
@@ -156,7 +156,7 @@ export function startPlanFeatures(
   if (running) return running
 
   const task: PlanFeaturesTask = {
-    taskId: `fp_${crypto.randomBytes(6).toString('hex')}`,
+    taskId: newTaskId('fp'),
     repoPaths: args.repoPaths,
     description: args.description,
     ...(args.autopilot === false ? { autopilot: false } : {}),

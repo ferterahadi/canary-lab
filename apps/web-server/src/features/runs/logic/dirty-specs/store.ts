@@ -1,3 +1,4 @@
+import path from 'path'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners } from '../../../../../../../shared/lib/file-backed-task-store'
 import { computeDirty, hashFeatureSpecs, hashFeatureSpecTests, promoteGreen, type SpecHashes } from './detect'
 import type { DirtySpec } from '../../../../../../../shared/run-manifest'
@@ -10,6 +11,15 @@ import type { TestReviewReceipt } from '../../../../../../../shared/test-review'
 // finalize transitions. Layout: <logs>/dirty-specs/<feature>/dirty.json.
 
 export const DIRTY_MESSAGE = '⚠️ Tests have been modified, please review.'
+
+const DIRTY_SPECS_DIR_NAME = 'dirty-specs'
+const DIRTY_RECORD_FILE = 'dirty.json'
+
+/** Where the store keeps one feature's record — for a reader that watches the
+ *  record's bytes (the coverage snapshot cache) rather than loading it. */
+export function dirtySpecRecordPath(logsDir: string, featureId: string): string {
+  return path.join(logsDir, DIRTY_SPECS_DIR_NAME, featureId, DIRTY_RECORD_FILE)
+}
 
 export interface DirtySpecRecord {
   id: string
@@ -73,8 +83,8 @@ export class DirtySpecStore {
   constructor(logsDir: string, private readonly now: () => string = () => new Date().toISOString()) {
     this.store = new FileBackedTaskStore<DirtySpecRecord>({
       logsDir,
-      dirName: 'dirty-specs',
-      recordFile: 'dirty.json',
+      dirName: DIRTY_SPECS_DIR_NAME,
+      recordFile: DIRTY_RECORD_FILE,
       idOf: (r) => r.featureId,
       indexEntryOf: (r) => ({
         id: r.featureId,

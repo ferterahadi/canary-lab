@@ -1,5 +1,5 @@
-import type { RunDetail } from '../../../../../../../shared/run-detail'
-import { environmentExclusions } from '../../../../../../../shared/run-applicability'
+import type { RunDetail } from './run-detail'
+import { environmentExclusions } from './run-applicability'
 
 export interface CompactRunCounts {
   notApplicable?: number

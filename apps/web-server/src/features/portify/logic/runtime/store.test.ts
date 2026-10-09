@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { PortifyRunStore } from './store'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('portify-store-')

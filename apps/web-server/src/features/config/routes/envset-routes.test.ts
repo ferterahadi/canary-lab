@@ -1,11 +1,9 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import Fastify, { type FastifyInstance } from 'fastify'
-import { featureConfigRoutes } from './feature-config'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildFeatureConfigApp, type FeatureConfigAppOptions } from './__fixtures__/feature-config-app'
 
 const tempDir = trackTempDirs('cl-fcfg-')
 
@@ -45,26 +43,7 @@ function buildFeature(name: string, opts: {
   return dir
 }
 
-async function makeApp(opts: {
-  isRepoActive?: (feature: string, repo: string) => boolean
-  events?: WorkspaceEvent[]
-  featureRename?: {
-    blockedBy: (feature: string) => string | null
-    apply: (from: string, to: string) => number
-  }
-} = {}): Promise<FastifyInstance> {
-  const app = Fastify()
-  await app.register(async (a) => {
-    await featureConfigRoutes(a, {
-      featuresDir,
-      isRepoActive: opts.isRepoActive,
-      ...(opts.featureRename ? { featureRename: opts.featureRename } : {}),
-      workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-    })
-  })
-  await app.ready()
-  return app
-}
+const makeApp = (opts: FeatureConfigAppOptions = {}) => buildFeatureConfigApp(featuresDir, opts)
 
 beforeEach(() => {
   tmpDir = tempDir()

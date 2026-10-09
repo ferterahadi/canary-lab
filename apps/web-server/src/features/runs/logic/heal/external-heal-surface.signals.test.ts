@@ -10,7 +10,7 @@ import {
   slimRepeatHealContext,
   writeHealSignal,
 } from './external-heal-surface'
-import { normalizeRunCounts } from './external-heal-counts'
+import { normalizeRunCounts } from '../../../../../../../shared/run-counts'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 

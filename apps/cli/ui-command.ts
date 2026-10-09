@@ -4,7 +4,6 @@
 
 import path from 'path'
 import readline from 'readline'
-import { spawn } from 'child_process'
 import { createServer } from '../web-server/src/server'
 import { getProjectRoot, isCanaryLabWorkspace, looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import { openBrowser } from '../web-server/src/shared/open-browser'
@@ -17,6 +16,7 @@ import { refreshClaudeDesktopMcpQuietly } from './mcp-refresh'
 import { main as upgradeWorkspace } from './upgrade'
 import { checkUpgradeDrift, type DriftState } from '../../shared/runtime/upgrade-check'
 import type { DesktopRegistrationResult } from './desktop-registration'
+import { spawnDetachedUi } from './mcp-reachability'
 
 // Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
 // short enough that a wedged shutdown doesn't feel hung before the watchdog
@@ -289,14 +289,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
 // port from canary-lab.config.json and binds it; this process then exits.
 // Also the `flight` command's "boot the server if needed" primitive.
 export function relaunchUiDetached(projectRoot: string): void {
-  const cliPath = process.argv[1] ?? path.join(__dirname, 'cli.js')
-  const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
-    cwd: projectRoot,
-    detached: true,
-    env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
-    stdio: 'ignore',
-  })
-  child.unref()
+  spawnDetachedUi(projectRoot, process.argv[1] ?? path.join(__dirname, 'cli.js'))
 }
 
 async function confirmShutdownFromStdin(): Promise<boolean> {

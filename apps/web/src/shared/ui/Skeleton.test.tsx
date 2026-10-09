@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it } from 'vitest'
 import { SkeletonBar, SkeletonLines, SkeletonPanel, SkeletonRows, awaitingFor } from './Skeleton'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 describe('awaitingFor — every lifecycle keeps the same evidence slots', () => {
   it('marks an unfilled settled slot unavailable instead of removing it', () => {
@@ -32,16 +31,7 @@ describe('Skeleton primitives', () => {
   let container: HTMLDivElement
   let root: Root
 
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    root = createRoot(container)
-  })
-
-  afterEach(() => {
-    act(() => root.unmount())
-    container.remove()
-  })
+  mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
   it('uses one colour while treatment distinguishes the four lifecycle states', () => {
     const bar = () => container.querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!

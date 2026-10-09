@@ -1,5 +1,5 @@
 import { runIndexEntry, type RunIndexEntry } from '@shared/run-index'
-import type { RunDetail } from '@shared/run-detail'
+import type { RunDetail, RunsStreamFrame } from '@shared/run-detail'
 import { isTerminalRunStatus, type TransientAction } from '@shared/run-state'
 import type { ConnectionState } from '@/shared/state/record-stream'
 import { createRecordIndex, byStartedDesc } from '@/shared/state/record-index-store'
@@ -7,14 +7,6 @@ import { createRecordIndex, byStartedDesc } from '@/shared/state/record-index-st
 // Pure module: the reducer + frame-applier that drives RunsContext. Lives
 // outside the .tsx file so it can be unit-tested in the existing
 // `node`-environment vitest config (no jsdom required).
-
-// ─── Wire frames mirror apps/web-server/ws/runs-stream.ts ────────────────
-
-export type RunsStreamFrame =
-  | { type: 'snapshot'; runs: RunIndexEntry[]; details: Record<string, RunDetail> }
-  | { type: 'update'; runId: string; detail: RunDetail }
-  | { type: 'removed'; runId: string }
-  | { type: 'list-changed'; runs: RunIndexEntry[] }
 
 // ─── State + actions ─────────────────────────────────────────────────────
 

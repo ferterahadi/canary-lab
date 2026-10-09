@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { registerCanaryLabTools } from './tools'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import type { WorkspaceEventPublisher } from '../shared/workspace-events'
+import { captureEvents } from '../shared/__fixtures__/workspace-events'
 
 // The MCP portify tools mutate feature state (save_portify writes an overlay;
 // remove_portification reverts the config + deletes it). When driven from an
@@ -30,7 +31,7 @@ function captureTools(deps: Partial<CanaryLabMcpDeps>): Map<string, ToolHandler>
 
 function recordingPublisher(): { events: WorkspaceEvent[]; publisher: WorkspaceEventPublisher } {
   const events: WorkspaceEvent[] = []
-  return { events, publisher: { publish: (event) => { events.push(event) } } }
+  return { events, publisher: captureEvents(events) }
 }
 
 describe('MCP portify tools emit workspace events', () => {

@@ -15,6 +15,7 @@ import type { SummaryState } from '../../../../shared/coverage/types'
 import type { DraftRecord, ExternalDraftStage } from '../../../../shared/draft-types'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
+import { newTimedTaskId } from '../shared/task-id'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive, McpStartRunOutcome } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
@@ -201,7 +202,7 @@ export function externalDraftAuthoringNextSteps(feature: string): string[] {
 }
 
 export function newDraftId(): string {
-  return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return newTimedTaskId('draft')
 }
 
 export function isToolErrorPayload(value: unknown): value is { error: string; statusCode?: number } {

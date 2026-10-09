@@ -1,10 +1,9 @@
 import fs from 'fs'
-import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { PaneBroker, PaneId, PaneSubscriber } from '../logic/pane-broker'
 import type { OrchestratorRegistry } from '../logic/run-registry'
 import { readManifest } from '../logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor, runManifestPath } from '../logic/runtime/run-paths'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { sendFrame } from '../../../shared/ws/record-stream'
 
@@ -107,7 +106,7 @@ export async function paneStreamRoutes(
 }
 
 export function shouldReplayLogFile(logsDir: string, runId: string): boolean {
-  const manifest = readManifest(path.join(runDirFor(logsDir, runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(logsDir, runId)))
   return manifest ? isTerminalRunStatus(manifest.status) : false
 }
 
@@ -168,7 +167,7 @@ export function resolveLogPath(logsDir: string, runId: string, paneId: string): 
     if (!safeName) return null
     // Confirm the service exists in the manifest — defensive: pane ids are
     // arbitrary strings and we don't want to expose arbitrary file reads.
-    const manifest = readManifest(path.join(runDir, 'manifest.json'))
+    const manifest = readManifest(paths.manifestPath)
     if (!manifest) return null
     const found = manifest.services.find((s) => s.safeName === safeName)
     if (!found) return null

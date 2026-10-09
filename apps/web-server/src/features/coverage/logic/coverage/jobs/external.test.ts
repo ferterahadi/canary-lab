@@ -13,6 +13,7 @@ import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
 import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../../tools/test-helpers/feature-fixture'
 import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-cov-ext-')
 
@@ -57,7 +58,7 @@ async function seedSummary(name: string) {
 
 function collector() {
   const events: WorkspaceEvent[] = []
-  const publisher: WorkspaceEventPublisher = { publish: (e) => events.push(e) }
+  const publisher: WorkspaceEventPublisher = captureEvents(events)
   return { events, publisher }
 }
 

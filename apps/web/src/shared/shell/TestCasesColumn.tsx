@@ -18,7 +18,7 @@ import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { sourceFileInRun } from '@/features/runs/utils/run-source-file'
 import { StatusDot } from '@/shared/ui/atoms'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret } from '@/shared/ui/Icons'
 import { useTestVersions } from './use-test-versions'
 import type { TestChangeKind } from '@shared/test-review'
 import { TestsVersionHeader } from './TestsVersionHeader'
@@ -496,13 +496,7 @@ function TestCard({
         onClick={onToggle}
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
       >
-        <span
-          aria-hidden="true"
-          className="inline-flex shrink-0 items-center justify-center transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={expanded} className="inline-flex shrink-0 items-center justify-center" />
         <TestIdBadge n={testNumber} />
         <div
           className="flex flex-1 min-w-0 items-center gap-2 text-sm font-medium"

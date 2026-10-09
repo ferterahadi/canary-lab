@@ -4,11 +4,10 @@ import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '../api/config'
+import { WorkspaceTestProviders } from '@/test-helpers/workspace-providers'
 import { GlobalStatusBar } from './GlobalStatusBar'
 import type { TestReviewReceipt } from '@shared/test-review'
 import type { RunDetail } from '@shared/run-detail'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('../api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/config')>()),
@@ -184,10 +183,12 @@ describe('GlobalStatusBar', () => {
   it('R26: no standalone Runs button — a live run lights the Flights pill instead', async () => {
     await act(async () => {
       root.render(
-        <GlobalStatusBar
-          activeRunDetail={null}
-          flightPill={{ flights: [], onOpenFlight: vi.fn(), activity: new Map([['checkout', { kind: 'running', runId: 'r1' }]]) }}
-        />,
+        <WorkspaceTestProviders
+          workState={{ flights: [], activity: new Map([['checkout', { kind: 'running', runId: 'r1' }]]) }}
+          actions={{ openFlight: vi.fn() }}
+        >
+          <GlobalStatusBar activeRunDetail={null} />
+        </WorkspaceTestProviders>,
       )
     })
     expect(runsButton()).toBeUndefined()
@@ -198,13 +199,15 @@ describe('GlobalStatusBar', () => {
   it('counts portify/authoring activity in the Flights pill even with zero flights', async () => {
     await act(async () => {
       root.render(
-        <GlobalStatusBar
-          activeRunDetail={null}
-          flightPill={{ flights: [], onOpenFlight: vi.fn(), activity: new Map([
+        <WorkspaceTestProviders
+          workState={{ flights: [], activity: new Map([
             ['pay', { kind: 'portifying', workflowId: 'wf1' }],
             ['cart', { kind: 'authoring', draftId: 'd1' }],
           ]) }}
-        />,
+          actions={{ openFlight: vi.fn() }}
+        >
+          <GlobalStatusBar activeRunDetail={null} />
+        </WorkspaceTestProviders>,
       )
     })
     expect(container.querySelector('[data-testid="flights-pill"]')?.textContent).toContain('Flights · 2 active')
@@ -213,17 +216,19 @@ describe('GlobalStatusBar', () => {
   it('threads each feature\'s group into the Flights pill picker (R55 grouping)', async () => {
     await act(async () => {
       root.render(
-        <GlobalStatusBar
-          activeRunDetail={null}
-          flightPill={{
-            flights: [], onOpenFlight: vi.fn(),
-            features: [
+        <WorkspaceTestProviders
+          workState={{
+            flights: [],
+            pickerFeatures: [
               { name: 'checkout', group: 'shop' },
               { name: 'cart', group: 'shop' },
               { name: 'admin' },
             ],
           }}
-        />,
+          actions={{ openFlight: vi.fn() }}
+        >
+          <GlobalStatusBar activeRunDetail={null} />
+        </WorkspaceTestProviders>,
       )
     })
     // Open the picker and confirm the grouped features collapse under their
@@ -255,7 +260,7 @@ describe('GlobalStatusBar', () => {
     }
     const onNavigateToRun = vi.fn()
     await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} onNavigateToRun={onNavigateToRun} />)
+      root.render(<WorkspaceTestProviders actions={{ navigateToRun: onNavigateToRun }}><GlobalStatusBar activeRunDetail={null} /></WorkspaceTestProviders>)
     })
     const pill = [...container.querySelectorAll('button')]
       .find((b) => b.getAttribute('aria-label')?.startsWith('Open deploy check'))

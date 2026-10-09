@@ -11,8 +11,6 @@ import {
 import type { FeatureActivity } from '@/features/flights/state/feature-activity'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
 const onOpenConfig = vi.fn()
 

@@ -1,7 +1,8 @@
 import type { DraftRecord, ExternalDraftStage } from '@shared/draft-types'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { shortSession } from '@/shared/lib/format'
-import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, agentJobTone, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { externalDraftStageStatus } from '@/shared/lib/agent-job-status'
 
 interface Props {
   draft: DraftRecord
@@ -26,7 +27,7 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
       eyebrow="External agent session"
       headline={headlineFor(clientKind)}
       subtitle={draft.externalConversationName ?? undefined}
-      statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
+      statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={agentJobTone(externalDraftStageStatus(stage))} />}
       meta={
         draft.externalSessionId && (
           <ExternalMetaFact label="Session" title={draft.externalSessionId}>
@@ -55,13 +56,6 @@ function stageLabel(stage: ExternalDraftStage): string {
     case 'applied': return 'Applied'
     case 'error': return 'Error'
   }
-}
-
-function stagePalette(stage: ExternalDraftStage) {
-  if (stage === 'error') return pillPalette('var(--danger)')
-  if (stage === 'applied') return pillPalette('var(--success)')
-  if (stage === 'ready') return pillPalette('var(--accent)')
-  return pillPalette('var(--border-focus)')
 }
 
 function bodyCopy(

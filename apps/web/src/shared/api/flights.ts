@@ -9,6 +9,7 @@ import type {
   FlightStageKey as FlightStageKeyT,
   PlannedFeature as PlannedFeatureT,
   PlanFeaturesTask as PlanFeaturesTaskT,
+  StartFlightRequest as StartFlightRequestT,
 } from '@shared/flights/types'
 import type { AgentStagePlans as AgentStagePlansT } from '@shared/agent-models'
 import { requestJson, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
@@ -31,24 +32,15 @@ export function getFlightEntryOptions(
   )
 }
 
-export interface StartFlightBody {
+/** The web launcher's subset of the wire body, with the enumerated fields
+ *  narrowed. Extending the shared request makes every narrowing a compile-time
+ *  check against what the server accepts. */
+export interface StartFlightBody extends Omit<StartFlightRequestT, 'base' | 'yolo' | 'stageProducer'> {
   feature: string
-  /** Omit on continue/redo/jump — repos are frozen; the server reuses the
-   *  stored set and 409s (`flight_frozen`) on a differing one. */
-  repoPaths?: string[]
-  /** Omit on continue/redo/jump — intent is frozen like the repos. */
-  description?: string
-  env?: string
-  coverageTarget?: number
   /** Required when the feature already has a flight record. */
   mode?: 'continue' | 'redo' | 'jump'
   /** Stage to start at (mode "jump", or fresh stage entry). */
   fromStage?: FlightStageKeyT
-  /** Optional context for a deliberate stage re-run. Scoped to that stage's
-   *  agent prompt; a plain resume leaves it absent. */
-  feedback?: string
-  /** Absent = autopilot on; explicit false asks at every checkpoint (R71/W4). */
-  autopilot?: boolean
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
@@ -58,8 +50,6 @@ export interface StartFlightBody {
   models?: AgentStagePlansT
   /** MCP-owned flights only; the web launcher leaves this absent. */
   externalAgentSession?: FlightManifestT['externalAgentSession']
-  /** Marks a Getting Started demo start; ordinary flights omit it. */
-  gettingStartedSource?: 'internal' | 'external'
   /** Which Getting Started card a demo flight belongs to: the author/portify/
    *  export demos run AS a flight but claim their own workflow key so their
    *  card lights. Absent → 'flight'. Only read with gettingStartedSource. */

@@ -3,7 +3,7 @@ import { bridgeCleanupEvents, CLEANUP_EVENT_COALESCE_MS } from './cleanup-events
 import { WorkspaceEventBus } from './workspace-events'
 import type { WorkspaceEvent } from '../../../../shared/workspace-events'
 import { PortifyRunStore } from '../features/portify/logic/runtime/store'
-import type { PortifyManifest } from '../features/portify/logic/runtime/types'
+import type { PortifyManifest } from '../../../../shared/portify-index'
 import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cleanup-events-')

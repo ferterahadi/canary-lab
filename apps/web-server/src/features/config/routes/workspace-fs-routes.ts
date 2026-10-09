@@ -10,8 +10,7 @@ import path from 'path'
 import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 import { checkoutBranch, getGitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
-import { notFound } from '../../../shared/http-error'
-import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { notFound, replyFailure } from '../../../shared/http-error'
 
 export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── generic filesystem browser ────────────────────────────────────────
@@ -200,11 +199,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
         expectedBranch: null,
       }
     } catch (err) {
-      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500
-      reply.code(code)
-      return { error: errorMessage(err) }
+      return replyFailure(reply, err)
     }
   })
 

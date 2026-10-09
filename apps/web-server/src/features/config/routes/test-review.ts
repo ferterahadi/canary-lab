@@ -10,7 +10,7 @@ import { translateReadableSource } from '../../../shared/readable-tests/translat
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath } from '../../runs/logic/runtime/run-paths'
 import { suiteReviewFiles } from '../../runs/logic/runtime/suite-review'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
@@ -39,7 +39,7 @@ function readSource(file: string): string {
 
 function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | undefined): { dir: string } | { status: number; error: string } {
   if (!deps.logsDir || !runId || !/^[\w.-]+$/.test(runId) || runId === '.' || runId === '..') return { status: 400, error: 'Invalid run' }
-  const manifest = readManifest(path.join(runDirFor(deps.logsDir, runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(deps.logsDir, runId)))
   if (!manifest || manifest.feature !== feature) return { status: 404, error: 'Run not found for this suite' }
   if (manifest.suiteSnapshot?.kind !== 'taken' || !fs.existsSync(manifest.suiteSnapshot.dir)) return { status: 409, error: 'This run’s test snapshot is unavailable. Choose committed changes or open the file in your editor.' }
   return { dir: manifest.suiteSnapshot.dir }

@@ -15,6 +15,7 @@ import { generateEvaluationRewriteWithAgent } from '../logic/test-review/rewrite
 import type { EvaluationRewrite, EvaluationRewriteAgentOptions } from '../logic/test-review/types'
 import { normalizePerAgentChoices, perAgentStageChoices } from '../../../../../../shared/agent-models'
 import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
+import { newEvaluationTaskId } from '../logic/external-evaluation-export'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -142,7 +143,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
   const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode, modelsOverride?: unknown) => {
     const now = new Date().toISOString()
     const task: EvaluationExportTaskRecord = {
-      taskId: `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      taskId: newEvaluationTaskId(),
       runId: detail.runId,
       feature: detail.manifest.feature,
       mode,

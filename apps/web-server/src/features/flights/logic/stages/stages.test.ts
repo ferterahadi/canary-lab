@@ -4,32 +4,10 @@ import fs from 'fs'
 
 import path from 'path'
 
-// Transparent pass-through by default — every other test in this file spawns
-// real processes (fake npx/claude binaries on PATH). Only the one test below
-// that needs to control child-process event ordering deterministically
-// installs an override via setMockSpawn.
-const { getMockSpawn, setMockSpawn } = vi.hoisted(() => {
-  let impl: ((...args: unknown[]) => unknown) | null = null
-  return {
-    getMockSpawn: () => impl,
-    setMockSpawn: (fn: ((...args: unknown[]) => unknown) | null) => { impl = fn },
-  }
-})
-
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>()
-  return {
-    ...actual,
-    spawn: (...args: unknown[]) => {
-      const impl = getMockSpawn()
-      return impl ? impl(...args) : (actual.spawn as (...a: unknown[]) => unknown)(...args)
-    },
-  }
-})
-
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
 import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
+import { stageDirs } from './__fixtures__/stage-context'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-flight-stages-')
@@ -43,13 +21,7 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = tempDir()
-  featuresDir = path.join(tmpDir, 'features')
-  logsDir = path.join(tmpDir, 'logs')
-  repoDir = path.join(tmpDir, 'product-repo')
-  fs.mkdirSync(featuresDir, { recursive: true })
-  fs.mkdirSync(logsDir, { recursive: true })
-  fs.mkdirSync(repoDir, { recursive: true })
+  ({ tmpDir, featuresDir, logsDir, repoDir } = stageDirs(tempDir()))
 })
 
 describe('context helpers', () => {

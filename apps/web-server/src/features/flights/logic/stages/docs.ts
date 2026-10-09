@@ -1,11 +1,10 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { linkFeatureDoc, writeFeatureDoc } from '../../../config/logic/feature-docs-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
-import { detectBaseBranch } from '../../../../shared/git-repo'
+import { detectBaseBranch, runGitSync } from '../../../../shared/git-repo'
 import type { PrdSourceAttempt } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, stageModels, type FlightStageDeps, stageJobRef } from './context'
@@ -107,14 +106,6 @@ function findRepoDocs(repoPaths: string[]): Array<{ repo: string; file: string }
   return found
 }
 
-function git(repo: string, args: string[]): string | null {
-  try {
-    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 }).trim()
-  } catch {
-    return null
-  }
-}
-
 const MODE_LABEL = {
   'collect-repo-docs': 'collect repo docs',
   'infer-from-diff': 'infer from diff',
@@ -155,9 +146,9 @@ export function attemptLogLine(attempt: PrdSourceAttempt): string {
 }
 
 function diffVsBase(repo: string, base: string): string | null {
-  const current = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const current = runGitSync(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (!current || current === base) return null
-  const diff = git(repo, ['diff', `${base}...HEAD`, '--stat', '-p'])
+  const diff = runGitSync(repo, ['diff', `${base}...HEAD`, '--stat', '-p'])
   if (!diff || diff.length < 40) return null
   return diff.length > MAX_DIFF_BYTES ? diff.slice(0, MAX_DIFF_BYTES) + '\n…(truncated)' : diff
 }

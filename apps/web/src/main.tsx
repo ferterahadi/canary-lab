@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { WorkspaceProvider } from './WorkspaceProvider'
 import { RunsProvider } from './features/runs/state/RunsContext'
 import { BenchmarkProvider } from './features/benchmark/state/BenchmarkContext'
 import { PortifyProvider } from './features/portify/state/PortifyContext'
@@ -23,7 +24,9 @@ createRoot(container).render(
             <McpPromoProvider>
               <EvaluationExportProvider>
                 <InvalidationProvider>
-                  <App />
+                  <WorkspaceProvider>
+                    <App />
+                  </WorkspaceProvider>
                 </InvalidationProvider>
               </EvaluationExportProvider>
             </McpPromoProvider>

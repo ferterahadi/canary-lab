@@ -6,7 +6,7 @@ import { loadFeatures } from '../../../../shared/feature-loader'
 import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, writeOverlay } from './overlay'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { defaultAgentEdit, gitInit, makeRunner, roots, singleFixture, twoFeatureFixture, waitForStatus } from './__fixtures__/runner.part4-fixtures'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 

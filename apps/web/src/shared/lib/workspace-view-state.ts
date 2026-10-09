@@ -275,53 +275,7 @@ export function readPersistedView(): PersistedView {
 export function persistView(state: PersistedView): void {
   try {
     const params = new URLSearchParams(window.location.search)
-    setOrDelete(params, 'view', state.view === 'workspace' ? null : state.view)
-    setOrDelete(params, 'feature', state.feature)
-    setOrDelete(params, 'run', state.run)
-    setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.run && state.currentTests !== undefined
-      ? state.currentTests ? 'current' : 'recorded' : null)
-    setOrDelete(params, 'dialog', state.dialog)
-    setOrDelete(params, 'approval', state.dialog === 'notifications' ? state.approval ?? null : null)
-    // `wf` qualified the retired portify dialog (R50), `task` the retired
-    // evaluation dialog (R29), and `draft` the retired external-authoring
-    // dialog (authoring now surfaces on the flight's specs-coverage stage) —
-    // clear all three from stale URLs so old deep links don't carry dead
-    // params forward. Never reuse these names for a new qualifier.
-    setOrDelete(params, 'wf', null)
-    setOrDelete(params, 'task', null)
-    setOrDelete(params, 'draft', null)
-    // `flight` only qualifies the flights view — drop it otherwise.
-    setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
-    if (state.view !== 'flights' || !state.flight || !params.get('elicitation')?.startsWith(`${state.flight}:`)) {
-      params.delete('elicitation')
-      params.delete('inputToken')
-    }
-    // `stage` only qualifies an OPEN flight — drop it on the flights landing
-    // list and off the view entirely, so a stage pick can't outlive its flight.
-    setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
-    setOrDelete(params, 'log', state.view === 'flights' && state.flight ? state.flightLog ?? null : null)
-    // `tab` only qualifies the config dialog — drop it otherwise.
-    setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
-    // `models` only qualifies the settings dialog — drop it otherwise, so a
-    // matrix pick can't outlive the settings dialog it was stacked over.
-    setOrDelete(params, 'reviewBase', state.dialog === 'tests-review' ? state.reviewFocus?.baseline ?? null : null)
-    setOrDelete(params, 'reviewChange', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' ? state.reviewFocus.change ?? null : null)
-    setOrDelete(params, 'reviewTest', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' && state.reviewFocus.change ? state.reviewFocus.test ?? null : null)
-    setOrDelete(params, 'reviewFile', state.dialog === 'tests-review' ? state.reviewFocus?.file ?? null : null)
-    setOrDelete(params, 'reviewLine', state.dialog === 'tests-review' && state.reviewFocus?.line ? String(state.reviewFocus.line) : null)
-    setOrDelete(params, 'reviewMode', state.dialog === 'tests-review' ? state.reviewFocus?.mode ?? null : null)
-    setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
-    // `test` only qualifies a selected run — drop it otherwise, so switching runs
-    // can't leave a previous run's failure pinned in the URL.
-    setOrDelete(params, 'test', state.run ? state.focusTest : null)
-    setOrDelete(params, 'testId', state.run && state.focusTest ? state.testId ?? null : null)
-    setOrDelete(params, 'testLocation', state.run && state.focusTest ? state.testLocation ?? null : null)
-    // Same rule for the arrival tab: it belongs to the run in the URL, so
-    // switching runs can't leave a previous drill-through's tab pinned.
-    setOrDelete(params, 'runtab', state.run ? state.runTab : null)
-    // `from` is dropped on the flights view — arriving at a flight IS the return,
-    // so keeping it would leave a back-link to the screen you're already on.
-    setOrDelete(params, 'from', state.view === 'flights' ? null : state.returnFlight)
+    writeViewParams(params, state)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)
@@ -331,6 +285,71 @@ export function persistView(state: PersistedView): void {
     const durable: DurableView = { view: state.view, feature: state.feature }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(durable))
   } catch { /* ignore */ }
+}
+
+/** A link to a view, serialized exactly as `persistView` would write it, for
+ *  surfaces that hand the user an `<a href>` rather than navigating in place.
+ *  Unset fields are absent, so the link carries only what it names. */
+export function viewHref(target: Partial<PersistedView>): string {
+  const params = new URLSearchParams()
+  writeViewParams(params, { ...EMPTY, ...target })
+  return `?${params}`
+}
+
+/** Internal-experiment surfaces opt in through the URL (`?showBenchmark=true`);
+ *  the flag is not part of the routed view, so `persistView` leaves it alone. */
+export function benchmarkSurfaceRequested(): boolean {
+  return new URLSearchParams(window.location.search).get('showBenchmark') === 'true'
+}
+
+function writeViewParams(params: URLSearchParams, state: PersistedView): void {
+  setOrDelete(params, 'view', state.view === 'workspace' ? null : state.view)
+  setOrDelete(params, 'feature', state.feature)
+  setOrDelete(params, 'run', state.run)
+  setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.run && state.currentTests !== undefined
+    ? state.currentTests ? 'current' : 'recorded' : null)
+  setOrDelete(params, 'dialog', state.dialog)
+  setOrDelete(params, 'approval', state.dialog === 'notifications' ? state.approval ?? null : null)
+  // `wf` qualified the retired portify dialog (R50), `task` the retired
+  // evaluation dialog (R29), and `draft` the retired external-authoring
+  // dialog (authoring now surfaces on the flight's specs-coverage stage) —
+  // clear all three from stale URLs so old deep links don't carry dead
+  // params forward. Never reuse these names for a new qualifier.
+  setOrDelete(params, 'wf', null)
+  setOrDelete(params, 'task', null)
+  setOrDelete(params, 'draft', null)
+  // `flight` only qualifies the flights view — drop it otherwise.
+  setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+  if (state.view !== 'flights' || !state.flight || !params.get('elicitation')?.startsWith(`${state.flight}:`)) {
+    params.delete('elicitation')
+    params.delete('inputToken')
+  }
+  // `stage` only qualifies an OPEN flight — drop it on the flights landing
+  // list and off the view entirely, so a stage pick can't outlive its flight.
+  setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
+  setOrDelete(params, 'log', state.view === 'flights' && state.flight ? state.flightLog ?? null : null)
+  // `tab` only qualifies the config dialog — drop it otherwise.
+  setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
+  // `models` only qualifies the settings dialog — drop it otherwise, so a
+  // matrix pick can't outlive the settings dialog it was stacked over.
+  setOrDelete(params, 'reviewBase', state.dialog === 'tests-review' ? state.reviewFocus?.baseline ?? null : null)
+  setOrDelete(params, 'reviewChange', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' ? state.reviewFocus.change ?? null : null)
+  setOrDelete(params, 'reviewTest', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' && state.reviewFocus.change ? state.reviewFocus.test ?? null : null)
+  setOrDelete(params, 'reviewFile', state.dialog === 'tests-review' ? state.reviewFocus?.file ?? null : null)
+  setOrDelete(params, 'reviewLine', state.dialog === 'tests-review' && state.reviewFocus?.line ? String(state.reviewFocus.line) : null)
+  setOrDelete(params, 'reviewMode', state.dialog === 'tests-review' ? state.reviewFocus?.mode ?? null : null)
+  setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
+  // `test` only qualifies a selected run — drop it otherwise, so switching runs
+  // can't leave a previous run's failure pinned in the URL.
+  setOrDelete(params, 'test', state.run ? state.focusTest : null)
+  setOrDelete(params, 'testId', state.run && state.focusTest ? state.testId ?? null : null)
+  setOrDelete(params, 'testLocation', state.run && state.focusTest ? state.testLocation ?? null : null)
+  // Same rule for the arrival tab: it belongs to the run in the URL, so
+  // switching runs can't leave a previous drill-through's tab pinned.
+  setOrDelete(params, 'runtab', state.run ? state.runTab : null)
+  // `from` is dropped on the flights view — arriving at a flight IS the return,
+  // so keeping it would leave a back-link to the screen you're already on.
+  setOrDelete(params, 'from', state.view === 'flights' ? null : state.returnFlight)
 }
 
 /** Subscribe to cross-tab view changes (durable tier only). Returns unsubscribe. */

@@ -26,10 +26,10 @@ import {
 } from '../features/evaluation/logic/test-review/rewrite'
 import { type WorkspaceEventPublisher } from '../shared/workspace-events'
 import type {
-  PortifyManifest,
   StartExternalPortifyInput,
   StartExternalPortifyResult,
 } from '../features/portify/logic/runtime/types'
+import type { PortifyManifest } from '../../../../shared/portify-index'
 
 // Every Canary Lab MCP tool is a thin wrapper around an existing internal
 // helper or REST handler. The translation pattern: validate input via zod,

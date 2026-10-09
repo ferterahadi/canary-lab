@@ -35,13 +35,12 @@ import type { FlightStageDeps } from './context'
 
 import type { StageOutcome } from '../flight-stages'
 
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
+import type { FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
-import { flightStageCtx } from './__fixtures__/stage-context'
-import { fakeFlightInject } from './__fixtures__/flight-inject'
+import { flightStageCtx, stageDirs, stageDeps, stageManifest } from './__fixtures__/stage-context'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-flight-stages-')
@@ -55,39 +54,15 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = tempDir()
-  featuresDir = path.join(tmpDir, 'features')
-  logsDir = path.join(tmpDir, 'logs')
-  repoDir = path.join(tmpDir, 'product-repo')
-  fs.mkdirSync(featuresDir, { recursive: true })
-  fs.mkdirSync(logsDir, { recursive: true })
-  fs.mkdirSync(repoDir, { recursive: true })
+  ({ tmpDir, featuresDir, logsDir, repoDir } = stageDirs(tempDir()))
 })
 
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
-  return {
-    featuresDir,
-    logsDir,
-    projectRoot: tmpDir,
-    inject: fakeFlightInject(() => undefined),
-    ...over,
-  }
+  return stageDeps({ featuresDir, logsDir, projectRoot: tmpDir }, over)
 }
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl-test',
-    feature: 'checkout',
-    repoPaths: [repoDir],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'similarity',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
+  return stageManifest(repoDir, over)
 }
 
 function ctxFor(m: FlightManifest) {

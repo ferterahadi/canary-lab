@@ -1,4 +1,5 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 // POST /api/runs/:runId/adopt-spec-edits — the human-only lever that lets a
 // mid-run spec edit into a run (D9/D13). Beside /approve-dirty: no
 // unrestricted MCP tool wraps it; elicited review passes an exact revision.
@@ -18,7 +19,7 @@ import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-adopt-')
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 let tmpDir: string
 
@@ -36,7 +37,7 @@ async function build(events: WorkspaceEvent[] = []) {
     featuresDir: path.join(tmpDir, 'features'),
     store,
     startRun: async () => { throw new Error('not configured') },
-    workspaceEvents: { publish: (event) => { events.push(event) } },
+    workspaceEvents: captureEvents(events),
   })
   return { app, registry, store }
 }

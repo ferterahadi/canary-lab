@@ -1,17 +1,17 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import type { DiscoveryRepairView } from '../api/discovery-repair'
 import type { connectReconnectingSocket } from '../api/reconnecting-socket'
 import { deferred } from '../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 const api = vi.hoisted(() => ({ listDiscoveryRepairs: vi.fn(), startDiscoveryRepair: vi.fn() }))
 const socket = vi.hoisted(() => ({ connect: vi.fn() }))
 vi.mock('../api/discovery-repair', () => api)
 vi.mock('../api/reconnecting-socket', () => ({ defaultWsBase: () => 'ws://synthetic', connectReconnectingSocket: socket.connect }))
 let root: Root
-let container: HTMLDivElement
 let current: ReturnType<typeof useDiscoveryRepair>
 let connections: { options: Parameters<typeof connectReconnectingSocket>[0]; close: ReturnType<typeof vi.fn> }[]
 function Host({ feature }: { feature: string | null }) { current = useDiscoveryRepair(feature); return null }
@@ -20,16 +20,12 @@ function repair(feature: string, updatedAt = '1', status: DiscoveryRepairView['s
   return { id: feature, feature, updatedAt, status, featureDir: '/workspace/features/suite', owner: { kind: 'internal', agent: 'codex' }, createdAt: '1', heartbeatAt: '1', message: '', diagnostic: '', log: [], promptPath: '/workspace/prompt.md', promptReady: true }
 }
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.resetAllMocks()
   api.listDiscoveryRepairs.mockResolvedValue([])
   connections = []
   socket.connect.mockImplementation((options) => { const close = vi.fn(); connections.push({ options, close }); return { close } })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it.each(['success', 'failure'])('an old feature %s releases only its own lock, leaving the new feature Starting', async (outcome) => {
   const a = deferred<DiscoveryRepairView>()

@@ -191,9 +191,10 @@ export function navToPersistedView(state: NavState): PersistedView {
  *  universal fallback, so no state can make a row unclickable. `flights`
  *  resolves the feature's flight record; features without one open their
  *  DERIVED flight (the `feature:` token). */
-export type ActivityTarget =
-  | { kind: 'run'; feature: string; runId: string }
-  | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
+// Always a flight pinned to a stage: every activity kind maps to the stage
+// that owns it (`ACTIVITY_STAGE`), so there is no run-detail or bare-flight
+// destination for a caller to branch on.
+export type ActivityTarget = { kind: 'flight'; flightId: string; stage: FlightStageKey }
 
 export function resolveActivityTarget(
   feature: string,

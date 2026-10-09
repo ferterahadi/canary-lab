@@ -7,6 +7,7 @@ export type { PlaywrightPlaybackEvent, RunSummaryRunningStep } from './playback'
 import type { PathType } from './coverage/types'
 import type { EnvironmentExclusion } from './run-applicability'
 import type { RunManifest } from './run-manifest'
+import type { RunIndexEntry } from './run-index'
 import type { RunLifecycleEvent } from './run-state'
 
 export interface RunSummaryFailedEntry {
@@ -131,3 +132,23 @@ export interface JournalSection {
   hypothesis: string | null
   body: string
 }
+
+// `/ws/runs` frames. Stable: the web client treats unknown `type` values as
+// no-ops, so adding fields is non-breaking; renaming a frame type IS
+// breaking. Keep additive.
+export type RunsStreamFrame =
+  /** Sent once when the connection opens. Carries everything the client
+   *  needs to render its initial UI without making any HTTP calls. */
+  | { type: 'snapshot'; runs: RunIndexEntry[]; details: Record<string, RunDetail> }
+  /** A single run changed (created, status flipped, finalized). The client
+   *  patches `state.details[runId]` with `detail` and inserts/updates the
+   *  matching `state.runs` entry. */
+  | { type: 'update'; runId: string; detail: RunDetail }
+  /** A run was removed from history (DELETE on a terminal run). The client
+   *  drops it from both `state.runs` and `state.details`. */
+  | { type: 'removed'; runId: string }
+  /** A list-level change with no specific runId (today: the boot-time
+   *  reaper). The client refreshes its `state.runs` snapshot from the
+   *  attached payload and reconciles details for any newly-active rows
+   *  via the next `update` frame. */
+  | { type: 'list-changed'; runs: RunIndexEntry[] }

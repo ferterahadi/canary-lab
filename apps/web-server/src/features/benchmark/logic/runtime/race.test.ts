@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { BenchmarkRace, SabotageNoopError } from './race'
-import type { ArmIterationResult } from './report'
+import type { ArmIterationResult } from '../../../../../../../shared/benchmark-index'
 
 describe('BenchmarkRace.runRace', () => {
   it('runs both arms each iteration, resets between iterations, accumulates results, reports', async () => {

@@ -4,6 +4,7 @@ import { resolveRepoPath } from '../../../shared/repo-identity'
 import { porcelainPath } from '../../../shared/git-status-path'
 import { normalizeFixCaptureNames } from './fix-capture-names'
 import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/run-state'
+import type { ApplyFixResult, ApplyFixesOutcome } from '../../../../../../shared/run-pr'
 
 // Apply a run's captured heal-fix patches (see RunFixCapture) INTO the real
 // product repos on demand — the one place a run's edits reach the user's source
@@ -14,20 +15,6 @@ import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/
 // This is the road the Changes tab's "Open in editor" drives down: the run's
 // scratch worktree is long gone by then, so landing the patch here is what puts
 // the repair into a tree the user's editor can actually show as changed files.
-
-export interface ApplyFixResult {
-  repoName: string
-  /** True when the patch applied (cleanly or 3-way merged) into the repo. */
-  ok: boolean
-  /** Failure reason (git stderr) when `ok` is false — e.g. a 3-way conflict or
-   *  a patch that no longer applies because the repo moved on. */
-  reason?: string
-}
-
-export interface ApplyFixesOutcome {
-  results: ApplyFixResult[]
-  allOk: boolean
-}
 
 /**
  * Apply each captured patch into its source repo working tree with

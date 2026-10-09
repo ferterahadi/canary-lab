@@ -21,7 +21,8 @@ import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, po
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
 import { hasDeclaredPortInjection, verifyDoubleBoot } from './verify'
-import type { PortifyManifest, PortifyRepoState, PortifyProducer, PortifyExternalSession } from './types'
+import type { PortifyProducer, PortifyExternalSession } from './types'
+import type { PortifyManifest, PortifyRepoState } from '../../../../../../../shared/portify-index'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,

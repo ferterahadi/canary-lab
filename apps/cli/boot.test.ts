@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { main } from './boot'
 import { fail, info, ok } from '../../shared/cli-ui/ui'
 
@@ -9,6 +9,17 @@ vi.mock('../../shared/runtime/project-root', () => ({ getProjectRoot: () => '/wo
 vi.mock('../web-server/src/features/runs/logic/runtime/launcher/project-config', () => ({
   DEFAULT_PORT: 7421, loadProjectConfig: () => ({}), resolveProjectPort: () => 7421,
 }))
+// An empty live-server registry: no record for '/workspace', so the configured
+// port is used. Set before `./boot` evaluates its module-level server base.
+const previousLiveRegistryHome = vi.hoisted(() => {
+  const previous = process.env.CANARY_LAB_LIVE_REGISTRY_HOME
+  process.env.CANARY_LAB_LIVE_REGISTRY_HOME = '/nonexistent-canary-live-registry'
+  return previous
+})
+afterAll(() => {
+  if (previousLiveRegistryHome === undefined) delete process.env.CANARY_LAB_LIVE_REGISTRY_HOME
+  else process.env.CANARY_LAB_LIVE_REGISTRY_HOME = previousLiveRegistryHome
+})
 const fetchImpl = vi.fn<typeof fetch>()
 beforeEach(() => {
   vi.clearAllMocks()
@@ -21,7 +32,7 @@ it.each([200, 201])('reports a started boot for HTTP %s', async (status) => {
   fetchImpl.mockResolvedValueOnce(new Response('{"runId":"run-1"}', { status }))
   await main(['shop', 'local'])
   expect(ok).toHaveBeenCalledWith(expect.stringContaining('Booting "shop" (local)'))
-  expect(fetchImpl).toHaveBeenCalledWith('http://localhost:7421/api/runs', expect.objectContaining({ body: '{"feature":"shop","env":"local","mode":"boot"}' }))
+  expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:7421/api/runs', expect.objectContaining({ body: '{"feature":"shop","env":"local","mode":"boot"}' }))
 })
 
 it('reports a queued boot for HTTP 202', async () => {
@@ -46,6 +57,6 @@ it('keeps the server-start guidance on transport failure', async () => {
 it('stops a run through the encoded abort URL', async () => {
   fetchImpl.mockResolvedValueOnce(new Response('{}'))
   await main(['stop', 'run/1'])
-  expect(fetchImpl).toHaveBeenCalledWith('http://localhost:7421/api/runs/run%2F1/abort', expect.objectContaining({ body: '{}' }))
+  expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:7421/api/runs/run%2F1/abort', expect.objectContaining({ body: '{}' }))
   expect(ok).toHaveBeenCalledWith(expect.stringContaining('Stopped run/1'))
 })

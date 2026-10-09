@@ -2,11 +2,10 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
-import { fileURLToPath } from 'url'
+import { REPO as root } from './lib/fs.mjs'
 
 // Historical shipped bytes identify legacy installations without guessing from
 // a skill's name. Custom instructions never match this migration catalogue.
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const revisions = execFileSync('git', ['rev-list', 'HEAD', '--', 'agent-integrations'], { cwd: root, encoding: 'utf8' }).trim().split('\n')
 const hashes = {}
 for (const revision of revisions) {

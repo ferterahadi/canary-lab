@@ -101,6 +101,12 @@ export function GlyphSvg({ children }: { children: ReactNode }) {
   )
 }
 
+/** Outcome marks on the 16-unit glyph grid, shared by the row glyphs and the
+ *  session divider so a pass, a failure and an absence read the same in both. */
+export const GLYPH_CHECK = <path d="M3.5 8.5l3 3 6-6.5" />
+export const GLYPH_CROSS = <path d="M5 5l6 6M11 5l-6 6" />
+export const GLYPH_DASH = <path d="M4.5 8h7" />
+
 export const SYSTEM_GLYPH: LogGlyph = {
   icon: <GlyphSvg><path d="M3.5 4.5l3 3-3 3" /><path d="M8.5 11h4.5" /></GlyphSvg>,
   color: 'var(--text-muted)',
@@ -127,8 +133,8 @@ export function eventGlyph(event: AgentSessionEvent, hasThreads = false): LogGly
         : { icon: <GlyphSvg>{toolGlyph(event.name)}</GlyphSvg>, color: 'var(--warning)' }
     case 'tool-result':
       return event.isError
-        ? { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color: 'var(--danger)' }
-        : { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color: 'var(--text-muted)' }
+        ? { icon: <GlyphSvg>{GLYPH_CROSS}</GlyphSvg>, color: 'var(--danger)' }
+        : { icon: <GlyphSvg>{GLYPH_CHECK}</GlyphSvg>, color: 'var(--text-muted)' }
   }
 }
 
@@ -139,9 +145,9 @@ export function externalGlyph(phase: 'start' | 'end', status: ExternalSessionAct
     : status === 'aborted' ? 'var(--text-muted)'
     : 'var(--running)'
   if (phase === 'start') return { icon: <GlyphSvg><circle cx="8" cy="8" r="3" /></GlyphSvg>, color: status === 'running' ? color : 'var(--text-muted)' }
-  if (status === 'done' || status === 'ready') return { icon: <GlyphSvg><path d="M3.5 8.5l3 3 6-6.5" /></GlyphSvg>, color }
-  if (status === 'failed') return { icon: <GlyphSvg><path d="M5 5l6 6M11 5l-6 6" /></GlyphSvg>, color }
-  return { icon: <GlyphSvg><path d="M4.5 8h7" /></GlyphSvg>, color }
+  if (status === 'done' || status === 'ready') return { icon: <GlyphSvg>{GLYPH_CHECK}</GlyphSvg>, color }
+  if (status === 'failed') return { icon: <GlyphSvg>{GLYPH_CROSS}</GlyphSvg>, color }
+  return { icon: <GlyphSvg>{GLYPH_DASH}</GlyphSvg>, color }
 }
 
 // Assistant/prompt prose is genuine markdown (headers, GFM tables, status

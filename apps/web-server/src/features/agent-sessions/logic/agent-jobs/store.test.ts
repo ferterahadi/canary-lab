@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { AgentJobRunStore, agentJobStore, bridgeAgentJobEvents } from './store'
 import type { AgentJobManifest } from './types'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-agentjobs-')
 
@@ -135,7 +136,7 @@ describe('AgentJobRunStore', () => {
   it('announces every change so a viewer updates without a refresh', () => {
     const events: WorkspaceEvent[] = []
     const store = new AgentJobRunStore(logsDir)
-    bridgeAgentJobEvents(store, { publish: (e) => events.push(e) })
+    bridgeAgentJobEvents(store, captureEvents(events))
     store.save(job())
     expect(events).toContainEqual({ type: 'agent-jobs-changed', jobId: 'fl-1:scout' })
   })

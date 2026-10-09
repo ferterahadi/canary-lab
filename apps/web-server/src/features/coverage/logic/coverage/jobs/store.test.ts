@@ -7,6 +7,7 @@ import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
 import type { CoverageJobManifest } from '../../../../../../../../shared/coverage/types'
 import { trackTempDirs } from '../../../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-store-')
 
@@ -193,7 +194,7 @@ describe('CoverageJobRunStore', () => {
 describe('bridgeCoverageJobEvents', () => {
   it('announces the job\'s feature on a write', () => {
     const events: WorkspaceEvent[] = []
-    bridgeCoverageJobEvents(store, { publish: (e) => events.push(e) })
+    bridgeCoverageJobEvents(store, captureEvents(events))
     store.save(makeManifest('j-live', { feature: 'billing' }))
     expect(events).toEqual([{ type: 'coverage-changed', feature: 'billing' }])
   })
@@ -201,7 +202,7 @@ describe('bridgeCoverageJobEvents', () => {
   it('stays quiet for a removed job, which has no record to read a feature from', () => {
     store.save(makeManifest('j-gone'))
     const events: WorkspaceEvent[] = []
-    bridgeCoverageJobEvents(store, { publish: (e) => events.push(e) })
+    bridgeCoverageJobEvents(store, captureEvents(events))
     store.remove('j-gone')
     // Nothing about the ledger changed — the job's history was pruned. An event
     // here would send every open client to refetch a ledger that is unchanged.

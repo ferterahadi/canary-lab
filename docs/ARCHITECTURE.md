@@ -125,8 +125,28 @@ Flights feature. It composes the existing activity and evidence readers for suit
 shortcuts, picker rails, pending suite rows, and the coverage ledger's generating
 state. Changes to the ordered coverage job IDs/statuses refresh suite metadata and
 invalidate coverage, including completion discovered by the existing 2.5-second
-active-job fallback. The controller adds no fetch loop or store; navigation,
-dialogs, and component composition remain in `App.tsx`.
+active-job fallback. The controller adds no fetch loop or store.
+
+**`WorkspaceProvider` builds the workspace state once, above `App`.**
+`apps/web/src/WorkspaceProvider.tsx`, mounted in `main.tsx` inside the store
+providers, runs navigation (the only URL writer), selection, workspace data and
+`useWorkspaceFlights` exactly once each, and owns the navigation actions that
+combine them. `App.tsx` reads it through `useWorkspace()` and keeps layout,
+dialogs, run starts, and the actions only it needs.
+
+**Deep consumers read two contexts instead of drilled props.** `WorkspaceProvider`
+fills `WorkStateProvider` (`apps/web/src/shared/state/work-state.tsx`) from its
+single `useWorkspaceFlights` call — the hook's coverage-job effect must run once
+per workspace, so leaves read the context rather than calling it again — and
+`WorkspaceActionsProvider` (`workspace-actions.tsx`) with its stable callbacks. Both values are memoised on the references they receive, so a
+consumer's own `useMemo`/effect re-runs exactly as it did with a prop. Every field
+is optional and the hooks return an empty object without a provider: an absent
+action hides its affordance, as an omitted prop did, so a component App never
+wires (the run detail inside Services or a benchmark arm) keeps its props instead
+of reading the context. `FlightPage` scopes the drill-throughs to the open flight
+with `FlightActionsProvider` (`features/flights/state/flight-actions.tsx`), built
+from its own props so App keeps binding the origin flight. Controlled open state
+stays a prop, and only `use-workspace-navigation.ts` writes the URL.
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own

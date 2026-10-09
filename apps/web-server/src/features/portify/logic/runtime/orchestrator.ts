@@ -1,4 +1,4 @@
-import type { PortifyManifest, PortifyRepoState, PortifyVerification } from './types'
+import type { PortifyManifest, PortifyRepoState, PortifyVerification } from '../../../../../../../shared/portify-index'
 import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 // Sequences the port-ification lifecycle and owns the manifest as the source of

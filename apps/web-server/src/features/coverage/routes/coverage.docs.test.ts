@@ -7,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 // Coverage generation is LLM-only; the route drives the real service, so swap the
 // agent-backed summarizer/mapper for the test fakes at the module boundary.
@@ -59,7 +60,7 @@ beforeEach(async () => {
   fs.mkdirSync(logsDir, { recursive: true })
   app = Fastify()
   events = []
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: { publish: (e) => events.push(e) } })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: captureEvents(events) })
   await app.ready()
 })
 

@@ -3,7 +3,7 @@ import fs from 'fs'
 import { BenchmarkRunStore, type BenchmarkStoreEvent } from './store'
 import { benchmarksIndexPath } from './paths'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
-import type { BenchmarkManifest } from './types'
+import type { BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-bench-')

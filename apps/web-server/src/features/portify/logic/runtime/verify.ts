@@ -5,7 +5,7 @@ import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime
 import { allocatePorts, releasePorts } from '../../../runs/logic/runtime/port-allocator'
 import { bootAndProbe, fileTee, type BootProbeResult } from '../../../runs/logic/runtime/boot-probe'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
-import type { PortifyBootInstance, PortifyVerification } from './types'
+import type { PortifyBootInstance, PortifyVerification } from '../../../../../../../shared/portify-index'
 import { sleep } from '../../../../../../../shared/lib/sleep'
 
 // Proof that a feature's ports are injectable: boot the whole stack TWICE

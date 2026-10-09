@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import type { RunManifest } from '@shared/run-manifest'
 import { RecordedTestChanges } from './RecordedTestChanges'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let container: HTMLDivElement
 let root: Root
 const manifest: RunManifest = {
@@ -13,8 +13,7 @@ const manifest: RunManifest = {
   specEdits: { checkedAt: '2026-01-01T00:05:00Z', pending: [{ file: 'e2e/access.spec.ts', change: 'modified', affectedTests: ['credentials stay private'] }], adopted: [],
     reviewDecisions: [{ at: '2026-01-01T00:06:00Z', revision: 'old-revision', decision: 'approved-for-new-run' }] },
 }
-beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container) })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it.each(['passed', 'failed', 'aborted'] as const)('explains historical changes for %s and exposes comparison without changing the receipt', (status) => {
   const compare = vi.fn()

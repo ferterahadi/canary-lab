@@ -5,6 +5,7 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-fcfg-fl-')
 
@@ -40,7 +41,7 @@ async function makeApp(opts: {
       // Conditional SPREAD, like the two deps above it. `workspaceEvents: undefined`
       // is not the same as an absent key when the dep is declared optional, and
       // passing the explicit undefined is what made this argument unassignable.
-      ...(opts.events ? { workspaceEvents: { publish: (event: WorkspaceEvent) => { opts.events!.push(event) } } } : {}),
+      ...(opts.events ? { workspaceEvents: captureEvents(opts.events) } : {}),
     })
   })
   await app.ready()

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 're
 import { createDetailHydration } from './detail-hydration'
 import { createObservedReads } from './observed-reads'
 import { useRecordStream, type ConnectionState } from './record-stream'
+import type { RecordIndexFrame } from '@shared/record-index-frame'
 
 // The browser half of a record store whose server pushes the whole manifest on
 // every change: an index list (newest first) plus the manifests it has, fed by a
@@ -21,16 +22,12 @@ export type RecordIndexState<Entry, Detail, List extends string> = Record<List, 
   connection: ConnectionState
 }
 
-/** The server's frames. `detail-missing` is in the union only because the wire
- *  type lists it; the stream never sends it, and it is ignored if it arrives. */
-export type RecordIndexFrame<Entry, Detail, List extends string, Id extends string> =
-  | ({ type: 'snapshot'; details: Record<string, Detail> } & Record<List, Entry[]>)
-  | ({ type: 'update'; manifest: Detail } & Record<Id, string>)
-  | ({ type: 'removed' } & Record<Id, string>)
-  | ({ type: 'detail-missing' } & Record<Id, string>)
-
+/** The server's frames plus two local actions: `detail-missing`, which detail
+ *  hydration dispatches when a read finds the record gone (the stream never
+ *  sends it, and `frameToAction` drops it if it arrives), and `connection`. */
 export type RecordIndexAction<Entry, Detail, List extends string, Id extends string> =
   | RecordIndexFrame<Entry, Detail, List, Id>
+  | ({ type: 'detail-missing' } & Record<Id, string>)
   | { type: 'connection'; status: ConnectionState }
 
 type Indexed<Id extends string> = Record<Id, string>

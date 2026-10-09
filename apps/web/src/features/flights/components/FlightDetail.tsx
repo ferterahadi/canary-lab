@@ -1,6 +1,5 @@
 import { isActiveFlightStatus } from '@shared/flights/types'
 import { isExternallyDriven } from '@shared/flights/ownership'
-import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import { coverageJobStage } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as flightsApi from '@/shared/api/flights'
@@ -22,9 +21,10 @@ import { Chip } from '@/shared/ui/StatusChip'
 import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
 import { ACTIVITY_CHIP, featureChipState, FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternalWorkPark, type ExternalMutationOwner } from '../lib/external-work'
-import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
-import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import type { ConfigTab } from '@/shared/lib/workspace-view-state'
+import { ACTIVITY_STAGE, presentActivityRunStatus } from '../state/feature-activity'
+import { useFlightActions, type FlightActions } from '../state/flight-actions'
+import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useWorkState } from '@/shared/state/work-state'
 import { STAGE_BLURB, StageStatusIcon, presentStageStatus } from './stage-meta'
 import { STAGE_COMPANION, stageRowKey } from './StageRail'
 import { formatStageDuration } from './StageStatusLines'
@@ -32,12 +32,10 @@ import {
   buildDerivedManifest,
   derivedEntryStage,
   derivedFlightFeature,
-  type DerivedStage,
 } from '../lib/derived-stages'
 import { DownloadEvaluationAction } from './CheckpointControls'
 import { ContinueMenu, FlightMenu } from './FlightControls'
 import { FlightTakeoverAction } from './FlightTakeoverAction'
-import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail } from './StageDetail'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
@@ -47,6 +45,7 @@ import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { coverageStageWarning } from './coverage-stage-warning'
 import { activityRowKey as rowKeyForActivity, presentedFlightRows } from './presented-flight-rows'
 import { displayError } from '@/shared/api/error-message'
+import { PlaneIcon } from '@/shared/ui/Icons'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -56,7 +55,9 @@ import { displayError } from '@/shared/api/error-message'
 // the real surfaces behind the drill-through. The flights *list* is the picker
 // dialog (FlightsPickerDialog, `?view=flights` with no flight) — this view only
 // renders a selected flight. Live via `flights-changed` events (refreshKey) + a
-// gentle poll while the flight is active.
+// gentle poll while the flight is active. The live work snapshot (activity,
+// provenance, coverage jobs, derived rails) comes from WorkState, and the
+// drill-through actions from the FlightActions the page scopes to this flight.
 
 /** Stage key → the sidecar dir its adapter pins an agent-session ref into.
  *  Stages without an agent (similarity, scaffold, run…) have no entry.
@@ -72,21 +73,10 @@ export const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
 export function FlightDetail({
   flightId,
   activityRequest,
-  refreshKey,
   liveFlight,
   onBackToList,
   onNavigateFlight,
   onClose,
-  onStartFlight,
-  onOpenConfig,
-  onOpenSpecReview,
-  configRefreshKey,
-  docsRefreshKey,
-  activity,
-  externalHistory,
-  coverageJobs = [],
-  derivedStages,
-  drill,
   stage: routedStage,
   onSelectStage,
   log,
@@ -97,7 +87,6 @@ export function FlightDetail({
 }: {
   flightId: string
   activityRequest?: number
-  refreshKey: number
   /** The manifest `/ws/flights` pushed for this flight. When present it IS the
    *  record — the fetch below is only how a settled flight (which the server
    *  does not snapshot, because it will never change again) gets read. */
@@ -106,19 +95,6 @@ export function FlightDetail({
   /** Select a different flight — used by the derived→real redirect (R81). */
   onNavigateFlight?: (flightId: string | null) => void
   onClose: () => void
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
-  onOpenSpecReview?: (feature: string, runId: string) => void
-  configRefreshKey?: number
-  docsRefreshKey?: number
-  /** Per-feature live activity — drives the run row's live icon (R64). */
-  activity?: Map<string, FeatureActivity>
-  /** Persistent external provenance — keeps the Activity rail honest after a
-   *  standalone task settles and drops out of the live activity map. */
-  externalHistory?: FeatureExternalHistory
-  coverageJobs?: CoverageJobIndexEntry[]
-  derivedStages?: Map<string, DerivedStage[]>
-  drill: FlightDrillThroughs
   /** The selected stage, when App owns it (routed as `?stage=…`) — null is
    *  follow-mode. Controlled/uncontrolled hybrid: pass BOTH or neither. Without
    *  them the pick stays internal, which is how this component's own tests run
@@ -139,6 +115,16 @@ export function FlightDetail({
   missing?: boolean
   onFlightMissing?: (id: string) => void
 }) {
+  // The flight detail refetches on `flights-changed`; the derived prefill also
+  // on `features-changed` (repos) and `coverage-changed` (docs).
+  const refreshKey = useInvalidationKey('flights')
+  const configRefreshKey = useInvalidationKey('repos')
+  const docsRefreshKey = useInvalidationKey('coverage')
+  // Live activity drives the run row's live icon (R64); external provenance
+  // keeps the Activity rail honest after a standalone task settles and drops
+  // out of the live map; derived rails supply the stages for a derived token.
+  const { activity, externalHistory, coverageJobs = [], derivedStages } = useWorkState()
+  const { onStartFlight } = useFlightActions()
   // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
   // record to GET. The rail comes from live workspace evidence and everything
   // below renders from a client-only pseudo-manifest, unchanged.
@@ -474,10 +460,7 @@ export function FlightDetail({
           </button>
           <span aria-hidden="true" className="shrink-0 font-normal text-muted">/</span>
           <span className="min-w-0 truncate">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mr-1.5 inline-block align-[-1px]">
-              <path d="M22 2 11 13" />
-              <path d="M22 2 15 22l-4-9-9-4Z" />
-            </svg>
+            <PlaneIcon className="mr-1.5 inline-block align-[-1px]" />
             {flight.feature}
           </span>
           <Chip
@@ -835,12 +818,6 @@ export function FlightDetail({
               externalMutationOwner={externalMutationOwner}
               onResponded={refetch}
               onActionError={setActionError}
-              onStartFlight={onStartFlight}
-              onOpenConfig={onOpenConfig}
-              onOpenSpecReview={onOpenSpecReview}
-              configRefreshKey={configRefreshKey}
-              docsRefreshKey={docsRefreshKey}
-              drill={drill}
             />
           )}
         </main>
@@ -856,9 +833,8 @@ export function FlightDetail({
 export function stageDrillThrough(
   stage: FlightStage,
   flight: FlightManifest,
-  drill: FlightDrillThroughs,
+  actions: FlightActions,
   companion: FlightStage | null,
-  onOpenConfig?: (feature: string, tab?: ConfigTab) => void,
 ): { label: string; onClick: () => void } | null {
   if (stage.status === 'running') return null
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
@@ -866,12 +842,12 @@ export function stageDrillThrough(
   // requirements become browsable rows. Gated on the folded prd-summary
   // companion, NOT on the docs row: the docs stage is `done` the moment its
   // source docs are approved, and offering a ledger then opens an empty one.
-  if (stage.key === 'docs' && drill.onOpenCoverage && companion?.status === 'done') {
-    const open = drill.onOpenCoverage
+  if (stage.key === 'docs' && actions.onOpenCoverage && companion?.status === 'done') {
+    const open = actions.onOpenCoverage
     return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
-  if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
-    const open = drill.onOpenCoverage
+  if (stage.key === 'specs-coverage' && actions.onOpenCoverage && stage.status !== 'pending') {
+    const open = actions.onOpenCoverage
     return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
   // Flight owns the Parallel-readiness workflow, including live work, review
@@ -880,8 +856,9 @@ export function stageDrillThrough(
   // Unlocks once the stage has been touched at all — settled, skipped, or
   // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
   // pending and keeps its startedAt, and that's exactly when you want the tab.
-  if (stage.key === 'portify' && onOpenConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
-    return { label: 'Port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
+  const openConfig = actions.onOpenConfig
+  if (stage.key === 'portify' && openConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
+    return { label: 'Port settings →', onClick: () => openConfig(flight.feature, 'ports') }
   }
   return null
 }

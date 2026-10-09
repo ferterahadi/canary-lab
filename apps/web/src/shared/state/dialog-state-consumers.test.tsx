@@ -1,9 +1,10 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import { FeaturesColumn } from '../shell/FeaturesColumn'
 import { FlightsPill } from '@/features/flights/components/FlightsPill'
 import { useRunsColumn } from '@/features/runs/components/use-runs-column'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('../shell/McpPromoContext', () => ({ useMcpPromo: () => ({ gatePromo: vi.fn() }) }))
 vi.mock('@/features/runs/state/RunsContext', () => ({ useRuns: () => ({ transients: {}, errors: {} }) }))
@@ -14,8 +15,7 @@ vi.mock('@/features/config/components/SettingsModal', () => ({
 
 let root: Root
 let container: HTMLDivElement
-beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 function click(selector: string) { act(() => (document.querySelector(selector) as HTMLButtonElement).click()) }
 
 it('keeps Settings controlled until the parent updates its value', () => {
@@ -46,7 +46,7 @@ it('opens the uncontrolled Settings consumer and closes through its existing cal
 
 it('routes flight-picker opening and Escape dismissal through the controlled callback', () => {
   const change = vi.fn()
-  const render = (open: boolean) => act(() => root.render(<FlightsPill flights={[]} open={open} onOpenChange={change} onOpenFlight={() => {}} />))
+  const render = (open: boolean) => act(() => root.render(<FlightsPill open={open} onOpenChange={change} />))
   render(false)
   click('button[aria-label="Flights"]')
   expect(change).toHaveBeenLastCalledWith(true)

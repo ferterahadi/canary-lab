@@ -1,10 +1,11 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { useEditableSlice } from './useEditableSlice'
 import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 type Doc = { edited: string; untouched: string }
 const load = vi.fn<() => Promise<Doc>>()
@@ -12,7 +13,6 @@ const save = vi.fn<(payload: unknown) => Promise<Doc>>()
 let editor: ReturnType<typeof useEditableSlice<Doc, string>>
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']
 let root: Root
-let container: HTMLDivElement
 function Harness({ name }: { name: string }) {
   invalidate = useInvalidation().invalidate
   editor = useEditableSlice({ cacheKey: `config:${name}`, load, save,
@@ -29,11 +29,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   load.mockResolvedValue({ edited: 'initial', untouched: 'initial' })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it('updates clean forms and retains dirty drafts through unchanged reads and external edits', async () => {
   await act(async () => { render() })

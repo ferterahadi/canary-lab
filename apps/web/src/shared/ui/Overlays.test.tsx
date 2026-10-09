@@ -1,18 +1,14 @@
 // @vitest-environment happy-dom
 import { act, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import { ConfirmModal, Modal, usePopoverDismiss } from './Overlays'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
-})
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function Harness() {
   const [open, setOpen] = useState(false)

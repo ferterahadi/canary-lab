@@ -16,6 +16,7 @@ import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { listSpecFiles } from '../../../../shared/feature-loader'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { SummaryShape, VerificationPlan, computedTotal, countPassed, extractFailedSlugs } from './run-verdict'
+import { passedNames } from './summary-names'
 
 export type PlaywrightRerunSelection =
   | {
@@ -115,8 +116,7 @@ export function computeRerunTargetsOrdered(
     if (!locationBySlug.has(t.slug)) locationBySlug.set(t.slug, t.location)
   }
 
-  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
-  const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+  const passed = new Set(passedNames(summary))
   const skipped = skippedNameSet(summary)
 
   const failedSlugs = extractFailedSlugs(summary)
@@ -200,8 +200,7 @@ export function computeNonPassedTargets(
   }
   if (!parsedAny || allTests.length === 0) return { kind: 'extraction-failed' }
 
-  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
-  const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
+  const passed = new Set(passedNames(summary))
 
   if (passed.size === 0) return { kind: 'no-passed-yet', total: allTests.length }
 
@@ -309,8 +308,7 @@ export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[]
 }
 
 export function passedNameSet(summary: SummaryShape): Set<string> {
-  const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
-  return new Set(passedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
+  return new Set(passedNames(summary).filter((name) => name.length > 0))
 }
 
 export function skippedNameSet(summary: SummaryShape): Set<string> {

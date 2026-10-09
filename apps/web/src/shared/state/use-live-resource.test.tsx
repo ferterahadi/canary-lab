@@ -1,28 +1,21 @@
 // @vitest-environment happy-dom
 
 import { act, useEffect } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useLiveResource, type LiveResource } from './use-live-resource'
 import { getFeatureCoverage } from '../api/coverage'
 import type { CoverageLedger } from '@shared/coverage/types'
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 /** Renders the hook and exposes the bus so a test can bump a topic the way the
  *  workspace-event handler does. */

@@ -2,19 +2,14 @@ import { requestCliJson } from './request-json'
 import { banner, section, ok, fail, info, dim, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { getProjectRoot } from '../../shared/runtime/project-root'
-import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { resolveServerBase } from '../../shared/runtime/active-servers'
+import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 // The boot command is a thin client over the same REST surface the web UI uses,
-// so it requires `canary-lab ui` to be running. The port comes from this
-// project's canary-lab.config.json (default 7421).
-function resolveServerBase(): string {
-  try {
-    return `http://localhost:${resolveProjectPort(loadProjectConfig(getProjectRoot()))}`
-  } catch {
-    return `http://localhost:${DEFAULT_PORT}`
-  }
-}
-const SERVER = resolveServerBase()
+// so it requires `canary-lab ui` to be running: this project's live server, else
+// the port from its canary-lab.config.json (default 7421).
+const PROJECT_ROOT = getProjectRoot()
+const SERVER = resolveServerBase(PROJECT_ROOT, () => resolveProjectPort(loadProjectConfig(PROJECT_ROOT)))
 
 function usage(): void {
   banner('Canary Lab — boot')

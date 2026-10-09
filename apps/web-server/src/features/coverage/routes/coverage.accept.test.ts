@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { coverageRoutes } from './coverage'
 import { applyExternalSummary } from '../logic/coverage/feature-docs'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-accept-route-')
 
@@ -36,7 +37,7 @@ beforeEach(async () => {
   })
   app = Fastify()
   events = []
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmp, workspaceEvents: { publish: (e) => events.push(e) } })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmp, workspaceEvents: captureEvents(events) })
   await app.ready()
 })
 

@@ -1,31 +1,22 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { PortifyManifest } from '@/shared/api/portify'
-import type { PortifyStatus } from '@shared/portify-index'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it } from 'vitest'
+import type { PortifyManifest, PortifyStatus } from '@shared/portify-index'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function manifest(status: PortifyStatus, over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
     workflowId: 'w',
     feature: 'cns',
+    featureDir: '/workspace/features/cns',
     repos: [{ name: 'app', path: '~/app', worktreePath: '/logs/portify/w/worktrees/g0-app' }],
     agent: 'claude',
     producer: 'external',

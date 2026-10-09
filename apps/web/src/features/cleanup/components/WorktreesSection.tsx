@@ -103,7 +103,7 @@ export function WorktreesSection({ now }: { now: number }) {
       >
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <tr className="cl-rubric" style={{ textAlign: 'left' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Owner</th>
               <th className="py-1 pr-3">Ref</th>
@@ -133,7 +133,7 @@ export function WorktreesSection({ now }: { now: number }) {
                   />
                 </td>
                 <td className="py-1 pr-3">
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  <span className="cl-rubric">
                     {WORKTREE_OWNER_LABEL[wt.ownerKind]}
                   </span>
                   {wt.ownerId && <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{wt.ownerId}</span>}

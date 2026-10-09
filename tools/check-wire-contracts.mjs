@@ -16,15 +16,17 @@
 //
 // Run: node tools/check-wire-contracts.mjs
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { checkSharedBehaviors, checkForbiddenSharedCopies } from './shared-behavior-contracts.mjs'
+import { REPO, walk } from './lib/fs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
 // Root files that own wire types. Every exported interface or type alias in
 // them is the one declaration of that name; an app file that declares the same
-// name is a mirror.
+// name is a mirror. Listed, not derived from `shared/**`: a scan reports
+// same-name locals with a different shape (TcpProbe, SourceTest,
+// HealSignalKind) as copies.
 const WIRE_HOMES = [
   'shared/agent-session-types.ts',
   'shared/workspace-events.ts',
@@ -43,6 +45,12 @@ const WIRE_HOMES = [
   'shared/version-status.ts',
   'shared/portify-index.ts',
   'shared/benchmark-index.ts',
+  'shared/record-index-frame.ts',
+  'shared/flights/index-entry.ts',
+  'shared/config-value.ts',
+  'shared/lib/dotenv-edit.ts',
+  'shared/verification.ts',
+  'shared/run-pr.ts',
 ]
 const APP_ROOTS = ['apps/web/src', 'apps/web-server/src']
 
@@ -72,6 +80,20 @@ const SHARED_TYPES = [
     declarationKind: 'type',
     consumers: [],
   },
+  // The full workflow record the server persists and streams. The web client
+  // once carried a hand-trimmed mirror that had already lost `featureDir`,
+  // `models` and `verification.failureClass`.
+  {
+    name: 'PortifyManifest',
+    declaration: 'shared/portify-index.ts',
+    consumers: [
+      { file: 'apps/web-server/src/features/portify/logic/runtime/store.ts', importFrom: '../../../../../../../shared/portify-index', usage: 'FileBackedTaskStore<PortifyManifest>' },
+      { file: 'apps/web/src/shared/api/portify.ts', importFrom: '@shared/portify-index', usage: 'request<PortifyManifest>(' },
+    ],
+  },
+  { name: 'PortifyVerification', declaration: 'shared/portify-index.ts', consumers: [] },
+  { name: 'PortifyBootInstance', declaration: 'shared/portify-index.ts', consumers: [] },
+  { name: 'PortifyRepoState', declaration: 'shared/portify-index.ts', consumers: [] },
   {
     name: 'BenchmarkIndexEntry',
     declaration: 'shared/benchmark-index.ts',
@@ -124,17 +146,6 @@ function unionTags(text, name) {
   return new Set([...body.matchAll(/type:\s*'([a-z-]+)'/g)].map((m) => m[1]))
 }
 
-function walk(dir) {
-  const out = []
-  for (const name of readdirSync(path.join(REPO, dir))) {
-    const rel = `${dir}/${name}`
-    if (name === 'node_modules' || name === 'dist') continue
-    if (statSync(path.join(REPO, rel)).isDirectory()) out.push(...walk(rel))
-    else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(rel)
-  }
-  return out
-}
-
 const problems = [...checkSharedBehaviors(read), ...checkForbiddenSharedCopies(read)]
 
 const wireNames = new Map()
@@ -143,7 +154,8 @@ for (const home of WIRE_HOMES) {
 }
 // A declaration, not an inline `type X,` import specifier.
 const declaration = /^\s*(?:export\s+)?(?:declare\s+)?(?:interface\s+([A-Za-z_]\w*)|type\s+([A-Za-z_]\w*)\s*(?:<[^=]*>)?\s*=)/gm
-for (const file of APP_ROOTS.flatMap(walk)) {
+const appFiles = APP_ROOTS.flatMap((dir) => walk(path.join(REPO, dir), { ext: /\.tsx?$/, skip: ['node_modules', 'dist'], excludeTests: true, relativeTo: REPO }))
+for (const file of appFiles) {
   for (const m of read(file).matchAll(declaration)) {
     const name = m[1] ?? m[2]
     const home = wireNames.get(name)

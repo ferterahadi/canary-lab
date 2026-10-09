@@ -18,7 +18,7 @@ import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-run-review-')
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The 409 below guards a write that lands WHILE the patch is being built, so the
 // test has to place one at that instant. Hooking the awaited diff step is the

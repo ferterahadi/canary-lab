@@ -1,4 +1,4 @@
-import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import type { ExtractedTest } from '@shared/extracted-test'
 import type {
   CoverageLedger,
@@ -14,6 +14,7 @@ import type {
 import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { Tooltip } from '@/shared/ui/Tooltip'
+import { activateOnKey } from '@/shared/ui/keyboard'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 import { pluralSuffix } from '@shared/lib/plural'
 import { joinNatural } from '@/shared/lib/format'
@@ -608,7 +609,7 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
         aria-expanded={expanded}
         data-testid={`req-toggle-${id}`}
         onClick={toggle}
-        onKeyDown={(e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        onKeyDown={activateOnKey(toggle)}
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <span className="clcov-rowid">{id}</span>
@@ -730,7 +731,7 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
         aria-expanded={expanded}
         data-testid={`test-toggle-${cardName}`}
         onClick={toggle}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        onKeyDown={activateOnKey(toggle)}
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <span className="clcov-rowid"><TestIdBadge n={testNumber} /></span>

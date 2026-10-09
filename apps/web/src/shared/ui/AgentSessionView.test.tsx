@@ -13,7 +13,6 @@ vi.mock('@/shared/api/flights', async (original) => ({
   ...(await original<typeof import('@/shared/api/flights')>()), getFlightAgentSession: mocks.get,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('Markdown (agent session prose)', () => {
   let container: HTMLDivElement

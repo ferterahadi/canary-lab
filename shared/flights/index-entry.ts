@@ -1,3 +1,4 @@
+import type { RecordIndexFrame } from '../record-index-frame'
 import { stageHasEvidence, type FlightIndexEntry, type FlightManifest } from './types'
 
 export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
@@ -36,3 +37,6 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     endedAt: m.endedAt,
   }
 }
+
+/** `/ws/flights` frames. */
+export type FlightsStreamFrame = RecordIndexFrame<FlightIndexEntry, FlightManifest, 'flights', 'flightId'>

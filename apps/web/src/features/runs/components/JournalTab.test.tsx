@@ -5,8 +5,6 @@ import { formatLocalDateTime } from '@/shared/lib/format'
 import { JournalTab } from './JournalTab'
 import type { JournalSection } from '@shared/run-detail'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 vi.mock('@/shared/api/runs', () => ({
   listJournal: vi.fn(),
 }))

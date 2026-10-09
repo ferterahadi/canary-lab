@@ -9,11 +9,12 @@ import { evaluationRoutes } from './evaluation'
 import { RunStore } from '../../runs/logic/run-store'
 import { createRegistry } from '../../runs/logic/run-registry'
 import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportBuild } from '../logic/evaluation-export-store'
-import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 
 import { resolveManifestSessionRef, loadAgentSession } from '../../agent-sessions/logic/agent-session-log'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { manifestWriterFor } from '../../runs/logic/__fixtures__/run-manifest'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-evalroutes-')
 
@@ -55,19 +56,7 @@ beforeEach(() => {
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
-function writeManifestForRun(runId: string, feature = 'foo', status: 'running' | 'passed' | 'failed' | 'healing' | 'aborted' = 'passed'): void {
-  const dir = runDirFor(logsDir, runId)
-  fs.mkdirSync(dir, { recursive: true })
-  writeManifest(path.join(dir, 'manifest.json'), {
-    runId,
-    feature,
-    featureDir: path.join(featuresDir, feature),
-    startedAt: 'now',
-    status,
-    healCycles: 0,
-    services: [],
-  })
-}
+const writeManifestForRun = manifestWriterFor(() => ({ logsDir, featuresDir }))
 
 async function build(opts: {
   projectRoot?: string
@@ -80,13 +69,13 @@ async function build(opts: {
   // An export task announces itself from the STORE now
   // (bridgeEvaluationExportEvents, wired once at boot in server.ts) — the app
   // under test gets the same bridge, because the routes no longer publish.
-  bridgeEvaluationExportEvents(logsDir, opts.events ? { publish: (event) => opts.events!.push(event) } : undefined)
+  bridgeEvaluationExportEvents(logsDir, opts.events ? captureEvents(opts.events) : undefined)
   await app.register(evaluationRoutes, {
     featuresDir,
     projectRoot: opts.projectRoot,
     store,
     generateEvaluationRewrite: opts.generateEvaluationRewrite,
-    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+    workspaceEvents: opts.events ? captureEvents(opts.events) : undefined,
   })
   return { app, registry, store }
 }
@@ -98,14 +87,14 @@ async function buildWithWs(opts: Parameters<typeof build>[0] = {}) {
   // An export task announces itself from the STORE now
   // (bridgeEvaluationExportEvents, wired once at boot in server.ts) — the app
   // under test gets the same bridge, because the routes no longer publish.
-  bridgeEvaluationExportEvents(logsDir, opts.events ? { publish: (event) => opts.events!.push(event) } : undefined)
+  bridgeEvaluationExportEvents(logsDir, opts.events ? captureEvents(opts.events) : undefined)
   await app.register(fastifyWebsocket)
   await app.register(evaluationRoutes, {
     featuresDir,
     projectRoot: opts.projectRoot,
     store,
     generateEvaluationRewrite: opts.generateEvaluationRewrite,
-    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+    workspaceEvents: opts.events ? captureEvents(opts.events) : undefined,
   })
   return { app, registry, store }
 }

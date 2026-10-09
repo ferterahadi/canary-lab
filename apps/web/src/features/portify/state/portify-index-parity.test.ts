@@ -3,7 +3,7 @@ import path from 'node:path'
 import { beforeEach, expect, it } from 'vitest'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 import { PortifyRunStore } from '../../../../../web-server/src/features/portify/logic/runtime/store'
-import type { PortifyManifest } from '../../../../../web-server/src/features/portify/logic/runtime/types'
+import type { PortifyManifest } from '@shared/portify-index'
 import { portifyIndex } from './portify-state'
 
 const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex

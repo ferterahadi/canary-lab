@@ -8,8 +8,6 @@ import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
 import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 vi.mock('@/shared/api/evaluation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/evaluation')>()),
   startEvaluationExport: vi.fn(),

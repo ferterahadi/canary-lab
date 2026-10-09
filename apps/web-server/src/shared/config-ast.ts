@@ -11,22 +11,13 @@
 import * as recast from 'recast'
 import { namedTypes as N } from 'ast-types'
 import type * as K from 'ast-types/lib/gen/kinds'
+import type { ConfigValue, ExprPlaceholder } from '../../../../shared/config-value'
  
 const tsParser = require('recast/parsers/babel-ts')
 
 const b = recast.types.builders
 
 const EXPR = '$expr' as const
-export interface ExprPlaceholder { [EXPR]: string }
-
-export type ConfigValue =
-  | null
-  | boolean
-  | number
-  | string
-  | ExprPlaceholder
-  | ConfigValue[]
-  | { [k: string]: ConfigValue }
 
 /** A config file's root value. Every locator below resolves to an
  *  `ObjectExpression`, so a parsed config is always a plain object — callers

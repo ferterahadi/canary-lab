@@ -51,17 +51,6 @@ export function StatusDot({
   )
 }
 
-export function SectionHeader({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="px-4 py-2 text-[10px] uppercase tracking-wider"
-      style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-default)' }}
-    >
-      {children}
-    </div>
-  )
-}
-
 /** A titled section as a discrete bordered card — a header band + a padded body
  *  — so multiple sections in a config tab read as distinct blocks instead of
  *  one continuous list (the old faint `SectionHeader` blurred them together).

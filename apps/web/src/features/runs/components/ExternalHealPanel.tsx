@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, pillPalette, useExternalClientAction, type PillPalette } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, agentJobTone, pillPalette, useExternalClientAction, type PillPalette } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
@@ -128,7 +128,7 @@ function statusPalette(status: PanelStatus): PillPalette {
   if (runStatus) return { ...pillPalette(runStatus.tone), bg: runStatus.background }
   if (status === 'disconnected') return pillPalette('var(--danger)')
   if (status === 'paused') return pillPalette('var(--warning)')
-  if (status === 'running-tests') return pillPalette('var(--border-focus)')
+  if (status === 'running-tests') return agentJobTone('running')
   return pillPalette('var(--success)')
 }
 

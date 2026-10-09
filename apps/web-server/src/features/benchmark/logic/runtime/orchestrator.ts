@@ -1,5 +1,5 @@
-import type { BenchmarkManifest } from './types'
-import type { ArmIterationResult, BenchmarkReport } from './report'
+import type { BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
+import type { ArmIterationResult, BenchmarkReport } from '../../../../../../../shared/benchmark-index'
 import { SabotageNoopError } from './race'
 import { errorMessage } from '../../../../../../../shared/lib/error-message'
 

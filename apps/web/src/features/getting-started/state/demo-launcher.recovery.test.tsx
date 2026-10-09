@@ -14,7 +14,6 @@ vi.mock('@/shared/api/config', async (importOriginal) => ({
   getOnboardingSamples: api.getOnboardingSamples,
   getProjectConfig: api.getProjectConfig,
 }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
 let element: HTMLDivElement
 let invalidate: () => void

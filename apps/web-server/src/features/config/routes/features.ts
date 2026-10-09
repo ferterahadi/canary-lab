@@ -25,12 +25,11 @@ import type { FeaturesRouteDeps } from './features-route-deps'
 import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { notFound } from '../../../shared/http-error'
+import { notFound, statusCodeOf } from '../../../shared/http-error'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
-  const statusCode = (error as { statusCode?: number }).statusCode ?? 500
-  return reply.code(statusCode).send({ error: errorMessage(error, fallback) })
+  return reply.code(statusCodeOf(error)).send({ error: errorMessage(error, fallback) })
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {

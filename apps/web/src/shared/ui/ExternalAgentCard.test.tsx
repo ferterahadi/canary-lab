@@ -1,9 +1,10 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExternalOpenAction } from './AgentSessionRows'
 import type { ExternalSessionActivity } from './activity-log'
 import * as workspaceApi from '@/shared/api/workspace'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
@@ -13,17 +14,10 @@ vi.mock('@/shared/api/workspace', async (importOriginal) => ({
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function render(clientKind: ExternalSessionActivity['clientKind'], sessionUrl?: string) {
   act(() => root.render(<ExternalOpenAction session={{

@@ -11,6 +11,9 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   playwrightEventsPath: string
+  // JSONL audit trail of every external (MCP/REST) heal command against the
+  // run, one entry per command, created lazily on the first append.
+  externalCommandsPath: string
   // Newline-delimited `--test-list` entries for a targeted rerun, rewritten
   // before each Playwright invocation that uses one. Kept in the run dir rather
   // than a temp file so a rerun's exact selection stays inspectable afterwards.
@@ -63,6 +66,21 @@ export interface RunPaths {
   serviceLog(safeName: string): string
 }
 
+/** The run manifest's file name — exported for the observer, which watches
+ *  run-dir entries by name rather than by full path. */
+export const RUN_MANIFEST_FILE = 'manifest.json'
+
+/** `<runDir>/manifest.json`: the one artifact every run reader starts from,
+ *  so readers that need nothing else skip building the whole layout. */
+export function runManifestPath(runDir: string): string {
+  return path.join(runDir, RUN_MANIFEST_FILE)
+}
+
+/** `<runDir>/e2e-summary.json`: the Playwright reporter's per-test results. */
+export function runSummaryPath(runDir: string): string {
+  return path.join(runDir, 'e2e-summary.json')
+}
+
 /**
  * Build the per-run path layout from a single `runDir`.
  *
@@ -76,10 +94,11 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
   const signalsDir = overrides?.signalsDir ?? path.join(runDir, 'signals')
   return {
     runDir,
-    manifestPath: path.join(runDir, 'manifest.json'),
-    summaryPath: path.join(runDir, 'e2e-summary.json'),
+    manifestPath: runManifestPath(runDir),
+    summaryPath: runSummaryPath(runDir),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    externalCommandsPath: path.join(runDir, 'external-commands.jsonl'),
     rerunListPath: path.join(runDir, 'rerun-test-list.txt'),
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),

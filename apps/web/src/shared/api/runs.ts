@@ -7,7 +7,7 @@ import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequi
 import type { AuditList } from './types-wizard'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { RunDetail, JournalSection } from '@shared/run-detail'
-import type { GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
+import type { ApplyFixesOutcome, GhStatus, PrPreflight, ProposePrResult } from '@shared/run-pr'
 export type { GhStatus, PrBlockedReason, PrRepoPreflight, PrPreflight, ProposePrResult } from '@shared/run-pr'
 import { requestJson, ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
@@ -201,14 +201,13 @@ export function restartRun(
 // Apply a run's captured heal fixes (R80) into the real product repos. Returns
 // a per-repo result; a 3-way conflict comes back as `ok:false` with a reason,
 // not an error. 409 (no captured fixes) rejects.
-export interface ApplyFixResult { repoName: string; ok: boolean; reason?: string }
 export function applyRunFixes(
   runId: string,
   /** One repo, or every captured repo when omitted. */
   repoName?: string,
   opts?: ClientOptions,
-): Promise<{ results: ApplyFixResult[]; allOk: boolean }> {
-  return requestJson<{ results: ApplyFixResult[]; allOk: boolean }>(`/api/runs/${encodeURIComponent(runId)}/apply-fixes`, 'POST', repoName === undefined ? {} : { repoName }, opts)
+): Promise<ApplyFixesOutcome> {
+  return requestJson<ApplyFixesOutcome>(`/api/runs/${encodeURIComponent(runId)}/apply-fixes`, 'POST', repoName === undefined ? {} : { repoName }, opts)
 }
 
 // What applying would land on, per captured repo, read live. `foreignDirty`

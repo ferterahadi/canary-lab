@@ -94,15 +94,24 @@ export async function checkHealth(
 }
 
 export function startUiInBackground(stderr: Writable, projectRoot: string): void {
-  const child = spawn(process.execPath, [resolveCliPath(), 'ui', '--no-open'], {
+  spawnDetachedUi(projectRoot, resolveCliPath(), stderr)
+}
+
+/** The one detached `canary-lab ui --no-open` spawn for a project. Callers keep
+ *  their own CLI-path precedence; `stderr`, when given, receives the child's
+ *  stderr prefixed, otherwise all output is discarded. */
+export function spawnDetachedUi(projectRoot: string, cliPath: string, stderr?: Writable): void {
+  const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
     cwd: projectRoot,
     detached: true,
     env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: stderr ? ['ignore', 'ignore', 'pipe'] : 'ignore',
   })
-  child.stderr?.on('data', (chunk: Buffer | string) => {
-    stderr.write(`[canary-lab ui] ${chunk.toString()}`)
-  })
+  if (stderr) {
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr.write(`[canary-lab ui] ${chunk.toString()}`)
+    })
+  }
   child.unref()
 }
 

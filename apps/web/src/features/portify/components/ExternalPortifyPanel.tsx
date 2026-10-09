@@ -1,8 +1,8 @@
-import type { PortifyManifest } from '@/shared/api/portify'
-import type { PortifyStatus } from '@shared/portify-index'
+import type { PortifyManifest, PortifyStatus } from '@shared/portify-index'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { shortSession } from '@/shared/lib/format'
-import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { ExternalAgentCard, ExternalAgentError, ExternalClientCta, ExternalMetaFact, agentJobTone, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
+import { portifyTraceStatus } from '@/shared/lib/agent-job-status'
 
 // Portify-side analog of ExternalDraftAgentPanel / ExternalHealPanel. When a
 // port-ification workflow is driven by an external MCP client (the agent runs
@@ -22,7 +22,7 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
       eyebrow="External agent session"
       headline={clientLabel(clientKind)}
       subtitle={m.external?.conversationName}
-      statusPill={<ExternalStatusPill label={statusLabel(m.status)} palette={statusPalette(m.status)} />}
+      statusPill={<ExternalStatusPill label={statusLabel(m.status)} palette={agentJobTone(portifyTraceStatus(m.status))} />}
       meta={
         m.external?.sessionId && (
           <ExternalMetaFact label="Session" title={m.external.sessionId}>
@@ -93,14 +93,6 @@ function statusLabel(status: PortifyStatus): string {
     case 'failed': return 'Failed'
     case 'aborted': return 'Cancelled'
   }
-}
-
-function statusPalette(status: PortifyStatus) {
-  if (status === 'failed') return pillPalette('var(--danger)')
-  if (status === 'aborted') return pillPalette('var(--text-muted)')
-  if (status === 'saved') return pillPalette('var(--success)')
-  if (status === 'ready-to-save') return pillPalette('var(--accent)')
-  return pillPalette('var(--border-focus)')
 }
 
 function bodyCopy(status: PortifyStatus, agent: string): string {

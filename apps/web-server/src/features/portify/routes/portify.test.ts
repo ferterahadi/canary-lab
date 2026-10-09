@@ -4,13 +4,13 @@ import path from 'path'
 import Fastify from 'fastify'
 import { portifyRoutes, type PortifyRouteDeps } from './portify'
 import type { PortifyStore } from '../logic/runtime/store'
-import type { PortifyManifest } from '../logic/runtime/types'
+import type { PortifyManifest } from '../../../../../../shared/portify-index'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('portify-open-')
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 function manifest(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {

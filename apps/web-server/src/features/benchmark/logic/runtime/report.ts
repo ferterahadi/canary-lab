@@ -2,34 +2,7 @@
 // comparison report. No I/O — fully unit-testable. Arm 'A' = Canary harness,
 // arm 'B' = baseline (Playwright MCP only).
 
-export interface ArmIterationResult {
-  arm: 'A' | 'B'
-  iteration: number
-  healed: boolean
-  /** Heal cycles to green when healed, or cycles spent before timeout/failure. */
-  healCycles: number
-  wallClockMs: number
-  tokens?: number
-}
-
-export interface ArmSummary {
-  iterationsHealed: number
-  iterationsTotal: number
-  /** Mean heal cycles across ALL iterations (healed + failed). 0 when none. */
-  avgHealCycles: number
-  totalWallClockMs: number
-  /** Sum of per-iteration tokens; undefined when no iteration reported tokens. */
-  totalTokens?: number
-}
-
-export interface BenchmarkReport {
-  harness: ArmSummary
-  baseline: ArmSummary
-  /** Headline: harness iterations-healed ÷ baseline iterations-healed.
-   *  null when baseline healed zero (an unbounded multiple — UI shows it
-   *  as "baseline never healed" rather than ∞). */
-  reliabilityMultiple: number | null
-}
+import type { ArmIterationResult, ArmSummary, BenchmarkReport } from '../../../../../../../shared/benchmark-index'
 
 function summarizeArm(results: ArmIterationResult[], arm: 'A' | 'B'): ArmSummary {
   const rows = results.filter((r) => r.arm === arm)

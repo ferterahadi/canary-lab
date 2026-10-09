@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import {
   getStoredChoice,
   resolveTheme,
@@ -11,6 +11,7 @@ import {
   currentResolvedTheme,
   useTheme,
 } from './theme'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const STORAGE_KEY = 'canary-lab.theme'
 
@@ -156,19 +157,9 @@ describe('subscribeTheme', () => {
 })
 
 describe('useTheme', () => {
-  let container: HTMLDivElement
   let root: Root
 
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    root = createRoot(container)
-  })
-
-  afterEach(() => {
-    act(() => { root.unmount() })
-    container.remove()
-  })
+  mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
   function captureHook() {
     const captured: { current: ReturnType<typeof useTheme> | null } = { current: null }

@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DurableView, PersistedView } from '../lib/workspace-view-state'
 import type { WorkspaceNavigation } from './use-workspace-navigation'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The URL/localStorage layer is mocked, not the derivation: `nav-state` runs for
 // real here (its own suite covers it in isolation) so the seed, the routed
@@ -29,7 +28,6 @@ function persisted(over: Partial<PersistedView> = {}): PersistedView {
   }
 }
 
-let container: HTMLDivElement
 let root: Root
 let nav: WorkspaceNavigation
 let crossTab: ((state: DurableView) => void) | null
@@ -47,10 +45,8 @@ async function mount(seed: PersistedView = persisted()): Promise<void> {
   await act(async () => { root.render(<Probe />) })
 }
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   crossTab = null
   unsubscribes = 0
   viewState.persistView.mockReset()
@@ -59,11 +55,6 @@ beforeEach(() => {
     crossTab = cb
     return () => { unsubscribes += 1 }
   })
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
 })
 
 describe('useWorkspaceNavigation — seeding from the route', () => {
@@ -224,6 +215,19 @@ describe('useWorkspaceNavigation — dialog openers', () => {
     expect(nav.resumePlanTaskId).toBe('plan-1')
     // flight-new outranks demo and verify in the z-order.
     expect(nav.routedDialog).toBe('flight-new')
+  })
+
+  it('opens the changed-tests review on the focus it names, and clears a stale one', async () => {
+    await mount()
+
+    await act(async () => { nav.openReview({ file: 'e2e/cart.spec.ts', line: 4, mode: 'english' }) })
+    expect([nav.specReviewOpen, nav.reviewFocus, nav.routedDialog]).toEqual([true, { file: 'e2e/cart.spec.ts', line: 4, mode: 'english' }, 'tests-review'])
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ dialog: 'tests-review', reviewFocus: { file: 'e2e/cart.spec.ts', line: 4, mode: 'english' } }))
+
+    await act(async () => { nav.setSpecReviewOpen(false) })
+    // An open without a focus lands on the overview, not the file the last one named.
+    await act(async () => { nav.openReview() })
+    expect([nav.specReviewOpen, nav.reviewFocus]).toEqual([true, undefined])
   })
 
   it('closing settings also drops the stacked model matrix (the setConfigFor rule)', async () => {

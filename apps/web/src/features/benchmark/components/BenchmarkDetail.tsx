@@ -8,8 +8,8 @@ import type {
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 import { useBenchmarkDetail, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
@@ -20,6 +20,7 @@ import { ReportView } from './BenchmarkReport'
 import { displayError } from '@/shared/api/error-message'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { CheckIcon, TrashIcon } from '@/shared/ui/Icons'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 
 // ─── Detail (setup / race / report) ─────────────────────────────────────────
 
@@ -199,7 +200,7 @@ export function SetupView({ m }: { m: BenchmarkManifest }) {
         The sabotage agent is editing the app code in an isolated worktree — this usually takes <b>30–90s</b>.
         When the broken state is frozen, both arms (🐤 harness, ⚙ baseline) start automatically and the race appears here.
       </div>
-      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', marginBottom: 7, fontWeight: 600 }}>Sabotage agent</div>
+      <CapsLabel style={{ marginBottom: 7 }}>Sabotage agent</CapsLabel>
       <div style={{ flex: 1, minHeight: 200, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
         <AgentSessionView source={{ kind: 'benchmark', benchmarkId: m.benchmarkId, live: true }} />
       </div>

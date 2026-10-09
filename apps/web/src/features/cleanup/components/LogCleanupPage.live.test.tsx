@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as runsApi from '@/shared/api/runs'
@@ -10,8 +10,9 @@ import type { InvalidationTopic } from '@/shared/state/invalidation-bus'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { CLEANUP_RECONCILE_MS } from '../state/use-cleanup-inventory'
 import { LogCleanupPage } from './LogCleanupPage'
+import { advanceAct } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/cleanup', () => ({ cleanupRuns: vi.fn(), cleanupWorktrees: vi.fn(), cleanupPortify: vi.fn(), trimRun: vi.fn(), removeWorktree: vi.fn(), openWorktreePath: vi.fn() }))
 vi.mock('@/shared/api/runs', () => ({ deleteRun: vi.fn() }))
 vi.mock('@/shared/api/portify', () => ({ removePortify: vi.fn() }))
@@ -43,16 +44,12 @@ beforeEach(() => {
   ], totalBytes: 150 })
   vi.mocked(runsApi.deleteRun).mockResolvedValue(undefined)
   vi.mocked(portifyApi.removePortify).mockResolvedValue({ removed: true, workflowId: 'p-one' })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 async function mount() {
   await act(async () => root.render(<InvalidationProvider><Harness /></InvalidationProvider>))
@@ -65,7 +62,7 @@ function button(label: string, parent: ParentNode = container) {
 }
 async function click(element: HTMLElement) { await act(async () => element.click()) }
 async function changed(resource = 'runs') { await act(async () => invalidate('cleanup', resource)) }
-async function tick() { await act(async () => { await vi.advanceTimersByTimeAsync(CLEANUP_RECONCILE_MS) }) }
+async function tick() { await advanceAct(CLEANUP_RECONCILE_MS) }
 
 function inventoryCase<T>(tab: string, read: () => Promise<T>, empty: T, loading: string, failure: string, emptyTitle: string) {
   return {

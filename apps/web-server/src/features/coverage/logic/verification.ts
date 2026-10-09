@@ -10,6 +10,7 @@ import type {
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
+  VerificationTargetIndex,
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup } from '../../../../../../shared/run-detail'
@@ -23,11 +24,6 @@ import { readTextOrNull } from '../../../../../../shared/lib/read-file-or'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
-}
-
-export interface VerificationTargetIndex {
-  targets: VerificationTarget[]
-  targetUrls: Record<string, string>
 }
 
 export interface SaveVerificationConfigInput {

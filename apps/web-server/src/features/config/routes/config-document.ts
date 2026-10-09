@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { findExistingConfig, type ResolvedConfigPath } from '../../../shared/config-file'
-import type { ConfigValue } from '../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../shared/config-value'
 
 /** Keep lookup precedence shared while the caller owns write/rename policy. */
 export function resolveConfigDocument(featuresDir: string, name: string, candidates: string[], missingConfig: 'config file' | 'playwright config') {

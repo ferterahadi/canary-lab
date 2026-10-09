@@ -2,11 +2,12 @@ import { runCaptureCases } from '@shared/__fixtures__/run-capture-state'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RepoBranchSnapshot } from '@shared/run-manifest'
 import type { RunFixCapture, RunPrAttempt } from '@shared/run-state'
 import { ChangesTab, rosterFor } from './ChangesTab'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   getRunApplyPreflight: vi.fn(),
@@ -28,8 +29,6 @@ vi.mock('@/shared/api/runs', () => ({
 vi.mock('@/shared/api/workspace', () => ({
   openEditor: mocks.openEditor,
 }))
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const stoppedRun = { status: 'failed', endedAt: '2026-08-01T00:00:00.000Z' } as const
 
@@ -75,10 +74,8 @@ const target = (over: Partial<{ repoName: string; repoRoot: string; ready: boole
 let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   mocks.getRunApplyPreflight.mockReset().mockResolvedValue({ targets: [target(), target({ repoName: 'gateway', repoRoot: '/repos/gw' })] })
   mocks.applyRunFixes.mockReset().mockResolvedValue({ results: [{ repoName: 'mighty-cns', ok: true }], allOk: true })
   mocks.openRunRepo.mockReset().mockResolvedValue({ opened: true, path: '/repos/cns', editor: 'vscode' })
@@ -90,10 +87,6 @@ beforeEach(() => {
     diff: 'diff --git a/src/api/orders.ts b/src/api/orders.ts\n@@ -1,3 +1,3 @@\n-  broken()\n+  fixed()\n',
   })
   mocks.openEditor.mockReset().mockResolvedValue({ opened: true, editor: 'vscode' })
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 const render = async (ui: React.ReactElement): Promise<void> => {

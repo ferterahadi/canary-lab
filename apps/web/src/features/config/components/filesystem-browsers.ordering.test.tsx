@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
 import { AddSlotModal } from './AddSlotModal'
@@ -8,6 +8,7 @@ import { CopyFromModal } from './CopyFromModal'
 import { FolderPickerModal } from './FolderPicker'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const api = vi.hoisted(() => ({ browseDir: vi.fn(), listWorkspaceDirs: vi.fn(), readDotenvFile: vi.fn(), getEnvsetSlot: vi.fn(), addEnvsetSlot: vi.fn() }))
 vi.mock('@/shared/api/config', () => ({
@@ -20,7 +21,6 @@ vi.mock('@/shared/api/workspace', () => ({
   listWorkspaceDirs: api.listWorkspaceDirs,
 }))
 let root: Root
-let container: HTMLDivElement
 
 const directory = (dir: string, name = 'current.env') => ({ dir, parent: '/root', entries: [{ name, isDir: false }] })
 const button = (label: string) => [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)!
@@ -30,13 +30,10 @@ function input(value: string) {
   node.dispatchEvent(new Event('input', { bubbles: true }))
 }
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   vi.resetAllMocks()
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it.each(['add', 'copy'])('%s rejects delayed navigation and disables retained files until the requested directory succeeds', async (kind) => {
   const first = deferred<unknown>()

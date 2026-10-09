@@ -8,7 +8,6 @@ import { useFlightsStream } from './use-flights-stream'
 import { flightIndexEntry } from '@shared/flights/index-entry'
 const { listFlights } = vi.hoisted(() => ({ listFlights: vi.fn() }))
 vi.mock('@/shared/api/flights', () => ({ listFlights }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // Minimal socket stand-in: the test drives `onmessage` / `onclose` directly.
 class FakeSocket {

@@ -74,7 +74,7 @@ export default defineConfig({
         resolve: { alias: webAliases },
         test: {
           name: 'dom',
-          setupFiles: ['./vitest.setup.ts'],
+          setupFiles: ['./vitest.setup.ts', './apps/web/src/test-helpers/dom-setup.ts'],
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
@@ -154,6 +154,7 @@ export default defineConfig({
         'shared/code-display-format.ts',
         'shared/feature-scaffold.ts',
         'shared/portify-overlay.ts',
+        'shared/run-counts.ts',
         'shared/run-mode.ts',
         'shared/run-state.ts',
         'shared/repository-observation.ts',
@@ -208,6 +209,12 @@ export default defineConfig({
         'apps/web/src/features/evaluation/api/**/*.ts',
         'apps/web/src/features/runs/api/**/*.ts',
         'apps/web/src/shared/shell/McpPromoContext.tsx',
+        // The workspace state above App and the contexts it fills: JSX only for
+        // the provider elements, so the `.ts` globs above miss them.
+        'apps/web/src/WorkspaceProvider.tsx',
+        'apps/web/src/shared/state/work-state.tsx',
+        'apps/web/src/shared/state/workspace-actions.tsx',
+        'apps/web/src/features/flights/state/flight-actions.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
         'apps/cli/upgrade-migration.ts',
         'apps/cli/upgrade-known-prompts.ts',

@@ -24,8 +24,6 @@ import {
 import { deferred } from '../../../../../../tools/test-helpers/deferred'
 import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 vi.mock('@/shared/api/runs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/runs')>()),
   listRuns: vi.fn(),

@@ -1,18 +1,18 @@
 import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Feature } from '../api/types'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { DurableView, PersistedView } from '../lib/workspace-view-state'
 import type { ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
-import type { RunsStreamFrame } from '@/features/runs/state/runs-state'
+import type { RunsStreamFrame } from '@shared/run-detail'
 import type { WorkspaceNavigation } from './use-workspace-navigation'
 import type { WorkspaceData } from './use-workspace-data'
 import type { useWorkspaceSelection } from './use-workspace-selection'
+import { mountRoot } from '@/test-helpers/mount-root'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const api = vi.hoisted(() => ({ listFeatures: vi.fn(), listFlights: vi.fn(), listPlanFeatures: vi.fn(),
   getVersionStatus: vi.fn(), listRuns: vi.fn(), getRunDetail: vi.fn() }))
 vi.mock('../api/features', async (importOriginal) => ({
@@ -112,11 +112,9 @@ beforeEach(() => {
   api.getVersionStatus.mockResolvedValue({ current: '1.0.0' })
   api.listRuns.mockResolvedValue([])
   api.getRunDetail.mockRejectedValue(new Error('Detail not loaded yet'))
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe('workspace selection through navigation, data, and run streams', () => {
   it('keeps a pending run selected while evidence falls back, then follows its arrival', async () => {

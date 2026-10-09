@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { newTaskId } from '../../../shared/task-id'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
@@ -88,7 +88,7 @@ export class DiscoveryRepairService {
       if (owner.kind === 'internal' || (active.owner.kind === 'external' && active.owner.sessionId === owner.sessionId)) return active
       throw Object.assign(new Error('Another agent owns this discovery repair. Continue that session before starting another.'), { statusCode: 409 })
     }
-    const id = `dr_${crypto.randomBytes(12).toString('hex')}`
+    const id = newTaskId('dr', 12)
     const now = new Date().toISOString()
     const repair = this.save({ id, feature: featureName, featureDir: feature.featureDir, owner, status: 'repairing', createdAt: now, updatedAt: now, heartbeatAt: now, diagnostic: '', message: 'Checking suite availability', log: ['[Canary] Checking suite configuration and test discovery.'], promptPath: path.join(this.store.recordDir(id), 'prompt.md') })
     // Reserve ownership before the first asynchronous discovery check.

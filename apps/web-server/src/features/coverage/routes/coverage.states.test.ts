@@ -7,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 // Coverage generation is LLM-only; the route drives the real service, so swap the
 // agent-backed summarizer/mapper for the test fakes at the module boundary.
@@ -65,7 +66,7 @@ beforeEach(async () => {
   fs.mkdirSync(logsDir, { recursive: true })
   app = Fastify()
   events = []
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: { publish: (e) => events.push(e) } })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: captureEvents(events) })
   await app.ready()
 })
 
@@ -407,7 +408,7 @@ describe('coverage-redo backflow into the flight record', () => {
     // publish inside `reopenStages`, so bridge this store the way the server
     // bridges its shared one (shared/store-event-bridge.ts). Uncoalesced here
     // so the assertion below reads the event synchronously.
-    bridgeStoreEvents(flightStore, { publish: (e) => events.push(e) }, () => ({ type: 'flights-changed' }))
+    bridgeStoreEvents(flightStore, captureEvents(events), () => ({ type: 'flights-changed' }))
     const doneStages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
     flightStore.save({
       flightId: 'fl-backflow',
@@ -428,7 +429,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {
@@ -461,7 +462,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {
@@ -497,7 +498,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {

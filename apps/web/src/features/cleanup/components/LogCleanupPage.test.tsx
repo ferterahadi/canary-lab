@@ -8,8 +8,7 @@ import * as runsApi from '@/shared/api/runs'
 import * as portifyApi from '@/shared/api/portify'
 import type { CleanupListing } from '@shared/cleanup-listing'
 import { LogCleanupPage } from './LogCleanupPage'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { WorkspaceTestProviders } from '@/test-helpers/workspace-providers'
 
 vi.mock('@/shared/api/cleanup', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/cleanup')>()),
@@ -68,11 +67,12 @@ async function mount(
 ): Promise<void> {
   await act(async () => {
     root.render(
-      <LogCleanupPage
-        onClose={() => {}}
-        onNavigateToRun={onNavigateToRun}
-        onNavigateToPortify={onNavigateToPortify}
-      />,
+      <WorkspaceTestProviders actions={{ openPortifyStage: onNavigateToPortify }}>
+        <LogCleanupPage
+          onClose={() => {}}
+          onNavigateToRun={onNavigateToRun}
+        />
+      </WorkspaceTestProviders>,
     )
   })
   // flush the cleanupRuns().then

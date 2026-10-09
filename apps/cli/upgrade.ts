@@ -16,6 +16,7 @@ import { refreshCanaryLabMcp, findStaleCanaryLabMcp } from './mcp-refresh'
 import { main as installPlaywrightBrowsers } from './install-browsers'
 import { SCAFFOLD_POSTINSTALL } from './scaffold-scripts'
 import { errorMessage } from '../../shared/lib/error-message'
+import { agentHomeOverride } from '../../shared/runtime/workspace-registry'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -334,7 +335,7 @@ export async function main(
   // Refresh only user-level integrations that are already installed. First-time
   // installs remain explicit via `canary-lab setup`.
   refreshInstalledAgentIntegrations('all', {
-    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+    homeDir: extras.agentHomeDir ?? agentHomeOverride(),
     log: (msg) => log(`  ${msg}`, opts),
   })
 
@@ -343,7 +344,7 @@ export async function main(
   // never let an MCP CLI hiccup abort the upgrade.
   try {
     refreshCanaryLabMcp({
-      homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+      homeDir: extras.agentHomeDir ?? agentHomeOverride(),
       log: (msg) => log(`  ${msg}`, opts),
     })
   } catch (err) {
@@ -356,7 +357,7 @@ export async function main(
   // mode, and a registration pointing at a deleted cli.js is exactly the thing a
   // quiet upgrade must still surface.
   for (const stale of findStaleCanaryLabMcp({
-    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+    homeDir: extras.agentHomeDir ?? agentHomeOverride(),
   })) {
     console.warn(`  Canary Lab: ${stale.client} MCP points at ${stale.cliPath}, which no longer exists.`)
     console.warn('  Canary Lab: run `npx canary-lab setup` to re-point it at this install.')

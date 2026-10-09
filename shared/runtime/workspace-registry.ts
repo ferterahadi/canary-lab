@@ -25,6 +25,14 @@ export function canaryLabHome(env: NodeJS.ProcessEnv = process.env): string {
   return override ? override : os.homedir()
 }
 
+// The home whose agent configs (~/.claude, ~/.codex, Claude Desktop) Canary Lab
+// writes into. CANARY_LAB_AGENT_HOME redirects it so tests and smoke installs
+// never touch the real ones; unset stays undefined so each caller keeps its own
+// default.
+export function agentHomeOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.CANARY_LAB_AGENT_HOME
+}
+
 export function registryDir(homeDir: string = canaryLabHome()): string {
   return path.join(homeDir, '.canary-lab')
 }

@@ -25,15 +25,7 @@ vi.mock('../api/features', async (importOriginal) => ({
   getTestSourceComparison: vi.fn(),
 }))
 
-vi.mock('shiki/core', () => ({
-  createHighlighterCore: async () => ({
-    codeToHtml: (code: string) => (
-      `<pre class="shiki one-dark-pro"><code>${
-        code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
-      }</code></pre>`
-    ),
-  }),
-}))
+vi.mock('shiki/core', async () => (await import('@/test-helpers/shiki-mock')).shikiCoreMock())
 
 vi.mock('shiki/engine/oniguruma', () => ({ createOnigurumaEngine: () => ({}) }))
 

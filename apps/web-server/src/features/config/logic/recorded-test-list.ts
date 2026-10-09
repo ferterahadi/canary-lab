@@ -2,7 +2,7 @@ import { isPathUnder } from '../../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import { readManifest } from '../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath } from '../../runs/logic/runtime/run-paths'
 import { readRunSummary } from '../../runs/logic/run-detail'
 import type { PlaywrightListEntry } from '../../runs/logic/playwright-list'
 import { mergeSuiteTestRoster, savedSuiteTestRoster } from '../../runs/logic/suite-test-roster'
@@ -12,7 +12,7 @@ export function recordedTestList(logsDir: string | undefined, feature: string, r
   const fail = (message: string, statusCode: number): never => { throw Object.assign(new Error(message), { statusCode }) }
   if (!logsDir || !/^[\w.-]+$/.test(runId) || runId === '.' || runId === '..') return fail('Invalid run', 400)
   const runDir = runDirFor(logsDir, runId)
-  const manifest = readManifest(path.join(runDir, 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDir))
   if (!manifest || manifest.feature !== feature) return fail('Run not found for this suite', 404)
   // Older runs saved results before source snapshots existed. Their locations
   // identify tests, but must never authorize reading today's workspace source.

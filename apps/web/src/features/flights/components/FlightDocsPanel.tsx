@@ -13,6 +13,7 @@ import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { displayError } from '@/shared/api/error-message'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
 // While the flight is parked on the prd-source checkpoint the FORK owns the
@@ -98,7 +99,6 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
 export function FlightDocsPanel({
   feature,
   approved,
-  refreshKey,
   summaryStatus,
   summaryStage,
   requirementCount,
@@ -108,8 +108,6 @@ export function FlightDocsPanel({
   feature: string
   /** Stage settled done — requirements approved, the doc set is frozen. */
   approved: boolean
-  /** Bumped on coverage-changed so out-of-band doc writes show live. */
-  refreshKey?: number
   /** The folded prd-summary stage's status — chips the card. */
   summaryStatus?: FlightStageStatus
   /** The folded prd-summary stage itself. Carries the live agent snapshot, which
@@ -124,6 +122,8 @@ export function FlightDocsPanel({
   /** The listing the stage band already fetched — see useFlightDocs. */
   listing?: FeatureDocsListing | null
 }) {
+  // Bumped on coverage-changed so out-of-band doc writes show live.
+  const refreshKey = useInvalidationKey('coverage')
   const docs = useFlightDocs(feature, refreshKey, undefined, listing)
   const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'

@@ -25,8 +25,6 @@ import { FeatureSetupPanel } from './FeatureSetupPanel'
 import { FlightDocsPanel } from './FlightDocsPanel'
 import { RepoScanPanel } from './RepoScanPanel'
 import { RequirementsFork } from './RequirementsFork'
-import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { StageColumn, StageStatusChip, STAGE_BLURB, type StagePresentation, portifyWorkflowId, specsCoverageProgress } from './stage-meta'
 import { evaluationTaskId, FactsGrid, stageFacts } from './StageFacts'
 import { stageRowKey, type StageRailRow } from './StageRail'
@@ -35,7 +33,7 @@ import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExpo
 import { PortifyWorkflowControls } from '@/features/portify/components/PortifyWorkflowControls'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
-import type { FlightDrillThroughs } from './FlightPage'
+import { useFlightActions } from '../state/flight-actions'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
@@ -254,12 +252,6 @@ export function StageDetail({
   externalMutationOwner,
   onResponded,
   onActionError,
-  onStartFlight,
-  onOpenConfig,
-  onOpenSpecReview,
-  configRefreshKey,
-  docsRefreshKey,
-  drill,
 }: {
   flightId: string
   flight: FlightManifest
@@ -291,15 +283,11 @@ export function StageDetail({
   onResponded: () => void
   /** R71/W1: run-control failures surface on the header's inline error line. */
   onActionError?: (msg: string) => void
-  /** R75: the Repo scan panel's "Change…" → launcher handoff. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
-  /** The run hero's link into the changed-tests review. */
-  onOpenSpecReview?: (feature: string, runId: string) => void
-  configRefreshKey?: number
-  docsRefreshKey?: number
-  drill: FlightDrillThroughs
 }) {
+  // R75: `onStartFlight` is the Repo scan panel's "Change…" → launcher handoff;
+  // `onOpenSpecReview` is the run hero's link into the changed-tests review.
+  const actions = useFlightActions()
+  const { onStartFlight, onOpenConfig, onOpenSpecReview, onOpenRun } = actions
   const coverageHistory = stageCoverageJobs(coverageJobs, flight.feature, recordedStage.key)
   const latestCoverageJob = coverageHistory.at(-1)
   const coverageStageStart = (recordedStage.key === 'docs' ? recordedCompanion?.startedAt : recordedStage.startedAt)
@@ -397,8 +385,8 @@ export function StageDetail({
   const modelChips = flightRowModelChips(row.key, coverageOwnsCurrent ? coverageModels : flight.opts.models)
   // The run shortcut shares the suite selection; other stages drill into their own evidence.
   const drillThrough = runMerged
-    ? latestRun && drill.onOpenRun ? { label: 'Latest run →', onClick: () => drill.onOpenRun?.(flight.feature, latestRun.runId) } : null
-    : stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
+    ? latestRun && onOpenRun ? { label: 'Latest run →', onClick: () => onOpenRun?.(flight.feature, latestRun.runId) } : null
+    : stageDrillThrough(dataStage, flight, actions, companion)
   const runId = runMerged
     ? latestRun?.runId
     : undefined
@@ -692,8 +680,8 @@ export function StageDetail({
           <div data-testid="suite-setup-proof" className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-xs">
             <span className="text-success" aria-hidden="true">✓</span>
             <span className="min-w-0 flex-1">Setup confirmed by an existing successful run</span>
-            {drill.onOpenRun && (
-              <button type="button" className="cl-button px-2 py-1" onClick={() => drill.onOpenRun?.(flight.feature, setupProof.runId)}>
+            {onOpenRun && (
+              <button type="button" className="cl-button px-2 py-1" onClick={() => onOpenRun?.(flight.feature, setupProof.runId)}>
                 View run →
               </button>
             )}
@@ -757,7 +745,6 @@ export function StageDetail({
             : flight.status === 'running'
               ? 'Suite setup is locked while the flight is running'
               : undefined}
-          refreshKey={configRefreshKey}
         />
       )}
 
@@ -773,7 +760,6 @@ export function StageDetail({
           <RequirementsFork
             flightId={flightId}
             flight={flight}
-            refreshKey={docsRefreshKey}
             onResponded={onResponded}
             listing={band.docsListing}
           />
@@ -782,7 +768,6 @@ export function StageDetail({
             feature={flight.feature}
             awaiting={awaiting}
             approved={stage.status === 'done'}
-            refreshKey={docsRefreshKey}
             listing={band.docsListing}
             summaryStatus={companion ? presentedStageStatus(companion) : undefined}
             summaryStage={companion ?? undefined}
@@ -820,7 +805,7 @@ export function StageDetail({
           awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
-          onOpenRun={drill.onOpenRun}
+          onOpenRun={onOpenRun}
           onOpenSpecReview={onOpenSpecReview}
           onError={onActionError}
           pausedNotice={pausedNotice}

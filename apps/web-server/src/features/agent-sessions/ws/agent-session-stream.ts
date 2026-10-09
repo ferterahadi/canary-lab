@@ -15,6 +15,8 @@ import { paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
+import { FlightRunStore } from '../../flights/logic/store'
+import { PlanFeaturesStore } from '../../flights/logic/plan-features'
 import { coverageJobStore, type CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
 import { sendFrame } from '../../../shared/ws/record-stream'
 import type { RunStore } from '../../runs/logic/run-store'
@@ -141,7 +143,7 @@ export async function agentSessionStreamRoutes(
         try { socket.close() } catch { /* ignore */ }
         return
       }
-      const dir = path.join(deps.logsDir, 'flights', req.params.flightId, stage)
+      const dir = path.join(new FlightRunStore(deps.logsDir).flightDir(req.params.flightId), stage)
       attachTail(socket, { ref: resolveWorkflowAgentRef(dir), discoverRef: () => resolveWorkflowAgentRef(dir) })
     },
   )
@@ -153,7 +155,7 @@ export async function agentSessionStreamRoutes(
     '/ws/flight-plans/:taskId/agent-session',
     { websocket: true },
     (socket, req) => {
-      const dir = path.join(deps.logsDir, 'flight-plans', req.params.taskId)
+      const dir = new PlanFeaturesStore(deps.logsDir).recordDir(req.params.taskId)
       attachTail(socket, { ref: resolveWorkflowAgentRef(dir), discoverRef: () => resolveWorkflowAgentRef(dir) })
     },
   )

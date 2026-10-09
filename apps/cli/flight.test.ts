@@ -65,7 +65,7 @@ describe('deriveFeatureName', () => {
   })
   it('slugs the first repo basename otherwise', () => {
     expect(deriveFeatureName(['/x/My Shop_v2'])).toBe('my-shop-v2')
-    expect(deriveFeatureName(['/x/---'])).toBe('first-flight')
+    expect(deriveFeatureName(['/x/---'])).toBe('feature')
   })
 })
 

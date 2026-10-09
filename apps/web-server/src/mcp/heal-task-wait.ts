@@ -12,7 +12,7 @@ import {
 import {
   normalizeRunCounts,
   type NormalizedRunCounts,
-} from '../features/runs/logic/heal/external-heal-counts'
+} from '../../../../shared/run-counts'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'

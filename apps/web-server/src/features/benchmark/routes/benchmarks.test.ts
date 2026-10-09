@@ -1,22 +1,20 @@
 import fs from 'fs'
 import path from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import Fastify from 'fastify'
-import { benchmarkRoutes } from './benchmarks'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { getGitRoot } from '../../../shared/git-repo'
-import type { BenchmarkStore } from '../logic/runtime/store'
-import type { SabotageSkill } from '../logic/runtime/skills'
-import type { BenchmarkManifest, StartBenchmarkInput } from '../logic/runtime/types'
+import type { BenchmarkManifest } from '../../../../../../shared/benchmark-index'
+import type { StartBenchmarkInput } from '../logic/runtime/types'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildApp, fakeStore } from './__fixtures__/benchmark-app'
 
 const tempDir = trackTempDirs('bench-route-')
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 vi.mock('../../runs/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
 
@@ -51,42 +49,6 @@ function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
     results: [],
     ...over,
   }
-}
-
-function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
-  return {
-    list: () => [],
-    get: () => null,
-    save: () => {},
-    renameFeature: () => 0,
-    onEvent: () => {},
-    offEvent: () => {},
-    ...over,
-  }
-}
-
-async function buildApp(deps: {
-  store?: BenchmarkStore
-  logsDir?: string
-  featuresDir?: string
-  projectRoot?: string
-  startBenchmark?: (input: StartBenchmarkInput) => Promise<{ benchmarkId: string }>
-  listSkills?: (feature: string) => SabotageSkill[]
-  abortBenchmark?: (id: string) => void
-  loadAgentSession?: (id: string) => { agent: string; sessionId: string; events: unknown[] } | null
-}) {
-  const app = Fastify()
-  await app.register(benchmarkRoutes, {
-    store: deps.store ?? fakeStore(),
-    logsDir: deps.logsDir ?? '/logs',
-    featuresDir: deps.featuresDir ?? '/features',
-    projectRoot: deps.projectRoot,
-    startBenchmark: deps.startBenchmark ?? (async () => ({ benchmarkId: 'b1' })),
-    listSkills: deps.listSkills ?? (() => []),
-    abortBenchmark: deps.abortBenchmark ?? (() => {}),
-    loadAgentSession: deps.loadAgentSession ?? (() => null),
-  })
-  return app
 }
 
 describe('benchmarkRoutes', () => {

@@ -15,6 +15,7 @@ import type { ServerContext } from '../../server-context'
 
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-runsched-')
 
@@ -65,7 +66,7 @@ function makeCtx(): ServerContext {
     registry: runStore.registry,
     runStore,
     dirtySpecStore: new DirtySpecStore(logsDir),
-    workspaceEvents: { publish: (e: WorkspaceEvent) => events.push(e) },
+    workspaceEvents: captureEvents(events),
     brokers: new Map(),
     activeEnvsets: new Map(),
     ptyFactory: inertPtyFactory,

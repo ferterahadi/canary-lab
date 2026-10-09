@@ -59,7 +59,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '26px 24px 40px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <span className="cl-pulse" aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--running)', boxShadow: '0 0 10px color-mix(in srgb, var(--running) 45%, transparent)' }} />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--running)' }}>
+          <span className="cl-rubric" style={{ color: 'var(--running)' }}>
             Generating
           </span>
           {elapsed && <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {elapsed}</span>}

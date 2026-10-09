@@ -10,6 +10,7 @@ import { createRegistry, type OrchestratorLike } from '../../runs/logic/run-regi
 
 import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 const tempDir = trackTempDirs('cl-vroutes-')
 
@@ -70,7 +71,7 @@ describe('verification routes', () => {
       featuresDir,
       store,
       startVerification: async () => fakeOrchestrator(),
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
 
     const targets = await app.inject({

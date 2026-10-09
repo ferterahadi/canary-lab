@@ -6,6 +6,7 @@ import type { ExecutionType } from '@shared/verification'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { RunStatus } from '@shared/run-state'
 import { useMcpPromo } from './McpPromoContext'
+import { useWorkspaceActions } from '../state/workspace-actions'
 import { SettingsModal } from '@/features/config/components/SettingsModal'
 import {
   FeatureChipBadge,
@@ -21,7 +22,7 @@ import { ThemeToggle } from '../ui/ThemeToggle'
 import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { StatusDot } from '@/shared/ui/atoms'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret, PlaneIcon, GearIcon } from '@/shared/ui/Icons'
 import { shortDateTime } from '../lib/format'
 import { Tooltip } from '../ui/Tooltip'
 import { useLiveCoverageStates } from '../state/use-live-coverage'
@@ -43,7 +44,6 @@ interface Props {
    *  "services up" treatment instead of the running/healing tint. */
   activeRunExecutionType?: ExecutionType | null
   activeRunWaiting?: RunWaitingState
-  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onOpenConfig: (feature: string) => void
   /** Opens the Requirement Coverage ledger when generation is not active in Flight. */
@@ -132,7 +132,6 @@ export function FeaturesColumn({
   activeRunExecutionType,
   activeRunWaiting,
   onSelectFeature,
-  onReviewFeature,
   onOpenConfig,
   onOpenCoverage,
   onStartNewFlight,
@@ -150,10 +149,10 @@ export function FeaturesColumn({
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
   // Workspace events plus bounded reconciliation keep source changes live.
   // Failed reads or an expired freshness lease withdraw the previous badge.
-  // The effect only asks *whether* coverage is reachable, never calls the handler.
-  // Depending on the callback itself made every App re-render refetch the same
-  // workspace status index — App passes a fresh arrow each render. The server
-  // scan is lightweight now, but duplicate requests are still needless work.
+  // The read only asks *whether* coverage is reachable, never calls the handler,
+  // so it keys on that boolean. App's handler is stable today; keying on the
+  // callback itself would still make any caller that passes a fresh arrow
+  // refetch the workspace status index on every render.
   const canOpenCoverage = Boolean(onOpenCoverage)
   const coverage = useLiveCoverageStates(canOpenCoverage ? features.map((feature) => feature.name) : null)
   const coverageHeadlines = useMemo(() => Object.fromEntries((coverage.value ?? []).map((state) => [state.feature,
@@ -175,7 +174,6 @@ export function FeaturesColumn({
       activeRunWaiting={activeRunWaiting}
       coverageHeadline={coverageHeadlines[feature.name]}
       onSelectFeature={onSelectFeature}
-      onReviewFeature={onReviewFeature}
       onOpenCoverage={onOpenCoverage}
       onOpenFlight={onOpenFlight}
       flightAction={flightAction}
@@ -230,10 +228,7 @@ export function FeaturesColumn({
           title="Settings"
           className="cl-icon-button h-7 w-7"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
+          <GearIcon size={14} />
           </button>
         </div>
       </div>
@@ -263,7 +258,6 @@ function FeatureRow({
   activeRunWaiting,
   coverageHeadline,
   onSelectFeature,
-  onReviewFeature,
   onOpenCoverage,
   onOpenFlight,
   flightAction,
@@ -278,7 +272,6 @@ function FeatureRow({
   activeRunExecutionType?: ExecutionType | null
   activeRunWaiting?: RunWaitingState
   coverageHeadline?: string | null
-  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
@@ -288,6 +281,9 @@ function FeatureRow({
   // A pending placeholder (First-Flight batch, pre-scaffold) has no feature dir
   // to select or configure — render it muted with its flight's status chip;
   // clicking the row resumes the flight.
+  // The dirty badge selects the suite, then opens its changed-tests review on
+  // the overview. Without a workspace provider it only selects.
+  const { openReview } = useWorkspaceActions()
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
   const tone = featureTone(f)
@@ -351,7 +347,7 @@ function FeatureRow({
       <LastRunDot feature={f.name} run={lastRun} />
       {tone && (
         <Tooltip label={`${SPEC_TONE[tone].title} Click to review.`}>
-          <button type="button" onClick={() => { onSelectFeature(f.name); onReviewFeature?.(f.name) }}
+          <button type="button" onClick={() => { onSelectFeature(f.name); openReview?.() }}
             aria-label={`Review test changes in ${f.name}`}
             data-testid={`dirty-badge-${f.name}`}
             data-tone={tone}
@@ -423,10 +419,7 @@ function FeatureRow({
                  is exactly the calm the column wants. */
               style={{ color: flight.tone }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M22 2 11 13" />
-                <path d="M22 2 15 22l-4-9-9-4Z" />
-              </svg>
+              <PlaneIcon strokeWidth={2.2} />
             </button>
           </Tooltip>
         )}
@@ -456,10 +449,7 @@ function FeatureRow({
             aria-label={`Configure ${f.name}`}
             className="cl-icon-button h-7 w-7 shrink-0"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+            <GearIcon strokeWidth={2.2} />
           </button>
         </Tooltip>
       </span>
@@ -532,13 +522,7 @@ function FeatureGroupAccordion({
         data-testid={`feature-group-toggle-${group}`}
         className="cl-hover-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
       >
-        <span
-          aria-hidden="true"
-          className="inline-flex shrink-0 transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={open} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
           {group}
         </span>

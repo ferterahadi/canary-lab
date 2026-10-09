@@ -18,20 +18,10 @@ import { pushEscapeLayer } from '@/shared/ui/Overlays'
 
 ;
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 // TestCard expands to the shared ShikiCode block, which lazily imports Shiki.
 // Mock the modules (same as TestCasesColumn.test) so the highlighter resolves
 // deterministically with line spans instead of loading the real wasm.
-vi.mock('shiki/core', () => ({
-  createHighlighterCore: async () => ({
-    codeToHtml: (code: string) => (
-      `<pre class="shiki one-dark-pro"><code>${
-        code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
-      }</code></pre>`
-    ),
-  }),
-}))
+vi.mock('shiki/core', async () => (await import('@/test-helpers/shiki-mock')).shikiCoreMock())
 
 vi.mock('shiki/engine/oniguruma', () => ({ createOnigurumaEngine: () => ({}) }))
 

@@ -2,12 +2,13 @@ import type { AgentProbeResponse } from '@shared/agent-probe'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
 
 import { MODEL_STAGE_KEYS, recommendedChoice, type KnownModelOption } from '@shared/agent-models'
 import { ModelMatrixDialog } from './ModelMatrixDialog'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -32,20 +33,12 @@ const SNAPSHOT = {
   codex: OK_PROBE('codex', { models: CODEX_MODELS }),
 }
 
-let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue(SNAPSHOT)
   vi.mocked(configApi.putProjectConfig).mockReset()
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 function select(label: string): HTMLSelectElement {

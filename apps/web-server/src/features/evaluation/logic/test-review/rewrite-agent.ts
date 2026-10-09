@@ -1,10 +1,9 @@
 import ts from 'typescript'
 import type { RunDetail } from '../../../../../../../shared/run-detail'
-import { pickAvailableHealAgent } from '../../../runs/logic/runtime/heal-agent-spawn'
+import { resolveAgentsFor } from '../../../runs/pick-heal-agent'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../../../../../shared/agent-models'
 import { runReadOnlyAnswerAgent } from '../../../agent-sessions/logic/agent-completion'
-import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { promptPath } from '../../../../shared/prompts'
 import { createFlowcharts } from './flowchart'
@@ -58,7 +57,7 @@ export const EVALUATION_REWRITE_SCHEMA_PATH = promptPath('evaluation-rewrite.sch
 
 export function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceAdapter']): HealAgent[] {
   if (adapter === 'deterministic') return []
-  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
+  return resolveAgentsFor(adapter)
 }
 
 export function evaluationAgentModel(models: StageModelChoice): string | null {

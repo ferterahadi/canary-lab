@@ -1,5 +1,6 @@
 import fs from 'fs'
-import { readPlaywrightConfig, type ConfigValue } from '../../../../shared/config-ast'
+import { readPlaywrightConfig } from '../../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../../shared/config-value'
 import { findPlaywrightConfig } from '../../../../shared/playwright-config'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,

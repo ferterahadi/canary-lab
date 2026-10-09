@@ -17,6 +17,7 @@ import {
 import { normalizeAgentModels } from '../../../../../../shared/agent-models'
 import { isWithin } from '../logic/path-containment'
 import { notFound } from '../../../shared/http-error'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export interface ProjectConfigRouteDeps {
@@ -143,7 +144,7 @@ export async function projectConfigRoutes(
 
   app.post<{ Body: { agent: 'claude' | 'codex' } }>('/api/open-agent', async (req, reply) => {
     const agent = req.body?.agent
-    if (agent !== 'claude' && agent !== 'codex') {
+    if (!isAgentKind(agent)) {
       reply.code(400)
       return { error: 'agent must be "claude" or "codex"' }
     }

@@ -17,7 +17,14 @@ const spawnSyncMock = vi.fn(
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
-  return { ...actual, spawn: spawnMock, spawnSync: spawnSyncMock }
+  // `commandAvailable` looks editors up through execFileSync, which throws on a
+  // non-zero exit; route it through the spawnSync double so each test's status
+  // table drives the lookup.
+  const execFileSync = (command: string, args: readonly string[], options?: unknown) => {
+    if (spawnSyncMock(command, args, options).status !== 0) throw new Error(`${args[0]}: not found`)
+    return Buffer.from('')
+  }
+  return { ...actual, spawn: spawnMock, spawnSync: spawnSyncMock, execFileSync }
 })
 
 const { projectConfigRoutes } = await import('./project-config')

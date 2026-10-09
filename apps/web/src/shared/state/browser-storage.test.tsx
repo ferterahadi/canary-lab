@@ -11,8 +11,6 @@ import {
   type FlagEncoding,
 } from './browser-storage'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 /** Makes both storage areas throw on access, the way a private-mode browser or
  *  blocked site data does. Patching `getItem` alone would miss the getter. */
 function withUnavailableStorage(run: () => void): void {

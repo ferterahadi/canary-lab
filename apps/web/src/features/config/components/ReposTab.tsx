@@ -2,7 +2,8 @@ import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
 import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { Section } from '@/shared/ui/atoms'
 import { PlusIcon } from '@/shared/ui/Icons'
 import { SaveBar } from './SaveBar'
@@ -12,6 +13,7 @@ import { isActiveRunStatus } from '@shared/run-state'
 import { createRepoEditorRows } from './repo-editor-rows'
 import { RepoCard } from './RepoCard'
 import { PortSlotSlice, RepoSlice, Slice, parseRepo, sameProbePath, serializeRepo } from './repo-slice'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 export function ReposTab({ feature }: { feature: string }) {
   const rowIds = useMemo(createRepoEditorRows, [feature])
@@ -41,10 +43,10 @@ export function ReposTab({ feature }: { feature: string }) {
   })
 
   if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
+    return <ConfigLoadGuard error={ed.error} />
   }
   if (ed.loading || !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <ConfigLoadGuard />
   }
 
   const { repos, rootEnvs } = ed.draft

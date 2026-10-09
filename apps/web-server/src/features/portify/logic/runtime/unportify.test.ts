@@ -3,7 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { stripPortSlots, revertPortification } from './unportify'
 import { writeOverlay, overlayDir } from './overlay'
-import { readFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
+import { readFeatureConfig } from '../../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../../shared/config-value'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('unportify-')

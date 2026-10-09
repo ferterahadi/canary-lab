@@ -1,4 +1,4 @@
-import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@shared/getting-started'
+import type { GettingStartedRunWorkflow, GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@shared/getting-started'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as configApi from '@/shared/api/config'
 
@@ -42,8 +42,6 @@ export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {
   author: 'specs-coverage',
   portify: 'portify',
 }
-
-type GettingStartedRunWorkflow = 'run' | 'heal'
 
 /** Resolve a suite to the server-owned Getting Started run workflow that names
  *  it. The run-index reader separately excludes boot, verify, and benchmark

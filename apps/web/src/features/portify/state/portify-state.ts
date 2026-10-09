@@ -1,10 +1,8 @@
-import { portifyIndexEntry, type PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import { portifyIndexEntry, type PortifyIndexEntry, type PortifyManifest } from '@shared/portify-index'
 import {
   byStartedDesc,
   createRecordIndex,
   type RecordIndexAction,
-  type RecordIndexFrame,
   type RecordIndexState,
 } from '@/shared/state/record-index-store'
 
@@ -19,7 +17,6 @@ export const portifyIndex = createRecordIndex<PortifyIndexEntry, PortifyManifest
   compareEntries: byStartedDesc,
 })
 
-export type PortifyStreamFrame = RecordIndexFrame<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>
 export type PortifyAction = RecordIndexAction<PortifyIndexEntry, PortifyManifest, 'workflows', 'workflowId'>
 export type PortifyState = RecordIndexState<PortifyIndexEntry, PortifyManifest, 'workflows'>
 

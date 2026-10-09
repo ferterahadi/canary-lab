@@ -1,5 +1,6 @@
 import fs from 'fs'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
+import { readFeatureConfig, writeFeatureConfig } from '../../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../../shared/config-value'
 import { readOverlayOriginalConfig, removeOverlay } from './overlay'
 import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../../shared/config-file'
 import { syncEnvsInConfig } from '../../../config/logic/envset-config'

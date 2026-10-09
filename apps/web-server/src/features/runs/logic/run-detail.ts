@@ -3,10 +3,10 @@ import { readPlaybackSourceDeclarations } from '../../../shared/playback-source-
 import { testLogicalKey } from './test-identity'
 import { readJsonLines } from '../../../shared/json-lines'
 import fs from 'fs'
-import path from 'path'
 import { readManifest, suiteDirForReading } from './runtime/manifest'
 import type { RunLifecycleEvent } from '../../../../../../shared/run-state'
-import { buildRunPaths, runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor, runManifestPath, runSummaryPath } from './runtime/run-paths'
+import { readJsonOr } from '../../../../../../shared/lib/read-file-or'
 import { indexPlaywrightArtifacts } from './run-artifacts'
 import type { RunSummary, PlaywrightPlaybackEvent, RunDetail } from '../../../../../../shared/run-detail'
 
@@ -20,20 +20,9 @@ export function readRunLifecycleEvents(runDir: string): RunLifecycleEvent[] | un
 // Read e2e-summary.json if present. Returns undefined when absent or
 // unreadable — the caller should treat that as "no per-test results yet".
 export function readRunSummary(runDir: string): RunSummary | undefined {
-  const p = path.join(runDir, 'e2e-summary.json')
-  let raw: string
-  try {
-    raw = fs.readFileSync(p, 'utf-8')
-  } catch {
-    return undefined
-  }
-  try {
-    const parsed = JSON.parse(raw) as RunSummary
-    if (typeof parsed !== 'object' || parsed === null) return undefined
-    return normalizeRunSummary(parsed)
-  } catch {
-    return undefined
-  }
+  const parsed = readJsonOr<RunSummary | undefined>(runSummaryPath(runDir), undefined)
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  return normalizeRunSummary(parsed)
 }
 
 /** The run's score, straight off the summary artifact — `passed` and `total` are
@@ -108,7 +97,7 @@ export function readPlaywrightPlaybackEvents(runDir: string): PlaywrightPlayback
 
 export function getRunDetail(logsDir: string, runId: string): RunDetail | null {
   const dir = runDirFor(logsDir, runId)
-  const manifestPath = path.join(dir, 'manifest.json')
+  const manifestPath = runManifestPath(dir)
   if (!fs.existsSync(manifestPath)) return null
   const m = readManifest(manifestPath)
   if (!m) return null

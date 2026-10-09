@@ -13,6 +13,7 @@ import { HERO_ROW, STAGE_COLUMN } from './stage-meta'
 import { FactsGrid, runHistoryFacts } from './StageFacts'
 import { healEndShort } from './StageStatusLines'
 import { plural } from '@shared/lib/plural'
+import { normalizeRunCounts } from '@shared/run-counts'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import type { ConnectionState } from '@/shared/state/record-stream'
@@ -447,8 +448,10 @@ function runStats({
   onOpenSpecReview?: () => void
 }): RunStat[] {
   const stats: RunStat[] = []
-  if (summary && summary.total > 0) {
-    stats.push({ label: 'Tests passed', value: `${summary.passed}/${summary.total}` })
+  // The same counts the MCP tools report, so the hero and an agent never disagree.
+  const counts = summary ? normalizeRunCounts(summary) : null
+  if (counts && counts.totalKnown > 0) {
+    stats.push({ label: 'Tests passed', value: `${counts.passed}/${counts.totalKnown}` })
   }
   // Repairs: a clean run reads a bare "0"; any cycle names the cap it is
   // counting toward, and a loop that gave up carries the reason as the note.

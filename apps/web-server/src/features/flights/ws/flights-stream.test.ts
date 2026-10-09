@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { expect, it } from 'vitest'
 import { flightActivityCases } from '../../../../../../shared/__fixtures__/flight-activity'
 import { FlightRunStore } from '../logic/store'
-import { flightsStreamRoutes, type FlightsStreamFrame } from './flights-stream'
+import { flightsStreamRoutes } from './flights-stream'
+import type { FlightsStreamFrame } from '../../../../../../shared/flights/index-entry'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tmp = trackTempDirs('flight-activity-')

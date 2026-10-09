@@ -14,7 +14,6 @@ vi.mock('@/shared/api/workspace-socket', () => ({
     return { close: bus.close }
   },
 }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 type Row = { id: string; status: string }
 

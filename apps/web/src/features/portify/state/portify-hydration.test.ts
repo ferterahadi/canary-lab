@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import { createRecordIndexHydration } from '@/shared/state/record-index-store'
 import { portifyIndex, type PortifyAction } from './portify-state'
@@ -8,7 +8,7 @@ import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const { reducer: portifyReducer, initialState: initialPortifyState } = portifyIndex
 
-const manifest = (status: PortifyManifest['status'] = 'saved'): PortifyManifest => ({ workflowId: 'wf', feature: 'checkout', status, repos: [], agent: 'codex', branch: 'ports', attempt: 1, maxAttempts: 3, startedAt: '2026-01-01' })
+const manifest = (status: PortifyManifest['status'] = 'saved'): PortifyManifest => ({ workflowId: 'wf', feature: 'checkout', featureDir: '/workspace/features/checkout', status, repos: [], agent: 'codex', branch: 'ports', attempt: 1, maxAttempts: 3, startedAt: '2026-01-01' })
 
 function harness() {
   let state = initialPortifyState

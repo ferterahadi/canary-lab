@@ -6,12 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as benchmarkApi from '@/shared/api/benchmark'
 import { ApiError } from '@/shared/api/internal'
 import { BenchmarkDetail, openWorktreeAction, previewWorktreeClear } from '../components/BenchmarkDetail'
-import type { BenchmarkManifest } from '../api/benchmark-types'
-import type { BenchmarkIndexEntry } from '@shared/benchmark-index'
+import type { BenchmarkManifest, BenchmarkIndexEntry } from '@shared/benchmark-index'
 import { BenchmarkProvider, useBenchmark, useBenchmarkDetail, useBenchmarks } from './BenchmarkContext'
 import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // The reducer and frame mapper are covered against the real rules in
 // benchmark-state.test.ts. This suite owns the provider: the socket lifecycle

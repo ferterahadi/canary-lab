@@ -1,5 +1,5 @@
 import type { AgentProbe, AgentProbeSnapshot } from '../../../../../../shared/agent-probe'
-import { execFile } from 'child_process'
+import { commandResult } from '../../../shared/command-result'
 import type { KnownModelOption } from '../../../../../../shared/agent-models'
 import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './agent-binary'
 
@@ -20,14 +20,11 @@ export type ProbeExec = (binary: string, args: string[]) => Promise<{ ok: boolea
 
 const EXEC_TIMEOUT_MS = 15_000
 
-function defaultExec(binary: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
-  return new Promise((resolve) => {
-    // With `encoding: 'utf-8'` the callback's stdout is always a string —
-    // Node passes '' on spawn failure — so no null-guard is needed.
-    execFile(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
-      resolve({ ok: !err, stdout })
-    })
-  })
+async function defaultExec(binary: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
+  // Any failure (spawn error, non-zero exit, timeout, overflow) maps to a
+  // non-zero code, so exit 0 is exactly "no error".
+  const result = await commandResult(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS, maxBuffer: 5 * 1024 * 1024 }, 1)
+  return { ok: result.code === 0, stdout: result.stdout }
 }
 
 export interface AgentProbeDeps {

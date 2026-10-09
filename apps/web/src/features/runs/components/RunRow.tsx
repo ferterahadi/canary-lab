@@ -8,6 +8,7 @@ import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-stat
 import { presentRunStatus } from '../utils/run-presentation'
 import { dayTime, durationBetween, formatDuration, shortTime } from '@/shared/lib/format'
 import { plural } from '@shared/lib/plural'
+import { normalizeRunCounts } from '@shared/run-counts'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
 // so the flight's run stage can render the same row as the runs list. Chrome
@@ -111,8 +112,9 @@ export function RunRow({
   const ms = showDuration ? durationBetween(run.startedAt, run.endedAt) : null
   if (ms != null) meta.push({ text: formatDuration(ms) })
   if (showRepairs && run.healCycles) meta.push({ text: plural(run.healCycles, 'repair') })
-  const summary = detail?.summary
-  const passLabel = summary && summary.total > 0 ? `${summary.passed}/${summary.total} passed` : null
+  // The same counts the MCP tools report, so a row and an agent never disagree.
+  const counts = detail?.summary ? normalizeRunCounts(detail.summary) : null
+  const passLabel = counts && counts.totalKnown > 0 ? `${counts.passed}/${counts.totalKnown} passed` : null
   if (passLabel && passCount === 'meta') meta.push({ text: passLabel })
   return (
     <li>

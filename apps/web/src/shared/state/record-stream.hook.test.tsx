@@ -4,8 +4,6 @@ import { expect, it, vi } from 'vitest'
 import { useRecordStream } from './record-stream'
 import { createObservedReads } from './observed-reads'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 it.each([false, true])('handles an unavailable socket with fallback set to %s', async (allowUnavailableSocket) => {
   vi.stubGlobal('WebSocket', undefined)
   const errors = vi.fn()

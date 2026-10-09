@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,6 +8,7 @@ import {
   readActiveServers,
   registerActiveServer,
   resolveActiveServer,
+  resolveServerBase,
   unregisterActiveServer,
 } from './active-servers'
 import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
@@ -291,5 +292,38 @@ describe('liveRegistryHome', () => {
 
   it('defaults the record path to the real home', () => {
     expect(activeServersPath()).toBe(path.join(os.homedir(), '.canary-lab', 'active-servers.json'))
+  })
+})
+
+describe('resolveServerBase', () => {
+  const configPort = () => 7421
+
+  it('follows the live record for this exact project root', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work/a', port: 7420, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    registerActiveServer({ projectRoot: '/work/b', port: 7500, pid: 222 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a/', configPort, { homeDir, isAlive: alwaysAlive })).toBe('http://127.0.0.1:7420')
+  })
+
+  it('never borrows another workspace or an enclosing root and falls back to the configured port', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work', port: 7500, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a', () => 7600, { homeDir, isAlive: alwaysAlive })).toBe('http://127.0.0.1:7600')
+  })
+
+  it('ignores a dead record for the same root', () => {
+    const homeDir = mkHome()
+    registerActiveServer({ projectRoot: '/work/a', port: 7420, pid: 111 }, { homeDir, isAlive: alwaysAlive })
+    expect(resolveServerBase('/work/a', configPort, { homeDir, isAlive: alwaysDead })).toBe('http://127.0.0.1:7421')
+  })
+
+  it('reads the default live registry when no home is injected', () => {
+    const missingHome = path.join(mkHome(), 'missing')
+    vi.stubEnv('CANARY_LAB_LIVE_REGISTRY_HOME', missingHome)
+    try {
+      expect(resolveServerBase('/work/a', configPort)).toBe('http://127.0.0.1:7421')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

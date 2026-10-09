@@ -7,9 +7,10 @@ import { loadFeatures } from '../../../../shared/feature-loader'
 import { PortifyRunStore } from './store'
 import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { waitForStatus } from './__fixtures__/runner.part4-fixtures'
 
 const tempDir = trackTempDirs('portify-it-')
 
@@ -123,16 +124,6 @@ function makeRunner(
     healthDeadlineMs: healthy ? 400 : 40,
   })
   return { store, runner }
-}
-
-async function waitForStatus(store: PortifyRunStore, id: string, until: string[], timeoutMs = 8000): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const m = store.get(id)
-    if (m && until.includes(m.status)) return m.status
-    await new Promise((r) => setTimeout(r, 25))
-  }
-  return store.get(id)?.status ?? 'missing'
 }
 
 const TERMINAL = ['ready-to-save', 'failed', 'aborted']

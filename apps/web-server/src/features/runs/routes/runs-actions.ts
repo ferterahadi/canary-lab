@@ -18,7 +18,7 @@ import { type SpecSelectionViolation } from '../../../shared/playwright-config'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
-import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
+import type { GettingStartedRunWorkflow } from '../../../../../../shared/getting-started'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'
 import { suiteReviewFiles } from '../logic/runtime/suite-review'
@@ -27,7 +27,7 @@ import { commitReviewedFiles } from '../logic/test-review-acceptance'
 import type { TestReviewDecision, TestReviewReceipt, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { withRunReviewLock } from '../logic/test-review-lock'
-import { notFound } from '../../../shared/http-error'
+import { notFound, statusCodeOf } from '../../../shared/http-error'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
@@ -193,10 +193,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         }
       })
     } catch (err) {
-      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500
-      reply.code(code)
+      reply.code(statusCodeOf(err))
       const message = errorMessage(err)
       const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
       if (review) {
