@@ -193,6 +193,19 @@ describe('alignedTestViewRows', () => {
     expect(aligned[1].source).toBe(rows[1])
   })
 
+  it('marks the changed words of a line edited on both sides only when the view asks for words', () => {
+    const data = review(['a', 'total(0.95)', 'c'], ['a', 'total(0.9)', 'c', 'd'], { patch: '@@ -1,3 +1,4 @@\n a\n-total(0.95)\n+total(0.9)\n c\n+d' })
+    const rows = sourceRows(data).map((row, index) => index === 2 ? { ...row, gap: { before: 4, after: 4 } } : row)
+    const words = alignedTestViewRows({ review: data, rows, mode: 'code', marks: 'word' })
+    expect(words[1].before?.marks.words).toEqual([{ text: 'total(0.', changed: false }, { text: '95', changed: true }, { text: ')', changed: false }])
+    expect(words[1].after?.marks.words).toEqual([{ text: 'total(0.', changed: false }, { text: '9', changed: true }, { text: ')', changed: false }])
+    // Unchanged and wholly added rows keep the line mark alone.
+    expect(words[0].after?.marks.words).toBeUndefined()
+    expect(words[3].after?.marks.words).toBeUndefined()
+    expect(words[2].source.gap).toEqual({ before: 4, after: 4 })
+    expect(alignedTestViewRows({ review: data, rows, mode: 'code' })[1].before?.marks.words).toBeUndefined()
+  })
+
   it('keeps an inserted or removed line aligned with an absent opposite side', () => {
     const inserted = review(['a', 'c'], ['a', 'b', 'c'], { patch: '@@ -1,2 +1,3 @@\n a\n+b\n c' })
     const rows = alignedTestViewRows({ review: inserted, rows: sourceRows(inserted), mode: 'code', change: 1 })
@@ -305,6 +318,8 @@ describe('aligned view facts', () => {
   it('names the baseline column after what the current source is compared against', () => {
     expect(alignedSideLabels(review(['a'], ['a']))).toEqual({ before: 'Committed tests · Git HEAD', after: 'Current source' })
     expect(alignedSideLabels(review(['a'], ['a'], { baseline: 'run-start' }))).toEqual({ before: 'Recorded tests', after: 'Current source' })
+    const { baseline: _baseline, ...noBaseline } = review(['a'], ['a'])
+    expect(alignedSideLabels(noBaseline).after).toBe('Current source')
   })
 
   it('keeps the two-character gutter until a line label outgrows it', () => {

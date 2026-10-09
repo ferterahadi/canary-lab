@@ -3,7 +3,7 @@ import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
 import { storyEndLine } from '@shared/readable-tests/source-lines'
 import { storyCodeLineNumbers, storyItemIdForSourceLine } from '@shared/readable-tests/story-source-map'
-import type { TestFileReview } from '@shared/test-review'
+import { plural } from '@shared/lib/plural'
 import type { ContextRow } from '@shared/test-source-diff'
 import {
   alignedEnglishAvailable,
@@ -16,15 +16,18 @@ import {
   sourceLineForBodyLine,
   storyChangeMarks,
   testViewSource,
+  type AlignedReview,
   type TestViewAlignedRow,
   type TestViewMode,
   type TestViewSelection,
   type TestViewSide,
+  type TestViewSideLabels,
 } from '@shared/test-view/render-model'
+import type { ComparisonRow } from './ComparisonTable'
 import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step-status'
 import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
-import { ShikiCode, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
+import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import { useCodeHighlight } from './use-code-highlight'
 
@@ -48,13 +51,22 @@ export interface TestPresentationSingleProps extends TestPresentationShellProps 
 }
 
 /** A whole file before and after with its rows paired across the two sides:
- * the "Compare test versions" review. One table with one scroller — two
+ * the "Compare test versions" review, and a repair cycle's Code changes. One
+ * table with one scroller — two
  * independent cards would lose the pairing after an insertion or deletion,
  * each side's English folding, and the review's edit navigation. */
 export interface TestPresentationAlignedProps extends TestPresentationShellProps {
   view: 'aligned'
-  review: TestFileReview
+  review: AlignedReview
   rows: ContextRow[]
+  /** Column headings; absent, they name the review's baseline. */
+  labels?: TestViewSideLabels
+  /** `word` marks the changed words inside an edited line. */
+  marks?: 'line' | 'word'
+  /** The listing has no English to offer; the toggle stays, disabled, with
+   * this reason. */
+  codeOnly?: { reason: string }
+  ariaLabel?: string
   /** The edit whose rows read as selected. */
   change?: number
   /** The side an added or removed test is absent from; its first row says so. */
@@ -245,12 +257,13 @@ function SingleTestView({
  * translated here: both sides arrive as the server reviewed them. */
 function AlignedTestView({
   review, rows, mode, onModeChange, header, change, emptySide, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
+  labels, marks, codeOnly, ariaLabel = 'Full test comparison',
 }: Resolved<TestPresentationAlignedProps>) {
-  const englishAvailable = alignedEnglishAvailable(review)
+  const englishAvailable = !codeOnly && alignedEnglishAvailable(review)
   const shownMode = englishAvailable ? mode : 'code'
   const before = useCodeHighlight(review.before.source)
   const after = useCodeHighlight(review.after.source)
-  const aligned = useMemo(() => alignedTestViewRows({ review, rows, mode: shownMode, change, selection }), [change, shownMode, review, rows, selection])
+  const aligned = useMemo(() => alignedTestViewRows({ review, rows, mode: shownMode, marks, change, selection }), [change, shownMode, marks, review, rows, selection])
   const render = (pair: TestViewAlignedRow, side: TestViewSide) => {
     const cell = side === 'before' ? pair.before : pair.after
     const source = pair.source[side]
@@ -270,7 +283,9 @@ function AlignedTestView({
       : cell.continued ? <span aria-label="Continued above">{' '}</span>
         : shownMode === 'english' && source.trim()
           ? <span style={{ color: 'var(--semantic-attention)' }}>English unavailable · View code</span>
-          : <ShikiSourceLine source={source} html={highlighted?.lines[line - 1]} />
+          : cell.marks.words
+            ? <ShikiMarkedLine html={highlighted?.lines[line - 1]} parts={cell.marks.words} />
+            : <ShikiSourceLine source={source} html={highlighted?.lines[line - 1]} />
     const Tag = cell.marks.changes.size === 0 ? 'span' : side === 'before' ? 'del' : 'ins'
     const sourceContent = shownMode === 'english' && onSelectSource && !cell.english && !cell.continued && source.trim()
       ? <button type="button" className="cl-review-story-link" title={`Show ${side === 'before' ? 'Before' : 'After'} code at line ${line}`}
@@ -285,15 +300,25 @@ function AlignedTestView({
       <Tag aria-label={cell.marks.changes.size === 0 ? undefined : `${side === 'before' ? 'Removed' : 'Added'} source at line ${line}`}>{sourceContent}</Tag>
     </Line>
   }
-  const displayRows = aligned.map((pair) => ({ ...pair.source, beforeLine: pair.before?.label, afterLine: pair.after?.label, fullSource: true, code: true,
-    selected: pair.selected, sourceChanged: pair.sourceChanged,
-    beforeContent: render(pair, 'before'), afterContent: render(pair, 'after') }))
-  const labels = alignedSideLabels(review)
+  const displayRows = aligned.flatMap((pair): ComparisonRow[] => {
+    const row: ComparisonRow = { ...pair.source, beforeLine: pair.before?.label, afterLine: pair.after?.label, fullSource: true, code: true,
+      selected: pair.selected, sourceChanged: pair.sourceChanged,
+      beforeContent: render(pair, 'before'), afterContent: render(pair, 'after') }
+    const { gap } = pair.source
+    // Lines a patch leaves out sit between its hunks; say how many, per side
+    // only when the sides differ.
+    return gap ? [{ id: `${pair.source.id}-gap`, kind: 'section', label: gap.before === gap.after
+      ? `${plural(gap.after, 'unchanged line')} not in this patch`
+      : `${plural(gap.before, 'unchanged line')} before · ${plural(gap.after, 'unchanged line')} after, not in this patch` }, row] : [row]
+  })
+  const headings = labels ?? alignedSideLabels(review)
   return <>
     <div className="cl-context-toolbar">
-      {englishAvailable
-        ? <TestLanguageSwitch mode={mode} onChange={onModeChange} />
-        : <span className="text-xs text-secondary">Supporting file · Code</span>}
+      {codeOnly
+        ? <TestLanguageSwitch mode="code" onChange={onModeChange} disabled={codeOnly} />
+        : englishAvailable
+          ? <TestLanguageSwitch mode={mode} onChange={onModeChange} />
+          : <span className="text-xs text-secondary">Supporting file · Code</span>}
       {header}
     </div>
     {notice}
@@ -303,7 +328,7 @@ function AlignedTestView({
         '--code-comment': after?.canvas.comment ?? before?.canvas.comment ?? 'var(--text-muted)',
         '--review-gutter-width': `${alignedGutterWidth(aligned)}ch`,
       } as CSSProperties}>
-        <ComparisonTable rows={displayRows} beforeLabel={labels.before} afterLabel={labels.after} ariaLabel="Full test comparison" scrollRef={scrollRef} />
+        <ComparisonTable rows={displayRows} beforeLabel={headings.before} afterLabel={headings.after} ariaLabel={ariaLabel} scrollRef={scrollRef} />
       </div>
     </div>
   </>

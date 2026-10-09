@@ -1495,6 +1495,9 @@ body {
 .cl-lang-switch-btn:hover {
   color: var(--text-secondary);
 }
+/* Disabled buttons ignore the pointer, so the wrapper's reason shows as its tooltip. */
+.cl-lang-switch[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.cl-lang-switch-btn:disabled { pointer-events: none; }
 .cl-lang-switch-btn[data-active="true"] {
   color: var(--text-primary);
 }
@@ -2253,6 +2256,9 @@ body {
 .cl-context-table td:has(> .cl-review-source-line > del) { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .cl-context-table td:has(> .cl-review-source-line > ins) { background: color-mix(in srgb, var(--success) 12%, transparent); }
 .cl-context-table .cl-review-source-line > del, .cl-context-table .cl-review-source-line > ins { background: transparent; }
+/* Word marks inside an edited line: a stronger tint of the line's own hue. */
+.cl-review-source-line mark.cl-review-word { color: inherit; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; background: color-mix(in srgb, var(--danger) 32%, transparent); }
+.cl-review-source-line[data-side="after"] mark.cl-review-word { background: color-mix(in srgb, var(--success) 32%, transparent); }
 .cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
 .cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }

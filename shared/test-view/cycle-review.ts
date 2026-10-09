@@ -4,6 +4,7 @@
 // guessed. Full sources are a later recovery step; nothing here reads a repo.
 import { hunkRange, unifiedDiffLines } from '../lib/unified-diff'
 import type { ContextRow } from '../test-source-diff'
+import type { AlignedReview, TestViewSideLabels } from './render-model'
 
 export type CycleFileChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'binary'
 
@@ -192,4 +193,26 @@ export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
   }
   close()
   return files
+}
+
+export interface CycleAlignedInput { review: AlignedReview; rows: ContextRow[]; labels: TestViewSideLabels }
+
+/** What the aligned view needs for one cycle file. Each side's source holds
+ * the patch's lines at their real line numbers and blank lines elsewhere, so
+ * the view highlights it once and indexes tokens by line as it does for a
+ * whole file. It is code only: a patch holds no complete statement to read. */
+export function cycleFileAlignedInput(file: CycleReviewFile, cycle: number): CycleAlignedInput {
+  const padded = (side: 'before' | 'after'): string => {
+    const lines: string[] = []
+    for (const row of file.rows) {
+      const line = side === 'before' ? row.beforeLine : row.afterLine
+      if (line != null) lines[line - 1] = row[side]!
+    }
+    return Array.from(lines, (text) => text ?? '').join('\n')
+  }
+  return {
+    review: { before: { source: padded('before'), tests: [] }, after: { source: padded('after'), tests: [] }, supportingFile: true },
+    rows: file.rows,
+    labels: { before: `Before repair cycle ${cycle}`, after: `After repair cycle ${cycle}` },
+  }
 }

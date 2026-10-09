@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { cycleReviewFromPatch } from './cycle-review'
+import { cycleFileAlignedInput, cycleReviewFromPatch } from './cycle-review'
+import { alignedTestViewRows } from './render-model'
 import {
   ADDED_FILE, BINARY_FILES, DELETED_FILE, HEADERLESS_FRAGMENT, LINE_ENDINGS, NO_NEWLINE_AT_END, RENAMES, TWO_FILE_CYCLE, ZERO_COUNT_HUNK,
 } from './__fixtures__/cycle-patches'
@@ -99,5 +100,24 @@ describe('cycleReviewFromPatch', () => {
     expect(file.rows).toHaveLength(2000)
     expect(file.rows.at(-1)?.afterLine).toBe(2000)
     expect(performance.now() - started).toBeLessThan(500)
+  })
+})
+
+describe('cycleFileAlignedInput', () => {
+  it('places each patch line at its real line number, so the aligned rows read the hunk numbers', () => {
+    const [pricing] = cycleReviewFromPatch(TWO_FILE_CYCLE)
+    const { review, rows, labels } = cycleFileAlignedInput(pricing, 2)
+    expect(labels).toEqual({ before: 'Before repair cycle 2', after: 'After repair cycle 2' })
+    const before = review.before.source.split('\n')
+    expect(before).toHaveLength(41)
+    expect(before[1]).toBe('export const total = (p: number) => Math.round(p * 0.95)')
+    expect(before[10]).toBe('')
+    expect(review.after.source.split('\n')[41]).toBe('--- divider')
+    expect(review.supportingFile).toBe(true)
+    const aligned = alignedTestViewRows({ review, rows, mode: 'code', marks: 'word' })
+    expect(aligned.map((pair) => [pair.before?.label, pair.after?.label])).toEqual([
+      ['1', '1'], ['2', '2'], ['3', '3'], ['40', '40'], [undefined, '41'], [undefined, '42'], ['41', '43'],
+    ])
+    expect(aligned.filter((pair) => pair.after?.marks.words).map((pair) => pair.source.id)).toEqual(['cycle-0-1'])
   })
 })

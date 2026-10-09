@@ -4,6 +4,8 @@ import type { Root } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
 import { sourceRows } from '@shared/test-source-diff'
+import { cycleFileAlignedInput, cycleReviewFromPatch } from '@shared/test-view/cycle-review'
+import { TWO_FILE_CYCLE, ZERO_COUNT_HUNK } from '@shared/test-view/__fixtures__/cycle-patches'
 import { TestPresentation } from './TestPresentation'
 import { ShikiCode } from './TestCodeBlock'
 import { mountRoot } from '@/test-helpers/mount-root'
@@ -289,4 +291,44 @@ it('names the before column after the baseline', async () => {
   expect([...container.querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Committed tests · Git HEAD', 'Current source'])
   await act(async () => root.render(<TestPresentation view="aligned" review={{ ...review, baseline: 'run-start' }} rows={sourceRows(review)} mode="code" />))
   expect([...container.querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Recorded tests', 'Current source'])
+})
+it('shows a cycle file with real line numbers, word marks, gap rows, its own headings and a disabled English toggle', async () => {
+  const [file] = cycleReviewFromPatch(TWO_FILE_CYCLE)
+  const input = cycleFileAlignedInput(file, 2)
+  const onModeChange = vi.fn()
+  await act(async () => root.render(<TestPresentation view="aligned" {...input} mode="english" onModeChange={onModeChange} marks="word"
+    codeOnly={{ reason: 'English needs the full file' }} ariaLabel="Code changes before and after" />))
+  const table = container.querySelector('table[aria-label="Code changes before and after"]')!
+  expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before repair cycle 2', 'After repair cycle 2'])
+  expect([...table.querySelectorAll('[data-side="after"]')].map((line) => line.getAttribute('data-source-line'))).toEqual(['1', '2', '3', '40', '41', '42', '43'])
+  expect(table.querySelector('.cl-comparison-section')?.textContent).toBe('36 unchanged lines not in this patch')
+  // Only the changed characters of the edited line are marked, inside Shiki's tokens.
+  expect([...table.querySelectorAll('[data-side="after"] mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['9'])
+  expect([...table.querySelectorAll('[data-side="before"] mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['95'])
+  expect(table.querySelector('[data-side="before"][data-source-line="2"] mark span[style]')).not.toBeNull()
+  expect(table.querySelector('[data-side="after"][data-source-line="41"] mark')).toBeNull()
+  // Code shows even though the reader asked for English, and the toggle says why it cannot switch.
+  expect(table.querySelector('.cl-review-story-line')).toBeNull()
+  const toggle = container.querySelector('.cl-lang-switch')!
+  expect(toggle.getAttribute('aria-disabled')).toBe('true')
+  expect(toggle.getAttribute('title')).toBe('English needs the full file')
+  expect(toggle.getAttribute('data-mode')).toBe('code')
+  expect([...toggle.querySelectorAll('button')].every((button) => button.disabled)).toBe(true)
+})
+it('names the hidden lines per side when a patch skips a different number on each side', async () => {
+  const [file] = cycleReviewFromPatch(ZERO_COUNT_HUNK)
+  const rows = file.rows.map((row) => row.gap?.before === 6 ? { ...row, gap: { before: 6, after: 1 } } : row)
+  await act(async () => root.render(<TestPresentation view="aligned" {...cycleFileAlignedInput(file, 1)} rows={rows} mode="code" marks="word" codeOnly={{ reason: 'Code only' }} />))
+  expect([...container.querySelectorAll('.cl-comparison-section')].map((row) => row.textContent)).toEqual([
+    '3 unchanged lines not in this patch',
+    '6 unchanged lines before · 1 unchanged line after, not in this patch',
+  ])
+})
+it('marks words as plain text until the highlighter has the line', async () => {
+  highlighter.load.mockReturnValue(new Promise(() => {}))
+  const [file] = cycleReviewFromPatch(TWO_FILE_CYCLE)
+  await act(async () => root.render(<TestPresentation view="aligned" {...cycleFileAlignedInput(file, 2)} mode="code" marks="word" codeOnly={{ reason: 'Code only' }} />))
+  const line = container.querySelector('[data-side="before"][data-source-line="2"]')!
+  expect(line.textContent).toBe('export const total = (p: number) => Math.round(p * 0.95)')
+  expect([...line.querySelectorAll('mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['95'])
 })

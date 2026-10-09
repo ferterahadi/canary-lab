@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedStep } from '@shared/extracted-test'
+import type { TextPart } from '@shared/lib/comparison-diff'
+import { markHighlightedLine } from '@shared/test-view/token-marks'
 import * as workspaceApi from '../api/workspace'
 import { useCodeHighlight } from './use-code-highlight'
 import type { StoryCodeLineNumber } from '@shared/readable-tests/story-source-map'
@@ -409,6 +411,20 @@ function bodyLineForSourceLine(startLine: number, source: string, sourceLine?: n
   const line = sourceLine - startLine + 1
   if (line < 1 || line > source.split('\n').length) return null
   return line
+}
+
+/** A highlighted row with its changed words marked. Before the highlighter
+ * resolves, the words show as plain text with the same marks. */
+export function ShikiMarkedLine({ html, parts }: { html?: string; parts: readonly TextPart[] }) {
+  const segments = html === undefined ? undefined : markHighlightedLine(html, parts)
+  return <span>{segments
+    ? segments.map((segment, index) => segment.changed
+      // The segments are cut from Shiki's escaped output; nothing is re-escaped.
+      // eslint-disable-next-line no-restricted-syntax
+      ? <mark key={index} className="cl-review-word" dangerouslySetInnerHTML={{ __html: segment.html }} />
+      // eslint-disable-next-line no-restricted-syntax
+      : <span key={index} dangerouslySetInnerHTML={{ __html: segment.html }} />)
+    : parts.map((part, index) => part.changed ? <mark key={index} className="cl-review-word">{part.text}</mark> : <span key={index}>{part.text}</span>)}</span>
 }
 
 /** A row from the same escaped Shiki output used by ShikiCode. Tokenization

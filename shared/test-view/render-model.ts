@@ -5,6 +5,7 @@
 // alias.
 import type { FormattedCodeDisplay, FormattedDisplayLine } from '../code-display-format'
 import type { ExtractedTest } from '../extracted-test'
+import { compareText, type TextPart } from '../lib/comparison-diff'
 import { englishLines, englishSourceRange } from '../readable-tests/source-lines'
 import { storyCodeLineNumbers, storyItemIdForSourceLine, type StoryCodeLineNumber } from '../readable-tests/story-source-map'
 import type { ReadableSource, ReadableStoryItem } from '../readable-tests/types'
@@ -27,6 +28,9 @@ export interface TestViewMarks {
   changed: boolean
   /** The run is on this row, or last failed on it. */
   execution?: TestViewExecution
+  /** The row's text split into unchanged and changed words, when the view
+   * marks words; absent, the whole changed line is the mark. */
+  words?: readonly TextPart[]
 }
 
 /** One rendered row of test source. A single listing renders one per display
@@ -222,10 +226,20 @@ export function storyChangeMarks(test: ExtractedTest, sourceFile: string, change
 
 export interface TestViewSelection { side: TestViewSide; line: number; endLine: number }
 
+/** What an aligned view reads from a review. A file reviewed against a
+ * baseline supplies all of it; a repair cycle's patch supplies the sources it
+ * holds and no baseline. */
+export type AlignedReview = Pick<TestFileReview, 'before' | 'after' | 'supportingFile' | 'meaningfulChanges'> & {
+  baseline?: TestFileReview['baseline']
+}
+
 export interface TestViewAlignedInput {
-  review: TestFileReview
+  review: AlignedReview
   rows: ContextRow[]
   mode: TestViewMode
+  /** `word` marks the changed words of a line edited on both sides; `line`,
+   * the default, marks the whole line. */
+  marks?: 'line' | 'word'
   /** The edit whose rows read as selected. */
   change?: number
   /** The Code-mode range the reader opened from English. */
@@ -246,7 +260,7 @@ export interface TestViewAlignedRow {
 /** Keep diff rows source-aligned while English folds each statement into its
  * first row. A pair collapses only when neither side has independent content:
  * an insertion, deletion or differently wrapped statement keeps its alignment. */
-export function alignedTestViewRows({ review, rows, mode, change, selection }: TestViewAlignedInput): TestViewAlignedRow[] {
+export function alignedTestViewRows({ review, rows, mode, marks = 'line', change, selection }: TestViewAlignedInput): TestViewAlignedRow[] {
   const english = { before: englishLines(review.before), after: englishLines(review.after) }
   const meaningful = review.meaningfulChanges ? {
     before: new Set(review.meaningfulChanges.before),
@@ -295,6 +309,12 @@ export function alignedTestViewRows({ review, rows, mode, change, selection }: T
     const before = cell(row, 'before', index)
     const after = cell(row, 'after', index)
     if ((!before || before.continued) && (!after || after.continued)) continue
+    // A one-sided row is wholly added or removed; its line mark says so.
+    if (marks === 'word' && before && after && before.code !== after.code) {
+      const words = compareText(before.code, after.code)
+      before.marks.words = words.before
+      after.marks.words = words.after
+    }
     const changes = [...(before?.marks.changes ?? []), ...(after?.marks.changes ?? [])]
     aligned.push({
       source: row,
@@ -310,14 +330,14 @@ export function alignedTestViewRows({ review, rows, mode, change, selection }: T
 /** Which formats the aligned view can offer. A supporting file with no English
  * on either side reads as code only, since the toggle would open an empty view;
  * a spec file always offers English, its untranslated rows saying so one by one. */
-export function alignedEnglishAvailable(review: TestFileReview): boolean {
+export function alignedEnglishAvailable(review: AlignedReview): boolean {
   return !review.supportingFile || Boolean(review.before.story?.steps.length || review.after.story?.steps.length)
 }
 
 export interface TestViewSideLabels { before: string; after: string }
 
 /** Column headings name the baseline the current source is compared against. */
-export function alignedSideLabels(review: TestFileReview): TestViewSideLabels {
+export function alignedSideLabels(review: AlignedReview): TestViewSideLabels {
   return { before: review.baseline === 'run-start' ? 'Recorded tests' : 'Committed tests · Git HEAD', after: 'Current source' }
 }
 
