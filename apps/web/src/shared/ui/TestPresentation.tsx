@@ -66,6 +66,9 @@ export interface TestPresentationAlignedProps extends TestPresentationShellProps
   returnSelection?: TestViewSelection
   onReturnToEnglish?: () => void
   scrollRef?: Ref<HTMLDivElement>
+  /** A notice about the listing as a whole, read before it: between the
+   *  toolbar and the table. */
+  notice?: ReactNode
 }
 
 export type TestPresentationProps = TestPresentationSingleProps | TestPresentationAlignedProps
@@ -241,7 +244,7 @@ function SingleTestView({
  * grammar, Shiki tokenization and format toggle. Neither baseline is ever
  * translated here: both sides arrive as the server reviewed them. */
 function AlignedTestView({
-  review, rows, mode, onModeChange, header, change, emptySide, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish,
+  review, rows, mode, onModeChange, header, change, emptySide, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
 }: Resolved<TestPresentationAlignedProps>) {
   const englishAvailable = alignedEnglishAvailable(review)
   const shownMode = englishAvailable ? mode : 'code'
@@ -293,6 +296,7 @@ function AlignedTestView({
         : <span className="text-xs text-secondary">Supporting file · Code</span>}
       {header}
     </div>
+    {notice}
     <div className="cl-context-table min-h-0 flex-1">
       <div className="cl-review-source-canvas" style={{
         background: after?.canvas.bg ?? before?.canvas.bg,

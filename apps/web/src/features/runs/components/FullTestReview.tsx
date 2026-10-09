@@ -141,8 +141,8 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
           const pane = scroll.current!
           setEnglishReturn({ selection: next, top: pane.scrollTop, left: pane.scrollLeft, cursor: index })
           setCursor(index); setSelection(next); setMode('code'); updateFocus(next.line, 'code')
-        }} />}
-    {ready && selectedTest && !sourceTest && <p role="status" className="px-3 py-2 text-xs text-warning">This test is in the {testSide === 'before' ? 'recorded' : 'current'} test list, but its matching declaration is unavailable in this source snapshot. Showing file context; no test is highlighted.</p>}
+        }}
+        notice={selectedTest && !sourceTest && <p role="status" className="px-3 py-2 text-xs text-warning">This test is in the {testSide === 'before' ? 'recorded' : 'current'} test list, but its matching declaration is unavailable in this source snapshot. Showing file context; no test is highlighted.</p>} />}
     <div className="cl-context-assessment" aria-live="polite">
       {!loading && !error && data && <>
       {data.assessment.reasons?.map((reason) => <p key={reason} className="text-warning">{testAssessmentReason(reason)}</p>)}

@@ -802,6 +802,10 @@ it('never highlights a different test if the source changes after the declaratio
   expect(testNavigation().textContent).toContain('1 / 1')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('gone')
   expect(document.body.textContent).toContain('matching declaration is unavailable in this source snapshot')
+  // Read before the listing it qualifies: right after the toolbar, ahead of the table.
+  const notice = [...document.querySelectorAll('p[role="status"]')].find((p) => p.textContent?.includes('matching declaration is unavailable'))!
+  expect(notice.previousElementSibling?.classList.contains('cl-context-toolbar')).toBe(true)
+  expect(notice.nextElementSibling?.classList.contains('cl-context-table')).toBe(true)
   expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
 })
 
