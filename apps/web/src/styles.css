@@ -2241,6 +2241,9 @@ body {
 .cl-review-source-canvas { display: flex; flex: 1; min-width: 0; overflow: hidden; }
 .cl-context-table .cl-comparison-wrap { flex: 1; min-width: 0; background: transparent; overflow: auto; border: 0; border-radius: 0; scrollbar-gutter: stable; overflow-anchor: none; }
 .cl-context-table .cl-comparison { min-width: 720px; table-layout: fixed; background: transparent; }
+/* Code changes sits in the run panel, far narrower than the review dialog: both
+   sides stay in view and long lines wrap, as the patch view did. */
+.cl-cycle-review .cl-context-table .cl-comparison { min-width: 0; }
 .cl-context-table .cl-comparison th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); width: 50%; padding-block: 8px; }
 .cl-context-table .cl-comparison td { position: relative; padding: 2px 10px 2px calc(var(--review-gutter-width, 2ch) + 16px); vertical-align: top; }
 .cl-context-table .cl-comparison tbody tr { border-top: 0; }

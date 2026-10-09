@@ -31,7 +31,7 @@ export function CycleFileReview({ files, cycle }: { files: readonly CycleReviewF
       </p>
     </div>
   }
-  return <div className="flex max-h-[420px] min-h-0 flex-col overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
+  return <div className="cl-cycle-review flex max-h-[420px] min-h-0 flex-col overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
     <TestPresentation view="aligned" {...input} mode="code" marks="word" codeOnly={CODE_ONLY} ariaLabel="Code changes before and after"
       header={<>{picker}<ComparisonLegend /></>}
       notice={(file.previousPath || ending) && <p className="m-0 px-3 py-1.5 text-secondary">
