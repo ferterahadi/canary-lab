@@ -7,7 +7,7 @@ import type { RunDetail } from '@shared/run-detail'
 import { evidenceKnownTests, stampedEvidenceLifecycleEvents, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
 import { RunDetailColumn } from './RunDetailColumn'
 
-const paneTerminals = vi.hoisted(() => ({ props: [] as Array<{ paneId?: string }> }))
+const paneTerminals = vi.hoisted(() => ({ props: [] as Array<{ paneId?: string }>, mounts: [] as string[] }))
 
 vi.mock('../state/RunsContext', () => ({ useRun: vi.fn() }))
 vi.mock(import('@/shared/api/runs'), async (importOriginal) => ({
@@ -22,12 +22,16 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 }))
 vi.mock('@/shared/shell/McpPromoContext', () => ({ useMcpPromo: () => ({ gatePromo: (_a: string, go: () => void) => go() }) }))
 vi.mock('@/shared/ui/AgentSessionView', () => ({ AgentSessionView: () => <div>agent session</div> }))
-vi.mock('./PaneTerminal', () => ({
-  PaneTerminal: (props: { paneId?: string }) => {
-    paneTerminals.props.push(props)
-    return <div>terminal</div>
-  },
-}))
+vi.mock('./PaneTerminal', async () => {
+  const { useEffect } = await import('react')
+  return {
+    PaneTerminal: (props: { paneId?: string }) => {
+      paneTerminals.props.push(props)
+      useEffect(() => { paneTerminals.mounts.push(props.paneId ?? '') }, [props.paneId])
+      return <div>terminal</div>
+    },
+  }
+})
 
 let container: HTMLDivElement
 let root: Root
@@ -37,6 +41,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   paneTerminals.props = []
+  paneTerminals.mounts = []
 })
 
 afterEach(() => {
@@ -134,6 +139,18 @@ describe('run detail tabs', () => {
     await show(detailOf('run', 'run-2'))
     click('Results & Fixes')
     expect(container.querySelector('[data-open]')).toBeNull()
+  })
+
+  it('keeps the live Heal Agent terminal mounted across a trip through Results & Fixes', async () => {
+    const detail = detailOf()
+    await show({ ...detail, manifest: { ...detail.manifest, status: 'healing', endedAt: undefined } })
+    click('Heal Agent')
+    click('Results & Fixes')
+    click('Heal Agent')
+    click('Overview')
+    expect(paneTerminals.mounts.filter((id) => id === 'agent')).toHaveLength(1)
+    // Hidden, not unmounted, while another tab shows.
+    expect(container.querySelector('[hidden]')?.textContent).toContain('terminal')
   })
 
   it('keeps the Playwright terminal one click inside Results & Fixes', async () => {
