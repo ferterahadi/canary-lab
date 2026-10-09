@@ -471,6 +471,15 @@ describe('isTempInstallPath', () => {
     expect(isTempInstallPath(path.join(real, 'canary-lab-smoke-x', 'smoke-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js'))).toBe(true)
   })
 
+  // Observed live: `init` in a Claude Code scratchpad (`/private/tmp/claude-<uid>/…`)
+  // wrote its cli.js into the global Desktop, Claude Code, and Codex configs —
+  // macOS's os.tmpdir() is `/var/folders/…/T`, so `/tmp` was never checked.
+  it.skipIf(process.platform === 'win32')('flags an install under /tmp in either spelling', () => {
+    const tail = path.join('scratchpad', 'project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
+    expect(isTempInstallPath(path.join('/private/tmp/claude-0', tail))).toBe(true)
+    expect(isTempInstallPath(path.join('/tmp/claude-0', tail))).toBe(true)
+  })
+
   it('leaves a durable install alone', () => {
     expect(isTempInstallPath('/Users/x/Documents/canary-lab-workspace/node_modules/canary-lab/dist/scripts/cli.js')).toBe(false)
     expect(isTempInstallPath('/usr/local/lib/node_modules/canary-lab/dist/scripts/cli.js')).toBe(false)

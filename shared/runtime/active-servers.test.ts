@@ -251,6 +251,32 @@ describe('resolveActiveServer', () => {
     expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(7420)
   })
 
+  // `/tmp` is a temp root even where os.tmpdir() points elsewhere (macOS's
+  // `/var/folders/…/T`): a throwaway project in a Claude Code scratchpad under
+  // `/private/tmp` must lose the unpinned pick just like a demo does.
+  it.skipIf(process.platform === 'win32')('prefers a durable workspace over a newer one under /private/tmp', () => {
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-01-01T00:00:00.000Z' }),
+      base({ projectRoot: '/private/tmp/claude-0/scratchpad/project', port: 50259, updatedAt: '2026-03-01T00:00:00.000Z' }),
+    ]
+    expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(7420)
+  })
+
+  // ...while a session working inside that scratchpad project still reaches it:
+  // the enclosing-cwd match runs before the temp tiebreak.
+  it.skipIf(process.platform === 'win32')('still resolves a /tmp workspace that encloses the cwd', () => {
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-03-01T00:00:00.000Z' }),
+      base({ projectRoot: '/private/tmp/claude-0/scratchpad/project', port: 50259 }),
+    ]
+    const match = resolveActiveServer({
+      servers,
+      cwd: '/private/tmp/claude-0/scratchpad/project/features/x',
+      env: {} as NodeJS.ProcessEnv,
+    })
+    expect(match?.port).toBe(50259)
+  })
+
   // But reachable beats unreachable: when the demo is the only thing running, an
   // agent asking for it must still be able to find it.
   it('uses a temp workspace when it is the only live server', () => {
