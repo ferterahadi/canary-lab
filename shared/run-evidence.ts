@@ -114,11 +114,12 @@ export type EvidenceAttempt = PlaybackAttempt & {
 export type CycleVerification =
   /** The reporter observed this case in the verifying execution. */
   | { kind: 'observed'; attempt: EvidenceAttempt }
-  /** The verifying execution ran without this case: its last result stands
-   *  with its original execution identity, and nothing was re-observed. */
+  /** The verifying execution finished without this case: its last result
+   *  stands with its original execution identity, and nothing was re-observed. */
   | { kind: 'not-rerun'; execution: number }
-  /** No execution has run since the repair. */
-  | { kind: 'pending' }
+  /** No execution has run since the repair, or the verifying one (`execution`)
+   *  is still running and has not reached this case. */
+  | { kind: 'pending'; execution?: number }
 
 export interface CaseCycle {
   cycle: number
@@ -249,14 +250,7 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidence {
       // earlier execution still counts; a pass does not put it in this cycle.
       const input = latestPlaybackAttempt(placed.filter((a) => a.executionIndex! <= cycle.inputExecution!))
       if (!input || input.passed !== false) continue
-      const verifying = cycle.verifyingExecution
-      const observed = verifying === undefined ? undefined : lastIn(verifying)
-      caseCycles.push({
-        cycle: cycle.cycle,
-        input,
-        verification: verifying === undefined ? { kind: 'pending' }
-          : observed ? { kind: 'observed', attempt: observed } : { kind: 'not-rerun', execution: verifying },
-      })
+      caseCycles.push({ cycle: cycle.cycle, input, verification: verificationOf(cycle, executions, lastIn) })
     }
     const latest = latestPlaybackAttempt(own)
     return {
@@ -272,6 +266,18 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidence {
     }
   })
   return { executions, cycles, cases, unplacedAttempts: resolved.filter((a) => a.executionIndex === undefined) }
+}
+
+function verificationOf(
+  cycle: EvidenceCycle, executions: readonly EvidenceExecution[], lastIn: (execution: number) => EvidenceAttempt | undefined,
+): CycleVerification {
+  const verifying = executions.find((x) => x.index === cycle.verifyingExecution)
+  if (!verifying) return { kind: 'pending' }
+  const observed = lastIn(verifying.index)
+  if (observed) return { kind: 'observed', attempt: observed }
+  // Absence is only evidence once the execution is over: a running one may
+  // not have reached this case yet.
+  return verifying.endedAt === undefined ? { kind: 'pending', execution: verifying.index } : { kind: 'not-rerun', execution: verifying.index }
 }
 
 /** How a journal entry relates to one case's repair cycle. */
@@ -313,8 +319,9 @@ export type AttemptMedia =
    *  case's latest and the name is unique, so that copy is its own. */
   | { kind: 'latest-copy'; artifacts: PlaywrightArtifact[] }
   /** Nothing retained for it: the artifact policy kept none, or a legacy run
-   *  overwrote it with a later attempt's copy, or a same-name case could own it. */
-  | { kind: 'none'; reason: 'not-retained' | 'superseded' | 'ambiguous' }
+   *  overwrote it with a later attempt's copy, or a same-name case could own it.
+   *  `pending`: media is preserved when its execution exits, which it has not. */
+  | { kind: 'none'; reason: 'pending' | 'not-retained' | 'superseded' | 'ambiguous' }
 
 export function mediaForAttempt(
   attempt: EvidenceAttempt,
@@ -323,7 +330,10 @@ export function mediaForAttempt(
 ): AttemptMedia {
   const own = detail.attemptArtifacts?.[attempt.attemptKey]
   if (own?.length) return { kind: 'attempt', artifacts: own }
-  if (attempt.execution !== undefined) return { kind: 'none', reason: 'not-retained' }
+  if (attempt.execution !== undefined) {
+    const running = evidence.executions.find((x) => x.index === attempt.execution)?.endedAt === undefined
+    return { kind: 'none', reason: running ? 'pending' : 'not-retained' }
+  }
   const owner = evidence.cases.find((c) => c.caseKey === attempt.caseKey)
   if (owner?.latest?.attemptKey !== attempt.attemptKey) return { kind: 'none', reason: 'superseded' }
   if (evidence.cases.filter((c) => c.name === attempt.name).length > 1) return { kind: 'none', reason: 'ambiguous' }

@@ -252,6 +252,23 @@ describe('runPlaywright — execution identity', () => {
     expect(ctx.currentExecution).toEqual({ index: 4, afterCycle: 0 })
   })
 
+  it('closes an execution only after its media is preserved, so the push that record triggers carries it', async () => {
+    const { ctx, sink } = ctxFor({}, {
+      ptyFactory: () => {
+        fs.mkdirSync(path.join(ctx.paths.playwrightArtifactsDir, 'a-chromium'), { recursive: true })
+        fs.writeFileSync(path.join(ctx.paths.playwrightArtifactsDir, 'a-chromium', 'shot.png'), 'x')
+        return exit0Pty()
+      },
+      playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }),
+    })
+    const preservedAtRecord: boolean[] = []
+    vi.mocked(sink.recordLifecycleEvent).mockImplementation((_runId, event) => {
+      if (event.phase === 'completed') preservedAtRecord.push(fs.existsSync(path.join(ctx.paths.playwrightArtifactsHistoryDir, 'execution-1', 'a-chromium', 'shot.png')))
+    })
+    await runPlaywright(ctx)
+    expect(preservedAtRecord).toEqual([true])
+  })
+
   it('keeps every execution\'s artifacts while the keep dir follows the latest', () => {
     const { ctx } = ctxFor()
     const src = ctx.paths.playwrightArtifactsDir

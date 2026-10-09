@@ -42,6 +42,8 @@ function runDetail(over: Record<string, unknown> = {}, manifest: Record<string, 
     lifecycleEvents: [{ phase: 'booting' }],
     playwrightArtifacts: [{ name: 'trace.zip' }],
     playbackEvents: [{ test: 'pays' }],
+    attemptArtifacts: { '0': [{ name: 'test-failed-1.png' }] },
+    unassignedArtifacts: [{ name: 'trace.zip', execution: 1 }],
     ...over,
   } as unknown as RunDetail
 }
@@ -148,9 +150,12 @@ describe('get_run', () => {
     expect(out).not.toHaveProperty('lifecycleEvents')
     expect(out).not.toHaveProperty('playwrightArtifacts')
     expect(out).not.toHaveProperty('playbackEvents')
+    // Per-execution media grows with every rerun: an agent asks for it.
+    expect(out).not.toHaveProperty('attemptArtifacts')
+    expect(out).not.toHaveProperty('unassignedArtifacts')
     expect(out).toMatchObject({
       artifactsBase: '/api/runs/run-1/artifacts/',
-      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'] },
+      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents', 'attemptArtifacts', 'unassignedArtifacts'] },
     })
     // A running run has no next step to recommend yet.
     expect(out).not.toHaveProperty('next')

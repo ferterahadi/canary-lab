@@ -77,6 +77,14 @@ describe('buildRunEvidence — partial and live runs', () => {
     expect(byId(withoutInventoryRerun, 'inventory').cycles[0].verification).toEqual({ kind: 'not-rerun', execution: 2 })
   })
 
+  it('waits for a running verification instead of calling an unreached case not rerun', () => {
+    // Execution 3 has started and is mid-run: discount has not been reached.
+    const lifecycle = stampedEvidenceLifecycleEvents().slice(0, 7)
+    const events = stampedEvidencePlaybackEvents().filter((e) => e.time < '2026-10-08T10:09:00.000Z')
+    const discount = byId(buildRunEvidence({ events, known: evidenceKnownTests, lifecycle }), 'discount')
+    expect(discount.cycles.at(-1)!.verification).toEqual({ kind: 'pending', execution: 3 })
+  })
+
   it('leaves an attempt outside every execution unplaced instead of guessing its cycle', () => {
     const stray: PlaywrightPlaybackEvent[] = [
       { type: 'test-begin', time: '2026-10-08T11:00:00.000Z', test: { name: 'test-case-x', title: 'x', location: 'e2e/x.spec.ts:1' } },
@@ -190,6 +198,15 @@ describe('mediaForAttempt', () => {
     const detail = { attemptArtifacts: { [first.attemptKey]: [shot('before.png')] } }
     expect(mediaForAttempt(first, evidence, detail)).toEqual({ kind: 'attempt', artifacts: [shot('before.png')] })
     expect(mediaForAttempt(last, evidence, detail)).toEqual({ kind: 'none', reason: 'not-retained' })
+  })
+
+  it('says media is still to come while its execution has not exited, then shows it once pushed', () => {
+    // Results reach the view before media: the copy is taken at exit.
+    const running = buildRunEvidence({ events: stampedEvidencePlaybackEvents(), known: evidenceKnownTests, lifecycle: stampedEvidenceLifecycleEvents().slice(0, 7) })
+    const last = byId(running, 'discount').latest!
+    expect(mediaForAttempt(last, running, {})).toEqual({ kind: 'none', reason: 'pending' })
+    const settled = stamped()
+    expect(mediaForAttempt(last, settled, { attemptArtifacts: { [last.attemptKey]: [shot('after.png')] } })).toEqual({ kind: 'attempt', artifacts: [shot('after.png')] })
   })
 
   it('gives a legacy latest attempt the latest copy, and refuses older or same-name attempts', () => {
