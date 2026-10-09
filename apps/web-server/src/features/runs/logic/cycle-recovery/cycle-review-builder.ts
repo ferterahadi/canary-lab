@@ -67,7 +67,7 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
         before: side(before), after: side(after),
         patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
       } } : {}),
-      ...(rel !== null && manifest ? { executed: execution(manifest, rel, current.timestamp) } : {}),
+      ...(rel !== null && manifest ? { executed: execution(manifest, rel, current.previousTimestamp ?? manifest.startedAt) } : {}),
     }
   }))
   const review: RunCycleReview = {
@@ -88,13 +88,15 @@ function readableSide(rel: string | null, role: CycleFileRole, source: string, f
 }
 
 /** A suite edit ran only when the run executed the live suite, or adopted the
- * edit into its suite copy after the cycle that made it. */
-function execution(manifest: RunManifest, rel: string, timestamp: string | null): CycleFileExecution {
+ * file into its suite copy once the cycle could have edited it. A cycle's
+ * journal entry is written when the cycle ends, and a person may adopt the
+ * edit before that, so the window opens when the cycle before it ended. */
+function execution(manifest: RunManifest, rel: string, since: string): CycleFileExecution {
   if (manifest.suiteSnapshot?.kind !== 'taken') return { kind: 'live' }
-  const since = timestamp ? Date.parse(timestamp) : Number.NaN
-  // `!(at < since)` keeps every adoption when the cycle's time is unknown.
+  // `!(at < start)` keeps every adoption when a time does not parse.
+  const start = Date.parse(since)
   const adoption = [...(manifest.specEdits?.adopted ?? [])].reverse()
-    .find((entry) => entry.files.includes(rel) && !(Date.parse(entry.at) < since))
+    .find((entry) => entry.files.includes(rel) && !(Date.parse(entry.at) < start))
   return adoption ? { kind: 'adopted', by: adoption.by, at: adoption.at } : { kind: 'inert' }
 }
 
@@ -113,6 +115,6 @@ function suiteStamp(suiteDir: string | null, rel: string | null): number | null 
 function memoKey(runDir: string, iteration: number, diffs: string[], manifest: RunManifest | null, feature: FeatureConfig | undefined, stamps: Array<number | null>): string {
   return createHash('sha1').update(JSON.stringify([
     runDir, iteration, diffs, stamps, feature?.semanticRules ?? null,
-    manifest && [manifest.featureDir, manifest.repoPaths, manifest.worktrees, manifest.suiteSnapshot, manifest.specEdits?.adopted],
+    manifest && [manifest.startedAt, manifest.featureDir, manifest.repoPaths, manifest.worktrees, manifest.suiteSnapshot, manifest.specEdits?.adopted],
   ])).digest('hex')
 }

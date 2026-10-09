@@ -50,29 +50,34 @@ describe('buildRunCycleReview', () => {
 
   it('says whether the run executed a suite edit', async () => {
     const run = cycleRun(tempDir())
-    await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'/cart'", "'/basket'"), { at: '2026-01-01T00:05:00.000Z' })
-    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'live' })
+    await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'/cart'", "'/basket'"), { at: '2026-01-01T00:01:00.000Z' })
+    await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'Total'", "'Sum'"), { at: '2026-01-01T00:05:00.000Z' })
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'live' })
     run.takeSuite()
-    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [
-      { at: '2026-01-01T00:01:00.000Z', by: 'human', files: ['e2e/cart.spec.ts'] },
-      { at: '2026-01-01T00:06:00.000Z', by: 'test-heal', files: ['helpers/util.ts'] },
-    ] } })
-    // The only adoption of the spec came before the cycle that edited it.
-    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'inert' })
-    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at: '2026-01-01T00:06:00.000Z', by: 'test-heal', files: ['e2e/cart.spec.ts'] }] } })
-    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'adopted', by: 'test-heal', at: '2026-01-01T00:06:00.000Z' })
+    const adopt = (at: string, by: 'human' | 'test-heal', files = ['e2e/cart.spec.ts']) => run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at, by, files }] } })
+    // Adopted before cycle 2 could start: only cycle 1's edit reached the copy.
+    adopt('2026-01-01T00:00:30.000Z', 'human')
+    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2026-01-01T00:00:30.000Z' })
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'inert' })
+    // Adopted while cycle 2 was still running, before its entry was written.
+    adopt('2026-01-01T00:04:00.000Z', 'test-heal')
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'adopted', by: 'test-heal', at: '2026-01-01T00:04:00.000Z' })
+    adopt('2026-01-01T00:04:00.000Z', 'human', ['helpers/util.ts'])
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'inert' })
   })
 
-  it('counts any adoption when the cycle\'s time is unknown, and reads the heal mode from the run', async () => {
+  it('opens the window at the run\'s start when no earlier cycle was journaled, and reads the heal mode', async () => {
     const run = cycleRun(tempDir(), { app: false })
     run.takeSuite()
     const { diff } = await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'/cart'", "'/basket'"))
     fs.rmSync(run.journalPath)
     fs.writeFileSync(cyclePatchPath(run.runDir, 4), diff)
-    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at: '2020-01-01T00:00:00.000Z', by: 'human', files: ['e2e/cart.spec.ts'] }] } })
-    const review = (await build(run, 4))!
-    expect(review).toMatchObject({ healMode: 'test', source: 'patch' })
-    expect(review.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2020-01-01T00:00:00.000Z' })
+    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [
+      { at: '2025-12-31T23:59:00.000Z', by: 'human', files: ['e2e/cart.spec.ts'] },
+    ] } })
+    expect((await build(run, 4))!).toMatchObject({ healMode: 'test', source: 'patch', files: [{ executed: { kind: 'inert' } }] })
+    run.updateManifest({ startedAt: 'not a time' })
+    expect((await build(run, 4))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2025-12-31T23:59:00.000Z' })
   })
 
   it('reads the journal\'s inline diff when no patch was kept, and says it was cut', async () => {

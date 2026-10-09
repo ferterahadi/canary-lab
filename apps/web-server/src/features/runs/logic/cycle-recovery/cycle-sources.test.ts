@@ -26,7 +26,7 @@ describe('cycleDiffs', () => {
   it('prefers a cycle\'s persisted patch over the journal\'s inline copy', () => {
     const dir = runDir(entry(1, diffOf('a.ts', 'one', 'inline')), { 'iteration-1.patch': `${diffOf('a.ts', 'one', 'patch')}\n` })
     const diff = cycleDiffs(dir).get(1)!
-    expect(diff).toMatchObject({ iteration: 1, source: 'patch', patchPath: cyclePatchPath(dir, 1), truncated: false, timestamp: '2026-01-01T00:01:00.000Z' })
+    expect(diff).toMatchObject({ iteration: 1, source: 'patch', patchPath: cyclePatchPath(dir, 1), truncated: false, timestamp: '2026-01-01T00:01:00.000Z', previousTimestamp: null })
     expect(diff.files[0].rows.map((row) => row.after)).toEqual(['patch'])
   })
 
@@ -43,7 +43,8 @@ describe('cycleDiffs', () => {
     const dir = runDir(entry(3, diffOf('a.ts', 'a', 'b')) + entry(1), { 'iteration-2.patch': diffOf('a.ts', 'z', 'a'), 'notes.txt': 'not a patch' })
     const diffs = cycleDiffs(dir)
     expect([...diffs.keys()]).toEqual([2, 3])
-    expect(diffs.get(2)).toMatchObject({ source: 'patch', timestamp: null })
+    expect(diffs.get(2)).toMatchObject({ source: 'patch', timestamp: null, previousTimestamp: '2026-01-01T00:01:00.000Z' })
+    expect(diffs.get(3)).toMatchObject({ timestamp: '2026-01-01T00:03:00.000Z', previousTimestamp: '2026-01-01T00:01:00.000Z' })
   })
 
   it('keeps the entry the journal wrote last for a repeated cycle', () => {
