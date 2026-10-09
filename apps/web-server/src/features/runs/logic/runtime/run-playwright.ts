@@ -8,7 +8,8 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
-import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
+import type { RunExecutionRef, RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
+import { readManifest } from './manifest'
 import {
   SummaryShape,
   VerificationPlan,
@@ -49,12 +50,14 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
         reason: rerunSelection.reason,
       } satisfies RunLifecycleTargetedRerun
     : undefined
+  const execution = nextExecution(ctx)
   ctx.emit('playwright-started', { command: inv.command })
   recordLifecycle(ctx, targetedRerun ? 'rerunning-tests' : 'running-tests', targetedRerun ? 'Rerunning Playwright tests' : 'Running Playwright tests', {
     detail: targetedRerun
       ? `Running ${targetCount} selected test target${targetCount === 1 ? '' : 's'}.`
       : 'Running the configured Playwright suite.',
     ...(targetedRerun ? { targetedRerun } : {}),
+    execution,
   })
   const pty = ctx.ptyFactory({
     command: inv.command,
@@ -73,6 +76,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
       CANARY_LAB_SUMMARY_PATH: ctx.paths.summaryPath,
       CANARY_LAB_ENV: ctx.env ?? '',
       ...(rerunSelection ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
+      CANARY_LAB_EXECUTION: String(execution.index),
     },
   })
   ctx.playwrightPty = pty
@@ -94,6 +98,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
         ctx.serviceFailure ? 'Playwright stopped after service failure' : `Playwright exited with code ${exitCode}`, {
         detail: ctx.serviceFailure?.detail ?? (signal ? `Process signal: ${signal}` : undefined),
         severity: ctx.serviceFailure ? 'error' : exitCode === 0 ? 'success' : 'warning',
+        execution,
       })
       const waiter = ctx.playwrightExitWaiter
       ctx.playwrightExitWaiter = null
@@ -101,6 +106,17 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
       resolve(exitCode)
     })
   })
+}
+
+/** Identity of the invocation about to start. The count lives on the manifest
+ *  because a restart-heal builds a fresh context over the same run dir, and its
+ *  executions must not reuse numbers the evidence already carries. */
+function nextExecution(ctx: RunContext): RunExecutionRef {
+  const issued = ctx.currentExecution?.index ?? readManifest(ctx.paths.manifestPath)?.playwrightExecutions ?? 0
+  const execution = { index: issued + 1, afterCycle: ctx.healCycles }
+  ctx.currentExecution = execution
+  ctx.stateSink.patchManifest(ctx.runId, { playwrightExecutions: execution.index })
+  return execution
 }
 
 export function featureWithLatestHealThreshold(ctx: RunContext): FeatureConfig {
@@ -114,7 +130,9 @@ export function featureWithLatestHealThreshold(ctx: RunContext): FeatureConfig {
 // so it survives the next Playwright invocation's `--output` wipe. New
 // artifacts for the same pw-slug overwrite the previous copy — heal-cycle
 // reruns of a single test thus replace that test's previous video/trace
-// while leaving the other tests' artifacts intact. Best-effort: failures
+// while leaving the other tests' artifacts intact. The same dirs also go to
+// `history/execution-<n>/`, which nothing overwrites, so the media a repair
+// started from survives the rerun that verified it. Best-effort: failures
 // here are logged but do not fail the run.
 export function persistPlaywrightArtifacts(ctx: RunContext): void {
   const src = ctx.paths.playwrightArtifactsDir
@@ -136,6 +154,9 @@ export function persistPlaywrightArtifacts(ctx: RunContext): void {
       // Not fs.cpSync: its native tree walk aborts the process on a directory
       // it cannot read, which would take the run down instead of warning.
       copyDirRecursive(srcPath, dstPath)
+      if (ctx.currentExecution) {
+        copyDirRecursive(srcPath, path.join(ctx.paths.playwrightArtifactsHistoryDir, `execution-${ctx.currentExecution.index}`, entry.name))
+      }
     } catch (err) {
       ctx.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${errorMessage(err)}`)
     }

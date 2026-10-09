@@ -54,6 +54,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     recordLifecycle(ctx, 'agent-healing', `${modeLabel} heal cycle ${ctx.healCycles} started`, {
       detail: modeDetail,
       activeCycle: ctx.healCycles,
+      repairCycle: ctx.healCycles,
     })
     // Same snapshot/diff pattern as auto-heal: capture working-tree state
     // before the user starts editing, then diff after the signal arrives
@@ -304,6 +305,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         // `shouldHeal` for a non-empty signature, which is this same string.
         detail: `Failures: ${signature}`,
         activeCycle: cycleNum,
+        repairCycle: ctx.healCycles,
       })
 
       // Snapshot every git-tracked feature repo just before the agent runs.

@@ -919,8 +919,14 @@ guard remains the final barrier against another external effect.
 Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>/`:
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
 `external-commands.jsonl` (per-command audit for external heal), `fixes/` (captured
-repair diffs), `playwright-artifacts-keep/` (latest per-test artifacts across repair
-reruns), failure slices, and the manifest. There is no automatic retention/pruning:
+repair diffs, cumulative per run), `diffs/iteration-<n>.patch` (each journaled repair
+cycle's own diff), `playwright-artifacts-keep/` (latest per-test artifacts across repair
+reruns), `playwright-artifacts-history/execution-<n>/` (each Playwright execution's
+artifacts, never overwritten), `service-logs/<service>/execution-<n>.log` (what a
+service log held before a rerun or restart emptied it), failure slices, and the
+manifest. `manifest.playwrightExecutions` counts executions run-wide; the reporter
+stamps that number on each `test-begin`/`test-end` playback event, and the lifecycle
+records that start and end an execution carry it as `execution`. There is no automatic retention/pruning:
 runs persist on disk until removed manually via the Cleanup page's **Runs** tab
 (`GET /api/cleanup/runs`, backed by `RunStore.delete` / `trimArtifacts`), which deletes
 whole runs or trims Playwright artifacts while keeping the manifest and `runner.log`.

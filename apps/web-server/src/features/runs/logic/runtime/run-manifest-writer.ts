@@ -54,10 +54,28 @@ export function recordLifecycle(ctx: RunContext,
   ctx.lastLifecycleEvent = { phase, headline }
 }
 
+/** The run's latest Playwright execution. After a restart-heal it ran in the
+ *  previous process, so only the manifest's count still knows it. Undefined
+ *  before the first execution and on runs recorded before executions were
+ *  numbered. */
+export function latestExecutionIndex(ctx: RunContext): number | undefined {
+  return ctx.currentExecution?.index ?? readManifest(ctx.paths.manifestPath)?.playwrightExecutions
+}
+
+/** A journaled repair starts from the latest execution's failures. */
+function inputExecution(ctx: RunContext): { inputExecution?: number } {
+  const index = latestExecutionIndex(ctx)
+  return index !== undefined ? { inputExecution: index } : {}
+}
+
 export function appendJournalIteration(ctx: RunContext, input: Omit<JournalAppendInput, 'runId' | 'manifestPath' | 'summaryPath' | 'journalPath'>): void {
   appendJournalIterationToFile({
     ...input,
     runId: ctx.runId,
+    // Cycle 0 is "no repair yet"; an entry written outside a counted cycle
+    // claims no cycle rather than a false one.
+    ...(ctx.healCycles > 0 ? { cycle: ctx.healCycles } : {}),
+    ...inputExecution(ctx),
     manifestPath: ctx.paths.manifestPath,
     summaryPath: ctx.paths.summaryPath,
     journalPath: ctx.paths.diagnosisJournalPath,
@@ -103,6 +121,7 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
       specEdits: previous.specEdits,
       integrity: previous.integrity,
       healCycleHistory: previous.healCycleHistory,
+      playwrightExecutions: previous.playwrightExecutions,
     } : {}),
     services,
     // Reflect the actual paths this run occupies: worktree-isolated repos

@@ -30,15 +30,18 @@ export function dirSizeBytes(dir: string): number {
   return total
 }
 
-/** Byte size of the heavy Playwright artifact directories (videos / traces /
- *  screenshots) for a run — the two dirs `trimRunArtifacts` removes. */
-export function runArtifactBytes(logsDir: string, runId: string): number {
-  const paths = buildRunPaths(runDirFor(logsDir, runId))
-  return dirSizeBytes(paths.playwrightArtifactsDir) + dirSizeBytes(paths.playwrightArtifactsKeepDir)
+/** The heavy Playwright media directories (videos / traces / screenshots):
+ *  the live output, the latest-attempt keep copy and the per-execution history. */
+function artifactDirs(paths: ReturnType<typeof buildRunPaths>): string[] {
+  return [paths.playwrightArtifactsDir, paths.playwrightArtifactsKeepDir, paths.playwrightArtifactsHistoryDir]
 }
 
-/** Delete ONLY a run's Playwright artifact directories (`playwright-artifacts`
- *  + `playwright-artifacts-keep`), reclaiming the bulk of its disk while
+/** Byte size of the dirs `trimRunArtifacts` removes. */
+export function runArtifactBytes(logsDir: string, runId: string): number {
+  return artifactDirs(buildRunPaths(runDirFor(logsDir, runId))).reduce((sum, dir) => sum + dirSizeBytes(dir), 0)
+}
+
+/** Delete ONLY a run's Playwright artifact directories, reclaiming the bulk of its disk while
  *  leaving the manifest, summary, logs, and run-index entry intact — the run
  *  stays listed and inspectable, just without video/trace playback. Returns the
  *  number of bytes freed. Caller is responsible for verifying the run is
@@ -46,7 +49,7 @@ export function runArtifactBytes(logsDir: string, runId: string): number {
 export function trimRunArtifacts(logsDir: string, runId: string): number {
   const paths = buildRunPaths(runDirFor(logsDir, runId))
   let freed = 0
-  for (const dir of [paths.playwrightArtifactsDir, paths.playwrightArtifactsKeepDir]) {
+  for (const dir of artifactDirs(paths)) {
     if (!fs.existsSync(dir)) continue
     freed += dirSizeBytes(dir)
     fs.rmSync(dir, { recursive: true, force: true })

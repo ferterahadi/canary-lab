@@ -124,6 +124,23 @@ describe('run lifecycle reducer', () => {
       targetedRerun: previous.targetedRerun,
     })
   })
+
+  it('records execution and repair-cycle identity on the event that carries it only', () => {
+    const started = createRunLifecycleEvent('rerunning-tests', 'Rerunning Playwright tests', {
+      updatedAt: '2026-05-12T00:00:00.000Z',
+      execution: { index: 2, afterCycle: 1 },
+    })
+    const cycle = createRunLifecycleEvent('agent-healing', 'Heal cycle 1 started', {
+      updatedAt: '2026-05-12T00:00:01.000Z',
+      activeCycle: 1,
+      repairCycle: 3,
+    })
+    expect(started.execution).toEqual({ index: 2, afterCycle: 1 })
+    expect(cycle).toMatchObject({ activeCycle: 1, repairCycle: 3 })
+    // Unlike a targeted-rerun plan, an execution is a moment, not a mode: the
+    // next record must not inherit it or it would date later events wrongly.
+    expect(reduceRunLifecycleSnapshot(started, cycle).execution).toBeUndefined()
+  })
 })
 
 describe('HealSignalGate', () => {

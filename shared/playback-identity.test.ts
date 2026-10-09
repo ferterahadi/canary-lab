@@ -107,6 +107,18 @@ describe('run evidence baseline', () => {
     expect(groups(legacy, []).size).toBe(4)
   })
 
+  it('reads a stream that gained execution stamps mid-run exactly as before', () => {
+    // A restart-heal can append stamped events to a stream an older build
+    // started: the stamp is additive and must not move any event's identity.
+    const executionOf = [1, 1, 1, 1, 1, 2, 2, 3]
+    let begin = -1
+    const mixed = evidencePlaybackEvents.map((event) => {
+      if (event.type === 'test-begin') begin += 1
+      return begin >= 5 && (event.type === 'test-begin' || event.type === 'test-end') ? { ...event, execution: executionOf[begin] } : event
+    })
+    expect(buildPlaybackIdentity(mixed, evidenceKnownTests)).toEqual(buildPlaybackIdentity(evidencePlaybackEvents, evidenceKnownTests))
+  })
+
   it('carries no execution boundary in the stream: only lifecycle start/exit times bracket one', () => {
     const begins = evidencePlaybackEvents.filter((e) => e.type === 'test-begin')
     expect(begins.every((e) => Object.keys(e).sort().join() === 'test,time,type')).toBe(true)

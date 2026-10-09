@@ -12,6 +12,7 @@ import type {
   RunLifecycleEvent,
   RunLifecycleRestartPlan,
   RunLifecycleSeverity,
+  RunExecutionRef,
   RunLifecycleTargetedRerun,
 } from '../../../../../../../shared/run-state'
 import { type RunStateSink } from './run-state-sink'
@@ -194,6 +195,8 @@ export interface LifecycleRecordOptions {
   detail?: string
   severity?: RunLifecycleSeverity
   activeCycle?: number
+  repairCycle?: number
+  execution?: RunExecutionRef
   lastSignal?: RunLifecycleEvent['lastSignal']
   restartPlan?: RunLifecycleRestartPlan
   targetedRerun?: RunLifecycleTargetedRerun

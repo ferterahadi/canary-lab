@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
+import { appendJournalIteration, captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
@@ -75,6 +75,13 @@ describe('writeInitialManifest', () => {
 
     const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
     expect(written.singleAttempt).toEqual({ receipt: 'original.json' })
+  })
+
+  it('keeps the run\'s execution count across a restart so evidence numbers stay unique', () => {
+    const { ctx, sink } = ctxFor()
+    writeInitialManifest(ctx, 'starting', { playwrightExecutions: 3 } as RunManifest)
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.playwrightExecutions).toBe(3)
   })
 
   it('records a new suite attempt policy when there is no earlier manifest', () => {
@@ -290,4 +297,27 @@ it('records the occupied worktree path without claiming its source checkout', ()
   const active = [{ runId: written.runId, feature: written.feature, repoPaths: written.repoPaths! }]
   expect(detectRepoCollision([source], active)).toBeNull()
   expect(detectRepoCollision([worktree], active)?.conflictingRunId).toBe(written.runId)
+})
+
+describe('appendJournalIteration', () => {
+  it('stamps the entry with the run-wide cycle and the execution the repair started from', () => {
+    const { ctx, sink } = ctxFor({ healCycles: 2, currentExecution: { index: 3, afterCycle: 1 } })
+    appendJournalIteration(ctx, { signal: '.rerun', hypothesis: 'h' })
+    const body = fs.readFileSync(ctx.paths.diagnosisJournalPath, 'utf-8')
+    expect(body).toContain('- cycle: 2\n')
+    expect(body).toContain('- inputExecution: 3\n')
+    expect(sink.recordJournalChange).toHaveBeenCalledWith(ctx.runId)
+  })
+
+  it('takes the input execution from the manifest after a restart-heal, and omits it on a legacy run', () => {
+    const restarted = ctxFor({ healCycles: 3 })
+    fs.writeFileSync(restarted.ctx.paths.manifestPath, JSON.stringify({ playwrightExecutions: 4 }))
+    appendJournalIteration(restarted.ctx, { signal: '.rerun', hypothesis: 'h' })
+    expect(fs.readFileSync(restarted.ctx.paths.diagnosisJournalPath, 'utf-8')).toContain('- inputExecution: 4\n')
+
+    fs.writeFileSync(restarted.ctx.paths.manifestPath, '{}')
+    fs.rmSync(restarted.ctx.paths.diagnosisJournalPath)
+    appendJournalIteration(restarted.ctx, { signal: '.rerun', hypothesis: 'h' })
+    expect(fs.readFileSync(restarted.ctx.paths.diagnosisJournalPath, 'utf-8')).not.toContain('inputExecution')
+  })
 })

@@ -218,3 +218,57 @@ describe('runVerification', () => {
     expect(await runVerification(ctx)).toBe('passed')
   })
 })
+
+describe('runPlaywright — execution identity', () => {
+  const pwCtx = (env: Array<Record<string, string>>) => ctxFor({}, {
+    ptyFactory: (opts: { env: Record<string, string> }) => { env.push(opts.env); return exit0Pty() },
+    playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }),
+  })
+  const lifecycleOf = (sink: ReturnType<typeof ctxFor>['sink']) =>
+    vi.mocked(sink.recordLifecycleEvent).mock.calls.map(([, event]) => event)
+
+  it('numbers invocations, stamps the reporter env and brackets each one in the lifecycle', async () => {
+    const env: Array<Record<string, string>> = []
+    const { ctx, sink } = pwCtx(env)
+    await runPlaywright(ctx)
+    ctx.healCycles = 1
+    await runPlaywright(ctx, { kind: 'grep', grep: 'a', selected: 1, total: 2, mode: 'failed-only', reason: 'r' })
+
+    expect(env.map((e) => e.CANARY_LAB_EXECUTION)).toEqual(['1', '2'])
+    expect(lifecycleOf(sink).map((e) => [e.phase, e.execution])).toEqual([
+      ['running-tests', { index: 1, afterCycle: 0 }],
+      ['completed', { index: 1, afterCycle: 0 }],
+      ['rerunning-tests', { index: 2, afterCycle: 1 }],
+      ['completed', { index: 2, afterCycle: 1 }],
+    ])
+    expect(sink.patches).toContainEqual({ playwrightExecutions: 2 })
+  })
+
+  it('continues the run\'s numbering when a restarted process takes over the same run dir', async () => {
+    const env: Array<Record<string, string>> = []
+    const { ctx } = pwCtx(env)
+    fs.writeFileSync(ctx.paths.manifestPath, JSON.stringify({ runId: ctx.runId, playwrightExecutions: 3 }))
+    await runPlaywright(ctx)
+    expect(ctx.currentExecution).toEqual({ index: 4, afterCycle: 0 })
+  })
+
+  it('keeps every execution\'s artifacts while the keep dir follows the latest', () => {
+    const { ctx } = ctxFor()
+    const src = ctx.paths.playwrightArtifactsDir
+    const write = (body: string) => {
+      fs.mkdirSync(path.join(src, 'checkout-total'), { recursive: true })
+      fs.writeFileSync(path.join(src, 'checkout-total', 'test-failed-1.png'), body)
+    }
+    ctx.currentExecution = { index: 1, afterCycle: 0 }
+    write('before')
+    persistPlaywrightArtifacts(ctx)
+    ctx.currentExecution = { index: 2, afterCycle: 1 }
+    write('after')
+    persistPlaywrightArtifacts(ctx)
+
+    const history = ctx.paths.playwrightArtifactsHistoryDir
+    expect(fs.readFileSync(path.join(history, 'execution-1', 'checkout-total', 'test-failed-1.png'), 'utf-8')).toBe('before')
+    expect(fs.readFileSync(path.join(history, 'execution-2', 'checkout-total', 'test-failed-1.png'), 'utf-8')).toBe('after')
+    expect(fs.readFileSync(path.join(ctx.paths.playwrightArtifactsKeepDir, 'checkout-total', 'test-failed-1.png'), 'utf-8')).toBe('after')
+  })
+})

@@ -170,6 +170,9 @@ export interface RunManifest {
   endedAt?: string
   status: RunStatus
   healCycles: number
+  /** Playwright invocations so far — the last issued `RunExecutionRef.index`.
+   *  Absent on runs recorded before executions were numbered. */
+  playwrightExecutions?: number
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]

@@ -40,6 +40,7 @@ afterEach(() => {
   delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
   delete process.env.CANARY_LAB_TARGETED_RERUN
+  delete process.env.CANARY_LAB_EXECUTION
 })
 
 function mkStep(title: string, category: string, file?: string, line?: number): any {
@@ -53,6 +54,25 @@ function mkStep(title: string, category: string, file?: string, line?: number): 
 const { readSummary, readEvents } = summaryReaders(LOGS_DIR)
 
 describe('SummaryReporter', () => {
+  it('stamps the execution the orchestrator numbered on each test begin and end, never on steps', () => {
+    process.env.CANARY_LAB_EXECUTION = '2'
+    const reporter = new SummaryReporter()
+    const t = mkTest('Stamped', '/specs/stamped.spec.ts', 3)
+    reporter.onTestBegin(t)
+    reporter.onStepBegin(t, mkResult(), mkStep('click', 'pw:api'))
+    reporter.onTestEnd(t, mkResult())
+
+    expect(readEvents().map((e: { type: string; execution?: number }) => [e.type, e.execution])).toEqual([
+      ['test-begin', 2], ['step-begin', undefined], ['test-end', 2],
+    ])
+  })
+
+  it('records no execution stamp when spawned without one', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestBegin(mkTest('Unstamped', '/specs/unstamped.spec.ts', 3))
+    expect(readEvents()[0]).not.toHaveProperty('execution')
+  })
+
   it('writes the currently running test on begin and clears it on end', () => {
     const reporter = new SummaryReporter()
     reporter.onTestBegin(mkTest('Currently busy', '/specs/busy.spec.ts', 7))

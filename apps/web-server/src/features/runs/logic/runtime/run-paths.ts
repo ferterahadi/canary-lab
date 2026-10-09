@@ -29,6 +29,10 @@ export interface RunPaths {
   // this keep dir; new artifacts for the same pw-slug overwrite the previous
   // copy so the keep dir always reflects the latest attempt per test.
   playwrightArtifactsKeepDir: string
+  // Immutable per-execution copy of the same per-test dirs, under
+  // `execution-<n>/`. The keep dir answers "the latest attempt"; this answers
+  // "what did execution n leave", which a later execution must not overwrite.
+  playwrightArtifactsHistoryDir: string
   agentSessionIdPath: string
   // Small JSON pointer that records which agent ran and where its CLI-native
   // JSONL session log is on disk (e.g. ~/.claude/projects/.../<uuid>.jsonl
@@ -64,6 +68,10 @@ export interface RunPaths {
   rerunSignal: string
   healSignal: string
   serviceLog(safeName: string): string
+  // `serviceLog` is truncated before every rerun and restart so the live pane
+  // shows one execution. What it held is appended here first, named for the
+  // last execution that wrote into it (0 = boot output before any execution).
+  serviceLogSegment(safeName: string, execution: number): string
 }
 
 /** The run manifest's file name — exported for the observer, which watches
@@ -103,6 +111,7 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     playwrightArtifactsKeepDir: path.join(runDir, 'playwright-artifacts-keep'),
+    playwrightArtifactsHistoryDir: path.join(runDir, 'playwright-artifacts-history'),
     agentSessionIdPath: path.join(runDir, 'agent-session-id.txt'),
     agentSessionRefPath: path.join(runDir, 'agent-session.json'),
     runnerLogPath: path.join(runDir, 'runner.log'),
@@ -119,6 +128,8 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     rerunSignal: path.join(signalsDir, '.rerun'),
     healSignal: path.join(signalsDir, '.heal'),
     serviceLog: (safeName: string) => path.join(runDir, `svc-${safeName}.log`),
+    serviceLogSegment: (safeName: string, execution: number) =>
+      path.join(runDir, 'service-logs', safeName, `execution-${execution}.log`),
   }
 }
 

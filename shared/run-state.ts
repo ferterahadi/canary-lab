@@ -256,12 +256,30 @@ export interface RunPrAttempt {
   results: Array<{ repoName: string; ok: boolean; url?: string; reason?: string }>
 }
 
+/** One Playwright invocation within a run. `index` counts invocations from 1
+ *  across the whole run, restart-heal included. `afterCycle` is the run-wide
+ *  repair-cycle count when it started: 0 for the initial execution, n for an
+ *  execution that verifies repair cycle n. Several executions can share one
+ *  `afterCycle` (a no-agent pending-test rerun), so neither number can be
+ *  derived from the other. */
+export interface RunExecutionRef {
+  index: number
+  afterCycle: number
+}
+
 export interface RunLifecycleSnapshot {
   phase: RunLifecyclePhase
   headline: string
   detail?: string
   updatedAt: string
+  /** The heal loop's own cycle counter. It restarts at 1 on a restart-heal, so
+   *  it numbers what the narration says, not the run's repair cycles. */
   activeCycle?: number
+  /** Run-wide repair-cycle ordinal (`manifest.healCycles` once this cycle is
+   *  counted), on the record that starts a repair cycle. */
+  repairCycle?: number
+  /** On the records that start and end a Playwright invocation. */
+  execution?: RunExecutionRef
   lastSignal?: RunLifecycleSignal
   restartPlan?: RunLifecycleRestartPlan
   targetedRerun?: RunLifecycleTargetedRerun
@@ -406,6 +424,8 @@ export function createRunLifecycleEvent(
     updatedAt: opts.updatedAt ?? new Date().toISOString(),
     ...(opts.detail ? { detail: opts.detail } : {}),
     ...(opts.activeCycle !== undefined ? { activeCycle: opts.activeCycle } : {}),
+    ...(opts.repairCycle !== undefined ? { repairCycle: opts.repairCycle } : {}),
+    ...(opts.execution ? { execution: opts.execution } : {}),
     ...(opts.lastSignal ? { lastSignal: opts.lastSignal } : {}),
     ...(opts.restartPlan ? { restartPlan: opts.restartPlan } : {}),
     ...(opts.targetedRerun ? { targetedRerun: opts.targetedRerun } : {}),

@@ -11,6 +11,9 @@ export type PlaywrightPlaybackEvent =
       type: 'test-begin'
       time: string
       test: { id?: string; name: string; title: string; location: string }
+      /** `RunExecutionRef.index` of the Playwright invocation that ran this
+       *  attempt. Absent on events recorded before it was stamped. */
+      execution?: number
     }
   | {
       type: 'step-begin' | 'step-end'
@@ -26,6 +29,8 @@ export type PlaywrightPlaybackEvent =
       passed: boolean
       durationMs: number
       retry: number
+      /** Same stamp as on `test-begin`. */
+      execution?: number
       error?: { message: string; snippet?: string }
       attachments?: Array<{ name: string; contentType?: string; path?: string }>
     }
