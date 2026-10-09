@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { compareText } from './comparison-diff'
-import { comparisonPatchRows } from '@shared/comparison-patch'
+import { comparisonPatchRows } from '../comparison-patch'
 
 describe('compareText', () => {
   it.each([

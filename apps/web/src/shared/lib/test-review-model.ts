@@ -1,6 +1,6 @@
 import type { TestFileReview, VersionTest, TestChangeKind } from '@shared/test-review'
 import type { ContextRow } from '@shared/test-source-diff'
-import { compareText } from './comparison-diff'
+import { compareText } from '@shared/lib/comparison-diff'
 const contains = (test: { line: number; endLine: number }, line?: number): boolean => line != null && line >= test.line && line <= test.endLine
 
 /** Diff the selected declarations independently. File-level alignment can pair a

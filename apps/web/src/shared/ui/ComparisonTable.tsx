@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode, type Ref, type UIEventHandler } from 'react'
-import { compareText, type TextPart } from '@/shared/lib/comparison-diff'
+import { compareText, type TextPart } from '@shared/lib/comparison-diff'
 
 export type ComparisonRow =
   | { id: string; kind: 'section'; label: ReactNode }
