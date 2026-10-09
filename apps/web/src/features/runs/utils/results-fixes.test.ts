@@ -15,7 +15,7 @@ import {
   excerptGapCopy,
   focusedCaseKey,
   journalMarkdown,
-  markerOccurrence,
+  markerPosition,
   mediaGapCopy,
   resolveCycleChoice,
   runWideReason,
@@ -178,10 +178,10 @@ describe('service log excerpts', () => {
   it('picks a retry’s span by its position among same-name attempts in that execution', () => {
     const evidence = evidenceOf()
     const [first, retry, rerun] = caseOf(evidence, 'inventory').attempts
-    expect([first, retry, rerun].map((a) => markerOccurrence(a, evidence))).toEqual([0, 1, 0])
+    expect([first, retry, rerun].map((a) => markerPosition(a, evidence))).toEqual([{ occurrence: 0, of: 2 }, { occurrence: 1, of: 2 }, { occurrence: 0, of: 1 }])
     // Two tests share a title, so their markers share a name too.
-    expect(markerOccurrence(caseOf(evidence, 'home-loads').attempts[0], evidence)).toBe(0)
-    expect(markerOccurrence(caseOf(evidence, 'admin-loads').attempts[0], evidence)).toBe(1)
+    expect(markerPosition(caseOf(evidence, 'home-loads').attempts[0], evidence)).toEqual({ occurrence: 0, of: 2 })
+    expect(markerPosition(caseOf(evidence, 'admin-loads').attempts[0], evidence)).toEqual({ occurrence: 1, of: 2 })
   })
 
   it('orders an attempt without a start time by its end', () => {
@@ -191,8 +191,8 @@ describe('service log excerpts', () => {
     const unstamped = { ...first, startedAt: undefined, endedAt: undefined }
     const inventory = caseOf(evidence, 'inventory')
     const patched: RunEvidence = { ...evidence, cases: evidence.cases.map((c) => c === inventory ? { ...c, attempts: [unstamped, unstarted] } : c) }
-    expect(markerOccurrence(unstarted, patched)).toBe(1)
-    expect(markerOccurrence(unstamped, patched)).toBe(0)
+    expect(markerPosition(unstarted, patched).occurrence).toBe(1)
+    expect(markerPosition(unstamped, patched).occurrence).toBe(0)
   })
 
   const excerpt = (over: Partial<ServiceLogExcerpt>): ServiceLogExcerpt => ({ service: 'api', name: 'API', execution: 2, ...over })
@@ -207,7 +207,7 @@ describe('service log excerpts', () => {
 
   it('says whether output was lost or never marked', () => {
     expect(excerptGapCopy([excerpt({ missing: 'not-retained' }), excerpt({ service: 'web', missing: 'not-retained' })], 2))
-      .toBe("Execution 2's service output was not retained — this run emptied the live log before the next execution.")
+      .toBe("Execution 2's service output was not retained — this run was recorded before Canary kept each execution's service log.")
     expect(excerptGapCopy([excerpt({ missing: 'not-retained' }), excerpt({ service: 'web', missing: 'no-marker' })], 2))
       .toBe("No service printed this test's markers in execution 2.")
     expect(excerptGapCopy([], 3)).toBe("No service printed this test's markers in execution 3.")

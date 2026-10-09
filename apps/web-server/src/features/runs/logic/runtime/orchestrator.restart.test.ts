@@ -102,6 +102,7 @@ describe('RunOrchestrator.restart / rerun / status', () => {
 
     await orch.start()
     expect(spawned).toHaveLength(2) // two services started
+    spawned[1].emitData('svcB before\n')
 
     // Only repoA's file changed → only svcA restarts.
     await orch.restart([path.join(repoA, 'src/x.ts')])
@@ -111,6 +112,14 @@ describe('RunOrchestrator.restart / rerun / status', () => {
     expect(planEvents[0].toRestart).toEqual(['svca'])
     expect(planEvents[0].toKeep).toEqual(['svcb'])
     expect(skipEvents).toEqual(['svcb'])
+
+    // The kept service's log rotates too, so its next execution starts its own
+    // file instead of running on under the earlier execution's lines.
+    spawned[1].emitData('svcB after\n')
+    const segments = fs.readdirSync(path.join(runDir, 'service-logs', 'svcb'))
+    expect(segments).toHaveLength(1)
+    expect(fs.readFileSync(path.join(runDir, 'service-logs', 'svcb', segments[0]), 'utf-8')).toBe('svcB before\n')
+    expect(fs.readFileSync(path.join(runDir, 'svc-svcb.log'), 'utf-8')).toBe('svcB after\n')
 
     await orch.stop('passed')
   })

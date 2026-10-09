@@ -49,7 +49,7 @@ describe('a finished attempt’s service output', () => {
   it('reads the attempt’s own span — a retry by its position — and shows it with its provenance', async () => {
     const runsApi = await import('@/shared/api/runs')
     await render(retry, { execution: 1, excerpts: [captured()] })
-    expect(runsApi.getRunServiceExcerpts).toHaveBeenCalledWith(expect.stringMatching(/^excerpt-run-/), { execution: 1, name: 'test-case-reserves-stock', occurrence: 1 })
+    expect(runsApi.getRunServiceExcerpts).toHaveBeenCalledWith(expect.stringMatching(/^excerpt-run-/), { execution: 1, name: 'test-case-reserves-stock', occurrence: 1, of: 2 })
     expect(q('service-excerpt-caption')?.textContent).toBe('Before this repair · execution 1 · lines 40–43 of 900')
     const pre = q('service-excerpt')!
     expect(pre.className).toContain('max-h-40')

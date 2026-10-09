@@ -1,4 +1,4 @@
-import { getRunServiceExcerpts, getRunServiceLogLines } from '@/shared/api/runs'
+import { getRunServiceExcerpts, getRunServiceLogLines, type ServiceExcerptQuery } from '@/shared/api/runs'
 import type { ServiceLogExcerpts, ServiceLogLines } from '@shared/run-detail'
 import { useLiveResource, type LiveResource } from '@/shared/state/use-live-resource'
 
@@ -7,12 +7,12 @@ import { useLiveResource, type LiveResource } from '@/shared/state/use-live-reso
  *  execution starts, because that is when the live log moves into its
  *  segment and the old file stops holding it. */
 export function useServiceExcerpts(
-  runId: string, query: { execution: number; name: string; occurrence: number } | null, latest: number,
+  runId: string, query: ServiceExcerptQuery | null, latest: number,
 ): LiveResource<ServiceLogExcerpts> {
-  return useLiveResource(null, query ? JSON.stringify([runId, query.execution, query.name, query.occurrence, latest]) : null,
+  return useLiveResource(null, query ? JSON.stringify([runId, query, latest]) : null,
     async (key) => {
-      const [, execution, name, occurrence] = JSON.parse(key) as [string, number, string, number]
-      return getRunServiceExcerpts(runId, { execution, name, occurrence })
+      const [, keyed] = JSON.parse(key) as [string, ServiceExcerptQuery]
+      return getRunServiceExcerpts(runId, keyed)
     }, { scope: runId })
 }
 

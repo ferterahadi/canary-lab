@@ -340,6 +340,10 @@ describe('service log excerpts and windows', () => {
     expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=x&name=t' })).statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1' })).statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=t&occurrence=-1' })).statusCode).toBe(400)
+    // An attempt's place must lie among the attempts that share its name.
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=t&occurrence=1&of=1' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/svc/service-excerpts?execution=1&name=test-case-pay&occurrence=0&of=1' })).json())
+      .toMatchObject({ excerpts: [{ span: { startLine: 3, endLine: 3 } }] })
     expect((await app.inject({ method: 'GET', url: '/api/runs/nope/service-excerpts?execution=1&name=t' })).statusCode).toBe(404)
     await app.close()
   })

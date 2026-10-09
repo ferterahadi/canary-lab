@@ -261,10 +261,19 @@ export function getRunCyclePatch(runId: string, iteration: number, opts?: Client
 
 // One test attempt's output in each service, from the log that kept that
 // execution: `occurrence` picks among spans sharing the marker name.
-export function getRunServiceExcerpts(runId: string, query: { execution: number; name: string; occurrence: number }, opts?: ClientOptions): Promise<ServiceLogExcerpts> {
+export function getRunServiceExcerpts(runId: string, query: ServiceExcerptQuery, opts?: ClientOptions): Promise<ServiceLogExcerpts> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  const qs = new URLSearchParams({ execution: String(query.execution), name: query.name, occurrence: String(query.occurrence) })
+  const qs = new URLSearchParams({ execution: String(query.execution), name: query.name, occurrence: String(query.occurrence), of: String(query.of) })
   return request<ServiceLogExcerpts>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/service-excerpts?${qs}`, { method: 'GET' }, fetchImpl)
+}
+
+/** One attempt's place among the `of` attempts sharing its marker name in
+ *  one execution. */
+export interface ServiceExcerptQuery {
+  execution: number
+  name: string
+  occurrence: number
+  of: number
 }
 
 // A window of one service's retained log for one execution.

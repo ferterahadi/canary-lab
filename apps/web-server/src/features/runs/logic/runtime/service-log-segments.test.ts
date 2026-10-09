@@ -56,13 +56,16 @@ describe('preserveAndTruncateServiceLog', () => {
     expect(fs.existsSync(fresh.paths.serviceLogSegment('api', 3))).toBe(true)
   })
 
-  it('keeps nothing for an empty or never-created log and stays quiet about it', () => {
+  it('keeps an empty segment for a quiet log, nothing for a never-created one, and stays quiet about both', () => {
     const warn = vi.fn()
     const ctx = ctxFor({}, { runnerLog: { warn, info: () => {}, error: () => {} } as unknown as RunnerLog })
     preserveAndTruncateServiceLog(ctx, 'never-started')
     fs.writeFileSync(ctx.paths.serviceLog('quiet'), '')
     preserveAndTruncateServiceLog(ctx, 'quiet')
-    expect(fs.existsSync(ctx.paths.serviceLogSegment('quiet', 0))).toBe(false)
+    // An empty segment says "retained, printed nothing" — a missing one would
+    // read as a run that predates segments.
+    expect(fs.readFileSync(ctx.paths.serviceLogSegment('quiet', 0), 'utf-8')).toBe('')
+    expect(fs.existsSync(ctx.paths.serviceLogSegment('never-started', 0))).toBe(false)
     expect(warn).not.toHaveBeenCalled()
   })
 

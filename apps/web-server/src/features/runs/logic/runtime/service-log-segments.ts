@@ -1,8 +1,9 @@
 // A service's live log (`svc-<name>.log`) is emptied before every rerun and
-// restart so the Services pane shows one execution at a time. Emptying it
-// destroyed the only full copy of what the service printed while an earlier
-// execution failed — the evidence a repair was diagnosed from. Before each
-// truncation the contents move to an immutable per-execution segment instead.
+// restart — kept services' included — so the Services pane shows one execution
+// at a time. Emptying it destroyed the only full copy of what the service
+// printed while an earlier execution failed — the evidence a repair was
+// diagnosed from. Before each truncation the contents move to an immutable
+// per-execution segment instead.
 import fs from 'fs'
 import path from 'path'
 import { type RunContext } from './run-context'
@@ -17,12 +18,13 @@ export function preserveAndTruncateServiceLog(ctx: RunContext, safeName: string)
   const live = ctx.paths.serviceLog(safeName)
   const segment = ctx.paths.serviceLogSegment(safeName, latestExecutionIndex(ctx) ?? 0)
   try {
-    if (fs.statSync(live).size > 0) {
-      fs.mkdirSync(path.dirname(segment), { recursive: true })
-      // copyFile streams in the kernel; only the rare second half is buffered.
-      if (fs.existsSync(segment)) fs.appendFileSync(segment, fs.readFileSync(live))
-      else fs.copyFileSync(live, segment)
-    }
+    // An empty log still gets its segment: a missing one then always means
+    // the run predates segments, never that the service printed nothing.
+    fs.statSync(live)
+    fs.mkdirSync(path.dirname(segment), { recursive: true })
+    // copyFile streams in the kernel; only the rare second half is buffered.
+    if (fs.existsSync(segment)) fs.appendFileSync(segment, fs.readFileSync(live))
+    else fs.copyFileSync(live, segment)
   } catch (err) {
     // A log the service never created has nothing to keep. Anything else is
     // reported, and the truncation still happens: a pane that kept the old

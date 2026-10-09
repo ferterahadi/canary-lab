@@ -213,16 +213,18 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
 
   // One test attempt's service output: the span between its markers in the
   // log that kept that execution. Bounded, so a large log never ships whole.
-  app.get<{ Params: { runId: string }; Querystring: { execution?: string; name?: string; occurrence?: string } }>('/api/runs/:runId/service-excerpts', async (req, reply) => {
-    const { execution, name, occurrence = '0' } = req.query
-    if (!execution || !/^\d+$/.test(execution) || !/^\d+$/.test(occurrence) || !name) {
+  // `of` counts the attempts sharing `name` in that execution; absent, the
+  // attempt is the only one.
+  app.get<{ Params: { runId: string }; Querystring: { execution?: string; name?: string; occurrence?: string; of?: string } }>('/api/runs/:runId/service-excerpts', async (req, reply) => {
+    const { execution, name, occurrence = '0', of = '1' } = req.query
+    if (!execution || ![execution, occurrence, of].every((v) => /^\d+$/.test(v)) || !name || Number(occurrence) >= Number(of)) {
       reply.code(400)
-      return { error: 'execution, name and a numeric occurrence are required' }
+      return { error: 'execution, name and an occurrence below of are required' }
     }
     const detail = deps.store.get(req.params.runId)
     if (!detail) return notFound(reply, 'run')
     const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-    return { execution: Number(execution), excerpts: serviceLogExcerpts(runDir, detail.manifest, Number(execution), name, Number(occurrence)) }
+    return { execution: Number(execution), excerpts: serviceLogExcerpts(runDir, detail.manifest, Number(execution), name, { occurrence: Number(occurrence), of: Number(of) }) }
   })
 
   // A window of one service's retained log, for the anchored full-log view.

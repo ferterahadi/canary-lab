@@ -331,11 +331,11 @@ describe('runs api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/fixes/mighty%20cns/patch', { method: 'GET' })
   })
 
-  it('getRunServiceExcerpts GETs one attempt\'s service spans by execution, name and occurrence', async () => {
+  it('getRunServiceExcerpts GETs one attempt\'s service spans by execution, name and its place among same-name attempts', async () => {
     const body = { execution: 2, excerpts: [] }
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
-    await expect(getRunServiceExcerpts('run 9', { execution: 2, name: 'test-case-a b', occurrence: 1 }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/service-excerpts?execution=2&name=test-case-a+b&occurrence=1', { method: 'GET' })
+    await expect(getRunServiceExcerpts('run 9', { execution: 2, name: 'test-case-a b', occurrence: 1, of: 2 }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/service-excerpts?execution=2&name=test-case-a+b&occurrence=1&of=2', { method: 'GET' })
   })
 
   it('getRunServiceLogLines GETs a window of one service\'s retained log', async () => {

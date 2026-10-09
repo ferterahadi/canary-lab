@@ -69,10 +69,15 @@ function readLines(file: string): string[] {
   return plainLogLines(fs.readFileSync(file, 'utf-8'))
 }
 
-/** Each service's span for the `occurrence`-th (0-based) attempt named `name`
- *  in `execution`. */
+/** Each service's span for the `occurrence`-th (0-based) of the `of` attempts
+ *  named `name` in `execution`. A file ends with the execution it is named for
+ *  — a segment with the last execution that wrote into it, the live log with
+ *  the latest — so those attempts' spans are its last `of`. Counting from the
+ *  end also reads a run recorded before every restart rotated every log, where
+ *  a kept service's file holds earlier executions' spans first. */
 export function serviceLogExcerpts(
-  runDir: string, manifest: Pick<RunManifest, 'services' | 'playwrightExecutions'>, execution: number, name: string, occurrence: number,
+  runDir: string, manifest: Pick<RunManifest, 'services' | 'playwrightExecutions'>, execution: number, name: string,
+  { occurrence, of }: { occurrence: number; of: number },
 ): ServiceLogExcerpt[] {
   const latest = latestExecution(runDir, manifest)
   return manifest.services.map((service): ServiceLogExcerpt => {
@@ -81,14 +86,14 @@ export function serviceLogExcerpts(
     if (!found) return { ...base, missing: 'not-retained' }
     const lines = readLines(found.file)
     const spans = markerSpans(lines, name)
-    const span = spans[occurrence]
+    const span = spans[spans.length - of + occurrence]
     const known = { ...base, source: found.source, totalLines: lines.length }
     if (!span) return { ...known, missing: 'no-marker' }
     const first = Math.max(span.startLine, span.endLine - EXCERPT_MAX_LINES + 1)
     return {
       ...known,
       span,
-      matchedBy: spans.length > 1 ? 'order' : 'marker',
+      matchedBy: spans.length === 1 && of === 1 ? 'marker' : 'order',
       window: { firstLine: first, lines: lines.slice(first - 1, span.endLine), truncated: first > span.startLine },
     }
   })

@@ -34,7 +34,7 @@ afterEach(() => vi.clearAllMocks())
 it('reads one attempt’s spans, and again when a new execution moves the live log', async () => {
   const runsApi = await import('@/shared/api/runs')
   vi.mocked(runsApi.getRunServiceExcerpts).mockResolvedValue({ execution: 2, excerpts: [] })
-  const query = { execution: 2, name: 'test-case-x', occurrence: 1 }
+  const query = { execution: 2, name: 'test-case-x', occurrence: 1, of: 2 }
   const root = await mount(<Excerpts runId="svc-run-1" query={query} latest={2} />)
   expect(runsApi.getRunServiceExcerpts).toHaveBeenCalledWith('svc-run-1', query)
   expect(excerpts?.value).toEqual({ execution: 2, excerpts: [] })

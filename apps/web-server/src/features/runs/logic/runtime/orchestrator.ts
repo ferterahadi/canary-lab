@@ -232,8 +232,11 @@ export class RunOrchestrator extends EventEmitter {
         this.ctx.servicePtys.delete(svc.name)
       }
       this.ctx.logFiles.delete(this.ctx.paths.serviceLog(svc.safeName))
-      preserveAndTruncateServiceLog(this.ctx, svc.safeName)
     }
+    // Every service's log rotates, kept ones included: a kept service's live
+    // log would otherwise run on into the next execution, and an excerpt read
+    // from it would hold two executions' output under one execution's name.
+    for (const svc of this.ctx.services) preserveAndTruncateServiceLog(this.ctx, svc.safeName)
     const started = new Set(await ensureServicesRunning(this.ctx))
     return {
       restarted: plan.toRestart.filter((safeName) => started.has(safeName)),

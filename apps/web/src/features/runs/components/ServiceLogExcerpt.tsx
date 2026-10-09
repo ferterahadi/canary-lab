@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { EvidenceAttempt, RunEvidence } from '@shared/run-evidence'
 import type { ServiceLogExcerpt, ServiceLogSpan, ServiceLogWindow } from '@shared/run-detail'
 import { useServiceExcerpts } from '../state/use-service-logs'
-import { excerptCaption, excerptGapCopy, markerOccurrence, type ServiceLogAnchor } from '../utils/results-fixes'
+import { excerptCaption, excerptGapCopy, markerPosition, type ServiceLogAnchor } from '../utils/results-fixes'
 import { ResultSection } from './ResultSection'
 
 /**
@@ -26,7 +26,7 @@ export function ServiceLogsSection({ runId, evidence, attempt, label, cycle, cas
   const execution = attempt.executionIndex
   const finished = attempt.endedAt !== undefined
   const latest = evidence.executions.at(-1)?.index ?? 0
-  const query = execution !== undefined && finished ? { execution, name: attempt.name, occurrence: markerOccurrence(attempt, evidence) } : null
+  const query = execution !== undefined && finished ? { execution, name: attempt.name, ...markerPosition(attempt, evidence) } : null
   const { value, error } = useServiceExcerpts(runId, query, latest)
   const captured = value?.excerpts.filter(isCaptured) ?? []
   const [picked, setPicked] = useState<string | null>(null)

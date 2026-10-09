@@ -156,15 +156,16 @@ export function focusedCaseKey(detail: Pick<RunDetail, 'playbackEvents' | 'playb
 }
 
 /** Which same-name span in its execution's service log belongs to this
- *  attempt. The log-marker fixture marks every attempt — retries, and tests
- *  that share a title — under one summary name, in the order they ran. */
-export function markerOccurrence(attempt: EvidenceAttempt, evidence: RunEvidence): number {
+ *  attempt, and how many attempts share that name there. The log-marker
+ *  fixture marks every attempt — retries, and tests that share a title — under
+ *  one summary name, in the order they ran. */
+export function markerPosition(attempt: EvidenceAttempt, evidence: RunEvidence): { occurrence: number; of: number } {
   const when = (a: EvidenceAttempt) => a.startedAt ?? a.endedAt ?? ''
-  return evidence.cases
+  const sharing = evidence.cases
     .flatMap((c) => c.attempts)
     .filter((a) => a.name === attempt.name && a.executionIndex === attempt.executionIndex)
     .sort((a, b) => when(a).localeCompare(when(b)))
-    .findIndex((a) => a.attemptKey === attempt.attemptKey)
+  return { occurrence: sharing.findIndex((a) => a.attemptKey === attempt.attemptKey), of: sharing.length }
 }
 
 /** Where a Full service log link lands: one service's retained log for one
@@ -194,7 +195,7 @@ export function excerptCaption(excerpt: ServiceLogExcerpt, label: string): strin
 /** Why a service shows no output for an attempt. */
 export function excerptGapCopy(excerpts: readonly ServiceLogExcerpt[], execution: number): string {
   if (excerpts.length > 0 && excerpts.every((e) => e.missing === 'not-retained')) {
-    return `Execution ${execution}'s service output was not retained — this run emptied the live log before the next execution.`
+    return `Execution ${execution}'s service output was not retained — this run was recorded before Canary kept each execution's service log.`
   }
   return `No service printed this test's markers in execution ${execution}.`
 }
