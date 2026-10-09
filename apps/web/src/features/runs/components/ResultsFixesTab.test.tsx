@@ -5,7 +5,7 @@ import type { JournalSection, PlaywrightArtifact, PlaywrightPlaybackEvent, RunDe
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { VerificationDiagnostics } from '@shared/verification'
 import { buildRunEvidence } from '@shared/run-evidence'
-import { evidenceCases, evidenceKnownTests, stampedEvidenceLifecycleEvents, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
+import { evidenceCases, evidenceKnownTests, evidenceLifecycleEvents, evidencePlaybackEvents, stampedEvidenceLifecycleEvents, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
 import { ApiError } from '@/shared/api/internal'
 import type { ResultsSelection } from '../utils/results-fixes'
 import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
@@ -275,6 +275,75 @@ describe('a repaired test’s story', () => {
     await mountStory({ attemptArtifacts: { [input.attemptKey]: [artifact('screenshot', 'discount-exec-2.png')] } })
     act(() => { button('Screenshot')?.click() })
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/artifacts/discount-exec-2.png')
+  })
+})
+
+describe('artifacts by execution', () => {
+  const legacyDetail = (over: DetailOver = {}) => detailOf({
+    playbackEvents: evidencePlaybackEvents, lifecycleEvents: evidenceLifecycleEvents,
+    summary: { complete: true, total: 4, passed: 4, failed: [], knownTests: evidenceKnownTests },
+    playwrightArtifacts: [
+      { testName: evidenceCases.discount.name, artifacts: [artifact('screenshot', 'discount-latest.png')] },
+      { testName: evidenceCases.homeLoads.name, artifacts: [artifact('screenshot', 'loads-latest.png')] },
+    ],
+    manifest: { healCycles: 2, playwrightArtifacts: { screenshot: 'on', trace: 'on', video: 'off' } },
+    ...over,
+  })
+  const legacyKey = (location: string) => buildRunEvidence({ events: evidencePlaybackEvents, known: evidenceKnownTests, lifecycle: evidenceLifecycleEvents })
+    .cases.find((c) => c.location === location)!.caseKey
+
+  it('closes opened media when the cycle changes, so no screenshot sits under another cycle’s label', async () => {
+    const evidence = buildRunEvidence({ events: stampedEvidencePlaybackEvents(), known: evidenceKnownTests, lifecycle: stampedEvidenceLifecycleEvents() })
+    const discount = evidence.cases.find((c) => c.caseKey === discountKey())!
+    await mountStory({ attemptArtifacts: {
+      [discount.cycles[1].input.attemptKey]: [artifact('screenshot', 'exec-2.png')],
+      [discount.cycles[0].input.attemptKey]: [artifact('screenshot', 'exec-1.png')],
+    } })
+    act(() => { button('Screenshot')?.click() })
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/artifacts/exec-2.png')
+    await act(async () => {
+      cycleSelect()!.value = '1'
+      cycleSelect()!.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(container.querySelector('img')).toBeNull()
+    act(() => { button('Screenshot')?.click() })
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/artifacts/exec-1.png')
+  })
+
+  it('closes opened media when another test is opened', async () => {
+    const evidence = buildRunEvidence({ events: stampedEvidencePlaybackEvents(), known: evidenceKnownTests, lifecycle: stampedEvidenceLifecycleEvents() })
+    const input = evidence.cases.find((c) => c.caseKey === discountKey())!.cycles[1].input
+    await mountStory({ attemptArtifacts: { [input.attemptKey]: [artifact('screenshot', 'exec-2.png')] } })
+    act(() => { button('Screenshot')?.click() })
+    expect(container.querySelector('img')).toBeTruthy()
+    const inventory = caseRows().find((r) => r.textContent?.includes('inventory.spec.ts'))!
+    act(() => inventory.querySelector<HTMLButtonElement>(':scope > button')!.click())
+    act(() => headerOf(discountKey())!.click())
+    expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('says media is still being saved for an execution that has not finished', async () => {
+    await mountStory({ lifecycle: stampedEvidenceLifecycleEvents().slice(0, 7) })
+    const groups = container.querySelectorAll('[data-testid="artifact-group"]')
+    expect(groups[1]?.querySelector('h4')?.textContent).toBe('After this repair')
+    expect(groups[1]?.textContent).toContain('Media is saved when this execution finishes.')
+  })
+
+  it('shows a legacy run’s one kept copy on the latest attempt only, and says why earlier ones have none', async () => {
+    await mount(legacyDetail(), { selection: { caseKey: legacyKey(evidenceCases.discount.location) } })
+    const groups = () => [...container.querySelectorAll('[data-testid="artifact-group"]')]
+    expect(groups()[0]?.textContent).toContain('Not retained: this run kept one copy per test, and a later attempt replaced it.')
+    expect(groups()[1]?.textContent).toContain('The run\'s one retained copy for this test — it belongs to this latest attempt.')
+    act(() => { [...groups()[1].querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Screenshot'))!.click() })
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/artifacts/discount-latest.png')
+  })
+
+  it('refuses a kept copy two same-name tests could own', async () => {
+    await mount(legacyDetail(), { selection: { caseKey: legacyKey(evidenceCases.homeLoads.location) } })
+    const group = container.querySelector('[data-testid="artifact-group"]')
+    expect(group?.querySelector('h4')?.textContent).toBe('Test result')
+    expect(group?.textContent).toContain('Not shown: another test with the same name could own the retained copy.')
+    expect(group?.querySelector('[data-testid="evidence-badge-screenshot"]')?.textContent).toBe('None')
   })
 })
 
