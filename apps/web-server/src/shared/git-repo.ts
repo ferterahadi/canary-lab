@@ -25,8 +25,18 @@ export interface GitResult {
   stderr: string
 }
 
-export function runGit(cwd: string, args: string[]): Promise<GitResult> {
-  return commandResult('git', args, { cwd }, 1)
+export function runGit(cwd: string, args: string[], { maxBuffer }: { maxBuffer?: number } = {}): Promise<GitResult> {
+  return commandResult('git', args, { cwd, ...(maxBuffer ? { maxBuffer } : {}) }, 1)
+}
+
+/** One blob's content, untrimmed, or null when git cannot name exactly one blob
+ *  by `sha` — missing, pruned, ambiguous, or another object type. Read-only:
+ *  `cat-file` writes nothing. The hex check keeps a sha from a patch's `index`
+ *  line from ever reaching git as an option. */
+export async function readGitBlob(repoPath: string, sha: string): Promise<string | null> {
+  if (!/^[0-9a-f]{4,64}$/.test(sha)) return null
+  const result = await runGit(repoPath, ['cat-file', 'blob', sha], { maxBuffer: 16 * 1024 * 1024 })
+  return result.code === 0 ? result.stdout : null
 }
 
 /** Sync git read: trimmed stdout, or null when git fails or is missing. */

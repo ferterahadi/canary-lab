@@ -12,11 +12,13 @@ import {
   findRepo,
   getGitRoot,
   getGitStatus,
+  readGitBlob,
   parsePorcelainStatus,
   parseRefList,
   snapshotWorkingTree,
   validateConfiguredRepoBranches,
 } from './git-repo'
+import { gitBlobSha1 } from './git-blob'
 import { resolveRepoPath } from './repo-identity'
 import { git, initGitRepo } from '../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
@@ -496,6 +498,59 @@ describe('git-repo helpers', () => {
 
     it('returns null for a missing path', async () => {
       expect(await getGitRoot(path.join(os.tmpdir(), 'cl-missing-root-xyz'))).toBeNull()
+    })
+  })
+
+  describe('readGitBlob', () => {
+    function writeBlob(repo: string, content: string): string {
+      const file = path.join(repo, `blob-${gitBlobSha1(content)}`)
+      fs.writeFileSync(file, content)
+      return git(repo, 'hash-object', '-w', '--no-filters', file)
+    }
+
+    it('returns the content untrimmed, trailing newline included, by a full or abbreviated id', async () => {
+      const repo = tmpRepo()
+      const sha = writeBlob(repo, '  indented\nlast\n\n')
+      expect(await readGitBlob(repo, sha)).toBe('  indented\nlast\n\n')
+      expect(await readGitBlob(repo, sha.slice(0, 7))).toBe('  indented\nlast\n\n')
+    })
+
+    it('reads a blob larger than the default one-megabyte output buffer', async () => {
+      const repo = tmpRepo()
+      const content = 'x'.repeat(99) + '\n'
+      const large = content.repeat(20_000)
+      expect(await readGitBlob(repo, writeBlob(repo, large))).toBe(large)
+    })
+
+    it('returns null for an id the repository does not hold', async () => {
+      const repo = tmpRepo()
+      expect(await readGitBlob(repo, gitBlobSha1('never written\n'))).toBeNull()
+    })
+
+    it('returns null for an abbreviation that names two objects', async () => {
+      const repo = tmpRepo()
+      // Two contents whose ids share their first four characters, found in
+      // process so only those two reach the repository.
+      const seen = new Map<string, string>()
+      let pair: [string, string] | undefined
+      for (let i = 0; !pair; i++) {
+        const content = `content ${i}\n`
+        const prefix = gitBlobSha1(content).slice(0, 4)
+        const earlier = seen.get(prefix)
+        if (earlier) pair = [earlier, content]
+        else seen.set(prefix, content)
+      }
+      const sha = writeBlob(repo, pair[0])
+      writeBlob(repo, pair[1])
+      expect(await readGitBlob(repo, sha.slice(0, 4))).toBeNull()
+      expect(await readGitBlob(repo, sha)).toBe(pair[0])
+    })
+
+    it('returns null for an object that is not a blob, and for text that is not an id', async () => {
+      const repo = tmpRepo()
+      expect(await readGitBlob(repo, git(repo, 'rev-parse', 'HEAD'))).toBeNull()
+      expect(await readGitBlob(repo, '--batch')).toBeNull()
+      expect(await readGitBlob(repo, 'HEAD')).toBeNull()
     })
   })
 })
