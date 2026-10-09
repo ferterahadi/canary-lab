@@ -1,6 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
-import { journalDiffBlock, journalForCycle, mediaForAttempt, type CaseCycle, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
+import { journalForCycle, mediaForAttempt, type CaseCycle, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
 import type { PlaywrightArtifactPolicy } from '@shared/configs/playwright-modes'
 import type { RunDetail } from '@shared/run-detail'
 import { shortSourceLocation } from '@shared/lib/source-location'
@@ -225,9 +224,6 @@ function CodeChanges({ runId, cycle, section, runWide, loading, onOpenRunWide }:
   onOpenRunWide?: () => void
 }) {
   const review = useCycleReview(runId, section?.iteration ?? null)
-  const inline = section ? journalDiffBlock(section.body) : undefined
-  const inlineDiff = inline?.diff
-  const inlineFiles = useMemo(() => inlineDiff === undefined ? undefined : cycleReviewFromPatch(inlineDiff), [inlineDiff])
   const runWideAction = onOpenRunWide && (
     <button type="button" className="cl-button px-2 py-0.5 text-[11px]" onClick={onOpenRunWide} data-testid="open-run-wide-changes">Run-wide changes</button>
   )
@@ -238,16 +234,12 @@ function CodeChanges({ runId, cycle, section, runWide, loading, onOpenRunWide }:
   } else if (!section) {
     body = <Muted>No patch is attributed to repair cycle {cycle}. The run&apos;s captured changes stay under Run-wide changes.</Muted>
   } else if (review.value && review.value !== 'missing') {
-    body = review.value.files.length
-      ? <><CycleFileReview files={review.value.files} cycle={cycle} /><Caption>This cycle&apos;s edits · {review.value.patchPath}{scope}</Caption></>
+    const { source, patchPath, truncated, files } = review.value
+    const origin = source === 'patch' ? <>This cycle&apos;s edits · {patchPath}</>
+      : <>From the journal entry&apos;s inline diff{truncated ? ' · cut to the journal’s size cap; the full patch was not kept' : ''}</>
+    body = files.length
+      ? <CycleFileReview files={files} cycle={cycle} caption={<>{origin}{scope}</>} />
       : <Muted>This cycle changed no tracked files.</Muted>
-  } else if (inlineFiles?.length) {
-    body = (
-      <>
-        <CycleFileReview files={inlineFiles} cycle={cycle} />
-        <Caption>From the journal entry&apos;s inline diff{inline!.truncated ? ' · cut to the journal’s size cap; the full patch was not retained' : ''}{scope}</Caption>
-      </>
-    )
   } else {
     body = <Muted>{review.error ? `Failed to load this cycle's patch: ${review.error}` : 'This cycle recorded no diff.'}</Muted>
   }

@@ -7,7 +7,8 @@ import type { VerificationDiagnostics } from '@shared/verification'
 import { buildRunEvidence } from '@shared/run-evidence'
 import { evidenceCases, evidenceKnownTests, evidenceLifecycleEvents, evidencePlaybackEvents, stampedEvidenceLifecycleEvents, stampedEvidencePlaybackEvents } from '@shared/__fixtures__/run-evidence'
 import { ApiError } from '@/shared/api/internal'
-import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
+import { cycleReviewFromPatch, type CycleReviewFile } from '@shared/test-view/cycle-review'
+import { formatLocalDateTime } from '@/shared/lib/format'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import type { InvalidationTopic } from '@/shared/state/invalidation-bus'
 import type { ResultsSelection } from '../utils/results-fixes'
@@ -483,18 +484,77 @@ describe('repair notes and code changes', () => {
     expect(section('section-changes')?.textContent).toContain('This cycle changed no tracked files.')
   })
 
-  it('falls back to the entry’s inline diff through the same view when no patch file was retained, and says it is run-wide', async () => {
+  it('names the journal\'s inline copy as the source when no patch was kept, and says it is run-wide', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 1, source: 'journal', patchPath: null, truncated: true, healMode: 'service', files: cycleReviewFromPatch(patch('1', '0.95')) })
     await mountStory({ journal: journalSections(), cycle: 1 })
     const changes = section('section-changes')!
-    expect(changes.querySelector('table[aria-label="Code changes before and after"]')).not.toBeNull()
     expect(changes.querySelector('[data-side="after"][data-source-line="12"]')?.textContent).toContain('Math.round(p * 0.95)')
-    expect(changes.textContent).toContain("From the journal entry's inline diff · run-wide: the edit is not attributed to one test")
+    expect(changes.textContent).toContain("From the journal entry's inline diff · cut to the journal’s size cap; the full patch was not kept · run-wide: the edit is not attributed to one test · Patch only")
   })
 
-  it('says a cycle recorded no diff when neither a patch file nor an inline block names a file', async () => {
-    const [latest] = journalSections()
-    await mountStory({ journal: [{ ...latest, body: `${latest.body}\n### Diff\n\n\`\`\`diff\nnote: nothing captured\n\`\`\`\n` }] })
+  it('says a cycle recorded no diff when the server finds none', async () => {
+    await mountStory({ journal: journalSections() })
     expect(section('section-changes')?.textContent).toContain('This cycle recorded no diff.')
+  })
+
+  it('shows a recovered file whole, steps through its edits and offers English for a spec', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [recoveredFile()] })
+    await mountStory({ journal: journalSections() })
+    const changes = section('section-changes')!
+    const lines = () => [...changes.querySelectorAll('[data-side="after"]')].map((line) => line.getAttribute('data-source-line'))
+    expect(lines()).toEqual(['1', '2', '3', '4', '5'])
+    expect(changes.querySelector('.cl-comparison-section')).toBeNull()
+    expect(changes.querySelector('.cl-lang-switch')?.getAttribute('aria-disabled')).toBeNull()
+    const selected = () => [...changes.querySelectorAll('[data-selected="true"] [data-side="after"]')].map((line) => line.getAttribute('data-source-line'))
+    expect(changes.querySelector('[aria-label="Edit blocks in this file"]')?.textContent).toContain('Edit 1 / 2')
+    expect(selected()).toEqual(['2'])
+    act(() => { changes.querySelector<HTMLButtonElement>('[aria-label="Next change"]')!.click() })
+    expect(changes.querySelector('[aria-label="Edit blocks in this file"]')?.textContent).toContain('Edit 2 / 2')
+    expect(selected()).toEqual(['5'])
+    expect(changes.textContent).toContain("This cycle's edits · /p · Full file rebuilt from the recorded cycles and checked against git's ids")
+  })
+
+  it('shows app code as code, and says when the run did not execute a suite edit', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const app = recoveredFile({ path: 'src/server.ts', role: 'app', blobs: { before: 'aaaaaaa', after: 'bbbbbbb' }, recovery: { kind: 'exact', from: 'after-blob', repo: '/repos/app' } })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [app, recoveredFile({ executed: { kind: 'inert' } })] })
+    await mountStory({ journal: journalSections() })
+    const changes = section('section-changes')!
+    expect(changes.querySelector('.cl-lang-switch')?.getAttribute('title')).toBe('App code is shown as code; English is for the suite\'s own files')
+    expect(changes.textContent).toContain('Full file from git blob bbbbbbb in app')
+    expect(changes.querySelector('[data-testid="cycle-file-inert"]')).toBeNull()
+    await act(async () => {
+      const picker = changes.querySelector<HTMLSelectElement>('select')!
+      picker.value = 'e2e/cart.spec.ts'
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(changes.querySelector('[data-testid="cycle-file-inert"]')?.textContent).toContain('Not executed by this run')
+  })
+
+  it('names who adopted a suite edit into the run, and when', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const at = '2026-10-08T10:06:00.000Z'
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [recoveredFile({ executed: { kind: 'adopted', by: 'human', at } })] })
+    await mountStory({ journal: journalSections() })
+    expect(section('section-changes')?.querySelector('[data-testid="cycle-file-adopted"]')?.textContent).toBe(`Adopted into the run's suite by a person at ${formatLocalDateTime(at)}, then rerun`)
+  })
+
+  it('says why a file is shown from its patch alone, and labels a new file\'s empty side', async () => {
+    const runsApi = await import('@/shared/api/runs')
+    const [patchOnly] = cycleReviewFromPatch(patch('0.95', '0.9')).map((file) => ({ ...file, recovery: { kind: 'patch-only' as const, reason: 'repo-missing' as const } }))
+    const added = recoveredFile({ path: 'e2e/new.spec.ts', change: 'added', sources: { before: { source: '', tests: [] }, after: { source: 'x\n', tests: [] }, patch: 'diff --git a/old b/new\n--- a/old\n+++ b/new\n@@ -0,0 +1 @@\n+x' } })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [patchOnly, added] })
+    await mountStory({ journal: journalSections() })
+    const changes = section('section-changes')!
+    expect(changes.querySelector('.cl-lang-switch')?.getAttribute('title')).toBe('The repository that held this file is no longer on disk; showing the patch alone')
+    await act(async () => {
+      const picker = changes.querySelector<HTMLSelectElement>('select')!
+      picker.value = 'e2e/new.spec.ts'
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(changes.querySelector('.cl-comparison-empty')?.textContent).toBe('New file in this cycle — nothing on the Before side')
   })
 
   it('names a cycle with no journal entry instead of inventing notes or a patch', async () => {
@@ -614,6 +674,14 @@ function artifact(kind: PlaywrightArtifact['kind'], name: string): PlaywrightArt
 
 function patch(from: string, to: string): string {
   return ['--- a/src/pricing.ts', '+++ b/src/pricing.ts', '@@ -12 +12 @@', `-export const total = (p: number) => Math.round(p * ${from})`, `+export const total = (p: number) => Math.round(p * ${to})`].join('\n')
+}
+
+/** A spec whose two versions the server recovered: two separate edits. */
+function recoveredFile(over: Partial<CycleReviewFile> = {}): CycleReviewFile {
+  const [parsed] = cycleReviewFromPatch('diff --git a/e2e/cart.spec.ts b/e2e/cart.spec.ts\n--- a/e2e/cart.spec.ts\n+++ b/e2e/cart.spec.ts\n@@ -2 +2 @@\n-b\n+B')
+  const full = ['diff --git a/old b/new', '--- a/old', '+++ b/new', '@@ -1,5 +1,5 @@', ' a', '-b', '+B', ' c', ' d', '-e', '+E'].join('\n')
+  return { ...parsed, role: 'spec', recovery: { kind: 'reconstructed', verified: 'blob' },
+    sources: { before: { source: 'a\nb\nc\nd\ne\n', tests: [] }, after: { source: 'a\nB\nc\nd\nE\n', tests: [] }, patch: full }, ...over }
 }
 
 function supportPatch(): string {

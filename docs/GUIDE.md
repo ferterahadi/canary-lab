@@ -194,6 +194,13 @@ While healing, Canary Lab shows edits from successful worktree baselines in the
 run-wide view of **Results & Fixes**. They remain provisional until teardown writes the final patch into
 `logs/runs/<runId>/fixes/`. The Commit & open PR action becomes available only
 after the run stops. Non-portified worktrees are normally removed.
+
+Each repair cycle's own edits appear under **Code changes** in that cycle's
+Results & Fixes view. When Canary Lab can rebuild a file's exact before and
+after versions, it shows the whole file, with English for the suite's own
+files; otherwise it shows the patch alone and says why. A suite edit that the
+run never executed, because Playwright ran the run's suite copy, is labelled
+as such.
 Portified worktrees are kept after reversing the overlay because they may still
 hold repair edits; manage them under **Cleanup → Worktrees**.
 

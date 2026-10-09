@@ -755,9 +755,11 @@ Compare test versions, and `executed` says whether the run ran a suite edit
 (live suite, adopted into the suite copy, or inert). The result is memoised on its
 inputs; the reader rides the `journal` topic, so a rewritten entry re-reads it.
 The view passes `marks: 'word'` (changed words marked inside
-Shiki tokens by `shared/test-view/token-marks.ts`) and `codeOnly`, because a patch
-holds no complete statement to translate; Compare test versions keeps whole-line
-marks.
+Shiki tokens by `shared/test-view/token-marks.ts`) and the file's `lang`; Compare
+test versions keeps whole-line marks. A recovered file shows whole through
+`sourceRows`, like Compare test versions, with an edit navigator; a patch-only
+file keeps the hunk rows and `codeOnly` with its reason, because a patch holds
+no complete statement to translate. App code is `codeOnly` either way.
 English sentences open Code mode at their source range, highlighting and focusing
 the chosen Before or After side. Clicking that code range returns to the saved
 English sentence, scroll position, and change cursor, even after browsing other
