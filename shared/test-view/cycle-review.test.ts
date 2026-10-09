@@ -135,6 +135,17 @@ describe('parseCyclePatch', () => {
     expect(files[0].rows.map((row) => row.afterLine)).toEqual([1, 2])
   })
 
+  it('puts back the blank context lines a trimmed diff lost from its last hunk', () => {
+    // The heal journal trims what it records, so a hunk ending on blank lines
+    // reaches the parser two lines short on both sides.
+    const [file] = parseCyclePatch('diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,3 @@\n-one\n+uno\n')
+    expect(file.hunks[0].lines).toEqual([{ kind: 'deletion', text: 'one' }, { kind: 'addition', text: 'uno' }, { kind: 'context', text: '' }, { kind: 'context', text: '' }])
+    expect(file.rows.slice(-2).map((row) => [row.beforeLine, row.afterLine, row.before])).toEqual([[2, 2, ''], [3, 3, '']])
+    // An uneven shortfall is a cut, not a trim: nothing is guessed.
+    const [cut] = parseCyclePatch('diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,3 @@\n-one\n')
+    expect(cut.hunks[0].lines).toEqual([{ kind: 'deletion', text: 'one' }])
+  })
+
   it('names the grammar for each kind of file', () => {
     expect(['a.ts', 'a.cjs', 'a.tsx', 'a.jsx', 'a.json', 'README.md', 'a.yml', 'a.yaml', 'Makefile'].map(cycleFileLanguage))
       .toEqual(['typescript', 'typescript', 'tsx', 'tsx', 'json', 'markdown', 'yaml', 'yaml', 'typescript'])

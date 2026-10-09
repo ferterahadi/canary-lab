@@ -29,7 +29,8 @@ import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../lo
 import { notFound } from '../../../shared/http-error'
 import { errorMessage } from '../../../../../../shared/lib/error-message'
 import { readTextOrNull } from '../../../../../../shared/lib/read-file-or'
-import { cycleReviewFromPatch, type RunCycleReview } from '../../../../../../shared/test-view/cycle-review'
+import type { RunCycleReview } from '../../../../../../shared/test-view/cycle-review'
+import { buildRunCycleReview } from '../logic/cycle-recovery/cycle-review-builder'
 
 const READABLE_LOGS_DIR = 'readable-logs'
 
@@ -193,25 +194,23 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     }
   })
 
-  // One journaled repair cycle's own diff (`diffs/iteration-<n>.patch`), as
-  // opposed to the run's cumulative capture above, read into per-file rows
-  // with the hunks' line numbers. Runs recorded before every cycle was
-  // persisted lack small ones; the journal entry's inline block is then the
-  // only copy, and 404 says so. Nothing here reads or writes a repo.
+  // One journaled repair cycle's own edits, per file. The diff comes from the
+  // cycle's persisted patch, or from the journal entry's inline block on runs
+  // recorded before every cycle was persisted. Each file's full versions are
+  // recovered where a blob id can verify them, from the run's suite copy or a
+  // git blob, with read-only git. 404 only when no diff was recorded at all.
   app.get<{ Params: { runId: string; iteration: string } }>('/api/runs/:runId/cycle-reviews/:iteration', async (req, reply): Promise<RunCycleReview | { error: string }> => {
     if (!/^\d+$/.test(req.params.iteration)) {
       reply.code(400)
       return { error: 'invalid iteration' }
     }
     if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
-    const iteration = Number(req.params.iteration)
-    const patchPath = path.join(runDirFor(deps.store.logsDir, req.params.runId), 'diffs', `iteration-${iteration}.patch`)
-    const diff = readTextOrNull(patchPath)
-    if (diff === null) {
+    const review = await buildRunCycleReview({ logsDir: deps.store.logsDir, featuresDir: deps.featuresDir }, req.params.runId, Number(req.params.iteration))
+    if (!review) {
       reply.code(404)
-      return { error: 'no persisted patch for this cycle' }
+      return { error: 'no diff recorded for this cycle' }
     }
-    return { iteration, patchPath, files: cycleReviewFromPatch(diff) }
+    return review
   })
 
   // One test attempt's service output: the span between its markers in the

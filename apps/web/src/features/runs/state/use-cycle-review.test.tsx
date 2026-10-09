@@ -27,10 +27,10 @@ afterEach(() => vi.clearAllMocks())
 
 it('reads a cycle’s files by its journal iteration', async () => {
   const runsApi = await import('@/shared/api/runs')
-  vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 3, patchPath: '/p', files: [] })
+  vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 3, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [] })
   const root = await render('patch-run-1', 3)
   expect(runsApi.getRunCycleReview).toHaveBeenCalledWith('patch-run-1', 3)
-  expect(seen?.value).toEqual({ iteration: 3, patchPath: '/p', files: [] })
+  expect(seen?.value).toEqual({ iteration: 3, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [] })
   act(() => root.unmount())
 })
 
@@ -58,8 +58,8 @@ it('reads nothing without an iteration', async () => {
 it('re-reads the cycle when its run’s journal changes, and not for another run', async () => {
   const runsApi = await import('@/shared/api/runs')
   vi.mocked(runsApi.getRunCycleReview)
-    .mockResolvedValueOnce({ iteration: 2, patchPath: '/p', files: [] })
-    .mockResolvedValueOnce({ iteration: 2, patchPath: '/p', files: cycleReviewFromPatch('diff --git a/a.ts b/a.ts\n') })
+    .mockResolvedValueOnce({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [] })
+    .mockResolvedValueOnce({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: cycleReviewFromPatch('diff --git a/a.ts b/a.ts\n') })
   let invalidate: ReturnType<typeof useInvalidation>['invalidate'] = () => {}
   function Bump() { invalidate = useInvalidation().invalidate; return null }
   const root = createRoot(document.createElement('div'))

@@ -67,9 +67,19 @@ export interface CycleReviewFile {
 /** A parsed file with the hunks a recovery replays. Never sent to the page. */
 export interface ParsedCycleFile extends CycleReviewFile { hunks: PatchHunk[] }
 
+/** One repair cycle's files, as the route serves them. */
 export interface RunCycleReview {
   iteration: number
-  patchPath: string
+  /** The persisted patch file, or the journal entry's inline diff for runs
+   * recorded before every cycle was persisted. */
+  source: 'patch' | 'journal'
+  /** Null when the diff came from the journal. */
+  patchPath: string | null
+  /** The journal cut the inline diff at its size cap. */
+  truncated: boolean
+  /** What the run's repairs were told to edit: app code, or with no app repos
+   * the tests themselves. */
+  healMode: 'service' | 'test'
   files: CycleReviewFile[]
 }
 
@@ -256,6 +266,22 @@ export function parseCyclePatch(diff: string): ParsedCycleFile[] {
     } else {
       flush()
       push({ before: line, after: line, beforeLine: draft.line.before++, afterLine: draft.line.after++ })
+    }
+  }
+  // The heal journal trims the diff it records, which drops the last hunk's
+  // trailing blank context lines: a blank line is the only text a trim can
+  // remove from a hunk. They are put back so the hunk applies; a blob check
+  // still refuses a file whose stripped line held only spaces.
+  const last = draft && !draft.file.truncated ? draft.file.hunks.at(-1) : undefined
+  if (last) {
+    const short = (side: 'addition' | 'deletion', count: number) => count - last.lines.filter((line) => line.kind !== side).length
+    const missing = short('addition', last.oldCount)
+    if (missing > 0 && missing === short('deletion', last.newCount)) {
+      flush()
+      for (let i = 0; i < missing; i++) {
+        last.lines.push({ kind: 'context', text: '' })
+        push({ before: '', after: '', beforeLine: draft!.line.before++, afterLine: draft!.line.after++ })
+      }
     }
   }
   close()

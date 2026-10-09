@@ -1,4 +1,4 @@
-import { isPathUnder } from '../../../shared/path-containment'
+import { confinedFile } from '../../../shared/path-containment'
 import { readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
@@ -17,18 +17,6 @@ import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
 import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from '../logic/test-declaration-changes'
 import { notFound } from '../../../shared/http-error'
-
-/** Resolve existing parents too: a deleted file behind a symlink must not
- * bypass the same boundary as a readable file. */
-function confinedFile(root: string, relative: string): string {
-  const realRoot = fs.realpathSync(root)
-  const target = path.resolve(realRoot, relative)
-  let parent = target
-  while (!fs.existsSync(parent)) parent = path.dirname(parent)
-  const realTarget = path.resolve(fs.realpathSync(parent), path.relative(parent, target))
-  if (!isPathUnder(realTarget, realRoot, false)) throw new Error('Test file is outside the suite')
-  return realTarget
-}
 
 function readSource(file: string): string {
   try { return readSpecSource(file) } catch (error) {

@@ -346,7 +346,7 @@ describe('runs api', () => {
   })
 
   it('getRunCycleReview GETs one repair cycle\'s files by iteration', async () => {
-    const body = { iteration: 2, patchPath: '/r/diffs/iteration-2.patch', files: [] }
+    const body = { iteration: 2, source: 'patch', patchPath: '/r/diffs/iteration-2.patch', truncated: false, healMode: 'service', files: [] }
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
     await expect(getRunCycleReview('run 9', 2, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/cycle-reviews/2', { method: 'GET' })

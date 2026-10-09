@@ -404,7 +404,7 @@ describe('repair notes and code changes', () => {
   it('shows the cycle’s retained patch file by file, with real line numbers and only the changed words marked', async () => {
     const runsApi = await import('@/shared/api/runs')
     const files = cycleReviewFromPatch(`${patch('0.95', '0.9')}\n${supportPatch()}`)
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/runs/r/diffs/iteration-2.patch', files })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/runs/r/diffs/iteration-2.patch', truncated: false, healMode: 'service', files })
     await mountStory({ journal: journalSections() })
     expect(runsApi.getRunCycleReview).toHaveBeenCalledWith(expect.any(String), 2)
     const changes = section('section-changes')!
@@ -431,7 +431,7 @@ describe('repair notes and code changes', () => {
   it('keeps the chosen file when the cycle is read again, and falls back to the first when it is gone', async () => {
     const runsApi = await import('@/shared/api/runs')
     const both = cycleReviewFromPatch(`${patch('0.95', '0.9')}\n${supportPatch()}`)
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: both })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: both })
     await mountStory({ journal: journalSections() })
     const changes = section('section-changes')!
     const choose = async (path: string) => act(async () => {
@@ -441,11 +441,11 @@ describe('repair notes and code changes', () => {
     })
     await choose('e2e/support/staging.ts')
     // What the journal's live topic does when the cycle's entry is rewritten.
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [both[1], both[0]] })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [both[1], both[0]] })
     const runId = vi.mocked(runsApi.getRunCycleReview).mock.calls[0][0]
     await act(async () => { invalidate('journal', runId); await new Promise((r) => setTimeout(r, 0)) })
     expect(changes.querySelector<HTMLSelectElement>('select')?.value).toBe('e2e/support/staging.ts')
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [both[0]] })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [both[0]] })
     await act(async () => { invalidate('journal', runId); await new Promise((r) => setTimeout(r, 0)) })
     expect(changes.querySelector('select')).toBeNull()
     expect(changes.querySelector('[data-side="after"][data-source-line="12"]')).not.toBeNull()
@@ -455,7 +455,7 @@ describe('repair notes and code changes', () => {
     const runsApi = await import('@/shared/api/runs')
     const files = cycleReviewFromPatch(['diff --git a/logo.png b/logo.png', 'Binary files a/logo.png and b/logo.png differ',
       'diff --git a/a.ts b/b.ts', 'similarity index 100%', 'rename from a.ts', 'rename to b.ts', ''].join('\n'))
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files })
     await mountStory({ journal: journalSections() })
     const changes = section('section-changes')!
     expect(changes.querySelector('[data-testid="cycle-file-without-rows"]')?.textContent).toBe('logo.png is a binary file; there is no text to compare.')
@@ -471,14 +471,14 @@ describe('repair notes and code changes', () => {
     const runsApi = await import('@/shared/api/runs')
     const files = cycleReviewFromPatch(['diff --git a/a.ts b/b.ts', 'rename from a.ts', 'rename to b.ts', '--- a/a.ts', '+++ b/b.ts',
       '@@ -1 +1 @@', '-x = 1', '+x = 2', '\\ No newline at end of file', ''].join('\n'))
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files })
     await mountStory({ journal: journalSections() })
     expect(section('section-changes')?.textContent).toContain('Renamed from a.ts. No newline at the end of the file after this cycle.')
   })
 
   it('reads a cycle that changed no tracked files', async () => {
     const runsApi = await import('@/shared/api/runs')
-    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, patchPath: '/p', files: [] })
+    vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [] })
     await mountStory({ journal: journalSections() })
     expect(section('section-changes')?.textContent).toContain('This cycle changed no tracked files.')
   })

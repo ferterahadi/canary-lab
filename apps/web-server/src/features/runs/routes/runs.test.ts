@@ -303,23 +303,29 @@ describe('GET /api/runs/:runId/execution-artifacts/:execution/*', () => {
 })
 
 describe('GET /api/runs/:runId/cycle-reviews/:iteration', () => {
-  it('reads one cycle\'s persisted patch into per-file rows and 404s a cycle that has none', async () => {
+  it('reads one cycle\'s persisted patch, else the journal\'s inline diff, and 404s a cycle with neither', async () => {
     writeManifestForRun('r1')
-    const diffs = path.join(runDirFor(logsDir, 'r1'), 'diffs')
+    const runDir = runDirFor(logsDir, 'r1')
+    const diffs = path.join(runDir, 'diffs')
     fs.mkdirSync(diffs, { recursive: true })
     fs.writeFileSync(path.join(diffs, 'iteration-2.patch'), TWO_FILE_CYCLE)
     fs.writeFileSync(path.join(diffs, 'iteration-3.patch'), '')
+    fs.writeFileSync(path.join(runDir, 'diagnosis-journal.md'), `## Iteration 4 — 2026-01-01T00:04:00.000Z\n\n### Diff\n\n\`\`\`diff\n${TWO_FILE_CYCLE.trim()}\n\`\`\`\n`)
     const { app } = await build()
 
     const res = await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/2' })
     expect(res.statusCode).toBe(200)
     const body = res.json()
-    expect(body).toMatchObject({ iteration: 2, patchPath: path.join(diffs, 'iteration-2.patch') })
+    expect(body).toMatchObject({ iteration: 2, source: 'patch', patchPath: path.join(diffs, 'iteration-2.patch'), truncated: false, healMode: 'test' })
     expect(body.files.map((file: { path: string; rows: unknown[] }) => [file.path, file.rows.length])).toEqual([['src/pricing.ts', 7], ['e2e/support/staging.ts', 2]])
     expect(body.files[0].rows[3]).toMatchObject({ beforeLine: 40, afterLine: 40, gap: { before: 36, after: 36 } })
     // An empty patch is a cycle that changed no tracked files, not a missing one.
-    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/3' })).json()).toEqual({ iteration: 3, patchPath: path.join(diffs, 'iteration-3.patch'), files: [] })
-    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/1' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/3' })).json())
+      .toEqual({ iteration: 3, source: 'patch', patchPath: path.join(diffs, 'iteration-3.patch'), truncated: false, healMode: 'test', files: [] })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/4' })).json())
+      .toMatchObject({ iteration: 4, source: 'journal', patchPath: null, files: [{ path: 'src/pricing.ts' }, { path: 'e2e/support/staging.ts' }] })
+    const missing = await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/1' })
+    expect([missing.statusCode, missing.json()]).toEqual([404, { error: 'no diff recorded for this cycle' }])
     expect((await app.inject({ method: 'GET', url: '/api/runs/r1/cycle-reviews/..%2F..' })).statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/api/runs/nope/cycle-reviews/1' })).statusCode).toBe(404)
   })

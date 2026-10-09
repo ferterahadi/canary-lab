@@ -737,12 +737,24 @@ review and Results & Fixes → Code changes — one table, one scroller, rows
 paired across the two sides from `shared/test-view/render-model.ts`, sharing
 `ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization) and the
 `TestLanguageSwitch` in its header with the ordinary test cards.
-Code changes reads `GET /api/runs/:runId/cycle-reviews/:iteration`, which parses
-`diffs/iteration-<n>.patch` with `shared/test-view/cycle-review.ts` into per-file
+Code changes reads `GET /api/runs/:runId/cycle-reviews/:iteration`. The server
+takes the cycle's diff from `diffs/iteration-<n>.patch`, or from the journal
+entry's inline block on runs recorded before every cycle was persisted (`source`,
+`truncated`), and parses it with `shared/test-view/cycle-review.ts` into per-file
 rows carrying the hunks' line numbers, `gap` counts for the lines the patch leaves
-out, and each file's blob ids. A 404 falls back to the journal entry's inline diff
-through the same parser; the reader rides the `journal` topic, so a rewritten
-entry re-reads it. The view passes `marks: 'word'` (changed words marked inside
+out, and each file's blob ids. `features/runs/logic/cycle-recovery/` then recovers
+each file's full before and after: the run's suite copy (`suite/`, which holds the
+last adopted state, not the run start) is placed in the file's chain of cycles by
+its blob hash and replayed forward or back; otherwise a git blob the diff names is
+read with `cat-file` and the cycle applied or undone; an added or deleted file is
+rebuilt from its diff. A version is accepted only when it hashes to the recorded
+blob id, so a guessed file is never shown; anything else is `patch-only` with a
+reason. A `# repo:` key only selects a tree the run's manifest or suite config
+already names. Suite files get English through the same `reviewSourceFor` as
+Compare test versions, and `executed` says whether the run ran a suite edit
+(live suite, adopted into the suite copy, or inert). The result is memoised on its
+inputs; the reader rides the `journal` topic, so a rewritten entry re-reads it.
+The view passes `marks: 'word'` (changed words marked inside
 Shiki tokens by `shared/test-view/token-marks.ts`) and `codeOnly`, because a patch
 holds no complete statement to translate; Compare test versions keeps whole-line
 marks.
@@ -932,7 +944,8 @@ Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
 `external-commands.jsonl` (per-command audit for external heal), `fixes/` (captured
 repair diffs, cumulative per run), `diffs/iteration-<n>.patch` (each journaled repair
-cycle's own diff), `playwright-artifacts-keep/` (latest per-test artifacts across repair
+cycle's own diff; runs recorded before every cycle was persisted kept small diffs
+only inline in the journal), `playwright-artifacts-keep/` (latest per-test artifacts across repair
 reruns), `playwright-artifacts-history/execution-<n>/` (each Playwright execution's
 artifacts, never overwritten), `service-logs/<service>/execution-<n>.log` (what a
 service log held before a rerun or restart emptied it), failure slices, and the
