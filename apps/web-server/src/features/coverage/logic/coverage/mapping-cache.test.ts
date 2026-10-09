@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
+import { CoverageInputReads } from './input-reads'
 import { mappingInferenceSnapshot, rememberMappingInference, unexaminedMappingTests, type MappingInferenceCache, type MappingTestInput } from './mapping-cache'
 
 let featureDir: string
@@ -27,6 +28,32 @@ it('tracks transitive and cyclic imports, including an unresolved helper becomin
   const beforeResolve = snapshot()
   fs.writeFileSync(path.join(featureDir, 'e2e/missing.ts'), 'export const value=1')
   expect(snapshot()).not.toEqual(beforeResolve)
+})
+
+it('tracks the real location of a symlinked shared tsconfig, so retargeting the link invalidates reuse', () => {
+  // The shape is load-bearing. TypeScript asks `host.realpath` only for a bare
+  // package lookup in node_modules, and a source import found that way is an
+  // external library the snapshot never visits; a package-based `extends` is
+  // the lookup whose real path matters. Each shared config maps `@support/*`
+  // relative to its own real directory, and no file's bytes change across the
+  // retarget, so only the realpath probe can notice it.
+  for (const [name, value] of [['config-a', 1], ['config-b', 2]]) {
+    fs.mkdirSync(path.join(featureDir, 'packages', name, 'support'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'packages', name, 'tsconfig.json'), '{"compilerOptions":{"paths":{"@support/*":["./support/*"]}}}')
+    fs.writeFileSync(path.join(featureDir, 'packages', name, 'support/helper.ts'), `export const value = ${value}`)
+  }
+  fs.mkdirSync(path.join(featureDir, 'node_modules'))
+  const link = path.join(featureDir, 'node_modules/shared-config')
+  fs.symlinkSync(path.join(featureDir, 'packages/config-a'), link, 'dir')
+  fs.writeFileSync(path.join(featureDir, 'tsconfig.json'), '{"extends":"shared-config/tsconfig.json"}')
+  fs.writeFileSync(path.join(featureDir, 'e2e/test.spec.ts'), "import '@support/helper'; test('test', () => { expect(value).toBe(1) })")
+  const reads = new CoverageInputReads()
+  const before = mappingInferenceSnapshot(featureDir, tests, requirements, undefined, reads)
+  expect(reads.unchanged()).toBe(true)
+  fs.rmSync(link)
+  fs.symlinkSync(path.join(featureDir, 'packages/config-b'), link, 'dir')
+  expect(snapshot()).not.toEqual(before)
+  expect(reads.unchanged()).toBe(false)
 })
 
 it('treats a helper declared inside the spec as semantic test content', () => {
