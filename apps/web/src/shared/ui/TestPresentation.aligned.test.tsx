@@ -10,14 +10,14 @@ import { TestPresentation } from './TestPresentation'
 import { ShikiCode } from './TestCodeBlock'
 import { mountRoot } from '@/test-helpers/mount-root'
 
-const highlighter = vi.hoisted(() => ({ load: vi.fn(), html: vi.fn() }))
+const highlighter = vi.hoisted(() => ({ load: vi.fn(), html: vi.fn(), language: vi.fn() }))
 vi.mock('./code-highlighter', () => ({ getCodeHighlighter: highlighter.load, codeThemeFor: (theme: string) => theme }))
 let root: Root
 let container: HTMLDivElement
 beforeEach(() => {
-  highlighter.load.mockReset(); highlighter.html.mockReset()
+  highlighter.load.mockReset(); highlighter.html.mockReset(); highlighter.language.mockReset()
   highlighter.html.mockImplementation((source: string) => `<pre><code>${source.split('\n').map((line) => `<span class="line"><span style="color:var(--code-keyword)">${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span></span>`).join('\n')}</code></pre>`)
-  highlighter.load.mockResolvedValue({ codeToHtml: highlighter.html, themeColors: () => ({ bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: '#7f848e' }) })
+  highlighter.load.mockResolvedValue({ codeToHtml: highlighter.html, loadLanguage: highlighter.language, themeColors: () => ({ bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: '#7f848e' }) })
 })
 mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 it('does not paint an unchanged statement because the opposite side has a meaningful edit', async () => {
@@ -331,4 +331,17 @@ it('marks words as plain text until the highlighter has the line', async () => {
   const line = container.querySelector('[data-side="before"][data-source-line="2"]')!
   expect(line.textContent).toBe('export const total = (p: number) => Math.round(p * 0.95)')
   expect([...line.querySelectorAll('mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['95'])
+})
+it('colours both sides with the file\'s own grammar', async () => {
+  const [file] = cycleReviewFromPatch(TWO_FILE_CYCLE)
+  await act(async () => root.render(<TestPresentation view="aligned" {...cycleFileAlignedInput(file, 2)} mode="code" lang="json" codeOnly={{ reason: 'Code only' }} />))
+  expect(highlighter.language).toHaveBeenCalledWith('json')
+  expect(highlighter.html.mock.calls.map(([, options]) => options.lang)).toEqual(['json', 'json'])
+})
+it('says what the empty side holds in the owner\'s words', async () => {
+  const [, added] = cycleReviewFromPatch(TWO_FILE_CYCLE)
+  const input = cycleFileAlignedInput({ ...added, change: 'added' }, 2)
+  const rows = input.rows.map((row) => ({ ...row, before: null, beforeLine: undefined }))
+  await act(async () => root.render(<TestPresentation view="aligned" {...input} rows={rows} mode="code" emptySide="before" emptySideLabel="New file in this cycle" codeOnly={{ reason: 'Code only' }} />))
+  expect(container.querySelector('.cl-comparison-empty')?.textContent).toBe('New file in this cycle')
 })

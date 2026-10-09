@@ -29,6 +29,7 @@ import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
+import type { CodeLanguage } from './code-highlighter'
 import { useCodeHighlight } from './use-code-highlight'
 
 interface TestPresentationShellProps {
@@ -71,6 +72,10 @@ export interface TestPresentationAlignedProps extends TestPresentationShellProps
   change?: number
   /** The side an added or removed test is absent from; its first row says so. */
   emptySide?: TestViewSide
+  /** What that first row says; absent, it names the review's own baseline. */
+  emptySideLabel?: string
+  /** The grammar both sides are coloured with; TypeScript when absent. */
+  lang?: CodeLanguage
   /** The Code-mode range opened from an English row. */
   selection?: TestViewSelection | null
   onSelectSource?: (selection: TestViewSelection) => void
@@ -256,19 +261,19 @@ function SingleTestView({
  * grammar, Shiki tokenization and format toggle. Neither baseline is ever
  * translated here: both sides arrive as the server reviewed them. */
 function AlignedTestView({
-  review, rows, mode, onModeChange, header, change, emptySide, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
-  labels, marks, codeOnly, ariaLabel = 'Full test comparison',
+  review, rows, mode, onModeChange, header, change, emptySide, emptySideLabel, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
+  labels, marks, codeOnly, lang, ariaLabel = 'Full test comparison',
 }: Resolved<TestPresentationAlignedProps>) {
   const englishAvailable = !codeOnly && alignedEnglishAvailable(review)
   const shownMode = englishAvailable ? mode : 'code'
-  const before = useCodeHighlight(review.before.source)
-  const after = useCodeHighlight(review.after.source)
+  const before = useCodeHighlight(review.before.source, lang)
+  const after = useCodeHighlight(review.after.source, lang)
   const aligned = useMemo(() => alignedTestViewRows({ review, rows, mode: shownMode, marks, change, selection }), [change, shownMode, marks, review, rows, selection])
   const render = (pair: TestViewAlignedRow, side: TestViewSide) => {
     const cell = side === 'before' ? pair.before : pair.after
     const source = pair.source[side]
     if (cell === undefined || source == null) return emptySide === side && pair.source === rows[0]
-      ? <span className="cl-comparison-empty">{side === 'after' ? 'Removed from current source' : 'Not present in recorded tests'}</span>
+      ? <span className="cl-comparison-empty">{emptySideLabel ?? (side === 'after' ? 'Removed from current source' : 'Not present in recorded tests')}</span>
       : <span className="sr-only">No corresponding line</span>
     const line = cell.sourceLine
     const highlighted = side === 'before' ? before : after
