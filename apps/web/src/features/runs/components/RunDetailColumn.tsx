@@ -163,13 +163,18 @@ export function RunDetailColumn({
   const focusKey = JSON.stringify([focusTest, focusTestId, focusTestLocation, focusRequest])
   const seeding = seed.current?.runId === runId && seed.current.focusKey === focusKey ? seed.current.location : undefined
   // A later focus (clicking a second failure while this run is already open)
-  // switches back to the tab that can show it. A restored place already says
-  // which tab its test was read on.
+  // switches back to the tab that can show it — once per focus, so the seed
+  // clearing on resolve cannot replay it. A restored place already says which
+  // tab its test was read on, so the focus it was restored with is handled.
+  const handledFocus = useRef<string | null>(seeding ? `${runId}:${focusKey}` : null)
   useEffect(() => {
-    if (!focusTest || seeding) return
+    if (!focusTest) return
+    const key = `${runId}:${focusKey}`
+    if (handledFocus.current === key) return
+    handledFocus.current = key
     setTab('results')
     setResultsView('tests')
-  }, [focusTest, focusTestId, focusTestLocation, focusRequest, runId, seeding])
+  }, [focusTest, focusKey, runId])
   const focusTarget = focusTest ? { name: focusTest, ...(focusTestId ? { id: focusTestId } : {}), ...(focusTestLocation ? { location: focusTestLocation } : {}) } : undefined
   // Which focus the selection has taken up, set in the same update as the
   // selection so the reported place never drops the test in between.

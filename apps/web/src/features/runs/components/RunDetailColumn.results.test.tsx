@@ -262,6 +262,19 @@ describe('a routed place inside the run', () => {
     expect(reports.at(-1)).toEqual(location)
   })
 
+  it('keeps a restored Services place when the test it carries resolves', async () => {
+    Element.prototype.scrollIntoView = () => {}
+    const reports: unknown[] = []
+    const log = { execution: 2, startLine: 120, endLine: 124, approximate: false }
+    const location = { tab: 'services' as const, ...discount, service: 'web', log }
+    await show(withServices(), { focusTest: discount.test.name, focusTestLocation: discount.test.location, location, onLocationChange: (l) => reports.push(l) })
+    await settle()
+    expect(container.querySelector('[data-testid="service-log-inspector"]')).toBeTruthy()
+    expect(reports.at(-1)).toEqual(location)
+    click('Back to Results & Fixes')
+    expect(container.querySelector('[data-open]')?.textContent).toContain('applies the discount')
+  })
+
   it('cold-loads a Full service log range on its service, even one the Services tab does not open first', async () => {
     Element.prototype.scrollIntoView = () => {}
     const log = { execution: 2, startLine: 120, endLine: 124, approximate: true }
