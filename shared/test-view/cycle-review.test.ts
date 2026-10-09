@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cycleFileAlignedInput, cycleReviewFromPatch } from './cycle-review'
+import { cycleFileAlignedInput, cycleFileLanguage, cycleReviewFromPatch, parseCyclePatch } from './cycle-review'
 import { alignedTestViewRows } from './render-model'
 import {
   ADDED_FILE, BINARY_FILES, DELETED_FILE, HEADERLESS_FRAGMENT, LINE_ENDINGS, NO_NEWLINE_AT_END, RENAMES, TWO_FILE_CYCLE, ZERO_COUNT_HUNK,
@@ -41,7 +41,8 @@ describe('cycleReviewFromPatch', () => {
 
   it('keeps a rename with no edits as a file without rows', () => {
     const [pure, edited] = cycleReviewFromPatch(RENAMES)
-    expect(pure).toEqual({ path: 'src/b.ts', previousPath: 'src/a.ts', change: 'renamed', lineEnding: 'lf', rows: [] })
+    expect(pure).toEqual({ path: 'src/b.ts', previousPath: 'src/a.ts', change: 'renamed', lineEnding: 'lf', rows: [],
+      language: 'typescript', role: 'app', recovery: { kind: 'patch-only', reason: 'no-tree' } })
     expect(edited).toMatchObject({ path: 'src/d.ts', previousPath: 'src/c.ts', change: 'renamed', blobs: { before: '1111111', after: '2222222' } })
     expect(edited.rows).toHaveLength(1)
   })
@@ -83,8 +84,10 @@ describe('cycleReviewFromPatch', () => {
     expect(quoted.path).toBe('"a/odd name.ts" "b/odd name.ts"')
     expect(cycleReviewFromPatch('')).toEqual([])
     expect(cycleReviewFromPatch('\n')).toEqual([])
-    // Text before any file header has no file to belong to.
+    // Text before any file header has no file to belong to, and a line before
+    // a file's first hunk has no line number to stand at.
     expect(cycleReviewFromPatch('note: captured\n-stray\n')).toEqual([])
+    expect(cycleReviewFromPatch('diff --git a/x.ts b/x.ts\n-stray\n')[0].rows).toEqual([])
   })
 
   it('never pairs a deletion with an addition listed before it, and ignores notes after a hunk', () => {
@@ -100,6 +103,43 @@ describe('cycleReviewFromPatch', () => {
     expect(file.rows).toHaveLength(2000)
     expect(file.rows.at(-1)?.afterLine).toBe(2000)
     expect(performance.now() - started).toBeLessThan(500)
+  })
+})
+
+describe('parseCyclePatch', () => {
+  it('keeps each file\'s hunks as recorded, without the rows the page reads', () => {
+    const [pricing, staging] = parseCyclePatch(TWO_FILE_CYCLE)
+    expect(pricing.hunks.map((hunk) => [hunk.oldStart, hunk.oldCount, hunk.newStart, hunk.newCount, hunk.lines.length])).toEqual([[1, 3, 1, 3, 4], [40, 2, 40, 4, 4]])
+    expect(pricing.hunks[1].lines).toEqual([
+      { kind: 'context', text: '  return p * RATE' },
+      { kind: 'addition', text: '  // rounded by caller' },
+      { kind: 'addition', text: '--- divider' },
+      { kind: 'context', text: '}' },
+    ])
+    expect(staging.hunks).toHaveLength(1)
+    expect(cycleReviewFromPatch(TWO_FILE_CYCLE)[0]).not.toHaveProperty('hunks')
+  })
+
+  it('marks the hunk that ends without a newline on the side that does', () => {
+    const [one, two, three] = parseCyclePatch(NO_NEWLINE_AT_END)
+    expect(one.hunks[0].noNewlineAtEnd).toEqual({ before: true, after: false })
+    expect(two.hunks[0].noNewlineAtEnd).toEqual({ before: false, after: true })
+    expect(three.hunks[0].noNewlineAtEnd).toEqual({ before: true, after: true })
+    expect(parseCyclePatch('diff --git a/x.ts b/x.ts\n\\ No newline at end of file\n')[0].noNewlineAtEnd).toBeUndefined()
+  })
+
+  it('flags the file a journal cut at its size cap and reads nothing after the marker', () => {
+    const cut = `${TWO_FILE_CYCLE.split('\n').slice(0, 9).join('\n')}\n... (truncated, 2658 more bytes)\n${DELETED_FILE}`
+    const files = parseCyclePatch(cut)
+    expect(files.map((file) => [file.path, file.truncated])).toEqual([['src/pricing.ts', true]])
+    expect(files[0].rows.map((row) => row.afterLine)).toEqual([1, 2])
+  })
+
+  it('names the grammar for each kind of file', () => {
+    expect(['a.ts', 'a.cjs', 'a.tsx', 'a.jsx', 'a.json', 'README.md', 'a.yml', 'a.yaml', 'Makefile'].map(cycleFileLanguage))
+      .toEqual(['typescript', 'typescript', 'tsx', 'tsx', 'json', 'markdown', 'yaml', 'yaml', 'typescript'])
+    expect(parseCyclePatch(ADDED_FILE)[0].language).toBe('typescript')
+    expect(parseCyclePatch('diff --git a/a.json b/a.json\n--- a/a.json\n+++ b/a.json\n@@ -1 +1 @@\n-1\n+2\n')[0].language).toBe('json')
   })
 })
 

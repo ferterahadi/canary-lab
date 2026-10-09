@@ -1,12 +1,39 @@
-// One repair cycle's edits, per file, read from `diffs/iteration-<n>.patch`
-// alone. The patch holds only the hunks, so every row carries the line numbers
-// its hunk header gives and the lines it leaves out are counted as gaps, never
-// guessed. Full sources are a later recovery step; nothing here reads a repo.
-import { hunkRange, unifiedDiffLines } from '../lib/unified-diff'
+// One repair cycle's edits, per file, read from its recorded diff alone. The
+// diff holds only the hunks, so every row carries the line numbers its hunk
+// header gives and the lines it leaves out are counted as gaps, never guessed.
+// Recovering the full files is the server's job; nothing here reads a repo.
+import { hunkRange, unifiedDiffLines, type PatchHunk } from '../lib/unified-diff'
+import type { ReviewSource } from '../test-review'
 import type { ContextRow } from '../test-source-diff'
 import type { AlignedReview, TestViewSideLabels } from './render-model'
 
 export type CycleFileChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'binary'
+
+/** The grammars the code view can colour a file with. */
+export type CycleFileLanguage = 'typescript' | 'tsx' | 'json' | 'markdown' | 'yaml'
+
+/** Which tree the file lives in, decided from the run's own records, never
+ * from the diff text. App code is shown as code only: English is for tests. */
+export type CycleFileRole = 'spec' | 'support' | 'app'
+
+/** How the file's full before and after were obtained. */
+export type CycleFileRecovery =
+  /** Replayed from the run's suite copy through the recorded cycles. */
+  | { kind: 'reconstructed'; verified: 'blob' | 'context' }
+  /** Read from a git blob the diff names, then the cycle applied to it. */
+  | { kind: 'exact'; from: 'before-blob' | 'after-blob'; repo: string }
+  | { kind: 'patch-only'; reason: CyclePatchOnlyReason }
+
+export type CyclePatchOnlyReason = 'truncated' | 'no-tree' | 'repo-missing' | 'blob-missing' | 'chain-broken' | 'apply-failed' | 'binary' | 'mismatch'
+
+/** Whether the run executed a suite file's edit. */
+export type CycleFileExecution =
+  /** The run had no suite copy, so later reruns ran the live suite and the edit with it. */
+  | { kind: 'live' }
+  /** The edit was copied into the run's suite and rerun. */
+  | { kind: 'adopted'; by: 'human' | 'test-heal'; at: string }
+  /** Playwright ran the run's suite copy; this edit stayed in the live suite. */
+  | { kind: 'inert' }
 
 /** One file touched by one journaled repair cycle. */
 export interface CycleReviewFile {
@@ -25,7 +52,20 @@ export interface CycleReviewFile {
   noNewlineAtEnd?: { before: boolean; after: boolean }
   /** Empty for a binary file or a rename with no edits. */
   rows: ContextRow[]
+  /** The journal cut this file's diff at its size cap. */
+  truncated?: boolean
+  language: CycleFileLanguage
+  role: CycleFileRole
+  recovery: CycleFileRecovery
+  /** Both full versions, and their full-context diff, unless the file is
+   * shown from the diff alone. */
+  sources?: { before: ReviewSource; after: ReviewSource; patch: string }
+  /** Suite files only. */
+  executed?: CycleFileExecution
 }
+
+/** A parsed file with the hunks a recovery replays. Never sent to the page. */
+export interface ParsedCycleFile extends CycleReviewFile { hunks: PatchHunk[] }
 
 export interface RunCycleReview {
   iteration: number
@@ -33,9 +73,19 @@ export interface RunCycleReview {
   files: CycleReviewFile[]
 }
 
+/** The grammar for a path; JavaScript reads with the TypeScript grammar. */
+export function cycleFileLanguage(path: string): CycleFileLanguage {
+  if (/\.[jt]sx$/.test(path)) return 'tsx'
+  if (/\.json$/.test(path)) return 'json'
+  if (/\.(md|markdown)$/.test(path)) return 'markdown'
+  if (/\.ya?ml$/.test(path)) return 'yaml'
+  return 'typescript'
+}
+
+const TRUNCATED = /^\.\.\. \(truncated, \d+ more bytes\)$/
+
 interface FileDraft {
-  file: CycleReviewFile
-  hunks: number
+  file: ParsedCycleFile
   /** The last line each side's previous hunk covered. */
   end: { before: number; after: number }
   line: { before: number; after: number }
@@ -53,11 +103,13 @@ const patchPath = (text: string): string | null => {
   return path === '/dev/null' ? null : path.replace(/^[ab]\//, '')
 }
 
-/** Files and aligned rows of one cycle's patch, in patch order. Deletions and
- * additions pair index-wise within a block, as the patch view always paired
- * them; context and hunk boundaries are never crossed. */
-export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
-  const files: CycleReviewFile[] = []
+/** Files, aligned rows and hunks of one cycle's diff, in diff order.
+ * Deletions and additions pair index-wise within a block, as the patch view
+ * always paired them; context and hunk boundaries are never crossed. A
+ * journal's truncation marker ends the diff: the file it cut is flagged and
+ * nothing after it exists. */
+export function parseCyclePatch(diff: string): ParsedCycleFile[] {
+  const files: ParsedCycleFile[] = []
   let repo: string | undefined
   let draft: FileDraft | undefined
   // A fragment without `diff --git` names its file in the `---` line first.
@@ -102,14 +154,15 @@ export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
     flush()
     const { crlf, lf } = draft.endings
     draft.file.lineEnding = crlf && lf ? 'mixed' : crlf ? 'crlf' : 'lf'
+    draft.file.language = cycleFileLanguage(draft.file.path)
     files.push(draft.file)
     draft = undefined
   }
   const open = (path: string, change: CycleFileChange = 'modified'): void => {
     close()
     draft = {
-      file: { path, ...(repo ? { repo } : {}), change, lineEnding: 'lf', rows: [] },
-      hunks: 0,
+      file: { path, ...(repo ? { repo } : {}), change, lineEnding: 'lf', rows: [], hunks: [],
+        language: 'typescript', role: 'app', recovery: { kind: 'patch-only', reason: 'no-tree' } },
       end: { before: 0, after: 0 },
       line: { before: 0, after: 0 },
       removed: [],
@@ -133,7 +186,7 @@ export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
       continue
     }
     if (kind === 'old-file') {
-      if (!draft || draft.hunks) headerless = { before: patchPath(text.slice(4)) }
+      if (!draft || draft.file.hunks.length) headerless = { before: patchPath(text.slice(4)) }
       continue
     }
     if (kind === 'new-file') {
@@ -148,12 +201,22 @@ export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
     if (!draft) continue
     const { file } = draft
     if (kind === 'metadata') {
+      if (TRUNCATED.test(text)) {
+        file.truncated = true
+        break
+      }
       if (text.startsWith('\\')) {
-        const ends = file.noNewlineAtEnd ?? { before: false, after: false }
-        if (draft.last !== 'addition') ends.before = true
-        if (draft.last !== 'deletion') ends.after = true
-        file.noNewlineAtEnd = ends
-      } else if (draft.hunks === 0) {
+        // The marker speaks of the line before it; with no hunk there is none.
+        const hunk = file.hunks.at(-1)
+        if (hunk) {
+          const ends = file.noNewlineAtEnd ?? { before: false, after: false }
+          for (const target of [ends, hunk.noNewlineAtEnd]) {
+            if (draft.last !== 'addition') target.before = true
+            if (draft.last !== 'deletion') target.after = true
+          }
+          file.noNewlineAtEnd = ends
+        }
+      } else if (file.hunks.length === 0) {
         const index = /^index ([0-9a-f]+)\.\.([0-9a-f]+)/.exec(text)
         if (text.startsWith('new file mode')) file.change = 'added'
         else if (text.startsWith('deleted file mode')) file.change = 'deleted'
@@ -176,23 +239,32 @@ export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
       if (hidden.before > 0 || hidden.after > 0) draft.gap = { before: Math.max(0, hidden.before), after: Math.max(0, hidden.after) }
       draft.line = { before: range.oldCount ? range.oldStart : range.oldStart + 1, after: range.newCount ? range.newStart : range.newStart + 1 }
       draft.end = { before: draft.line.before + range.oldCount - 1, after: draft.line.after + range.newCount - 1 }
-      draft.hunks++
+      file.hunks.push({ ...range, lines: [], noNewlineAtEnd: { before: false, after: false } })
       continue
     }
+    // A line outside any hunk has no line number to stand at.
+    const hunk = file.hunks.at(-1)
+    if (!hunk) continue
     draft.last = kind
+    const line = content(text)
+    hunk.lines.push({ kind, text: line })
     if (kind === 'deletion') {
       if (draft.added.length) flush()
-      draft.removed.push({ text: content(text), line: draft.line.before++ })
+      draft.removed.push({ text: line, line: draft.line.before++ })
     } else if (kind === 'addition') {
-      draft.added.push({ text: content(text), line: draft.line.after++ })
+      draft.added.push({ text: line, line: draft.line.after++ })
     } else {
       flush()
-      const line = content(text)
       push({ before: line, after: line, beforeLine: draft.line.before++, afterLine: draft.line.after++ })
     }
   }
   close()
   return files
+}
+
+/** The files of one cycle's diff as the page reads them: without the hunks. */
+export function cycleReviewFromPatch(diff: string): CycleReviewFile[] {
+  return parseCyclePatch(diff).map(({ hunks: _hunks, ...file }) => file)
 }
 
 export interface CycleAlignedInput { review: AlignedReview; rows: ContextRow[]; labels: TestViewSideLabels }

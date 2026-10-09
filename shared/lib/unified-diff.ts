@@ -49,3 +49,60 @@ export function unifiedDiffLines(diff: string): UnifiedDiffLine[] {
     return { kind: 'metadata', text }
   })
 }
+
+export interface PatchHunkLine { kind: 'context' | 'deletion' | 'addition'; text: string }
+
+/** One hunk as a patch recorded it. `lines` hold the text without its `+`, `-`
+ * or space prefix and without a trailing `\r`. */
+export interface PatchHunk extends HunkRange {
+  lines: PatchHunkLine[]
+  noNewlineAtEnd: { before: boolean; after: boolean }
+}
+
+export type ApplyHunksResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'context-mismatch' | 'out-of-range' | 'truncated'; line?: number }
+
+const reverseHunk = (hunk: PatchHunk): PatchHunk => ({
+  oldStart: hunk.newStart, oldCount: hunk.newCount, newStart: hunk.oldStart, newCount: hunk.oldCount,
+  lines: hunk.lines.map((line) => line.kind === 'context' ? line : { kind: line.kind === 'addition' ? 'deletion' : 'addition', text: line.text }),
+  noNewlineAtEnd: { before: hunk.noNewlineAtEnd.after, after: hunk.noNewlineAtEnd.before },
+})
+
+/** Apply a file's hunks to its text, or undo them with `reverse`. Every
+ * context and removed line must match exactly where its hunk says: there is
+ * no fuzz and no search for a moved hunk, because a near miss would be a
+ * guessed file. The file keeps its line ending when every line shares one; a
+ * file mixing endings comes back with `\n`, which a caller's content hash then
+ * refuses. */
+export function applyHunks(text: string, hunks: readonly PatchHunk[], direction: 'forward' | 'reverse'): ApplyHunksResult {
+  const endedWithNewline = text === '' || text.endsWith('\n')
+  const raw = text === '' ? [] : (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
+  const crlf = raw.length > 0 && raw.every((line) => line.endsWith('\r'))
+  const lines = raw.map((line) => line.endsWith('\r') ? line.slice(0, -1) : line)
+  const out: string[] = []
+  let cursor = 0
+  let newline = endedWithNewline
+  for (const recorded of hunks) {
+    const hunk = direction === 'forward' ? recorded : reverseHunk(recorded)
+    const oldLines = hunk.lines.filter((line) => line.kind !== 'addition').length
+    const newLines = hunk.lines.filter((line) => line.kind !== 'deletion').length
+    if (oldLines !== hunk.oldCount || newLines !== hunk.newCount) return { ok: false, reason: 'truncated' }
+    // A zero-count old side inserts after its start line instead of at it.
+    const start = hunk.oldCount ? hunk.oldStart - 1 : hunk.oldStart
+    if (start < cursor || start > lines.length) return { ok: false, reason: 'out-of-range', line: hunk.oldStart }
+    out.push(...lines.slice(cursor, start))
+    cursor = start
+    for (const line of hunk.lines) {
+      if (line.kind === 'addition') { out.push(line.text); continue }
+      if (lines[cursor] !== line.text) return { ok: false, reason: 'context-mismatch', line: cursor + 1 }
+      if (line.kind === 'context') out.push(line.text)
+      cursor++
+    }
+    if (cursor === lines.length) newline = !hunk.noNewlineAtEnd.after
+  }
+  out.push(...lines.slice(cursor))
+  if (!out.length) return { ok: true, text: '' }
+  const ending = crlf ? '\r\n' : '\n'
+  return { ok: true, text: out.join(ending) + (newline ? ending : '') }
+}

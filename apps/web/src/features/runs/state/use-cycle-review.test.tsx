@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
 import { useCycleReview } from './use-cycle-review'
 
 vi.mock(import('@/shared/api/runs'), async (importOriginal) => ({ ...(await importOriginal()), getRunCycleReview: vi.fn() }))
@@ -58,7 +59,7 @@ it('re-reads the cycle when its run’s journal changes, and not for another run
   const runsApi = await import('@/shared/api/runs')
   vi.mocked(runsApi.getRunCycleReview)
     .mockResolvedValueOnce({ iteration: 2, patchPath: '/p', files: [] })
-    .mockResolvedValueOnce({ iteration: 2, patchPath: '/p', files: [{ path: 'a.ts', change: 'modified', lineEnding: 'lf', rows: [] }] })
+    .mockResolvedValueOnce({ iteration: 2, patchPath: '/p', files: cycleReviewFromPatch('diff --git a/a.ts b/a.ts\n') })
   let invalidate: ReturnType<typeof useInvalidation>['invalidate'] = () => {}
   function Bump() { invalidate = useInvalidation().invalidate; return null }
   const root = createRoot(document.createElement('div'))
