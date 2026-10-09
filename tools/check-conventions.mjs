@@ -66,7 +66,7 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   keeps a small margin because the count only includes files a test loaded.
 // 387 → 389 when the repair-cycle row builder and the token word-mark splitter
 //   joined `shared/test-view/` (measured 675 files over 14568 tests).
-const MIN_GATED_FILES = 389
+const MIN_GATED_FILES = 395
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']
