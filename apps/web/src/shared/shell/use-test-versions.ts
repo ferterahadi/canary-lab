@@ -32,7 +32,7 @@ export function useTestVersions({ feature, baseline, displayed, recordedView, re
   const visible = displayFailed ? null : ready ? displayed : cached?.[visibleVersion]?.specs ?? null
   const current = recordedView ? counterpart : visible
   const recorded = recordedView ? visible : counterpart
-  const snapshotDir = baseline?.suiteSnapshot?.kind === 'taken' ? baseline.suiteSnapshot.dir : undefined
+  const snapshotDir = baseline?.suiteSnapshot?.kind === 'taken' ? baseline.suiteSnapshot.dir : null
   const source = useTestSourceComparison({
     feature, runId: baseline?.runId, featureDir: baseline?.featureDir, snapshotDir, refreshKey: revision,
   })

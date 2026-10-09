@@ -112,12 +112,14 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
     : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
   const comparisonDir = comparisonManifest?.featureDir
-  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
+  // The run store skips detail reads in a hidden tab. An unknown manifest must
+  // not hold the comparison, so only a known missing snapshot withholds it.
+  const snapshotDir = !comparisonManifest ? undefined : comparisonManifest.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : null
   const sourceComparison = useTestSourceComparison({
     feature: selected?.name, runId: comparisonRunId, featureDir: comparisonDir, snapshotDir, refreshKey: testChanges,
   })
   const comparison = sourceComparison.comparison
-  const runFiles = selected && comparisonRunId && snapshotDir ? {
+  const runFiles = selected && comparisonRunId && snapshotDir !== null ? {
     feature: selected.name, runId: comparisonRunId, files: comparison.files,
     changedFiles: comparison.differences.map((item) => item.file),
     changes: comparison.state === 'ready' ? comparison.changes : undefined,
@@ -141,7 +143,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
     ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
-  const missingSnapshot = !!comparisonRunId && ((!!comparisonManifest && !snapshotDir) || !!currentRunFiles?.missingSnapshot)
+  const missingSnapshot = !!comparisonRunId && (snapshotDir === null || !!currentRunFiles?.missingSnapshot)
   // RunStore decisions arrive through the run WebSocket as a new manifest.
   // Use that pushed revision to refetch the REST-only review immediately;
   // bounded reconciliation below remains the missed-event recovery path.
@@ -177,7 +179,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     && normalizedReview.allowedActions
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
-  const comparisonAllowsAction = !comparisonRunId || !snapshotDir || sourceComparison.confirmed
+  const comparisonAllowsAction = !comparisonRunId || snapshotDir === null || sourceComparison.confirmed
   const reviewRevision = comparisonAllowsAction && runReview.confirmed && reviewRun ? runReview.value?.review_revision : undefined
   const featureReviewRevision = comparisonAllowsAction && featureReview.confirmed && suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
   const displayedRunRevision = useRef<string | undefined>(undefined)

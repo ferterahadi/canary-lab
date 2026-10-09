@@ -85,6 +85,15 @@ it('shows a readable fixture in English and Code with visible edits, not an empt
   expect(document.body.textContent).not.toContain('No title or test-content changes in this file')
   expect(document.querySelector('.cl-review-file[data-changed="true"]')?.getAttribute('title')).toBe(fixture)
 })
+it('counts the recorded-run comparison before the run store has hydrated its manifest', async () => {
+  // A hidden tab never reads run detail, so the dialog has no manifest yet.
+  const fixture = 'e2e/fixture.ts'
+  const declared = { file: 'e2e/a.spec.ts', line: 3, endLine: 5, name: 'a' }
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture, declared.file], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [declared], removed: [] } })
+  await render({ focusFeature: 'alpha', focusRunId: 'run-1', pendingRuns: [{ ...run, status: 'passed' }], focus: { file: fixture, baseline: 'run', mode: 'code' } })
+  expect(featuresApi.getTestSourceComparison).toHaveBeenCalledWith('alpha', 'run-1')
+  expect(document.querySelector('.cl-review-change-status')?.textContent).toBe('— / 1')
+})
 it('returns from a deep-linked import continuation to its English range and highlights that range in Code', async () => {
   const review = multilineImportReview()
   vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
