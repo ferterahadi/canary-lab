@@ -514,6 +514,15 @@ describe('repair notes and code changes', () => {
     expect(changes.querySelector('[aria-label="Edit blocks in this file"]')?.textContent).toContain('Edit 2 / 2')
     expect(selected()).toEqual(['5'])
     expect(changes.textContent).toContain("This cycle's edits · /p · Full file rebuilt from the recorded cycles and checked against git's ids")
+    // Switching to English re-centres on the same edit, which English folds differently.
+    const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView')
+    try {
+      act(() => { changes.querySelector<HTMLButtonElement>('[data-testid="test-presentation-english-tab"]')!.click() })
+      expect(scrolled).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
+      expect(scrolled.mock.contexts.at(-1)).toBe(changes.querySelector('[data-selected="true"]'))
+    } finally {
+      scrolled.mockRestore()
+    }
   })
 
   it('shows app code as code, and says when the run did not execute a suite edit', async () => {

@@ -81,10 +81,11 @@ function CycleFileView({ file, cycle, mode, onModeChange, picker }: {
     return { labels: patched.labels, review: { before, after, supportingFile: file.role !== 'spec' }, rows: sourceRows({ before, after, patch }) }
   }, [file, cycle])
   const changes = useMemo(() => file.sources ? [...new Set(input.rows.flatMap((row) => row.change == null ? [] : [row.change]))] : [], [file.sources, input.rows])
+  // English folds the rows differently, so a format switch re-centres too.
   useLayoutEffect(() => {
     if (!changes.length) return
     scrollRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView?.({ block: 'center', behavior: 'instant' })
-  }, [changes.length, index])
+  }, [changes.length, index, mode])
   // The server sends no sources exactly when a file is patch-only.
   const codeOnly = file.recovery.kind === 'patch-only'
     ? { reason: `${PATCH_ONLY[file.recovery.reason]}; showing the patch alone` }
