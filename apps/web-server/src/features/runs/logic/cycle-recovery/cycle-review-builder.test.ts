@@ -5,6 +5,7 @@ import { cycleRun, SPEC, type CycleRun } from './__fixtures__/cycle-run'
 import { buildRunCycleReview } from './cycle-review-builder'
 import { cyclePatchPath } from './cycle-sources'
 import { runManifestPath } from '../runtime/run-paths'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-cycle-builder-')
@@ -50,34 +51,55 @@ describe('buildRunCycleReview', () => {
 
   it('says whether the run executed a suite edit', async () => {
     const run = cycleRun(tempDir())
+    const adopt = (at: string, by: 'human' | 'test-heal', files = ['e2e/cart.spec.ts']) =>
+      run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at, by, files }] } })
     await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'/cart'", "'/basket'"), { at: '2026-01-01T00:01:00.000Z' })
-    await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'Total'", "'Sum'"), { at: '2026-01-01T00:05:00.000Z' })
-    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'live' })
+    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'live' })
+    // The test-heal rule adopts just after the cycle's entry is written.
     run.takeSuite()
-    const adopt = (at: string, by: 'human' | 'test-heal', files = ['e2e/cart.spec.ts']) => run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at, by, files }] } })
-    // Adopted before cycle 2 could start: only cycle 1's edit reached the copy.
-    adopt('2026-01-01T00:00:30.000Z', 'human')
-    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2026-01-01T00:00:30.000Z' })
+    adopt('2026-01-01T00:01:30.000Z', 'test-heal')
+    await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'Total'", "'Sum'"), { at: '2026-01-01T00:05:00.000Z' })
+    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'adopted', by: 'test-heal', at: '2026-01-01T00:01:30.000Z' })
+    // That adoption falls inside cycle 2 too, but the copy holds cycle 1's version.
     expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'inert' })
-    // Adopted while cycle 2 was still running, before its entry was written.
-    adopt('2026-01-01T00:04:00.000Z', 'test-heal')
-    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'adopted', by: 'test-heal', at: '2026-01-01T00:04:00.000Z' })
+    // A person adopting while cycle 2 was still open took its edit.
+    run.takeSuite()
+    adopt('2026-01-01T00:04:00.000Z', 'human')
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2026-01-01T00:04:00.000Z' })
+    adopt('2026-01-01T00:00:30.000Z', 'human')
+    expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'inert' })
     adopt('2026-01-01T00:04:00.000Z', 'human', ['helpers/util.ts'])
     expect((await build(run, 2))!.files[0].executed).toEqual({ kind: 'inert' })
   })
 
+  it('reads a deleted file\'s absence from the copy as holding its after side', async () => {
+    const run = cycleRun(tempDir())
+    run.takeSuite()
+    await run.cycle(() => git(run.workspace, 'rm', '-qf', 'features/demo/helpers/util.ts'), { at: '2026-01-01T00:01:00.000Z' })
+    run.takeSuite()
+    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at: '2026-01-01T00:00:30.000Z', by: 'human', files: ['helpers/util.ts'] }] } })
+    expect((await build(run, 1))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2026-01-01T00:00:30.000Z' })
+  })
+
   it('opens the window at the run\'s start when no earlier cycle was journaled, and reads the heal mode', async () => {
     const run = cycleRun(tempDir(), { app: false })
-    run.takeSuite()
     const { diff } = await run.cycle(() => edit(run.featureDir, 'e2e/cart.spec.ts', "'/cart'", "'/basket'"))
+    run.takeSuite()
     fs.rmSync(run.journalPath)
     fs.writeFileSync(cyclePatchPath(run.runDir, 4), diff)
-    run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [
-      { at: '2025-12-31T23:59:00.000Z', by: 'human', files: ['e2e/cart.spec.ts'] },
-    ] } })
-    expect((await build(run, 4))!).toMatchObject({ healMode: 'test', source: 'patch', files: [{ executed: { kind: 'inert' } }] })
-    run.updateManifest({ startedAt: 'not a time' })
-    expect((await build(run, 4))!.files[0].executed).toEqual({ kind: 'adopted', by: 'human', at: '2025-12-31T23:59:00.000Z' })
+    const adopt = (at: string) => run.updateManifest({ specEdits: { checkedAt: 'x', pending: [], adopted: [{ at, by: 'human', files: ['e2e/cart.spec.ts'] }] } })
+    adopt('2026-01-01T00:00:01.000Z')
+    expect((await build(run, 4))!).toMatchObject({ healMode: 'test', source: 'patch', files: [{ executed: { kind: 'adopted', by: 'human', at: '2026-01-01T00:00:01.000Z' } }] })
+    adopt('2025-12-31T23:59:00.000Z')
+    expect((await build(run, 4))!.files[0].executed).toEqual({ kind: 'inert' })
+    // With no blob id to check the copy against, a mid-cycle adoption is not counted.
+    fs.writeFileSync(cyclePatchPath(run.runDir, 4), diff.replace(/^index .*\n/m, ''))
+    adopt('2026-01-01T00:00:01.000Z')
+    expect((await build(run, 4))!.files[0].executed).toEqual({ kind: 'inert' })
+    // Nor when the copy lacks the file the id names.
+    fs.writeFileSync(cyclePatchPath(run.runDir, 4), diff)
+    fs.rmSync(path.join(run.suiteDir, 'e2e/cart.spec.ts'))
+    expect((await build(run, 4))!.files[0].executed).toEqual({ kind: 'inert' })
   })
 
   it('reads the journal\'s inline diff when no patch was kept, and says it was cut', async () => {
@@ -132,6 +154,25 @@ describe('buildRunCycleReview', () => {
     const missing = await build(run, 1)
     expect(missing).not.toBe(first)
     expect(await build(run, 1)).toBe(missing)
+  })
+
+  it('reads again when a tree comes or goes, or the copy changes under an earlier name', async () => {
+    const run = cycleRun(tempDir())
+    run.takeSuite()
+    await run.cycle(() => {
+      git(run.workspace, 'mv', 'features/demo/helpers/util.ts', 'features/demo/helpers/money.ts')
+      edit(run.appDir, 'src/server.ts', 'a + b', 'a + b + 0')
+    })
+    const first = await build(run, 1)
+    fs.renameSync(run.appDir, `${run.appDir}-moved`)
+    const moved = await build(run, 1)
+    expect(moved).not.toBe(first)
+    expect(moved!.files.find((file) => file.path === 'src/server.ts')!.recovery).toEqual({ kind: 'patch-only', reason: 'repo-missing' })
+    const second = await build(run, 1)
+    expect(second).toBe(moved)
+    // The renamed file is read from the copy under its old name.
+    fs.utimesSync(path.join(run.suiteDir, 'helpers/util.ts'), new Date(), new Date(Date.now() + 60_000))
+    expect(await build(run, 1)).not.toBe(second)
   })
 
   it('keeps a bounded number of reviews in memory, dropping the oldest', async () => {

@@ -6,13 +6,14 @@ import { isSpecFile } from '../../../../../../../shared/spec-files'
 import type { ReviewSource } from '../../../../../../../shared/test-review'
 import type { CycleFileExecution, CycleFileRole, CycleReviewFile, RunCycleReview } from '../../../../../../../shared/test-view/cycle-review'
 import { findFeature } from '../../../../shared/feature-loader'
+import { gitBlobSha1, isZeroBlob, matchesBlob } from '../../../../shared/git-blob'
 import { confinedFile } from '../../../../shared/path-containment'
 import { reviewSourceFor } from '../../../../shared/readable-tests/review-source'
 import { diffSourceText } from '../dirty-specs/text-diff'
 import { detectHealMode } from '../runtime/auto-heal'
 import { readManifest } from '../runtime/manifest'
 import { runDirFor, runManifestPath } from '../runtime/run-paths'
-import { cycleDiffs } from './cycle-sources'
+import { cycleDiffs, type CycleDiff } from './cycle-sources'
 import { resolveCycleTree, suiteRelativePath, type CycleTree } from './cycle-tree'
 import { recoverCycleFile } from './recover-cycle-file'
 
@@ -51,8 +52,12 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
     return { file, tree, rel: tree.kind === 'feature-dir' ? suiteRelativePath(tree, file.path) : null }
   }))
 
-  const key = memoKey(runDir, iteration, [...diffs.values()].map((diff) => diff.text), manifest, feature,
-    placed.map(({ rel }) => suiteStamp(suiteDir, rel)))
+  // A replay reads the suite copy under every name the file had across the
+  // cycles, so each of those is an input; so is each resolved tree, which
+  // changes when a checkout comes back or the suite config moves it.
+  const names = [...new Set([...diffs.values()].flatMap((diff) => diff.files.flatMap((file) => [file.path, file.previousPath ?? file.path])))]
+  const stamps = placed.flatMap(({ tree }) => tree.kind === 'feature-dir' ? names.map((name) => suiteStamp(suiteDir, suiteRelativePath(tree, name))) : [])
+  const key = memoKey(runDir, iteration, [...diffs.values()].map((diff) => diff.text), manifest, feature, placed.map(({ tree }) => tree), stamps)
   const cached = memo.get(key)
   if (cached) return cached
 
@@ -67,7 +72,7 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
         before: side(before), after: side(after),
         patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
       } } : {}),
-      ...(rel !== null && manifest ? { executed: execution(manifest, rel, current.previousTimestamp ?? manifest.startedAt) } : {}),
+      ...(rel !== null && manifest ? { executed: execution(manifest, rel, file.blobs?.after, current) } : {}),
     }
   }))
   const review: RunCycleReview = {
@@ -87,17 +92,38 @@ function readableSide(rel: string | null, role: CycleFileRole, source: string, f
   return reviewSourceFor(rel, source, feature?.semanticRules, { withTests: role === 'spec' })
 }
 
-/** A suite edit ran only when the run executed the live suite, or adopted the
- * file into its suite copy once the cycle could have edited it. A cycle's
- * journal entry is written when the cycle ends, and a person may adopt the
- * edit before that, so the window opens when the cycle before it ended. */
-function execution(manifest: RunManifest, rel: string, since: string): CycleFileExecution {
+/** A suite edit ran only when the run executed the live suite, or copied the
+ * edited file into its suite copy and reran. An adoption after the cycle's
+ * journal entry copied the live file with the edit in it; the test-heal rule
+ * adopts just after that entry. A person may adopt before the entry is
+ * written, while the cycle is still open: that adoption counts only when it
+ * is the copy's latest re-take, made within the cycle, and the copy still
+ * holds this cycle's after version. */
+function execution(manifest: RunManifest, rel: string, afterBlob: string | undefined, cycle: CycleDiff): CycleFileExecution {
   if (manifest.suiteSnapshot?.kind !== 'taken') return { kind: 'live' }
-  // `!(at < start)` keeps every adoption when a time does not parse.
-  const start = Date.parse(since)
-  const adoption = [...(manifest.specEdits?.adopted ?? [])].reverse()
-    .find((entry) => entry.files.includes(rel) && !(Date.parse(entry.at) < start))
-  return adoption ? { kind: 'adopted', by: adoption.by, at: adoption.at } : { kind: 'inert' }
+  const adoptions = manifest.specEdits?.adopted ?? []
+  const adopted = (entry: (typeof adoptions)[number]): CycleFileExecution => ({ kind: 'adopted', by: entry.by, at: entry.at })
+  const ended = cycle.timestamp ? Date.parse(cycle.timestamp) : Number.NaN
+  const later = [...adoptions].reverse().find((entry) => entry.files.includes(rel) && Date.parse(entry.at) >= ended)
+  if (later) return adopted(later)
+  const latest = adoptions.at(-1)
+  const opened = Date.parse(cycle.previousTimestamp ?? manifest.startedAt)
+  if (latest?.files.includes(rel) && Date.parse(latest.at) >= opened && suiteHolds(manifest.suiteSnapshot.dir, rel, afterBlob)) return adopted(latest)
+  return { kind: 'inert' }
+}
+
+/** Whether the suite copy's file is the version a blob id names; the zero id
+ * names an absent file. */
+function suiteHolds(suiteDir: string, rel: string, sha: string | undefined): boolean {
+  if (!sha) return false
+  try {
+    const file = confinedFile(suiteDir, rel)
+    if (isZeroBlob(sha)) return !fs.existsSync(file)
+    return matchesBlob(gitBlobSha1(fs.readFileSync(file)), sha)
+  } catch {
+    // Absent from the copy, or outside it: the copy does not hold this version.
+    return false
+  }
 }
 
 /** When the suite copy's file last changed, so an edit to the copy is a new
@@ -112,9 +138,9 @@ function suiteStamp(suiteDir: string | null, rel: string | null): number | null 
   }
 }
 
-function memoKey(runDir: string, iteration: number, diffs: string[], manifest: RunManifest | null, feature: FeatureConfig | undefined, stamps: Array<number | null>): string {
+function memoKey(runDir: string, iteration: number, diffs: string[], manifest: RunManifest | null, feature: FeatureConfig | undefined, trees: CycleTree[], stamps: Array<number | null>): string {
   return createHash('sha1').update(JSON.stringify([
-    runDir, iteration, diffs, stamps, feature?.semanticRules ?? null,
+    runDir, iteration, diffs, trees, stamps, feature?.semanticRules ?? null,
     manifest && [manifest.startedAt, manifest.featureDir, manifest.repoPaths, manifest.worktrees, manifest.suiteSnapshot, manifest.specEdits?.adopted],
   ])).digest('hex')
 }

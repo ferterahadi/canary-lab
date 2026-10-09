@@ -158,6 +158,9 @@ export async function recoverCycleFile({ file, iteration, tree, diffs, suiteDir 
       for (const side of ['before', 'after'] as const) {
         const sha = file.blobs?.[side]
         if ((side === 'before' ? before : after) !== undefined || !sha || isZeroBlob(sha)) continue
+        // The repository is found by git from the recorded directory, so it
+        // may be a parent the run never named; a wrong blob still has to
+        // match this side's id, and `fill` holds the other side to its own.
         const text = await readGitBlob(gitDir, sha)
         if (text === null || !accepts(text, side)) continue
         if (side === 'before') before = text
