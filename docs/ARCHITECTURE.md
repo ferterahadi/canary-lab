@@ -737,6 +737,14 @@ review and Results & Fixes → Code changes — one table, one scroller, rows
 paired across the two sides from `shared/test-view/render-model.ts`, sharing
 `ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization) and the
 `TestLanguageSwitch` in its header with the ordinary test cards.
+The evaluation report cannot mount React, so it renders the same model as HTML
+strings: `buildTestReviewPacket` attaches each case's `ExtractedTest` (read from
+the suite copy the run executed, with the suite's semantic rules), the English
+drawer numbers the story with the shared `story-source-map` labels and
+`shared/readable-tests/story-presentation.ts` keywords, and the code drawer lays
+out `buildTestViewRows` with Shiki tokens a line at a time. Step numbers and
+source lines therefore match the Tests column; a test the extractor cannot read
+falls back to the body-only translation.
 Code changes reads `GET /api/runs/:runId/cycle-reviews/:iteration`. The server
 takes the cycle's diff from `diffs/iteration-<n>.patch`, or from the journal
 entry's inline block on runs recorded before every cycle was persisted (`source`,

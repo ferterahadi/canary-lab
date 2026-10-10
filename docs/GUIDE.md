@@ -86,6 +86,9 @@ Export a terminal run from its **Overview** tab. The archive contains
 `evaluation.html` plus captured media, with each declared test's flow, source,
 helpers, evidence, checks, and actual status. Failed, aborted, skipped, and
 never-run cases keep those states; export never rounds them into passes.
+Each test's English explanation and test code are numbered exactly as the
+Tests column numbers them, so a step called 02.1 in the app is 02.1 in the
+report too.
 
 When the suite has a PRD summary, the report separates two questions:
 
