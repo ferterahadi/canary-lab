@@ -15,6 +15,7 @@ import { sourceKey, specFileOf } from './test-review/ast'
 import { NOT_RUN_STATUS } from './test-review/types'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../shared/run-detail'
 import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { summaryEntryName } from '../../../../../../shared/test-names'
 
 const tempDir = trackTempDirs('cl-review-')
 
@@ -536,6 +537,98 @@ describe('a test that moved lines between heal cycles', () => {
   })
 })
 
+
+// A test declared in a loop keeps its template title in source (`for
+// ${operation}`) while the run records each expanded title. When a heal edit
+// moves the loop, the recorded line misses and only the template can find it.
+describe('a loop-declared test whose recorded line is stale', () => {
+  const titles = ['a read stays scoped for GET /items', 'a read stays scoped for GET /items/:id']
+  let spec: string
+
+  function loopDetail(): RunDetail {
+    // The roster was taken at line 6; the heal edit pushed the `test(` call to 8.
+    const tests = titles.map((title, index) => ({ id: `id-${index}`, name: summaryEntryName(title), title, location: `${spec}:6` }))
+    return {
+      runId: 'run-loop',
+      manifest: {
+        runId: 'run-loop',
+        feature: 'scoped-reads',
+        featureDir: tmpDir,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        endedAt: '2026-01-01T00:00:09.000Z',
+        status: 'passed',
+        healCycles: 1,
+        services: [],
+      },
+      summary: {
+        complete: true,
+        total: 2,
+        passed: 2,
+        passedNames: tests.map((test) => test.name),
+        passedIds: tests.map((test) => test.id),
+        failed: [],
+        knownTests: tests,
+      },
+      playbackEvents: tests.map((test, index) => ({
+        type: 'test-end', time: `2026-01-01T00:00:0${index + 1}.000Z`, test, status: 'passed', passed: true, durationMs: 5, retry: 0,
+      })),
+    } as RunDetail
+  }
+
+  function writeSpec(extra: string[] = []): void {
+    fs.mkdirSync(path.dirname(spec), { recursive: true })
+    fs.writeFileSync(spec, [
+      "import { test, expect } from '@playwright/test'",
+      '',
+      "const OPERATIONS = ['GET /items', 'GET /items/:id', 'POST /items']",
+      '',
+      "for (const operation of OPERATIONS.filter((o) => o.startsWith('GET '))) {",
+      '  // Two lines a heal cycle added',
+      '  // after the roster was recorded.',
+      '  test(`a read stays scoped for ${operation}`, async () => {',
+      "    expect(operation).toContain('GET')",
+      '  })',
+      '}',
+      ...extra,
+      '',
+    ].join('\n'))
+  }
+
+  beforeEach(() => {
+    spec = path.join(tmpDir, 'e2e', 'scoped-reads.spec.ts')
+  })
+
+  it('finds the source by matching the template against each expanded title', () => {
+    writeSpec()
+
+    const packet = buildTestReviewPacket(loopDetail())
+
+    expect(packet.tests.map((test) => [test.title, test.status, test.testBody.includes("expect(operation).toContain('GET')")])).toEqual([
+      [titles[0], 'passed', true],
+      [titles[1], 'passed', true],
+    ])
+    expect(packet.tests[0]?.extracted?.test.line).toBe(8)
+  })
+
+  it('leaves the source unavailable when a second template could expand to the same title', () => {
+    writeSpec([
+      "const SCOPE = 'scoped'",
+      'for (const operation of OPERATIONS) {',
+      '  test(`a read stays ${SCOPE} for ${operation}`, async () => {',
+      '    expect(SCOPE).toBe(SCOPE)',
+      '  })',
+      '}',
+    ])
+
+    const packet = buildTestReviewPacket(loopDetail())
+
+    // Never dropped, never merged: both cases stay, just without a guessed body.
+    expect(packet.tests.map((test) => [test.title, test.status, test.testBody])).toEqual([
+      [titles[0], 'passed', ''],
+      [titles[1], 'passed', ''],
+    ])
+  })
+})
 
 describe('column-qualified source association', () => {
   it.each([[':2', ':2:1'], [':2:1', ':2'], [':2:1', ':2:5']])(

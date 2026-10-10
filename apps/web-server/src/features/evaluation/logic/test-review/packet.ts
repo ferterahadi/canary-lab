@@ -1,6 +1,7 @@
 import { reconcilePlaybackCases, latestPlaybackAttempt, type PlaybackIdentity } from '../../../../../../../shared/playback-identity'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
+import { escapeRegExp } from '../../../runs/logic/runtime/rerun-targets'
 import { missingAssertionReason, unknownAssertion } from './assertions'
 import { sourceKey, specFileOf } from './ast'
 import { loadSourceTests } from './source-analysis'
@@ -115,14 +116,27 @@ export function declaredRoster(detail: RunDetail, attempts: PlaybackAttempt[], s
  *  the file the attempt ran from. */
 function sourceDeclarations(test: { name: string; title: string }, file: string, sourceTests: Map<string, SourceTest>): SourceTest[] {
   return [...sourceTests.values()].filter((source) => (
-    source.file === file && (source.title === test.title || summaryEntryName(source.title) === test.name)
+    source.file === file && (declaresTitle(source.title, test.title) || summaryEntryName(source.title) === test.name)
   ))
+}
+
+/** A `${…}` slot in a display title, allowing one level of nested braces. */
+const TEMPLATE_SLOT = /\$\{(?:[^{}]|\{[^{}]*\})*\}/g
+
+/** Whether a declaration's display title can expand to the reported one. A
+ *  test declared in a loop keeps its template text (`for ${operation}`) while
+ *  Playwright reports the expanded title, so each slot matches any text. */
+function declaresTitle(display: string, title: string): boolean {
+  if (display === title) return true
+  const literals = display.split(TEMPLATE_SLOT)
+  return literals.length > 1 && new RegExp(`^${literals.map(escapeRegExp).join('[\\s\\S]*')}$`).test(title)
 }
 
 /** The source body for a case. The recorded line is a hint, not an identity:
  *  a heal edit shifts lines, and a targeted rerun never re-lists the tests it
  *  did not run, so the exact line misses for every test that only ran before the
- *  edit. Fall back to the one test with this title in the same file. */
+ *  edit. Fall back to the one test in the same file whose title — or, for a
+ *  test declared in a loop, whose template — matches; with several, none. */
 function sourceFor(entry: RosterEntry & { location: string }, sourceTests: Map<string, SourceTest>): SourceTest | undefined {
   const exact = sourceTests.get(sourceKey(entry.location))
   if (exact) return exact
