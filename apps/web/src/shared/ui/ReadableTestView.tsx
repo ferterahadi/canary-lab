@@ -1,9 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import type {
   ReadableSource,
-  ReadableStoryFlowKind,
   ReadableStoryItem,
-  ReadableStoryRole,
   ReadableStorySpan,
   ReadableTest,
 } from '@shared/readable-tests/types'
@@ -11,6 +9,7 @@ import type { TestExecutionHighlightKind } from '@/features/runs/utils/test-step
 import { useTheme } from '../lib/theme'
 import { codeThemeFor, getCodeHighlighter } from './code-highlighter'
 import { storyLocalSequenceLabel, storySequenceLabel } from '@shared/readable-tests/story-source-map'
+import { storyDisplaySpans, storyDisplayText, storyKeyword, storyKeywordTone, type StoryTone } from '@shared/readable-tests/story-presentation'
 
 export interface ReadableSourceSelection {
   id: string
@@ -252,71 +251,11 @@ function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
   return kind ? STORY_SPAN_COLORS[kind] : undefined
 }
 
-function roleColor(role: ReadableStoryRole): string {
-  if (role === 'note') return 'var(--code-comment)'
-  if (role === 'setup') return 'var(--code-cyan)'
-  if (role === 'action' || role === 'output' || role === 'test') return 'var(--code-keyword)'
-  return 'var(--semantic-attention)'
-}
-
-function storyKeywordColor(step: ReadableStoryItem): string {
-  if (step.kind !== 'flow') return roleColor(step.role)
-  if (step.flowKind === 'catch') return 'var(--semantic-attention)'
-  return step.role === 'setup' ? 'var(--code-cyan)' : 'var(--code-keyword)'
-}
-
-function storyKeyword(step: ReadableStoryItem): string {
-  if (step.kind !== 'flow') return roleLabel(step.role)
-  const keywords: Record<ReadableStoryFlowKind, string> = {
-    scope: roleLabel(step.role),
-    condition: 'IF',
-    then: 'THEN',
-    otherwise: 'ELSE',
-    switch: 'SWITCH',
-    case: 'WHEN',
-    loop: 'REPEAT',
-    retry: 'RETRY',
-    try: 'TRY',
-    catch: 'ON ERROR',
-    finally: 'ALWAYS',
-  }
-  return keywords[step.flowKind]
-}
-
-function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'OUTPUT' | 'CHECK' | 'NOTE' {
-  if (role === 'note') return 'NOTE'
-  if (role === 'test') return 'TEST'
-  if (role === 'setup') return 'SETUP'
-  if (role === 'action') return 'ACTION'
-  if (role === 'output') return 'OUTPUT'
-  return 'CHECK'
-}
-
-function redundantStoryPrefix(step: ReadableStoryItem): string {
-  const keyword = storyKeyword(step)
-  if (keyword === 'TEST' && step.text.startsWith('Test: ')) return 'Test: '
-  if (keyword === 'CHECK' && step.text.startsWith('Check that ')) return 'Check that '
-  if (keyword === 'OUTPUT' && step.text.startsWith('Output ')) return 'Output '
-  return ''
-}
-
-function storyDisplayText(step: ReadableStoryItem): string {
-  return step.text.slice(redundantStoryPrefix(step).length)
-}
-
-function storyDisplaySpans(step: ReadableStoryItem): ReadableStorySpan[] {
-  let remaining = redundantStoryPrefix(step).length
-  if (remaining === 0) return step.spans
-  const spans: ReadableStorySpan[] = []
-  for (const span of step.spans) {
-    if (remaining >= span.text.length) {
-      remaining -= span.text.length
-      continue
-    }
-    spans.push(remaining > 0 ? { ...span, text: span.text.slice(remaining) } : span)
-    remaining = 0
-  }
-  return spans
+const TONE_COLORS: Record<StoryTone, string> = {
+  comment: 'var(--code-comment)',
+  cyan: 'var(--code-cyan)',
+  keyword: 'var(--code-keyword)',
+  attention: 'var(--semantic-attention)',
 }
 
 /** The Shiki theme's canvas colours, shared with Code mode. Until Shiki is
@@ -360,9 +299,9 @@ function sourceLabel(source: ReadableSource): string {
 
 /** The semantic row shared by test stories and source-aligned English diffs. */
 export function ReadableStoryText({ step, children }: { step: ReadableStoryItem; children?: ReactNode }) {
-  const noteColor = step.role === 'note' ? roleColor(step.role) : undefined
+  const noteColor = step.role === 'note' ? TONE_COLORS.comment : undefined
   return <>
-    <span data-testid={`readable-story-role-${step.id}`} style={{ color: storyKeywordColor(step), fontWeight: 600 }}>
+    <span data-testid={`readable-story-role-${step.id}`} style={{ color: TONE_COLORS[storyKeywordTone(step)], fontWeight: 600 }}>
       {storyKeyword(step)}
     </span>
     <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: noteColor }}>

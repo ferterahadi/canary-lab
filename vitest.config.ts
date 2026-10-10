@@ -153,6 +153,7 @@ export default defineConfig({
         // server report. Enumerated by file because `shared/readable-tests/`
         // also holds the translator's types and the ungated source-lines helper.
         'shared/readable-tests/story-source-map.ts',
+        'shared/readable-tests/story-presentation.ts',
         'shared/test-view/**/*.ts',
         'shared/robustness/**/*.ts',
         'shared/runtime/**/*.ts',
