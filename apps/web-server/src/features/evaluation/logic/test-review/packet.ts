@@ -5,6 +5,7 @@ import { missingAssertionReason, unknownAssertion } from './assertions'
 import { sourceKey, specFileOf } from './ast'
 import { loadSourceTests } from './source-analysis'
 import { summaryEntryName } from '../../../../../../../shared/test-names'
+import type { ReadableSemanticRuleConfig } from '../../../../../../../shared/readable-tests/types'
 import { NOT_RUN_STATUS, RosterEntry, RunVerdicts, SourceTest, TestReviewCase, TestReviewPacket, TestStatusCounts } from './types'
 
 /** The roster the report built before it enumerated declared tests: executed
@@ -20,10 +21,10 @@ export function legacyCaseOrder(detail: RunDetail): string[] {
   return out
 }
 
-export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
+export function buildTestReviewPacket(detail: RunDetail, semanticRules?: ReadableSemanticRuleConfig): TestReviewPacket {
   // Source comes from the copy the verdict executed while it exists (D9), not
   // the live dir an agent may have edited since — the report must show what ran.
-  const sourceTests = loadSourceTests(suiteDirForReading(detail.manifest))
+  const sourceTests = loadSourceTests(suiteDirForReading(detail.manifest), semanticRules)
   const verdicts = runVerdicts(detail)
   const tests = declaredRoster(detail, playbackTests(detail.playbackEvents ?? [], detail.playbackIdentity), sourceTests).map(({ entry, attempt }) => {
     // The last attempt's position is the freshest one the run saw; the declared
@@ -40,6 +41,7 @@ export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
       ...(location ? { location } : {}),
       ...(error ? { error } : {}),
       testBody: source?.bodySource ?? '',
+      ...(source?.extracted ? { extracted: source.extracted } : {}),
       helperCalls: source?.helperCalls ?? [],
       helperDefinitions: source?.helperDefinitions ?? [],
       externalImports: source?.externalImports ?? [],

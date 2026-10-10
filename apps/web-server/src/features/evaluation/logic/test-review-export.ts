@@ -24,7 +24,7 @@ export async function createAssertionHtml(detail: RunDetail, options: AssertionH
 }
 
 export async function createEvaluationHtml(detail: RunDetail, options: AssertionHtmlOptions = {}): Promise<string> {
-  const packet = buildTestReviewPacket(detail)
+  const packet = buildTestReviewPacket(detail, options.semanticRules)
   const rewrite = resolveRewrite(detail, packet, options)
   const flowcharts = createFlowcharts(packet, rewrite)
   return renderHtml(packet, options, rewrite, flowcharts)
@@ -35,7 +35,7 @@ export async function createAssertionExport(detail: RunDetail, options: Assertio
 }
 
 export async function createEvaluationExport(detail: RunDetail, options: AssertionHtmlOptions = {}): Promise<AssertionExport> {
-  const packet = buildTestReviewPacket(detail)
+  const packet = buildTestReviewPacket(detail, options.semanticRules)
   const rewrite = resolveRewrite(detail, packet, options)
   const flowcharts = createFlowcharts(packet, rewrite)
   return {

@@ -1,4 +1,7 @@
 import { playbackSourceNodes } from '../../../../shared/playback-source-declarations'
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+import { codeDisplayAttacher } from '../../../../shared/readable-tests/code-display'
+import type { ReadableSemanticRuleConfig } from '../../../../../../../shared/readable-tests/types'
 import { scanSpecFiles } from '../../../../../../../shared/spec-files'
 import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import fs from 'fs'
@@ -9,13 +12,18 @@ import { calledIdentifier, functionLikeBody, functionName, isAssertionCall, isPl
 import { cleanSnippet, dedupe } from './text'
 import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion } from './types'
 
-export function loadSourceTests(featureDir: string | undefined): Map<string, SourceTest> {
+/** Every declared test in the suite with its body, helpers and checks, plus
+ * the same extracted test the Tests column renders, so the report numbers its
+ * English and code rows exactly as the web does. */
+export function loadSourceTests(featureDir: string | undefined, semanticRules?: ReadableSemanticRuleConfig): Map<string, SourceTest> {
   const out = new Map<string, SourceTest>()
   if (!featureDir || !fs.existsSync(featureDir)) return out
+  const withCodeDisplay = codeDisplayAttacher()
   for (const file of scanSpecFiles(featureDir)) {
     const source = safeRead(file)
     if (source === null) continue
     const src = parseSource(file, source).sourceFile
+    const extracted = new Map(extractTestsFromSource(file, source, semanticRules).tests.map((test) => [test.line, test]))
     const imports = readRelativeImports(file, src)
     const externalImports = readExternalImports(src)
     const helpers = new Map<string, HelperDefinition>()
@@ -30,9 +38,11 @@ export function loadSourceTests(featureDir: string | undefined): Map<string, Sou
 
     for (const { node, title, body } of playbackSourceNodes(src)) {
       const review = reviewTestBody(body, src, helperFor)
-      out.set(`${file}:${lineFor(node, src)}`, {
+      const line = lineFor(node, src)
+      const test = extracted.get(line)
+      out.set(`${file}:${line}`, {
         file,
-        line: lineFor(node, src),
+        line,
         title,
         bodySource: formatCodeForDisplay(body.getText(src)),
         helperCalls: review.helperCalls,
@@ -42,6 +52,7 @@ export function loadSourceTests(featureDir: string | undefined): Map<string, Sou
           ...review.helperDefinitions.flatMap((helper) => flattenHelpers([helper]).flatMap((h) => h.externalImports)),
         ]),
         assertions: review.assertions,
+        ...(test ? { extracted: withCodeDisplay(test) } : {}),
       })
     }
   }

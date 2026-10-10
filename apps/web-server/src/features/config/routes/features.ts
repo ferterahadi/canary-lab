@@ -2,7 +2,7 @@ import { readSpecSource } from '../../../../../../shared/spec-files'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
+import { codeDisplayAttacher } from '../../../shared/readable-tests/code-display'
 import { findFeature, listSpecFiles, loadFeatures, suiteAvailability } from '../../../shared/feature-loader'
 import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
 import { extractTestsFromSource } from '../../../shared/ast-extractor'
@@ -243,18 +243,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     if (availability.kind === 'config-missing' || availability.kind === 'config-invalid') return reply.code(422).send({ code: 'discovery-failed', error: availability.diagnostic })
     const feature = availability.feature
     const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
-    const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
-    const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
-      if (!test.bodySource) return test
-      const sourceStartLine = test.bodyLine ?? test.line
-      const key = `${sourceStartLine}\0${test.bodySource}`
-      let codeDisplay = codeDisplayCache.get(key)
-      if (!codeDisplay) {
-        codeDisplay = formatCodeForDisplayWithLineMap(test.bodySource, sourceStartLine)
-        codeDisplayCache.set(key, codeDisplay)
-      }
-      return { ...test, codeDisplay }
-    }
+    const withCodeDisplay = codeDisplayAttacher()
     const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
     // Playwright module discovery and source enrichment read the same suite
     // independently. Starting both before either finishes avoids stacking their

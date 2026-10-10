@@ -21,6 +21,15 @@ function writeTmpFeature(logsDir: string, featureName: string): string {
 }
 
 describe('buildEvaluationExportArchive — coverage attachment', () => {
+  it('still exports when the suite has left the workspace, with the default English wording', async () => {
+    const tmpDir = tempDir('canary-eval-archive-gone-')
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+    const featuresDir = writeTmpFeature(logsDir, 'Another Suite')
+    const built = await buildEvaluationExportArchive(detail(), { logsDir, featuresDir })
+    expect(zipEntries(built.zip).find((e) => e.filename === 'evaluation.html')).toBeTruthy()
+  })
+
   it('skips coverage when featuresDir is absent', async () => {
     const tmpDir = tempDir('canary-eval-archive-nocov-')
     const logsDir = path.join(tmpDir, 'logs')

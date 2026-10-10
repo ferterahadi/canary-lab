@@ -1,6 +1,8 @@
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
+import type { ExtractedTest } from '../../../../../../../shared/extracted-test'
+import type { ReadableSemanticRuleConfig } from '../../../../../../../shared/readable-tests/types'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
 
@@ -21,6 +23,9 @@ export interface TestReviewCase {
   status: string
   durationMs?: number
   testBody: string
+  /** The test as the Tests column reads it, with its Code-mode listing. The
+   *  report renders its English and code rows from it; absent → the body alone. */
+  extracted?: ExtractedTest
   helperCalls: string[]
   helperDefinitions: HelperDefinition[]
   externalImports: string[]
@@ -60,6 +65,9 @@ export interface AssertionHtmlOptions {
    *  report leads with per-requirement coverage + per-test STRENGTH; absent →
    *  falls back to the Playwright assertion-specificity grading. */
   coverage?: CoverageLedger
+  /** The suite's semantic rules, so the report's English reads like the Tests
+   *  column's; absent → the default wording. */
+  semanticRules?: ReadableSemanticRuleConfig
 }
 
 export interface EvaluationRewriteAgentOptions {
@@ -143,6 +151,8 @@ export interface SourceTest {
   helperDefinitions: HelperDefinition[]
   externalImports: string[]
   assertions: TestReviewAssertion[]
+  /** Absent when the extractor could not parse the file or match the test. */
+  extracted?: ExtractedTest
 }
 
 export interface ImportedHelper {
