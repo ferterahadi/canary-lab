@@ -68,6 +68,13 @@ export const CSS_BASE = `
   --flow-pass-fill: #e0efe5;     --flow-pass-line: #2f7d55;     --flow-pass-text: #14472e;
   --flow-fail-fill: #f9e3e0;     --flow-fail-line: #b04034;     --flow-fail-text: #6d1d16;
   --flow-detail-text: #5c5a52;
+
+  /* English-story grammar: the same families as shiki's one-light and
+     one-dark-pro in the code drawer, and as the web's --code-* tokens. They
+     mean grammar, never test status. */
+  --code-string: #50a14f;  --code-literal: #c18401;  --code-number: #986801;
+  --code-cyan: #0184bc;    --code-function: #4078f2; --code-keyword: #a626a4;
+  --code-comment: #a0a1a7; --code-attention: #dc2626;
 }
 
 :root[data-theme="dark"] { color-scheme: dark; }
@@ -106,6 +113,10 @@ export const CSS_BASE = `
     --flow-pass-fill: #14271c;     --flow-pass-line: #3f9c68;     --flow-pass-text: #a9e6c1;
     --flow-fail-fill: #2f1712;     --flow-fail-line: #c25748;     --flow-fail-text: #f5b8ae;
     --flow-detail-text: #a09c90;
+
+    --code-string: #98c379;  --code-literal: #e5c07b;  --code-number: #d19a66;
+    --code-cyan: #56b6c2;    --code-function: #61afef; --code-keyword: #c678dd;
+    --code-comment: #7f848e; --code-attention: #ff7b72;
   }
 }
 
@@ -138,6 +149,10 @@ export const CSS_BASE = `
   --flow-pass-fill: #14271c;     --flow-pass-line: #3f9c68;     --flow-pass-text: #a9e6c1;
   --flow-fail-fill: #2f1712;     --flow-fail-line: #c25748;     --flow-fail-text: #f5b8ae;
   --flow-detail-text: #a09c90;
+
+  --code-string: #98c379;  --code-literal: #e5c07b;  --code-number: #d19a66;
+  --code-cyan: #56b6c2;    --code-function: #61afef; --code-keyword: #c678dd;
+  --code-comment: #7f848e; --code-attention: #ff7b72;
 }
 
 /* One line per status; every dot, pill, chip, bar segment and matrix cell

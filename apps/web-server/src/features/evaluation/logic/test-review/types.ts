@@ -23,9 +23,10 @@ export interface TestReviewCase {
   status: string
   durationMs?: number
   testBody: string
-  /** The test as the Tests column reads it, with its Code-mode listing. The
-   *  report renders its English and code rows from it; absent → the body alone. */
-  extracted?: ExtractedTest
+  /** The test as the Tests column reads it, with its Code-mode listing, and
+   *  the spec file it was read from. The report renders its English and code
+   *  rows from it; absent → the body alone. */
+  extracted?: { test: ExtractedTest; file: string }
   helperCalls: string[]
   helperDefinitions: HelperDefinition[]
   externalImports: string[]

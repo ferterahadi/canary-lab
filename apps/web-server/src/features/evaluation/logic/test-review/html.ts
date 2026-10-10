@@ -6,7 +6,7 @@ import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../
 import { qualitySummaryForAudience } from './assertions'
 import { displayCaseTitle, specFileLabel } from './audience'
 import { createFlowcharts } from './flowchart'
-import { renderEnglishSource } from './english'
+import { renderEnglishSource, renderTestEnglish } from './english'
 import { statusBucket, testStatusCounts } from './packet'
 import { ASSERTION_HTML_SCRIPT } from './report-script'
 import { ASSERTION_HTML_CSS } from './report-styles'
@@ -95,7 +95,7 @@ export async function renderHtml(
           <div class="drawers">
             <details class="drawer english-details" open>
               <summary>English explanation</summary>
-              <div class="drawer-body">${test.testBody ? renderEnglishSource(test.location ?? 'evaluation.spec.ts', test.testBody) : '<p class="muted">Source unavailable.</p>'}</div>
+              <div class="drawer-body">${test.testBody ? renderCaseEnglish(test) : '<p class="muted">Source unavailable.</p>'}</div>
             </details>
             <details class="drawer test-code-details">
               <summary>Test code</summary>
@@ -388,6 +388,14 @@ export function renderFlowchartSection(flowchart: TestFlowchart, title: string):
       ${flowchart.svg}
     </figure>
   </section>`
+}
+
+/** The Tests column's English when the extractor read this test; the body
+ * translated on its own otherwise. */
+function renderCaseEnglish(test: TestReviewCase): string {
+  return test.extracted
+    ? renderTestEnglish(test.extracted.test, test.extracted.file)
+    : renderEnglishSource(test.location ?? 'evaluation.spec.ts', test.testBody)
 }
 
 export async function renderTestCode(source: string): Promise<string> {

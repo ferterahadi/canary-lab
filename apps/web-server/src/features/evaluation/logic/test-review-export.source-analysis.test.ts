@@ -497,7 +497,7 @@ test('loads the cart', async ({ page }) => {
     const spec = writeSpec()
     const featureDir = path.dirname(path.dirname(spec))
     const withSource = buildTestReviewPacket(detail({ featureDir, eventLocation: `${spec}:${lineOf(specSource, "test('loads the cart'")}`, title: 'loads the cart' }))
-    expect(withSource.tests[0].extracted?.name).toBe('loads the cart')
+    expect(withSource.tests[0].extracted).toMatchObject({ test: { name: 'loads the cart' }, file: spec })
     const without = buildTestReviewPacket(detail({ featureDir, title: 'loads the cart' }))
     expect(without.tests[0]).not.toHaveProperty('extracted')
   })

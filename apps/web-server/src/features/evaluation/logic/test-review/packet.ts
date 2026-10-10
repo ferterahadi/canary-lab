@@ -41,7 +41,7 @@ export function buildTestReviewPacket(detail: RunDetail, semanticRules?: Readabl
       ...(location ? { location } : {}),
       ...(error ? { error } : {}),
       testBody: source?.bodySource ?? '',
-      ...(source?.extracted ? { extracted: source.extracted } : {}),
+      ...(source?.extracted ? { extracted: { test: source.extracted, file: source.file } } : {}),
       helperCalls: source?.helperCalls ?? [],
       helperDefinitions: source?.helperDefinitions ?? [],
       externalImports: source?.externalImports ?? [],
