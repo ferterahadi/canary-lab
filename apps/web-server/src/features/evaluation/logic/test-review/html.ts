@@ -1,6 +1,7 @@
 import { shortSourceLocation } from '../../../../../../../shared/lib/source-location'
 import path from 'path'
-import { codeToHtml } from 'shiki'
+import { codeToHtml, codeToTokens, stringifyTokenStyle } from 'shiki'
+import { buildTestViewRows } from '../../../../../../../shared/test-view/render-model'
 import { formatCodeForDisplay } from '../../../../../../../shared/code-display-format'
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../../shared/coverage/types'
 import { qualitySummaryForAudience } from './assertions'
@@ -99,7 +100,7 @@ export async function renderHtml(
             </details>
             <details class="drawer test-code-details">
               <summary>Test code</summary>
-              <div class="drawer-body">${test.testBody ? await renderTestCode(test.testBody) : '<p class="muted">Source unavailable.</p>'}</div>
+              <div class="drawer-body">${test.testBody ? await renderCaseCode(test) : '<p class="muted">Source unavailable.</p>'}</div>
             </details>
             <details class="drawer checks-details">
               <summary>Checks</summary>
@@ -453,20 +454,60 @@ export function rationaleForAudience(rationale: string): string {
   return rationale
 }
 
+// `defaultColor: false` makes shiki emit both palettes as --shiki-light /
+// --shiki-dark custom properties instead of baking one in, so the report's
+// theme switch recolors the code with it. Offline-safe: no runtime shiki.
+const SHIKI_OPTIONS = {
+  lang: 'typescript',
+  themes: { light: 'one-light', dark: 'one-dark-pro' },
+  defaultColor: false,
+} as const
+
 export async function highlightCode(source: string): Promise<string> {
   const formatted = formatCodeForDisplay(source)
   try {
-    // `defaultColor: false` makes shiki emit both palettes as --shiki-light /
-    // --shiki-dark custom properties instead of baking one in, so the report's
-    // theme switch recolors the code with it. Offline-safe: no runtime shiki.
-    return await codeToHtml(formatted, {
-      lang: 'typescript',
-      themes: { light: 'one-light', dark: 'one-dark-pro' },
-      defaultColor: false,
-    })
+    return await codeToHtml(formatted, SHIKI_OPTIONS)
   } catch {
     return `<pre class="fallback-code"><code>${escapeHtml(formatted)}</code></pre>`
   }
+}
+
+/** One highlighted HTML string per line of `code`, and the block's own colours;
+ * null when the highlighter is unavailable. Tokens come a line at a time, so
+ * line N of the result is line N of the code. */
+async function highlightLines(code: string): Promise<{ lines: string[]; rootStyle: string } | null> {
+  try {
+    const { tokens, rootStyle } = await codeToTokens(code, SHIKI_OPTIONS)
+    // With both themes and no default colour, every token carries its two
+    // colours as `htmlStyle` and the block its own as `rootStyle`.
+    const lines = tokens.map((line) => line.map((token) => `<span style="${escapeAttr(stringifyTokenStyle(token.htmlStyle!))}">${escapeHtml(token.content)}</span>`).join(''))
+    return { lines, rootStyle: String(rootStyle) }
+  } catch {
+    return null
+  }
+}
+
+/** A test's code on the Tests column's rows: the body without its braces, each
+ * row numbered by the English step that starts on it, blank where a step runs
+ * on. `data-code-line` keeps naming the row's line in the formatted body, the
+ * number the flowchart links by; `data-source-line` is the spec's own line. */
+async function renderCaseCode(test: TestReviewCase): Promise<string> {
+  if (!test.extracted) return renderTestCode(test.testBody)
+  const { test: extracted, file } = test.extracted
+  const rows = buildTestViewRows({ test: extracted, sourceFile: file })
+  if (!rows.length) return '<p class="muted">This body has no statements.</p>'
+  // The formatted body has the same lines as the listing the rows come from,
+  // plus the wrapper braces when the listing dropped them.
+  const offset = (test.testBody.split('\n').length - rows.length) / 2
+  const highlighted = await highlightLines(rows.map((row) => row.code).join('\n'))
+  const body = rows.map((row, index) => {
+    const step = row.story?.label ?? ''
+    const source = highlighted ? `<span class="line">${highlighted.lines[index]}</span>` : escapeHtml(row.code)
+    return `<span class="code-line" data-code-line="${row.index + offset}" data-source-line="${row.sourceLine}" data-row="${row.index}"${step ? ` data-step="${escapeAttr(step)}"` : ''}><span class="line-number">${escapeHtml(step)}</span><span class="line-source">${source || ' '}</span></span>`
+  }).join('')
+  return highlighted
+    ? `<pre class="shiki shiki-themes one-light one-dark-pro" style="${escapeAttr(highlighted.rootStyle)}" tabindex="0"><code>${body}</code></pre>`
+    : `<pre class="fallback-code"><code>${body}</code></pre>`
 }
 
 export function addCodeLineMarkers(html: string): string {
