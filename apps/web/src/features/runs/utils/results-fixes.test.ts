@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { buildRunEvidence, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
-import type { JournalSection, PlaywrightArtifactGroup, ServiceLogExcerpt } from '@shared/run-detail'
+import type { JournalSection, ServiceLogExcerpt } from '@shared/run-detail'
 import {
   evidenceKnownTests,
   stampedEvidenceLifecycleEvents,
-  evidencePlaybackEvents,
   stampedEvidencePlaybackEvents,
 } from '@shared/__fixtures__/run-evidence'
 import {
+  attemptLabel,
   attemptStatus,
   caseNumbers,
-  cycleOptions,
   excerptCaption,
   excerptGapCopy,
   focusedCaseKey,
   journalMarkdown,
   markerPosition,
   mediaGapCopy,
-  resolveCycleChoice,
+  missingMediaCopy,
+  recoveredNote,
+  resolveRunEntry,
+  runEntries,
   runWideReason,
-  selectedResult,
-  unshownLatestCopies,
-  verificationOutcome,
-  verificationSummary,
+  summaryKind,
+  type RunEntry,
 } from './results-fixes'
 
 const evidenceOf = (opts: { lifecycleUpTo?: number; dropEvents?: (time: string, id?: string) => boolean } = {}): RunEvidence => buildRunEvidence({
@@ -38,91 +38,197 @@ const section = (over: Partial<JournalSection>): JournalSection => ({
   iteration: 1, timestamp: null, feature: null, run: null, outcome: null, hypothesis: null, body: '', ...over,
 })
 
-describe('cycle selection', () => {
-  it('lists the latest cycle first with the runner outcome, then the initial execution', () => {
-    expect(cycleOptions(caseOf(evidenceOf(), 'discount'))).toEqual([
-      { value: 2, label: 'Repair cycle 2 — Passed (latest)' },
-      { value: 1, label: 'Repair cycle 1 — Failed' },
-      { value: 'initial', label: 'Initial execution — Failed' },
+const at = (over: Partial<EvidenceAttempt>): EvidenceAttempt => ({ attemptKey: 'a', caseKey: 'c', name: 'n', title: 't', steps: [], ...over })
+const caseWith = (attempts: EvidenceAttempt[], over: Partial<CaseEvidence> = {}): CaseEvidence => ({
+  caseKey: 'c', name: 'n', title: 't', declared: true, attempts, latest: attempts.at(-1), cycles: [], ...over,
+})
+const shape = (entries: RunEntry[]) => entries.map((e) => ({ number: e.number, title: e.title, subtitle: e.subtitle, status: e.status, label: e.label, cycle: e.cycle?.cycle }))
+// Execution 3 never reaches the discount test: either it is still running
+// (pending) or it finished without it (not rerun).
+const discountUnchecked = (pending: boolean) => caseOf(evidenceOf({
+  ...(pending ? { lifecycleUpTo: 6 } : {}),
+  dropEvents: (t, id) => (pending || id === 'discount') && t >= '2026-10-08T10:09:00.000Z',
+}), 'discount')
+
+describe('runEntries', () => {
+  it('lists every run newest first, each under the repair that came just before it', () => {
+    expect(shape(runEntries(caseOf(evidenceOf(), 'discount')))).toEqual([
+      { number: 3, title: 'Repair 2', subtitle: '', status: 'passed', label: undefined, cycle: 2 },
+      { number: 2, title: 'Repair 1', subtitle: '', status: 'failed', label: undefined, cycle: 1 },
+      { number: 1, title: 'Initial run', subtitle: '', status: 'failed', label: undefined, cycle: undefined },
     ])
   })
 
-  it('offers no selector for a case no repair addressed', () => {
-    expect(cycleOptions(caseOf(evidenceOf(), 'home-loads'))).toEqual([])
+  it('says a run the runner stopped mid-test was stopped, not running', () => {
+    const first = at({ attemptKey: 'a1', status: 'failed', passed: false, executionIndex: 1 })
+    const cut = at({ attemptKey: 'a2', executionIndex: 2, stopped: true })
+    const again = at({ attemptKey: 'a3', status: 'passed', passed: true, executionIndex: 3 })
+    const evidence = caseWith([first, cut, again], { cycles: [{ cycle: 1, input: first, verification: { kind: 'observed', attempt: cut } }] })
+    expect(shape(runEntries(evidence))).toEqual([
+      { number: 3, title: 'Run again', subtitle: '', status: 'passed', label: undefined, cycle: undefined },
+      { number: 2, title: 'Repair 1', subtitle: '', status: 'pending', label: 'stopped', cycle: 1 },
+      { number: 1, title: 'Initial run', subtitle: '', status: 'failed', label: undefined, cycle: undefined },
+    ])
   })
 
-  it('names a pending and a not-rerun cycle without inventing a result', () => {
-    const pending = caseOf(evidenceOf({ lifecycleUpTo: 6, dropEvents: (t) => t >= '2026-10-08T10:09:00.000Z' }), 'discount')
-    expect(cycleOptions(pending)[0].label).toBe('Repair cycle 2 — Verification pending (latest)')
-    const skipped = caseOf(evidenceOf({ dropEvents: (t, id) => id === 'discount' && t >= '2026-10-08T10:09:00.000Z' }), 'discount')
-    expect(cycleOptions(skipped)[0].label).toBe('Repair cycle 2 — Not rerun (latest)')
+  it('gives a runner retry its own entry, with no repair before it', () => {
+    expect(shape(runEntries(caseOf(evidenceOf(), 'inventory'))).map(({ title, subtitle }) => ({ title, subtitle }))).toEqual([
+      { title: 'Repair 1', subtitle: '' },
+      { title: 'Retry 1', subtitle: '' },
+      { title: 'Initial run', subtitle: '' },
+    ])
   })
 
-  it('follows the latest cycle unless an explicit choice the case still offers was made', () => {
-    const discount = caseOf(evidenceOf(), 'discount')
-    expect(resolveCycleChoice(discount, undefined)).toBe(2)
-    expect(resolveCycleChoice(discount, 1)).toBe(1)
-    expect(resolveCycleChoice(discount, 'initial')).toBe('initial')
-    // A stale routed cycle the case never had falls back to latest.
-    expect(resolveCycleChoice(discount, 7)).toBe(2)
-    expect(resolveCycleChoice(caseOf(evidenceOf(), 'home-loads'), undefined)).toBe('initial')
+  it('names a retry the runner made after a repair, and a rerun no repair preceded', () => {
+    const first = at({ attemptKey: 'a1', status: 'failed', passed: false, executionIndex: 1 })
+    const again = at({ attemptKey: 'a2', status: 'failed', passed: false, executionIndex: 2 })
+    const retried = at({ attemptKey: 'a3', status: 'passed', passed: true, executionIndex: 2, retry: 1 })
+    const evidence = caseWith([first, again, retried], { cycles: [{ cycle: 1, input: first, verification: { kind: 'observed', attempt: retried } }] })
+    expect(shape(runEntries(evidence)).map(({ title, subtitle }) => ({ title, subtitle }))).toEqual([
+      { title: 'Repair 1', subtitle: 'retry 1' },
+      { title: 'Run again', subtitle: '' },
+      { title: 'Initial run', subtitle: '' },
+    ])
+  })
+
+  it('names the execution only to tell apart runs that share a title', () => {
+    const first = at({ attemptKey: 'a1', status: 'failed', passed: false, executionIndex: 1 })
+    const second = at({ attemptKey: 'a2', status: 'failed', passed: false, executionIndex: 2 })
+    const third = at({ attemptKey: 'a3', status: 'failed', passed: false, executionIndex: 3, retry: 1 })
+    const fourth = at({ attemptKey: 'a4', status: 'passed', passed: true, executionIndex: 4 })
+    const evidence = caseWith([first, second, third, fourth], { cycles: [{ cycle: 1, input: second, verification: { kind: 'observed', attempt: third } }] })
+    expect(shape(runEntries(evidence)).map(({ title, subtitle }) => ({ title, subtitle }))).toEqual([
+      { title: 'Run again', subtitle: 'execution 4' },
+      { title: 'Repair 1', subtitle: 'retry 1' },
+      { title: 'Run again', subtitle: 'execution 2' },
+      { title: 'Initial run', subtitle: '' },
+    ])
+  })
+
+  it('keeps a repair the runner has not checked on this test as an entry with no run under it', () => {
+    expect(shape(runEntries(discountUnchecked(true)))[0]).toEqual({ number: 3, title: 'Repair 2', subtitle: 'waiting for the runner', status: 'pending', label: 'pending', cycle: 2 })
+    expect(shape(runEntries(discountUnchecked(false)))[0]).toMatchObject({ subtitle: 'not run again', label: 'not rerun' })
+    expect(runEntries(discountUnchecked(true))[0].attempt).toBeUndefined()
+  })
+
+  it('says whether a single run needed a repair, and stays quiet while it is still running', () => {
+    expect(shape(runEntries(caseOf(evidenceOf(), 'home-loads')))).toEqual([
+      { number: 1, title: 'Initial run', subtitle: 'no repair needed', status: 'passed', label: undefined, cycle: undefined },
+    ])
+    expect(runEntries(caseWith([at({ status: 'failed', passed: false, executionIndex: 1 })]))[0].subtitle).toBe('no repair ran')
+    expect(runEntries(caseWith([at({ executionIndex: 4 })]))[0].subtitle).toBe('')
+  })
+
+  it('words an attempt no execution brackets the same way', () => {
+    expect(runEntries(caseWith([at({ status: 'passed', passed: true })]))[0].subtitle).toBe('no repair needed')
+    expect(runEntries(caseWith([at({ status: 'skipped', passed: false })]))[0].subtitle).toBe('no repair ran')
+    expect(runEntries(caseWith([at({})]))[0].subtitle).toBe('')
+    // Its first recorded attempt was already a runner retry.
+    expect(runEntries(caseWith([at({ retry: 1, status: 'passed', passed: true })]))[0]).toMatchObject({ title: 'Initial run', subtitle: 'retry 1 · no repair needed' })
+    expect(runEntries(caseWith([at({ retry: 1, status: 'failed', passed: false })]))[0].subtitle).toBe('retry 1 · no repair ran')
+    expect(runEntries(caseWith([at({ status: 'failed', passed: false }), at({ attemptKey: 'b', status: 'passed', passed: true })]))[0].subtitle).toBe('')
+  })
+
+  it('shows a test that has not run as one not-run entry', () => {
+    expect(shape(runEntries(caseWith([])))).toEqual([{ number: 1, title: 'Not run', subtitle: 'not in this run yet', status: 'pending', label: 'not run', cycle: undefined }])
   })
 })
 
-describe('selectedResult', () => {
-  it('pairs a cycle’s failed input with the attempt the runner observed after it', () => {
-    const discount = caseOf(evidenceOf(), 'discount')
-    const second = selectedResult(discount, 2)
-    expect(second.cycle?.cycle).toBe(2)
-    expect(second.before).toMatchObject({ executionIndex: 2, passed: false })
-    expect(second.after).toMatchObject({ executionIndex: 3, passed: true })
-    expect(selectedResult(discount, 'initial')).toEqual({ before: discount.initial })
+describe('resolveRunEntry', () => {
+  const entries = runEntries(caseOf(evidenceOf(), 'discount'))
+
+  it('follows the latest run until the reader picks one', () => {
+    expect(resolveRunEntry(entries, {}).entry.number).toBe(3)
+    expect(resolveRunEntry(entries, { attempt: 2 })).toEqual({ entry: entries[1] })
   })
 
-  it('shows no after attempt while verification is pending', () => {
-    const pending = caseOf(evidenceOf({ lifecycleUpTo: 6, dropEvents: (t) => t >= '2026-10-08T10:09:00.000Z' }), 'discount')
-    expect(selectedResult(pending, 2).after).toBeUndefined()
+  it('reads an older link’s cycle as the run that followed that repair', () => {
+    expect(resolveRunEntry(entries, { cycle: 1 }).entry.number).toBe(2)
+    expect(resolveRunEntry(entries, { cycle: 'initial' }).entry.number).toBe(1)
+    // A pick wins over the link it replaced.
+    expect(resolveRunEntry(entries, { attempt: 3, cycle: 1 }).entry.number).toBe(3)
   })
 
-  it('shows an unrepaired case’s latest result, and nothing for a case that never ran', () => {
-    const home = caseOf(evidenceOf(), 'home-loads')
-    expect(selectedResult(home, 'initial')).toEqual({ before: home.latest })
-    const notRun: CaseEvidence = { caseKey: 'k', name: 'n', title: 't', declared: true, attempts: [], cycles: [] }
-    expect(selectedResult(notRun, 'initial')).toEqual({})
+  it('falls back to the latest run and says what was asked for', () => {
+    expect(resolveRunEntry(entries, { attempt: 9 })).toEqual({ entry: entries[0], stale: 'This test has no run 9; showing its latest run.' })
+    expect(resolveRunEntry(entries, { cycle: 7 })).toEqual({ entry: entries[0], stale: 'Repair 7 did not address this test; showing its latest run.' })
+  })
+})
+
+describe('summaryKind', () => {
+  it('leaves the Summary tab empty only when the run has nothing to say', () => {
+    const [afterRepair, , initial] = runEntries(caseOf(evidenceOf(), 'discount'))
+    expect(summaryKind(afterRepair)).toBe('sections')
+    expect(summaryKind(initial)).toBe('sections')
+    expect(summaryKind(runEntries(discountUnchecked(true))[0])).toBe('sections')
+    expect(summaryKind(runEntries(caseOf(evidenceOf(), 'home-loads'))[0])).toBe('passed-clean')
+    expect(summaryKind(runEntries(caseWith([]))[0])).toBe('not-run')
+    // A legacy attempt records no retry number at all: still a first-time pass.
+    expect(summaryKind(runEntries(caseWith([at({ status: 'passed', passed: true })]))[0])).toBe('passed-clean')
+  })
+
+  it('tells a retry’s pass and a first run still going apart from a rerun still going', () => {
+    const failed = at({ attemptKey: 'a1', status: 'failed', passed: false })
+    expect(summaryKind(runEntries(caseWith([failed, at({ attemptKey: 'a2', status: 'passed', passed: true, retry: 1 })]))[0])).toBe('passed-retry')
+    expect(summaryKind(runEntries(caseWith([at({})]))[0])).toBe('running-first')
+    expect(summaryKind(runEntries(caseWith([failed, at({ attemptKey: 'a2' })]))[0])).toBe('sections')
+  })
+})
+
+describe('recoveredNote', () => {
+  it('marks a case that failed first and now passes, naming the cycle that fixed it', () => {
+    expect(recoveredNote(caseOf(evidenceOf(), 'discount'))).toBe('Failed first · passed after repair 2')
+    expect(recoveredNote(caseOf(evidenceOf(), 'inventory'))).toBe('Failed first · passed after repair 1')
+  })
+
+  it('leaves a first-time pass and a still-failing case unmarked', () => {
+    expect(recoveredNote(caseOf(evidenceOf(), 'home-loads'))).toBeUndefined()
+    expect(recoveredNote(discountUnchecked(false))).toBeUndefined()
+  })
+
+  it('names a runner retry when no repair addressed the case', () => {
+    const latest = at({ attemptKey: 'b', status: 'passed', passed: true })
+    expect(recoveredNote(caseWith([at({ status: 'timedOut', passed: false }), latest]))).toBe('Failed first · passed on retry')
+  })
+
+  it('marks a skip or a rerun still going that hides an earlier failure', () => {
+    const failed = at({ status: 'failed', passed: false })
+    const cycle = { cycle: 2, input: failed, verification: { kind: 'pending' as const } }
+    expect(recoveredNote(caseWith([failed, at({ attemptKey: 'b', status: 'skipped', passed: false, executionIndex: 2 })]))).toBe('Failed first · skipped in execution 2')
+    expect(recoveredNote(caseWith([failed, at({ attemptKey: 'b', status: 'skipped', passed: false })]))).toBe('Failed first · skipped')
+    expect(recoveredNote(caseWith([failed, at({ attemptKey: 'b' })], { cycles: [cycle] }))).toBe('Failed first · running again after repair 2')
+    expect(recoveredNote(caseWith([failed, at({ attemptKey: 'b' })]))).toBe('Failed first · running again')
+    expect(recoveredNote(caseWith([at({ attemptKey: 'b', status: 'skipped', passed: false })]))).toBeUndefined()
   })
 })
 
 describe('runner wording', () => {
-  const attempt = (over: Partial<EvidenceAttempt>): EvidenceAttempt => ({ attemptKey: 'a', caseKey: 'c', name: 'n', title: 't', steps: [], ...over })
-
   it('reads a status from the runner, never from absence', () => {
     expect(attemptStatus(undefined)).toBe('pending')
-    expect(attemptStatus(attempt({}))).toBe('testing')
-    expect(attemptStatus(attempt({ status: 'passed', passed: true }))).toBe('passed')
+    expect(attemptStatus(at({}))).toBe('testing')
+    expect(attemptStatus(at({ status: 'passed', passed: true }))).toBe('passed')
+    expect(attemptStatus(at({ stopped: true }))).toBe('pending')
   })
 
-  it('summarises every verification outcome', () => {
-    const latest = attempt({ status: 'failed', passed: false, executionIndex: 2 })
-    expect(verificationSummary({ kind: 'observed', attempt: attempt({ status: 'passed', passed: true, executionIndex: 3 }) }, latest))
-      .toBe('Passed in execution 3 — the assertion held after this repair.')
-    expect(verificationSummary({ kind: 'observed', attempt: attempt({ status: 'failed', passed: false, executionIndex: 2 }) }, latest))
-      .toBe('Failed in execution 2 — the assertion still did not hold after this repair.')
-    expect(verificationSummary({ kind: 'observed', attempt: attempt({ status: 'timedOut', passed: false }) }, latest))
-      .toBe('Timeout — the assertion still did not hold after this repair.')
-    expect(verificationSummary({ kind: 'observed', attempt: attempt({ executionIndex: 3 }) }, latest)).toBe('Running in execution 3.')
-    expect(verificationSummary({ kind: 'not-rerun', execution: 3 }, latest))
-      .toBe('Execution 3 ran after this repair without this test, so nothing re-observed it. The latest recorded result is still failed from execution 2.')
-    expect(verificationSummary({ kind: 'pending', execution: 3 }, latest)).toBe('Execution 3 is running and has not reached this test yet.')
-    expect(verificationSummary({ kind: 'pending' }, attempt({ status: 'failed', passed: false })))
-      .toBe('No execution has run since this repair. The latest recorded result is still failed.')
-    expect(verificationOutcome({ kind: 'observed', attempt: attempt({ status: 'skipped' }) })).toBe('Skipped')
+  it('labels a badge only where the status word would mislead', () => {
+    expect(attemptLabel(undefined)).toBe('not run')
+    expect(attemptLabel(at({ stopped: true }))).toBe('stopped')
+    expect(attemptLabel(at({ status: 'passed', passed: true }))).toBeUndefined()
   })
 
   it('says why an attempt has no media', () => {
-    expect(mediaGapCopy({ kind: 'none', reason: 'pending' })).toBe('Media is saved when this execution finishes.')
-    expect(mediaGapCopy({ kind: 'none', reason: 'not-retained' })).toBe('No screenshot, video or trace was retained for this execution.')
-    expect(mediaGapCopy({ kind: 'none', reason: 'superseded' })).toBe('Not retained: this run kept one copy per test, and a later attempt replaced it.')
-    expect(mediaGapCopy({ kind: 'none', reason: 'ambiguous' })).toBe('Not shown: another test with the same name could own the retained copy.')
+    expect(mediaGapCopy('not-retained')).toBe('No screenshot, video or trace was retained for this execution.')
+    expect(mediaGapCopy('superseded')).toBe('Not retained: this run kept one copy per test, and a later attempt replaced it.')
+    expect(mediaGapCopy('ambiguous')).toBe('Not shown: another test with the same name could own the retained copy.')
+  })
+
+  it('explains a missing screenshot or video in the terms of the suite’s policy', () => {
+    expect(missingMediaCopy('screenshot', 'off', true)).toBe('Screenshots were off for this run, so Playwright kept none. Turn them on in Artifact settings to record the next run.')
+    expect(missingMediaCopy('video', 'off', false)).toBe('Video recording was off for this run, so Playwright kept none. Turn it on in Artifact settings to record the next run.')
+    expect(missingMediaCopy('video', 'on-first-retry', false)).toBe('Video is recorded only when Playwright retries a test, and this run was not a retry.')
+    expect(missingMediaCopy('screenshot', 'only-on-failure', true)).toBe('Screenshots are kept only when a test fails, and this run passed.')
+    expect(missingMediaCopy('screenshot', 'on', true)).toBe('Playwright kept no screenshot for this run.')
+    expect(missingMediaCopy('video', 'retain-on-failure', false)).toBe('Playwright kept no video for this run.')
   })
 })
 
@@ -156,7 +262,7 @@ describe('journal presentation', () => {
   })
 
   it('says why an entry is run-wide in the entry’s own terms', () => {
-    expect(runWideReason(section({ failingTests: ['a', 'b'] }), 1)).toBe('This cycle entry covers 2 tests.')
+    expect(runWideReason(section({ failingTests: ['a', 'b'] }), 1)).toBe("This repair's entry covers 2 tests.")
     expect(runWideReason(section({ failingTests: ['a'] }), 2)).toBe('Another test shares this name, so the entry cannot single this one out.')
     expect(runWideReason(section({}), 1)).toBe('The entry does not name the tests it addressed.')
     expect(runWideReason(section({ failingTests: ['other'] }), 1)).toBe('The entry names a different test as its input.')
@@ -211,24 +317,5 @@ describe('service log excerpts', () => {
     expect(excerptGapCopy([excerpt({ missing: 'not-retained' }), excerpt({ service: 'web', missing: 'no-marker' })], 2))
       .toBe("No service printed this test's markers in execution 2.")
     expect(excerptGapCopy([], 3)).toBe("No service printed this test's markers in execution 3.")
-  })
-})
-
-describe('unshownLatestCopies', () => {
-  const group = (testName: string, n = 1): PlaywrightArtifactGroup => ({
-    testName,
-    artifacts: Array.from({ length: n }, (_, i) => ({ name: `${testName}-${i}.png`, kind: 'screenshot' as const, path: `${testName}-${i}.png`, url: `/a/${testName}-${i}.png`, sizeBytes: 1, mtimeMs: 0 })),
-  })
-  const groups = [group('test-case-applies-the-discount'), group('test-case-loads-the-page'), group('test-case-reserves-stock', 0)]
-
-  it('keeps the copies an unstamped run’s stories cannot show — a name two tests share', () => {
-    const legacy = buildRunEvidence({ events: evidencePlaybackEvents, known: evidenceKnownTests })
-    expect(unshownLatestCopies(legacy, { playwrightArtifacts: groups }).map((g) => g.testName)).toEqual(['test-case-loads-the-page'])
-  })
-
-  it('keeps every copy of a stamped run, where stories show retained attempt copies instead', () => {
-    expect(unshownLatestCopies(evidenceOf(), { playwrightArtifacts: groups }).map((g) => g.testName))
-      .toEqual(['test-case-applies-the-discount', 'test-case-loads-the-page'])
-    expect(unshownLatestCopies(evidenceOf(), {})).toEqual([])
   })
 })

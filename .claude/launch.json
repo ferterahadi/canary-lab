@@ -4,8 +4,21 @@
     {
       "name": "canary-web-dev",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "CANARY_DEV_API=http://127.0.0.1:7421 npm run dev:web"],
+      "runtimeArgs": [
+        "-c",
+        "CANARY_DEV_API=http://127.0.0.1:7421 npm run dev:web"
+      ],
       "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "test-dialog-preview",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/oddle/Documents/canary-lab-prototypes/run-dialog-preview && node /Users/oddle/Documents/canary-lab/node_modules/vite/bin/vite.js --config vite.config.mjs"
+      ],
+      "port": 51363,
       "autoPort": true
     }
   ]

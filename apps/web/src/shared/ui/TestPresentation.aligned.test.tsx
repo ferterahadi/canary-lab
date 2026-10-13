@@ -299,7 +299,7 @@ it('shows a cycle file with real line numbers, word marks, gap rows, its own hea
   await act(async () => root.render(<TestPresentation view="aligned" {...input} mode="english" onModeChange={onModeChange} marks="word"
     codeOnly={{ reason: 'English needs the full file' }} ariaLabel="Code changes before and after" />))
   const table = container.querySelector('table[aria-label="Code changes before and after"]')!
-  expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before repair cycle 2', 'After repair cycle 2'])
+  expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before repair 2', 'After repair 2'])
   expect([...table.querySelectorAll('[data-side="after"]')].map((line) => line.getAttribute('data-source-line'))).toEqual(['1', '2', '3', '40', '41', '42', '43'])
   expect(table.querySelector('.cl-comparison-section')?.textContent).toBe('36 unchanged lines not in this patch')
   // Only the changed characters of the edited line are marked, inside Shiki's tokens.

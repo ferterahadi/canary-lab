@@ -1399,9 +1399,10 @@ Failure is recorded, never raised — a run's verdict must not depend on GitHub 
 reachable. Every outcome, success and failure, lands on `manifest.prAttempt` (`RunPrAttempt`
 in `shared/run-state.ts`: `at`, `auto`, and a per-repo `{ ok, url?, reason? }`), written
 through `stateSink.patchManifest` so the runs WebSocket pushes it live; successes also merge
-into `manifest.proposedPrs`. The run-wide view of the web **Results & Fixes** tab
-(`apps/web/src/features/runs/components/ChangesTab.tsx`, inside `ResultsFixesTab`, always
-openable even when a run changed nothing) renders the captured diff per repo — served as
+into `manifest.proposedPrs`. The run's **Changes** dialog
+(`apps/web/src/features/runs/components/ChangesTab.tsx`, opened from the run header in
+`RunDetailColumn` once the run captured a repo, and by a `changes` arrival or `changes=1`
+link even when it captured nothing) renders the captured diff per repo — served as
 text by `GET /api/runs/:runId/fixes/:repoName/patch`, which 404s when the run captured nothing
 for that repo and 410s once the Cleanup page trimmed the run directory away — next to the PR
 link, or the per-repo reason there is none.

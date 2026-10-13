@@ -6,6 +6,8 @@ import {
   outcomeLabel,
   formatJournalFieldKey,
   presentJournalFields,
+  splitLead,
+  codeSpans,
 } from './journal-utils'
 describe('parseBodyFields', () => {
   it('extracts key/value field lines', () => {
@@ -127,5 +129,52 @@ describe('presentJournalFields', () => {
       { key: 'feature', value: 'demo' },
       { key: 'mystery', value: 'v' },
     ])).toEqual([])
+  })
+})
+
+describe('splitLead', () => {
+  it('takes the first sentence as the lead, without splitting a path', () => {
+    expect(splitLead('Test is wrong, not the service. a.service.ts runs b() first.')).toEqual({
+      lead: 'Test is wrong, not the service.',
+      rest: 'a.service.ts runs b() first.',
+    })
+  })
+
+  it('ends a lead at a semicolon and drops it', () => {
+    expect(splitLead('spec.ts: check applies to X only; added a stricter check.')).toEqual({
+      lead: 'spec.ts: check applies to X only',
+      rest: 'added a stricter check.',
+    })
+  })
+
+  it('reads past an abbreviation', () => {
+    expect(splitLead('Use a clock, e.g. the fake one. Then rerun.').lead).toBe('Use a clock, e.g. the fake one.')
+  })
+
+  it('keeps a single sentence whole', () => {
+    expect(splitLead('  multiply by 0.9  ')).toEqual({ lead: 'multiply by 0.9', rest: '' })
+  })
+})
+
+describe('codeSpans', () => {
+  it('marks calls, files, constants and backtick spans as code', () => {
+    expect(codeSpans('scheduled() in a-b.service.ts starts RERATE_MONTH via `settle`.')).toEqual([
+      { text: 'scheduled()', code: true },
+      { text: ' in ', code: false },
+      { text: 'a-b.service.ts', code: true },
+      { text: ' starts ', code: false },
+      { text: 'RERATE_MONTH', code: true },
+      { text: ' via ', code: false },
+      { text: 'settle', code: true },
+      { text: '.', code: false },
+    ])
+  })
+
+  it('ends on a code span with no empty tail', () => {
+    expect(codeSpans('edited a.spec.ts')).toEqual([{ text: 'edited ', code: false }, { text: 'a.spec.ts', code: true }])
+  })
+
+  it('leaves plain prose as one part', () => {
+    expect(codeSpans('The discount is 10 percent, not 5.')).toEqual([{ text: 'The discount is 10 percent, not 5.', code: false }])
   })
 })

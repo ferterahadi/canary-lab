@@ -30,6 +30,18 @@ describe('playback identity', () => {
     expect(keys[3]).toBeNull()
     expect(keys[0]).not.toEqual(keys[1])
   })
+  it('closes an attempt the runner cut off when the same test id begins again, so the new end pairs with its begin', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      { type: 'test-begin', test: test(10, 'a'), time: '1' },
+      { type: 'test-begin', test: test(10, 'a'), time: '2' },
+      { type: 'step-begin', test: test(10, 'a'), time: '3', step: { title: 'click', category: 'pw:api' } },
+      { type: 'test-end', test: test(10, 'a'), time: '4', status: 'passed', passed: true, retry: 0, durationMs: 1 },
+    ]
+    const keys = buildPlaybackIdentity(events).eventKeys
+    expect(keys[1]).not.toEqual(keys[0])
+    expect(keys[2]).toEqual(keys[1])
+    expect(keys[3]).toEqual(keys[1])
+  })
   it('selects the latest timestamp, then event order, including live attempts', () => {
     const a = { endedAt: '3' }
     const b = { endedAt: '2' }

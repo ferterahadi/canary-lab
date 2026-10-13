@@ -11,12 +11,15 @@ import { useResultsFocus } from '@/features/runs/state/use-results-focus'
 import type { ResultsSelection } from '@/features/runs/utils/results-fixes'
 
 // The Results & Fixes panel as RunDetailColumn composes it: a routed focus
-// resolves into the reader's selection, which opens one accordion row.
+// resolves into the reader's selection, which opens one test's dialog.
 function Results({ detail, focus }: { detail: RunDetail; focus: RunOpenTarget }) {
   const [selection, setSelection] = useState<ResultsSelection>({ caseKey: null })
   useResultsFocus(detail.runId, detail, focus, (caseKey) => setSelection({ caseKey }))
-  return <ResultsFixesTab detail={detail} view="tests" onViewChange={() => {}} selection={selection} onSelectionChange={setSelection} repairEvidence />
+  return <ResultsFixesTab detail={detail} view="tests" onViewChange={() => {}} selection={selection} onSelectionChange={setSelection} />
 }
+
+// The dialog is portalled to the body, outside the list's container.
+const dialogs = () => [...document.body.querySelectorAll('[data-testid="test-result-dialog"]')]
 
 function detailOf(playbackEvents: PlaywrightPlaybackEvent[], summary?: RunDetail['summary']): RunDetail {
   return {
@@ -43,14 +46,14 @@ it('opens exactly the clicked failure, including delayed playback and a second s
     act(() => root.render(<View ready={false} />))
     act(() => container.querySelectorAll<HTMLButtonElement>('[data-testid^="failing-open-"]')[1].click())
     act(() => root.render(<View ready />))
-    expect(container.querySelectorAll('[data-open]')).toHaveLength(1)
-    expect(container.querySelector('[data-open]')?.textContent).toContain('Checkout?')
+    expect(dialogs()).toHaveLength(1)
+    expect(dialogs()[0].textContent).toContain('Checkout?')
     act(() => container.querySelectorAll<HTMLButtonElement>('[data-testid^="failing-open-"]')[0].click())
-    expect(container.querySelectorAll('[data-open]')).toHaveLength(1)
-    expect(container.querySelector('[data-open]')?.textContent).toContain('Checkout!')
+    expect(dialogs()).toHaveLength(1)
+    expect(dialogs()[0].textContent).toContain('Checkout!')
     // A bare name two cases share opens neither.
     act(() => root.render(<Results key="bare" detail={detailOf(events)} focus={{ test: collidingTests[0].name }} />))
-    expect(container.querySelectorAll('[data-open]')).toHaveLength(0)
+    expect(dialogs()).toHaveLength(0)
   } finally {
     act(() => root.unmount())
     container.remove()

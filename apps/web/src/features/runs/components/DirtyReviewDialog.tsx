@@ -21,7 +21,7 @@ import { shortRunRef } from '@/shared/lib/format'
 import { TEST_CHANGE_KINDS } from '@/shared/lib/test-versions'
 import { StatusDot } from '@/shared/ui/atoms'
 import { ChevronLeftIcon, ChevronRightIcon } from '@/shared/ui/Icons'
-import { Modal } from '@/shared/ui/Overlays'
+import { CODE_DIALOG_SIZE, Modal } from '@/shared/ui/Overlays'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '@/shared/ui/TestChangeMark'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -245,9 +245,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         title="Compare test versions"
         ariaLabel="Changed test files"
         testId="dirty-review-dialog"
-        width={2560}
-        height="96vh"
-        viewportInset={2}
+        {...CODE_DIALOG_SIZE}
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         footer={<div className="cl-review-footer" data-testid="dirty-review-actions">
           <div className="cl-review-footer-navigation" ref={setNavigationTarget}>

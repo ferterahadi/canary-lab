@@ -916,16 +916,15 @@ describe('trailer model (R14–R18)', () => {
     await openExportStage({ taskId: 'task-7', archiveBase: 'canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc' })
     expect(container.querySelector('[data-testid^="download-report-"]')).toBeNull()
     // Export identity is deliverable metadata, not a substitute for missing
-    // verification evidence. The frontend still owns the report's four slots.
+    // verification evidence. The frontend still owns the report's three slots.
     const facts = container.querySelector('[data-testid="stage-facts"]')
     expect(facts?.textContent).toContain('Requirements with tests')
     expect(facts?.textContent).toContain('Test depth')
-    expect(facts?.textContent).toContain('Tests that passed')
     expect(facts?.textContent).toContain('Requirements proven')
-    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(4)
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(3)
   })
 
-  it('a zero-requirement suite still renders the Report contract as four tiles', async () => {
+  it('a zero-requirement suite still renders the Report contract as three tiles', async () => {
     mocks.getFeatureCoverage.mockResolvedValue({
       feature: 'checkout',
       requirements: [],
@@ -945,7 +944,7 @@ describe('trailer model (R14–R18)', () => {
     const facts = container.querySelector('[data-testid="stage-facts"]')
     const labels = [...(facts?.querySelectorAll<HTMLElement>('[data-testid="fact-tile"]') ?? [])]
       .map((tile) => tile.firstElementChild?.firstElementChild?.textContent)
-    expect(labels).toEqual(['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'])
+    expect(labels).toEqual(['Requirements with tests', 'Test depth', 'Requirements proven'])
     expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(2)
   })
 
@@ -1247,10 +1246,9 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     mocks.evaluationTasks.mockReturnValue([])
     await open('evaluation-export')
     const facts = container.querySelector('[data-testid="stage-facts"]')
-    expect(facts?.querySelectorAll('[data-testid="fact-tile"]')).toHaveLength(4)
+    expect(facts?.querySelectorAll('[data-testid="fact-tile"]')).toHaveLength(3)
     expect(facts?.textContent).toContain('Requirements with tests')
     expect(facts?.textContent).toContain('Test depth')
-    expect(facts?.textContent).toContain('Tests that passed')
     expect(facts?.textContent).toContain('Requirements proven')
     expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's evaluation report")
     expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All evaluation reports for this suite')

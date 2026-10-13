@@ -77,10 +77,14 @@ export function ChangesTab({
   return (
     <Frame framed={framed}>
       <ul className="m-0 flex list-none flex-col gap-2 p-0" data-testid="changes-tab">
-        {rosterFor(repos.map((r) => r.repoName), repoBranches).map((repoName) => (
+        {rosterFor(repos.map((r) => r.repoName), repoBranches).map((repoName, index) => (
           <RepairedRepoCard
             key={repoName}
             repoName={repoName}
+            // The roster leads with the repaired repos, so the first card is
+            // always one with a patch to read.
+            defaultExpanded={index === 0}
+            capturedAt={fixCapture?.capturedAt}
             {...(changed.has(repoName) ? { repo: changed.get(repoName)! } : {})}
             {...opener.cardProps(repoName)}
             {...(prByRepo.has(repoName) ? { pr: prByRepo.get(repoName)! } : {})}

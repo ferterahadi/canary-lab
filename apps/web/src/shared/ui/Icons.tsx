@@ -52,7 +52,9 @@ export function DownloadIcon({ size = 13 }: { size?: number } = {}) {
   )
 }
 
-export function HintIcon({ hint, icon, label }: { hint: string; icon?: ReactNode; label?: string }) {
+/** `glyph` swaps the ring's letter (`!` for a caution) and keeps its size;
+ *  `icon` is a larger custom mark. */
+export function HintIcon({ hint, icon, glyph = 'i', label }: { hint: string; icon?: ReactNode; glyph?: string; label?: string }) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLSpanElement | null>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -90,7 +92,7 @@ export function HintIcon({ hint, icon, label }: { hint: string; icon?: ReactNode
           fontFamily: 'var(--font-sans, inherit)',
         }}
       >
-        {icon ?? 'i'}
+        {icon ?? glyph}
       </span>
       {open && pos && typeof document !== 'undefined'
         ? createPortal(

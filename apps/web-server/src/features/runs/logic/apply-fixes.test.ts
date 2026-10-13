@@ -183,6 +183,38 @@ describe('buildApplyPreflight', () => {
     expect(t.foreignDirty).toEqual(['app.js'])
   })
 
+  it('reads from the repo itself whether the repair is in it yet', async () => {
+    const fix = capture(makePatch())
+    fix.repos[0].fileNames = ['app.js']
+    // The run edited an isolated copy, so a fresh capture is not in the repo.
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('absent')
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('uncommitted')
+    git(repo, 'commit', '-aqm', 'take the repair', '--no-verify')
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('committed')
+  })
+
+  it("names the repair's files from the patch when the capture predates file names", async () => {
+    const patchPath = makePatch()
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
+    expect((await buildApplyPreflight(capture(patchPath)))[0].inRepo).toBe('uncommitted')
+    git(repo, 'commit', '-aqm', 'take the repair', '--no-verify')
+    expect((await buildApplyPreflight(capture(patchPath)))[0].inRepo).toBe('committed')
+  })
+
+  it('says nothing about a repair whose patch is gone or empty', async () => {
+    expect((await buildApplyPreflight(capture(path.join(fixesDir, 'gone.patch'))))[0]).not.toHaveProperty('inRepo')
+    const empty = path.join(fixesDir, 'empty.patch')
+    fs.writeFileSync(empty, '')
+    expect((await buildApplyPreflight(capture(empty)))[0]).not.toHaveProperty('inRepo')
+  })
+
+  it('reports a patch git cannot read as not in the repo', async () => {
+    const garbled = path.join(fixesDir, 'garbled.patch')
+    fs.writeFileSync(garbled, 'not a patch\n')
+    expect((await buildApplyPreflight(capture(garbled)))[0].inRepo).toBe('absent')
+  })
+
   it('marks a repo whose path is gone as not ready, with the reason', async () => {
     const [t] = await buildApplyPreflight({
       capturedAt: 'now',

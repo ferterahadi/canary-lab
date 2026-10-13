@@ -15,7 +15,13 @@ import type { RunLifecycleEvent } from './run-state'
  *  stamps existed. A reader must be able to tell which. */
 export type EvidenceSource = 'stamped' | 'derived'
 
-export interface PlaybackAttemptStep { title: string; category: string; ended: boolean }
+export interface PlaybackAttemptStep {
+  title: string
+  category: string
+  ended: boolean
+  /** Where the step ran (`file:line[:col]`), as the reporter recorded it. */
+  location?: string
+}
 
 /** One begin…end span of one case, exactly as the reporter recorded it. */
 export interface PlaybackAttempt {
@@ -59,11 +65,12 @@ export function playbackAttempts(
       current.startedAt = event.time
       if (event.execution !== undefined) current.execution = event.execution
     }
-    if (event.type === 'step-begin') current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
+    const where = event.type === 'step-begin' || event.type === 'step-end' ? (event.step.location ? { location: event.step.location } : {}) : {}
+    if (event.type === 'step-begin') current.steps.push({ title: event.step.title, category: event.step.category, ended: false, ...where })
     if (event.type === 'step-end') {
       const open = [...current.steps].reverse().find((step) => step.title === event.step.title && !step.ended)
       if (open) open.ended = true
-      else current.steps.push({ title: event.step.title, category: event.step.category, ended: true })
+      else current.steps.push({ title: event.step.title, category: event.step.category, ended: true, ...where })
     }
     if (event.type === 'test-end') {
       current.status = event.status
@@ -109,6 +116,9 @@ export type EvidenceAttempt = PlaybackAttempt & {
   /** Resolved execution: the stamp, or a lifecycle bracket on legacy runs.
    *  Absent when the attempt falls outside every known execution. */
   executionIndex?: number
+  /** No end was recorded, yet its execution is over or a later attempt of the
+   *  case began: the runner was stopped mid-test, so it has no result. */
+  stopped?: true
 }
 
 export type CycleVerification =
@@ -227,9 +237,12 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidence {
     return executions.find((x) => x.source === 'derived' && time >= x.startedAt && (x.endedAt === undefined || time <= x.endedAt))?.index
   }
   const { attempts } = playbackAttempts(events, input.identity, known)
-  const resolved: EvidenceAttempt[] = attempts.map((attempt) => {
+  const resolved: EvidenceAttempt[] = attempts.map((attempt, i) => {
     const executionIndex = bracket(attempt)
-    return executionIndex === undefined ? attempt : { ...attempt, executionIndex }
+    const over = executions.find((x) => x.index === executionIndex)?.endedAt !== undefined
+    const superseded = attempts.slice(i + 1).some((a) => a.caseKey === attempt.caseKey)
+    const stopped = attempt.status === undefined && (over || superseded)
+    return { ...attempt, ...(executionIndex !== undefined ? { executionIndex } : {}), ...(stopped ? { stopped: true as const } : {}) }
   })
 
   const byCase = new Map<string, EvidenceAttempt[]>()
@@ -249,7 +262,9 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidence {
       // at or before the input execution. A failure carried forward from an
       // earlier execution still counts; a pass does not put it in this cycle.
       const input = latestPlaybackAttempt(placed.filter((a) => a.executionIndex! <= cycle.inputExecution!))
-      if (!input || input.passed !== false) continue
+      // A skip also reports `passed: false`, but nothing failed for a repair to
+      // address, so it never makes the case a cycle input.
+      if (!input || input.passed !== false || input.status?.toLowerCase() === 'skipped') continue
       caseCycles.push({ cycle: cycle.cycle, input, verification: verificationOf(cycle, executions, lastIn) })
     }
     const latest = latestPlaybackAttempt(own)

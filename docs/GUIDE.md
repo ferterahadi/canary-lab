@@ -172,8 +172,8 @@ A feature may declare `singleAttempt.receipt` as a path inside each run's
 artifact directory. The suite writes this receipt when it claims its one
 external-effect attempt; Canary Lab only reads it. Once claimed, a repair
 signal records the agent's changes and ends that run failed and unverified.
-Canary Lab does not restart its services or rerun its tests. The run-wide view
-of **Results & Fixes** retains the captured patch. After review and the suite's required approval,
+Canary Lab does not restart its services or rerun its tests. The run's
+**Changes** dialog, opened from the run header, retains the captured patch. After review and the suite's required approval,
 start a fresh run with a new ID; `run_ref` and Restart Heal cannot reuse the
 spent run.
 
@@ -194,12 +194,12 @@ There are two important limits:
   applied to the user's checkout.
 
 While healing, Canary Lab shows edits from successful worktree baselines in the
-run-wide view of **Results & Fixes**. They remain provisional until teardown writes the final patch into
+run's **Changes** dialog, opened from the run header's **Changes · N repos** button. They remain provisional until teardown writes the final patch into
 `logs/runs/<runId>/fixes/`. The Commit & open PR action becomes available only
 after the run stops. Non-portified worktrees are normally removed.
 
-Each repair cycle's own edits appear under **Code changes** in that cycle's
-Results & Fixes view. When Canary Lab can rebuild a file's exact before and
+Each repair cycle's own edits appear under **Code changes** when you open a
+test in Results & Fixes and pick the run that followed that cycle. When Canary Lab can rebuild a file's exact before and
 after versions, it shows the whole file, with English for the suite's own
 files; otherwise it shows the patch alone and says why. A suite edit that the
 run never executed, because Playwright ran the run's suite copy, is labelled

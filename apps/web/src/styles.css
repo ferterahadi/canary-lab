@@ -394,7 +394,9 @@ body {
 }
 .cl-numbered-code span.line {
   display: grid;
-  grid-template-columns: 2ch minmax(0, 1fr);
+  /* `--code-gutter` widens it for a frame numbered by source line (`ShikiCode`
+     `numberBySource`); every other viewer keeps the 2ch sequence gutter. */
+  grid-template-columns: var(--code-gutter, 2ch) minmax(0, 1fr);
   column-gap: 0.5rem;
   min-height: 1lh;
 }
@@ -2022,7 +2024,6 @@ body {
 .cl-review-toolbar { flex-shrink: 0; }
 .cl-review-file-heading { display: flex; align-items: center; gap: 8px; height: 48px; }
 .cl-review-table-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; }
-.cl-review-table-controls .cl-comparison-legend > :last-child { display: none; }
 .cl-comparison-review { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; overflow-anchor: none; }
 .cl-comparison-review .cl-comparison { min-width: 780px; }
 .cl-comparison-review .cl-comparison .cl-comparison-label { width: auto; }
@@ -2097,6 +2098,14 @@ body {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
+}
+
+/* A code block that fills a card band edge to edge: the band's hairlines
+   frame it, so its own border and corners go. */
+.cl-band-code .cl-code-shell,
+.cl-band-code .shiki-block pre {
+  border: 0;
+  border-radius: 0;
 }
 
 /* Status dot atom — kept compatible with existing React StatusDot. */

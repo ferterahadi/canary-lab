@@ -62,7 +62,7 @@ const repoBranches: RepoBranchSnapshot[] = [
   { name: 'billing', path: '/repos/billing', branch: 'main', detached: false, dirty: false },
 ]
 
-const target = (over: Partial<{ repoName: string; repoRoot: string; ready: boolean; reason: string; foreignDirty: string[]; branch: string | null }> = {}) => ({
+const target = (over: Partial<{ repoName: string; repoRoot: string; ready: boolean; reason: string; foreignDirty: string[]; branch: string | null; inRepo: 'absent' | 'uncommitted' | 'committed' }> = {}) => ({
   repoName: 'mighty-cns',
   repoRoot: '/repos/cns',
   ready: true,
@@ -116,58 +116,45 @@ describe('ChangesTab', () => {
     expect(order).toEqual(['changes-repo-mighty-cns', 'changes-repo-gateway', 'changes-repo-billing'])
   })
 
-  it('names the changed files so they can be picked out of the editor', async () => {
+  it('opens the first repaired repo on its patch, in the code editor the repair cycles use', async () => {
     await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={fixCapture} repoBranches={repoBranches} />)
-    expect(text('changes-files-mighty-cns')).toContain('src/api/orders.ts')
-    expect(text('changes-files-mighty-cns')).toContain('src/lib/tax.ts')
+    expect(mocks.getRunFixPatch).toHaveBeenCalledTimes(1)
+    expect(mocks.getRunFixPatch).toHaveBeenCalledWith('r1', 'mighty-cns')
+    const patch = container.querySelector('[data-testid="changes-patch-mighty-cns"]')!
+    expect([...patch.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before this run', 'After this run'])
+    expect(patch.textContent).toContain('broken()')
+    expect(patch.textContent).toContain('fixed()')
+    expect(patch.textContent).toContain('− Removed+ Added')
+    // The other repos stay closed until asked for.
+    expect(container.querySelector('[data-testid="changes-patch-gateway"]')).toBeNull()
+    expect(container.querySelector('[data-testid="changes-toggle-gateway"]')?.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('rolls a long file list up per directory instead of printing a wall', async () => {
-    const many = [
-      ...Array.from({ length: 7 }, (_, i) => `src/api/f${i}.ts`),
-      ...Array.from({ length: 3 }, (_, i) => `src/lib/g${i}.ts`),
-      'server.ts',
-    ]
-    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{
-      ...fixCapture,
-      repos: [{ ...fixCapture.repos[0], files: 11, fileNames: many }],
-    }} />)
-    // Which AREAS the agent touched is the question that survives at this size;
-    // eight arbitrary paths and a "+3 more" answered nothing.
-    expect(container.querySelector('[data-testid="changes-files-mighty-cns"]')).toBeNull()
-    const rollup = text('changes-dirs-mighty-cns')
-    expect(rollup).toContain('src/api')
-    expect(rollup).toContain('7')
-    expect(rollup).toContain('src/lib')
-    expect(rollup).toContain('repo root')
-    // …and the full list stays one click away.
-    expect(text('changes-all-files-mighty-cns')).toBe('All 11 files')
-  })
-
-  it('folds the tail of a very wide rollup into a directory count', async () => {
-    const many = Array.from({ length: 9 }, (_, i) => `pkg/p${i}/index.ts`)
-    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{
-      ...fixCapture,
-      repos: [{ ...fixCapture.repos[0], files: 9, fileNames: many }],
-    }} />)
-    expect(text('changes-dirs-mighty-cns')).toContain('+3 more directories')
+  it('opens and closes a repo from its header', async () => {
+    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={fixCapture} repoBranches={repoBranches} />)
+    await click('changes-toggle-gateway')
+    expect(mocks.getRunFixPatch).toHaveBeenCalledWith('r1', 'gateway')
+    expect(container.querySelector('[data-testid="changes-patch-gateway"]')).not.toBeNull()
+    await click('changes-toggle-mighty-cns')
+    expect(container.querySelector('[data-testid="changes-patch-mighty-cns"]')).toBeNull()
+    // An untouched repo has nothing to open.
+    expect(container.querySelector('[data-testid="changes-toggle-billing"]')).toBeNull()
+    expect(text('changes-state-billing')).toBe('unchanged')
   })
 
   it('keeps a route to the patch for a capture that recorded no file names', async () => {
     // Runs from before `fileNames` existed carry a true count and nothing else
-    // (one real workspace run: 87 files, no names). The card can list nothing,
-    // so the patch is the only thing it has to offer — it must still offer it.
+    // (one real workspace run: 87 files, no names). The card can name nothing,
+    // so the patch is what it has to offer — it must still offer it.
     await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{
       ...fixCapture,
       repos: [{ ...fixCapture.repos[0], files: 87, fileNames: [] }],
     }} />)
     expect(text('changes-state-mighty-cns')).toBe('87 files')
-    expect(text('changes-all-files-mighty-cns')).toBe('All 87 files')
-    await click('changes-all-files-mighty-cns')
-    expect(text('changes-patch-files-mighty-cns')).toContain('+87 more the run didn’t record by name')
+    expect(text('changes-patch-mighty-cns')).toContain('fixed()')
   })
 
-  it('floats an edited test file above the fold — a repair fixes the app, not the test', async () => {
+  it('keeps an edited test file in view — a repair fixes the app, not the test', async () => {
     const many = [
       'e2e/checkout.spec.ts',
       ...Array.from({ length: 9 }, (_, i) => `src/api/f${i}.ts`),
@@ -177,10 +164,12 @@ describe('ChangesTab', () => {
       repos: [{ ...fixCapture.repos[0], files: 10, fileNames: many }],
     }} />)
     const flagged = text('changes-tests-mighty-cns')
-    expect(flagged).toContain('1 test file was edited')
+    expect(flagged).toContain('Edits 1 test file')
     expect(flagged).toContain('e2e/checkout.spec.ts')
-    // The spec is called out on its own; the rollup covers only the rest.
-    expect(text('changes-dirs-mighty-cns')).not.toContain('checkout.spec.ts')
+    expect(flagged).not.toContain('src/api/f0.ts')
+    // Closing the editor leaves the warning standing.
+    await click('changes-toggle-mighty-cns')
+    expect(text('changes-tests-mighty-cns')).toContain('e2e/checkout.spec.ts')
   })
 
   it('says how many tests were edited when there is more than one', async () => {
@@ -188,25 +177,7 @@ describe('ChangesTab', () => {
       ...fixCapture,
       repos: [{ ...fixCapture.repos[0], files: 2, fileNames: ['e2e/a.spec.ts', 'src/b.test.ts'] }],
     }} />)
-    expect(text('changes-tests-mighty-cns')).toContain('2 test files were edited')
-  })
-
-  it('opens the captured patch from the full-list action', async () => {
-    const many = Array.from({ length: 11 }, (_, i) => `src/api/f${i}.ts`)
-    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{
-      ...fixCapture,
-      repos: [{ ...fixCapture.repos[0], files: 11, fileNames: many }],
-    }} />)
-    await click('changes-all-files-mighty-cns')
-    expect(mocks.getRunFixPatch).toHaveBeenCalledWith('r1', 'mighty-cns')
-    // One patch holds every file in the repo, so the dialog is per repo.
-    expect(text('changes-patch-dialog-mighty-cns')).toContain('11 files in one patch')
-    expect(text('changes-patch-files-mighty-cns')).toContain('src/api/f10.ts')
-    // The patch renders as a before/after comparison (edits, not results), so
-    // both sides of the change are on screen with the colour legend.
-    expect(container.textContent).toContain('broken()')
-    expect(container.textContent).toContain('fixed()')
-    expect(container.textContent).toContain('Color describes edits, not test results.')
+    expect(text('changes-tests-mighty-cns')).toContain('Edits 2 test files')
   })
 
   it('says plainly that nothing changed rather than rendering an empty tab', async () => {
@@ -237,6 +208,24 @@ describe('ChangesTab', () => {
     expect(mocks.applyRunFixes).toHaveBeenCalledWith('r1', 'mighty-cns')
     // The editor id (`vscode`) is a command name, not something to show a user.
     expect(text('changes-open-done-mighty-cns')).toContain('opened in VS Code')
+  })
+
+  it("says whether the repair is in the user's repo yet, and re-reads it after opening", async () => {
+    mocks.getRunApplyPreflight.mockResolvedValue({ targets: [target({ inRepo: 'absent' })] })
+    mocks.applyRunFixes.mockResolvedValue({ results: [{ repoName: 'mighty-cns', ok: true }], allOk: true })
+    mocks.openRunRepo.mockResolvedValue({ opened: true, path: '/repos/cns', editor: 'vscode' })
+    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
+    // A diff on screen must not read as a change already made.
+    expect(text('changes-in-repo-mighty-cns')).toBe('Not in your repo')
+    mocks.getRunApplyPreflight.mockResolvedValue({ targets: [target({ inRepo: 'uncommitted' })] })
+    await click('changes-open-repo-mighty-cns')
+    expect(text('changes-in-repo-mighty-cns')).toBe('In your repo, uncommitted')
+  })
+
+  it('says when the repo already holds the repair, committed', async () => {
+    mocks.getRunApplyPreflight.mockResolvedValue({ targets: [target({ inRepo: 'committed' })] })
+    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
+    expect(text('changes-in-repo-mighty-cns')).toBe('Already in your repo')
   })
 
   it('warns before mixing the repair into work the user already had going', async () => {
@@ -301,27 +290,26 @@ describe('ChangesTab', () => {
     expect(text('changes-open-error-mighty-cns')).toContain('run not found')
   })
 
-  it('swaps the open action for the patch when the repo has moved away', async () => {
+  it('drops the open action when the repo has moved away, and keeps the patch and the PR', async () => {
     mocks.getRunApplyPreflight.mockResolvedValue({
       targets: [target({ ready: false, reason: 'the repo path no longer exists' })],
     })
     await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
-    expect(text('changes-open-blocked-mighty-cns')).toContain('no longer exists')
-    // A dead disabled button is a dead end: with no repo to open, the captured
-    // patch is the only route to the repair, so it becomes the action.
+    // A dead disabled button is a dead end, and a row restating it is noise:
+    // the patch stays readable and the PR dialog explains its own preflight.
     expect(container.querySelector('[data-testid="changes-open-repo-mighty-cns"]')).toBeNull()
-    await click('changes-view-patch-mighty-cns')
+    expect(container.textContent).not.toContain('no longer exists')
     expect(mocks.getRunFixPatch).toHaveBeenCalledWith('r1', 'mighty-cns')
-    expect(text('changes-patch-copy-mighty-cns')).toBe('Copy path')
+    expect(container.querySelector('[data-testid="changes-patch-mighty-cns"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="changes-propose-mighty-cns"]')).not.toBeNull()
   })
 
-  it('reports a patch that is no longer on disk instead of an empty dialog', async () => {
+  it('reports a patch that is no longer on disk instead of an empty editor', async () => {
     mocks.getRunApplyPreflight.mockResolvedValue({
       targets: [target({ ready: false, reason: 'the repo path no longer exists' })],
     })
     mocks.getRunFixPatch.mockRejectedValue(new Error('the patch file is no longer on disk'))
     await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
-    await click('changes-view-patch-mighty-cns')
     expect(text('changes-patch-error-mighty-cns')).toContain('no longer on disk')
   })
 
@@ -380,41 +368,6 @@ describe('ChangesTab', () => {
     expect(container.querySelectorAll('[data-testid^="changes-propose-"]')).toHaveLength(1)
   })
 
-  it('offers the patch path for a terminal, and a best-effort launch', async () => {
-    const writeText = vi.fn()
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const many = Array.from({ length: 11 }, (_, i) => `src/api/f${i}.ts`)
-    await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{
-      ...fixCapture,
-      repos: [{ ...fixCapture.repos[0], files: 11, fileNames: many }],
-    }} />)
-    await click('changes-all-files-mighty-cns')
-    await click('changes-patch-copy-mighty-cns')
-    expect(writeText).toHaveBeenCalledWith('/logs/runs/r1/fixes/mighty-cns.patch')
-    expect(container.textContent).toContain('Path copied')
-    await click('changes-patch-open-mighty-cns')
-    expect(mocks.openEditor).toHaveBeenCalledWith({ file: '/logs/runs/r1/fixes/mighty-cns.patch' })
-  })
-
-  it.each(['missing', 'rejected'])('does not report a copied patch path when clipboard is %s', async (mode) => {
-    const prior = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: mode === 'missing' ? undefined : { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
-    })
-    try {
-      const many = Array.from({ length: 11 }, (_, i) => `src/api/f${i}.ts`)
-      await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [{ ...fixCapture.repos[0], files: 11, fileNames: many }] }} />)
-      await click('changes-all-files-mighty-cns')
-      await click('changes-patch-copy-mighty-cns')
-      expect(container.textContent).not.toContain('Path copied')
-      expect(text('changes-patch-copy-mighty-cns')).toBe('Copy path')
-    } finally {
-      if (prior) Object.defineProperty(navigator, 'clipboard', prior)
-      else Reflect.deleteProperty(navigator, 'clipboard')
-    }
-  })
-
   it('opens the propose dialog from a repo card', async () => {
     await render(<ChangesTab run={stoppedRun} runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
     await click('changes-propose-mighty-cns')
@@ -424,7 +377,11 @@ describe('ChangesTab', () => {
   it('shows live edits but unlocks PR only after the run stops', async () => {
     const live = { ...fixCapture, provisional: true, repos: [fixCapture.repos[0]] }
     await render(<ChangesTab run={{ status: 'running' }} runId="r1" fixCapture={live} worktrees={{ 'mighty-cns': '/runs/r1/worktrees/cns' }} />)
-    expect(text('changes-files-mighty-cns')).toContain('src/api/orders.ts')
+    expect(text('changes-patch-mighty-cns')).toContain('fixed()')
+    // A newer capture re-reads the open patch, so live edits reach it.
+    mocks.getRunFixPatch.mockResolvedValue({ repoName: 'mighty-cns', patchPath: '/logs/runs/r1/fixes/mighty-cns.patch', files: 3, diff: 'diff --git a/src/api/orders.ts b/src/api/orders.ts\n@@ -1,3 +1,3 @@\n-  broken()\n+  fixedAgain()\n' })
+    await render(<ChangesTab run={{ status: 'running' }} runId="r1" fixCapture={{ ...live, capturedAt: '2026-10-13T00:00:09.000Z' }} worktrees={{ 'mighty-cns': '/runs/r1/worktrees/cns' }} />)
+    expect(text('changes-patch-mighty-cns')).toContain('fixedAgain()')
     expect(container.querySelector('[data-testid="changes-repo-mighty-cns"] [title="/runs/r1/worktrees/cns"]')).not.toBeNull()
     const button = container.querySelector<HTMLButtonElement>('[data-testid="changes-propose-mighty-cns"]')!
     expect(button.disabled).toBe(true)

@@ -73,9 +73,14 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?dialog=settings&models=codex                      → Project Settings with Codex models open
 ?feature=checkout&run=7cvh&test=cart%20fails        → run detail focused on a failure
 ?feature=checkout&run=7cvh&tests=recorded           → recorded tests for that run
-?feature=checkout&run=7cvh&runtab=changes           → legacy arrival: Results & Fixes, run-wide view
-?feature=checkout&run=7cvh&runtab=results&test=cart%20fails&cycle=2&journal=entry
-                                                    → that test's repair cycle 2, its journal entry open
+?feature=checkout&run=7cvh&runtab=changes           → arrival: the run's Changes dialog
+?feature=checkout&run=7cvh&changes=1                → the run's Changes dialog open (legacy rview=run-wide reads as this)
+?feature=checkout&run=7cvh&runtab=results&test=cart%20fails&attempt=2&journal=entry
+                                                    → that test's dialog on its 2nd run, its journal entry open
+?feature=checkout&run=7cvh&runtab=results&test=cart%20fails&ttab=artifacts
+                                                    → that test's dialog on its Artifacts tab
+?feature=checkout&run=7cvh&runtab=results&test=cart%20fails&cycle=2
+                                                    → older link: the run that checked repair cycle 2
 ?feature=checkout&run=7cvh&runtab=services&svc=api&exec=3&lines=120-140
                                                     → api's retained log for execution 3, lines highlighted
 ```
@@ -87,7 +92,7 @@ dialog open-state to localStorage or broadcast it cross-tab.
 `models` only qualifies `dialog=settings`; `review*` params only qualify
 `dialog=tests-review`; `test`, `runtab`, and `tests` qualify a selected run.
 Inside a run, the detail reports the reader's place (`RunLocation`: `runtab`,
-`rview`, `test`, `cycle`, `journal`, `svc`, `exec`/`lines`/`match`) through
+`rview`, `changes`, `test`, `attempt`, `cycle`, `ttab`, `journal`, `svc`, `exec`/`lines`/`match`) through
 `setRunLocation`; each qualifier is gated on the one it belongs to, a reported
 place supersedes the arrival that opened the run, and a stale name is explained
 by the view (`stale-*-link`) rather than dropped. Embedded run details pass no

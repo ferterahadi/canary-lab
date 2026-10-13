@@ -27,6 +27,9 @@ export interface StatusPresentation {
   label: string
   cardClassName: string
   pillClassName: string
+  /** The borderless tinted chip, for a list whose rows already separate
+   *  each status (the test dialog's timeline). */
+  softPillClassName: string
 }
 
 export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
@@ -34,36 +37,43 @@ export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
     label: 'passed',
     cardClassName: 'border-success/40 bg-success/5 dark:border-success/50',
     pillClassName: 'border-success/60 bg-success/10 text-success',
+    softPillClassName: 'bg-success/10 text-success',
   },
   testing: {
     label: 'running',
     cardClassName: 'border-running/50 bg-running/10 dark:border-running/60',
     pillClassName: 'border-running/60 bg-running/10 text-running',
+    softPillClassName: 'bg-running/10 text-running',
   },
   failed: {
     label: 'failed',
     cardClassName: 'border-danger/50 bg-danger/5 dark:border-danger/60',
     pillClassName: 'border-danger/60 bg-danger/10 text-danger',
+    softPillClassName: 'bg-danger/10 text-danger',
   },
   skipped: {
     label: 'skipped',
     cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
     pillClassName: 'border-warning/60 bg-warning/10 text-warning',
+    softPillClassName: 'bg-warning/10 text-warning',
   },
   timedout: {
     label: 'timeout',
     cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
     pillClassName: 'border-warning/60 bg-warning/10 text-warning',
+    softPillClassName: 'bg-warning/10 text-warning',
   },
   unmatched: {
     label: 'no matching result',
     cardClassName: 'border-line-strong bg-elevated/40',
     pillClassName: 'border-idle/70 bg-transparent text-secondary',
+    softPillClassName: 'bg-elevated text-secondary',
   },
   pending: {
     label: 'pending',
     cardClassName: 'border-line-strong bg-elevated/40',
     pillClassName: 'border-idle/70 bg-transparent text-secondary',
+    softPillClassName: 'bg-elevated text-secondary',
   },
 }
 
@@ -251,6 +261,10 @@ export function colorClassForStatus(status: StepStatus): string {
 
 export function statusPillClassForStatus(status: StepStatus): string {
   return STATUS_PRESENTATION[status].pillClassName
+}
+
+export function softStatusPillClassForStatus(status: StepStatus): string {
+  return STATUS_PRESENTATION[status].softPillClassName
 }
 
 export function statusLabel(status: StepStatus): string {

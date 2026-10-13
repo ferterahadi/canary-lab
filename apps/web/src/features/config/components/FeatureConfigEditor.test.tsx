@@ -34,8 +34,9 @@ describe('FeatureConfigEditor tab ownership', () => {
   it('uses the suite vocabulary in the visible dialog heading', () => {
     act(() => { root.render(<FeatureConfigEditor feature="checkout" onClose={vi.fn()} />) })
 
-    expect(container.textContent).toContain('Suite configuration')
-    expect(container.textContent).not.toContain('Feature configuration')
+    // The dialog is portaled to the body, above any dialog that opened it.
+    expect(document.body.textContent).toContain('Suite configuration')
+    expect(document.body.textContent).not.toContain('Feature configuration')
   })
 
   // The unrouted mount (the features-list gear) owns its own tab state.

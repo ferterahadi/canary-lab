@@ -76,8 +76,8 @@ export type ModelsAgent = 'claude' | 'codex'
 /** Which tab the run detail should OPEN on when another view links into a run —
  *  the `runtab` qualifier for `run`. Only cross-view arrivals are listed, not the
  *  whole tab set: a flight's Test Run stage reports the repairs a run captured
- *  and sends them to that run's Changes tab, now Results & Fixes' run-wide
- *  view. This carries the arrival intent, the same way `test` does; where the
+ *  and sends them to that run's captured changes, the dialog behind the run
+ *  header's Changes button. This carries the arrival intent, the same way `test` does; where the
  *  reader goes inside the run afterwards is its `RunLocation`. */
 export type RunArrivalTab = 'changes'
 
@@ -94,10 +94,17 @@ export interface RunLocation {
   /** Absent = Overview. */
   tab?: RunDetailTab
   /** Results & Fixes' sub-view; absent = the test list. */
-  view?: 'run-wide' | 'terminal'
+  view?: 'terminal'
+  /** The run's captured changes dialog, opened from the run header. */
+  changes?: true
+  /** The open test dialog. */
   test?: { name: string; id?: string; location?: string }
-  /** Absent = follow the test's latest repair cycle. */
+  /** The test dialog's timeline entry, oldest = 1. Absent = follow the latest. */
+  attempt?: number
+  /** An older link's repair cycle, read until the reader picks an entry. */
   cycle?: number | 'initial'
+  /** The test dialog's tab. Absent = the test's default. */
+  testTab?: 'summary' | 'artifacts'
   /** The selected service's safe name. */
   service?: string
   /** A Full service log range on `service`. */
@@ -237,11 +244,18 @@ function parseRunLocation(params: URLSearchParams): RunLocation | undefined {
   const raw = params.get('runtab')
   const tab = raw != null && (RUN_DETAIL_TABS as string[]).includes(raw) ? raw as RunDetailTab : undefined
   const viewParam = params.get('rview')
-  const view = tab === 'results' && (viewParam === 'run-wide' || viewParam === 'terminal') ? viewParam : undefined
+  const view = tab === 'results' && viewParam === 'terminal' ? viewParam : undefined
+  // `rview=run-wide` is the old home of the captured changes; it now opens
+  // their dialog, so a link from before the move still lands on them.
+  const changes = params.get('changes') === '1' || (tab === 'results' && viewParam === 'run-wide') ? true as const : undefined
   const name = params.get('test')
   const test = name ? { name, ...(params.get('testId') ? { id: params.get('testId')! } : {}), ...(params.get('testLocation') ? { location: params.get('testLocation')! } : {}) } : undefined
   const cycleParam = params.get('cycle') ?? ''
   const cycle = test && (cycleParam === 'initial' || POSITIVE_INT.test(cycleParam)) ? (cycleParam === 'initial' ? 'initial' as const : Number(cycleParam)) : undefined
+  const attemptParam = params.get('attempt') ?? ''
+  const attempt = test && POSITIVE_INT.test(attemptParam) ? Number(attemptParam) : undefined
+  const testTabParam = params.get('ttab')
+  const testTab = test && (testTabParam === 'summary' || testTabParam === 'artifacts') ? testTabParam : undefined
   const service = params.get('svc') || undefined
   const lines = /^([1-9]\d*)-([1-9]\d*)$/.exec(params.get('lines') ?? '')
   const exec = params.get('exec') ?? ''
@@ -250,9 +264,10 @@ function parseRunLocation(params: URLSearchParams): RunLocation | undefined {
     : undefined
   const journalParam = params.get('journal')
   const journal = test && (journalParam === 'entry' || journalParam === 'all') ? journalParam : undefined
-  if (!tab && !cycle && !service && !journal) return undefined
+  if (!tab && !cycle && !attempt && !testTab && !changes && !service && !journal) return undefined
   return {
-    ...(tab ? { tab } : {}), ...(view ? { view } : {}), ...(test ? { test } : {}), ...(cycle !== undefined ? { cycle } : {}),
+    ...(tab ? { tab } : {}), ...(view ? { view } : {}), ...(changes ? { changes } : {}), ...(test ? { test } : {}),
+    ...(attempt !== undefined ? { attempt } : {}), ...(cycle !== undefined ? { cycle } : {}), ...(testTab ? { testTab } : {}),
     ...(service ? { service } : {}), ...(log ? { log } : {}), ...(journal ? { journal } : {}),
   }
 }
@@ -411,7 +426,10 @@ function writeViewParams(params: URLSearchParams, state: PersistedView): void {
   setOrDelete(params, 'testLocation', test?.location ?? null)
   setOrDelete(params, 'runtab', !state.run ? null : loc ? loc.tab ?? null : state.runTab)
   setOrDelete(params, 'rview', loc?.tab === 'results' ? loc.view ?? null : null)
+  setOrDelete(params, 'changes', loc?.changes ? '1' : null)
+  setOrDelete(params, 'attempt', loc?.test && loc.attempt !== undefined ? String(loc.attempt) : null)
   setOrDelete(params, 'cycle', loc?.test && loc.cycle !== undefined ? String(loc.cycle) : null)
+  setOrDelete(params, 'ttab', loc?.test ? loc.testTab ?? null : null)
   setOrDelete(params, 'journal', loc?.test ? loc.journal ?? null : null)
   setOrDelete(params, 'svc', loc?.service ?? null)
   const log = loc?.tab === 'services' && loc.service ? loc.log : undefined

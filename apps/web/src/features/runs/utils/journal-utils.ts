@@ -106,3 +106,43 @@ export function outcomeLabel(outcome: OutcomeBadge): string {
   if (outcome === 'applicable_passed') return 'applicable tests passed'
   return outcome.replaceAll('_', ' ')
 }
+
+// A journal field's first sentence is its takeaway; the rest is its working.
+// A sentence ends at `.`, `!`, `?` or `;` followed by whitespace, so a path
+// (`a.service.ts`) or an abbreviation (`e.g.`) never splits one. A trailing
+// `;` belongs to the clause it closes, so the lead drops it.
+const LEAD_END_RE = /[.!?;](?=\s+\S)/g
+const ABBREVIATION_RE = /\b(?:e\.g|i\.e|vs|cf|etc)$/i
+
+export function splitLead(text: string): { lead: string; rest: string } {
+  const trimmed = text.trim()
+  for (const match of trimmed.matchAll(LEAD_END_RE)) {
+    const end = match.index
+    if (match[0] === '.' && ABBREVIATION_RE.test(trimmed.slice(0, end))) continue
+    const lead = trimmed.slice(0, match[0] === ';' ? end : end + 1)
+    return { lead, rest: trimmed.slice(end + 1).trim() }
+  }
+  return { lead: trimmed, rest: '' }
+}
+
+// Spans of agent prose that name code: a backtick span, a call (`fn()`), a
+// source file, or a SCREAMING_SNAKE constant. They render in mono so the
+// sentence around them reads as English.
+const CODE_TOKEN_RE = /`([^`]+)`|[A-Za-z_$][\w$.]*\(\)|[\w@][\w./-]*\.(?:[cm]?[jt]sx?|json|md|ya?ml|py|go|rb|rs|java|kt|sql|s?css|html|sh)\b|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g
+
+export interface ProsePart {
+  text: string
+  code: boolean
+}
+
+export function codeSpans(text: string): ProsePart[] {
+  const out: ProsePart[] = []
+  let at = 0
+  for (const match of text.matchAll(CODE_TOKEN_RE)) {
+    if (match.index > at) out.push({ text: text.slice(at, match.index), code: false })
+    out.push({ text: match[1] ?? match[0], code: true })
+    at = match.index + match[0].length
+  }
+  if (at < text.length) out.push({ text: text.slice(at), code: false })
+  return out
+}

@@ -1,34 +1,34 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { buildRunEvidence, type CaseEvidence, type RunEvidence } from '@shared/run-evidence'
+import { buildRunEvidence, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
 import type { PlaywrightArtifact, RunDetail } from '@shared/run-detail'
 import type { VerificationDiagnostics } from '@shared/verification'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { shortTime } from '@/shared/lib/format'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
-import { ChevronRightIcon, GearIcon } from '@/shared/ui/Icons'
+import { AlertCircleIcon, ChevronRightIcon } from '@/shared/ui/Icons'
 import { Tab } from '@/shared/ui/Tab'
 import { StepStatusBadge } from '@/shared/ui/TestCodeBlock'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
+import { Tooltip } from '@/shared/ui/Tooltip'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
-import { attemptStatus, caseNumbers, cycleOptions, resolveCycleChoice, unshownLatestCopies, type CycleChoice, type ResultsSelection, type ServiceLogAnchor } from '../utils/results-fixes'
-import { ChangesTab } from './ChangesTab'
-import { JournalTab } from './JournalTab'
+import { attemptLabel, attemptStatus, caseNumbers, recoveredNote, type ResultsSelection, type ServiceLogAnchor } from '../utils/results-fixes'
 import { PaneTerminal } from './PaneTerminal'
-import { RepairStory } from './RepairStory'
 import { VerificationDiagnosticsPanel } from './RunDiagnosticsPanels'
 import { ArtifactCaption, SectionHeader } from './RunPlaybackPanels'
 import { RunPane } from './RunPane'
+import { TestResultDialog } from './TestResultDialog'
 
-export type ResultsView = 'tests' | 'run-wide' | 'terminal'
+export type ResultsView = 'tests' | 'terminal'
 
 /**
- * Results & Fixes: every recorded test with the repair cycles it went through,
- * one accordion row per case, plus the run's raw evidence — the captured
- * changes and full journal that belong to no single test, and the Playwright
- * terminal. Everything is projected from the run detail the runs WebSocket
- * pushes, so an update re-renders the open view in place; the reader's
- * selection is owned by the caller so it survives a tab switch.
+ * Results & Fixes: every recorded test, one row each, and the Playwright
+ * terminal. A row opens the test's dialog — its runs, repairs and evidence.
+ * The run's captured changes belong to the run, not one test, so they sit
+ * behind the run header's Changes button. Everything is projected from the run
+ * detail the runs WebSocket pushes, so an update re-renders the open view and
+ * dialog in place; the reader's selection is owned by the caller so it
+ * survives a tab switch.
  */
 export function ResultsFixesTab({
   detail,
@@ -36,25 +36,25 @@ export function ResultsFixesTab({
   onViewChange,
   selection,
   onSelectionChange,
-  repairEvidence,
   diagnostics,
   onOpenArtifactSettings,
   onOpenServiceLog,
   unmatchedTest,
+  changes,
 }: {
   detail: RunDetail
   view: ResultsView
   onViewChange: (view: ResultsView) => void
   selection: ResultsSelection
   onSelectionChange: (selection: ResultsSelection) => void
-  /** False for a verify run: it never repairs, so it has no run-wide captures. */
-  repairEvidence: boolean
   diagnostics?: VerificationDiagnostics
   onOpenArtifactSettings?: () => void
   /** Opens a service's retained log at an excerpt's lines in the Services tab. */
   onOpenServiceLog?: (anchor: ServiceLogAnchor) => void
   /** A linked test this run's complete roster does not contain. */
   unmatchedTest?: string
+  /** The run's captured repair, by repo — the fix a pull request ships. */
+  changes?: { repos: number; onOpen: () => void }
 }) {
   const m = detail.manifest
   const evidence = useMemo(() => buildRunEvidence({
@@ -63,25 +63,29 @@ export function ResultsFixesTab({
     known: detail.summary?.knownTests,
     lifecycle: detail.lifecycleEvents,
   }), [detail.playbackEvents, detail.playbackIdentity, detail.summary?.knownTests, detail.lifecycleEvents])
+  const numbers = useMemo(() => caseNumbers(evidence.cases, detail.summary?.knownTests), [evidence.cases, detail.summary?.knownTests])
+  const open = view === 'tests' ? evidence.cases.find((c) => c.caseKey === selection.caseKey) : undefined
   return (
     <RunPane
       scroll={false}
       bar={
         <>
-          <Tab active={view === 'tests'} onClick={() => onViewChange('tests')} className="shrink-0 whitespace-nowrap">Tests</Tab>
-          {repairEvidence && <Tab active={view === 'run-wide'} onClick={() => onViewChange('run-wide')} className="shrink-0 whitespace-nowrap">Run-wide</Tab>}
-          <Tab active={view === 'terminal'} onClick={() => onViewChange('terminal')} className="shrink-0 whitespace-nowrap">Terminal</Tab>
-          {onOpenArtifactSettings && (
+          {/* The same run either laid out per test or as the runner printed it. */}
+          <Tab active={view === 'tests'} onClick={() => onViewChange('tests')} className="shrink-0 whitespace-nowrap">Formatted</Tab>
+          <Tab active={view === 'terminal'} onClick={() => onViewChange('terminal')} className="shrink-0 whitespace-nowrap">Playwright</Tab>
+          {changes && (
             <>
               <div className="min-w-2 flex-1" />
+              {/* The results show what the repair proved; its changes are the
+                  fix itself, one click away where they are reviewed and shipped. */}
               <button
                 type="button"
-                onClick={onOpenArtifactSettings}
-                title="Choose which Playwright artifacts this suite keeps — screenshots, video, trace"
-                className="cl-button mb-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
+                onClick={changes.onOpen}
+                title="Every file the repair agent changed in this run, per repo — review it or open a pull request"
+                className="cl-button mb-1 shrink-0 px-2 py-1 text-[11px] font-medium"
+                data-testid="run-changes-button"
               >
-                <GearIcon size={11} />
-                Artifact settings
+                Changes · {changes.repos} {changes.repos === 1 ? 'repo' : 'repos'}
               </button>
             </>
           )}
@@ -99,61 +103,63 @@ export function ResultsFixesTab({
               This link names a test this run did not record ({unmatchedTest}). Pick a test below.
             </p>
           )}
-          <CaseAccordion
-            detail={detail}
-            evidence={evidence}
-            selection={selection}
-            onSelectionChange={onSelectionChange}
-            onOpenRunWide={repairEvidence ? () => onViewChange('run-wide') : undefined}
-            onOpenServiceLog={onOpenServiceLog}
-          />
+          <CaseList cases={evidence.cases} numbers={numbers} openKey={open?.caseKey} onOpen={(c) => onSelectionChange({ caseKey: c.caseKey, test: caseTarget(c) })} />
+          <UnplacedEvidence detail={detail} evidence={evidence} />
         </div>
       )}
-      {view === 'run-wide' && repairEvidence && <RunWideEvidence detail={detail} evidence={evidence} />}
+      {open && (
+        <TestResultDialog
+          key={open.caseKey}
+          detail={detail}
+          evidence={evidence}
+          caseEvidence={open}
+          number={numbers.get(open.caseKey)}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          onClose={() => onSelectionChange({ caseKey: null })}
+          onOpenServiceLog={onOpenServiceLog}
+          onOpenArtifactSettings={onOpenArtifactSettings}
+        />
+      )}
     </RunPane>
   )
 }
 
-function CaseAccordion({ detail, evidence, selection, onSelectionChange, onOpenRunWide, onOpenServiceLog }: {
-  detail: RunDetail
-  evidence: RunEvidence
-  selection: ResultsSelection
-  onSelectionChange: (selection: ResultsSelection) => void
-  onOpenRunWide?: () => void
-  onOpenServiceLog?: (anchor: ServiceLogAnchor) => void
+/** One row per test. A row opens that test's dialog; the list itself never
+ *  expands, so it stays one line per test with every (!) mark in view. */
+function CaseList({ cases, numbers, openKey, onOpen }: {
+  cases: readonly CaseEvidence[]
+  numbers: Map<string, number>
+  openKey?: string
+  onOpen: (c: CaseEvidence) => void
 }) {
-  const numbers = useMemo(() => caseNumbers(evidence.cases, detail.summary?.knownTests), [evidence.cases, detail.summary?.knownTests])
   const openRef = useRef<HTMLElement | null>(null)
-  // Land on the opened case: a routed or clicked selection may sit below the fold.
+  // Land on the opened case: a routed selection may sit below the fold, and
+  // closing its dialog should leave the reader at that row.
   useEffect(() => {
-    openRef.current?.scrollIntoView({ block: 'start' })
-  }, [selection.caseKey])
-  if (evidence.cases.length === 0) return <EmptyState {...EMPTY_COPY.playback} />
+    openRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [openKey])
+  if (cases.length === 0) return <EmptyState {...EMPTY_COPY.playback} />
   return (
     <div className="flex flex-col gap-2 p-4 text-xs">
-      {evidence.cases.map((c) => {
-        const open = selection.caseKey === c.caseKey
-        const status = attemptStatus(c.latest)
-        const bodyId = `case-body-${encodeURIComponent(c.caseKey)}`
+      {cases.map((c) => {
+        const recovered = recoveredNote(c)
         return (
           <section
             key={c.caseKey}
-            ref={open ? openRef : undefined}
+            ref={c.caseKey === openKey ? openRef : undefined}
             className="cl-card overflow-hidden"
             data-testid="case-result"
             data-case-key={c.caseKey}
-            {...(open ? { 'data-open': '' } : {})}
-            style={open ? { borderColor: 'var(--accent)' } : undefined}
           >
             <button
               type="button"
-              aria-expanded={open}
-              aria-controls={open ? bodyId : undefined}
-              onClick={() => onSelectionChange(open ? { caseKey: null } : { caseKey: c.caseKey, test: caseTarget(c) })}
+              aria-haspopup="dialog"
+              onClick={() => onOpen(c)}
               className="flex w-full min-w-0 items-center gap-2 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-[var(--bg-hover)]"
-              style={{ background: 'var(--bg-elevated)', borderBottom: open ? '1px solid var(--border-default)' : undefined }}
+              style={{ background: 'var(--bg-elevated)' }}
             >
-              <span aria-hidden="true" className="inline-flex shrink-0 transition-transform duration-150" style={{ transform: open ? 'rotate(90deg)' : undefined, color: 'var(--text-muted)' }}>
+              <span aria-hidden="true" className="inline-flex shrink-0" style={{ color: 'var(--text-muted)' }}>
                 <ChevronRightIcon />
               </span>
               <TestIdBadge n={numbers.get(c.caseKey)} />
@@ -161,23 +167,17 @@ function CaseAccordion({ detail, evidence, selection, onSelectionChange, onOpenR
                 <span className="block truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }} title={c.title}>{stripLeadingTestOrdinal(c.title)}</span>
                 {c.location && <span className="block truncate text-[10.5px]" title={c.location} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{shortSourceLocation(c.location)}</span>}
               </span>
-              <StepStatusBadge status={status} {...(c.latest ? {} : { label: 'not run' })} />
+              <span className="relative inline-flex shrink-0">
+                <StepStatusBadge status={attemptStatus(c.latest)} {...badgeLabel(c.latest)} />
+                {/* Pinned to the badge's corner like a notification mark; the
+                    row's own background masks the badge border under it. */}
+                {recovered && (
+                  <Tooltip label={recovered}>
+                    <span role="img" aria-label={recovered} data-testid="case-recovered" className="absolute -right-1.5 -top-1.5 inline-flex rounded-full text-warning" style={{ background: 'var(--bg-elevated)' }}><AlertCircleIcon size={11} /></span>
+                  </Tooltip>
+                )}
+              </span>
             </button>
-            {open && (
-              <div id={bodyId} className="p-3" style={{ background: 'var(--bg-base)' }}>
-                <CaseBody
-                  detail={detail}
-                  evidence={evidence}
-                  caseEvidence={c}
-                  requested={selection.cycle}
-                  onChoose={(cycle) => onSelectionChange({ caseKey: c.caseKey, test: selection.test ?? caseTarget(c), cycle })}
-                  journal={selection.journal}
-                  onJournalChange={(journal) => onSelectionChange({ ...selection, journal: journal ?? undefined })}
-                  onOpenRunWide={onOpenRunWide}
-                  onOpenServiceLog={onOpenServiceLog}
-                />
-              </div>
-            )}
           </section>
         )
       })}
@@ -185,101 +185,13 @@ function CaseAccordion({ detail, evidence, selection, onSelectionChange, onOpenR
   )
 }
 
-/** How a link names a case: its recorded name, and its location to tell apart
- *  two tests that share one. */
-function caseTarget(c: CaseEvidence): NonNullable<ResultsSelection['test']> {
-  return { name: c.name, ...(c.location ? { location: c.location } : {}) }
-}
-
-function CaseBody({ detail, evidence, caseEvidence, requested, onChoose, journal, onJournalChange, onOpenRunWide, onOpenServiceLog }: {
-  detail: RunDetail
-  evidence: RunEvidence
-  caseEvidence: CaseEvidence
-  requested?: CycleChoice
-  onChoose: (cycle: CycleChoice) => void
-  journal?: 'entry' | 'all'
-  onJournalChange: (journal: 'entry' | 'all' | null) => void
-  onOpenRunWide?: () => void
-  onOpenServiceLog?: (anchor: ServiceLogAnchor) => void
-}) {
-  const options = cycleOptions(caseEvidence)
-  const choice = resolveCycleChoice(caseEvidence, requested)
-  const selectId = `cycle-${encodeURIComponent(caseEvidence.caseKey)}`
-  // A routed cycle this test never had (a stale or hand-edited link) falls back
-  // to the latest; say which was asked for rather than swap it silently.
-  const missingCycle = requested !== undefined && requested !== choice ? requested : undefined
-  return (
-    <>
-      {missingCycle !== undefined && (
-        <p className="mb-2 mt-0 text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid="stale-cycle-link">
-          {missingCycle === 'initial' ? 'This test has no separate initial execution' : `Repair cycle ${missingCycle} did not address this test`}; showing {choice === 'initial' ? 'its result' : `repair cycle ${choice}`}.
-        </p>
-      )}
-      {options.length > 0 ? (
-        <div className="mb-3 flex min-w-0 items-center gap-3">
-          <label htmlFor={selectId} className="shrink-0 text-[11.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Repair cycle</label>
-          <select
-            id={selectId}
-            className="themed-select cl-input min-w-0 flex-1 px-2 py-1 text-xs"
-            value={String(choice)}
-            onChange={(e) => onChoose(e.target.value === 'initial' ? 'initial' : Number(e.target.value))}
-          >
-            {options.map((o) => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
-          </select>
-        </div>
-      ) : caseEvidence.latest && (
-        <p className="mb-3 mt-0 text-[11px]" style={{ color: 'var(--text-muted)' }}>No repair cycle addressed this test.</p>
-      )}
-      <RepairStory
-        key={`${caseEvidence.caseKey}:${choice}`}
-        runId={detail.runId}
-        feature={detail.manifest.feature}
-        evidence={evidence}
-        caseEvidence={caseEvidence}
-        choice={choice}
-        media={detail}
-        policy={detail.manifest.playwrightArtifacts}
-        onOpenRunWide={onOpenRunWide}
-        hasServices={detail.manifest.services.length > 0}
-        onOpenServiceLog={onOpenServiceLog}
-        journal={journal}
-        onJournalChange={onJournalChange}
-      />
-    </>
-  )
-}
-
-/**
- * Evidence that belongs to the run rather than one test: the cumulative
- * captured changes (and their PR actions), the whole journal, retained files no
- * attempt claimed, and results recorded outside any known execution. Reachable
- * with no test selected, so nothing the old Changes and Journal tabs showed is
- * lost in the merge.
- */
-function RunWideEvidence({ detail, evidence }: { detail: RunDetail; evidence: RunEvidence }) {
-  const m = detail.manifest
+/** What the run kept that no test's dialog can show: files no test claimed
+ *  and results outside every recorded execution. Rare, so it renders nothing at all unless one exists. */
+function UnplacedEvidence({ detail, evidence }: { detail: RunDetail; evidence: RunEvidence }) {
   const unassigned = detail.unassignedArtifacts ?? []
-  const latestCopies = unshownLatestCopies(evidence, detail)
+  if (unassigned.length === 0 && evidence.unplacedAttempts.length === 0) return null
   return (
-    <div className="h-full overflow-y-auto p-4 scrollbar-thin" style={{ scrollbarGutter: 'stable' }} data-testid="results-run-wide">
-      <section aria-label="Captured changes">
-        <SectionHeader>Captured changes · whole run</SectionHeader>
-        <ChangesTab
-          framed={false}
-          runId={m.runId}
-          healCycles={m.healCycles}
-          run={m}
-          fixCapture={m.fixCapture}
-          worktrees={m.worktrees}
-          proposedPrs={m.proposedPrs}
-          prAttempt={m.prAttempt}
-          repoBranches={m.repoBranches ?? []}
-        />
-      </section>
-      <section aria-label="Repair journal" className="mt-5">
-        <SectionHeader>Repair journal · every cycle</SectionHeader>
-        <JournalTab framed={false} feature={m.feature} runId={m.runId} healCycles={m.healCycles} />
-      </section>
+    <div className="px-4 pb-4">
       {unassigned.length > 0 && (
         <ArtifactList
           title="Artifacts no test claimed"
@@ -287,23 +199,15 @@ function RunWideEvidence({ detail, evidence }: { detail: RunDetail; evidence: Ru
           items={unassigned.map((a) => ({ artifact: a, meta: `execution ${a.execution} · ${a.kind}` }))}
         />
       )}
-      {latestCopies.length > 0 && (
-        <ArtifactList
-          title="Playwright output folder · latest copy per test"
-          note="The copy Playwright left for each test's last attempt. A test's own story shows its attempt's retained copies instead, or names this one when it is the only copy."
-          testId="latest-copies"
-          items={latestCopies.flatMap((g) => g.artifacts.map((a) => ({ artifact: a, meta: `${stripLeadingTestOrdinal(g.testTitle ?? g.testName)} · ${a.kind}` })))}
-        />
-      )}
       {evidence.unplacedAttempts.length > 0 && (
-        <section aria-label="Results outside a recorded execution" className="mt-5" data-testid="unplaced-attempts">
+        <section aria-label="Results outside a recorded execution" className="mt-3" data-testid="unplaced-attempts">
           <SectionHeader>Results outside a recorded execution</SectionHeader>
           <ul className="m-0 flex list-none flex-col gap-1.5 p-0 text-xs">
             {evidence.unplacedAttempts.map((a) => (
               <li key={a.attemptKey} className="cl-card flex min-w-0 items-center gap-2 px-3 py-2">
                 <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{stripLeadingTestOrdinal(a.title)}</span>
                 {a.startedAt && <span className="text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{shortTime(a.startedAt)}</span>}
-                <StepStatusBadge status={attemptStatus(a)} />
+                <StepStatusBadge status={attemptStatus(a)} {...badgeLabel(a)} />
               </li>
             ))}
           </ul>
@@ -320,7 +224,7 @@ function ArtifactList({ title, note, testId, items }: {
   items: ReadonlyArray<{ artifact: PlaywrightArtifact; meta: string }>
 }) {
   return (
-    <section aria-label={title} className="mt-5" data-testid={testId}>
+    <section aria-label={title} className="mt-3" data-testid={testId}>
       <SectionHeader>{title}</SectionHeader>
       {note && <p className="mb-2 mt-0 text-[11px]" style={{ color: 'var(--text-muted)' }}>{note}</p>}
       <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
@@ -335,4 +239,15 @@ function ArtifactList({ title, note, testId, items }: {
       </ul>
     </section>
   )
+}
+
+function badgeLabel(attempt: EvidenceAttempt | undefined): { label?: string } {
+  const label = attemptLabel(attempt)
+  return label ? { label } : {}
+}
+
+/** How a link names a case: its recorded name, and its location to tell apart
+ *  two tests that share one. */
+function caseTarget(c: CaseEvidence): NonNullable<ResultsSelection['test']> {
+  return { name: c.name, ...(c.location ? { location: c.location } : {}) }
 }

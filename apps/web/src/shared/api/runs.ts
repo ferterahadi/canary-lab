@@ -222,6 +222,9 @@ export interface ApplyTarget {
   reason?: string
   foreignDirty: string[]
   branch: string | null
+  /** Whether the repair is in this repo yet, read from the repo itself: the
+   *  run edited an isolated copy, so nothing lands until it's applied or merged. */
+  inRepo?: 'absent' | 'uncommitted' | 'committed'
 }
 export function getRunApplyPreflight(runId: string, opts?: ClientOptions): Promise<{ targets: ApplyTarget[] }> {
   return requestSnapshot(`/api/runs/${encodeURIComponent(runId)}/apply-preflight`, opts)

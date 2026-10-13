@@ -214,7 +214,7 @@ describe('stageFacts — the frontend owns one fact contract per stage', () => {
     ['prd-summary', ['Requirements']],
     ['specs-coverage', ['Mapped coverage', 'Requirements', 'Tests written']],
     ['portify', ['Services injectable', 'Files edited', 'Instances proven']],
-    ['evaluation-export', ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven']],
+    ['evaluation-export', ['Requirements with tests', 'Test depth', 'Requirements proven']],
   ] as const
 
   it.each(contracts)('%s keeps the same ordered slots in every lifecycle state', (key, labels) => {
@@ -695,7 +695,6 @@ describe('stageFacts — evaluation report keeps deliverable metadata out of At 
     expect(facts.map((fact) => fact.label)).toEqual([
       'Requirements with tests',
       'Test depth',
-      'Tests that passed',
       'Requirements proven',
     ])
     expect(facts.every((fact) => fact.awaiting)).toBe(true)
@@ -783,7 +782,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
         { name: 't2', requirements: [], pathTypes: [], strength: 'shallow', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
       ],
     })
-    const expectedLabels = ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven']
+    const expectedLabels = ['Requirements with tests', 'Test depth', 'Requirements proven']
     for (const status of ['pending', 'running', 'waiting-for-approval', 'failed', 'done', 'skipped'] as const) {
       const facts = stageFacts({ ...stage, status }, flight(), undefined, {
         evalTask: task,
@@ -799,17 +798,18 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.map((fact) => fact.label)).toEqual(expectedLabels)
     expect(facts[0]).toEqual({ label: 'Requirements with tests', value: '', awaiting: true })
     expect(facts[1]).toMatchObject({ value: '1 solid', sub: '1 shallow' })
-    expect(facts[2]).toMatchObject({ value: '2/2', tone: 'good', sub: 'every test passed' })
-    expect(facts[3]).toEqual({ label: 'Requirements proven', value: '', awaiting: true })
+    // The run's outcomes ride the proof tile, so with no requirement axis they
+    // are not in this band — the Test Run stage still reports them.
+    expect(facts[2]).toEqual({ label: 'Requirements proven', value: '', awaiting: true })
   })
 
-  it('reads left to right as the derivation: claim → depth → run → conclusion', () => {
+  it('reads left to right as the derivation: claim → depth → conclusion', () => {
     const facts = stageFacts(stage, flight(), undefined, { evalTask: task, ledger: joined() })
-    // ORDER IS THE POINT. The conclusion is last because it is what the three
-    // tiles to its left add up to; leading with it (the old band) made `0/6`
-    // arrive before anything that explained it.
+    // ORDER IS THE POINT. The conclusion is last because it is what the tiles
+    // to its left add up to; leading with it (the old band) made `0/6` arrive
+    // before anything that explained it.
     expect(facts.map((f) => f.label))
-      .toEqual(['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'])
+      .toEqual(['Requirements with tests', 'Test depth', 'Requirements proven'])
     // Gate one, run-blind: what the coverage stage claimed, as a count on the
     // same denominator the conclusion uses — not the `100% claimed` jargon this
     // replaced, which asked the reader to convert a percentage to compare it.
@@ -821,13 +821,11 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     // finding. The sub lists the rest of the distribution.
     expect(facts.find((f) => f.label === 'Test depth'))
       .toMatchObject({ value: '1 solid', sub: '2 shallow' })
-    expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '1/3', tone: 'warn', sub: '1 failed · 1 never ran' })
-    // Gate two. Its sub carries the RULE, which is the only thing the three tiles
-    // to the left cannot show: one spec passed, yet nothing is proven, because a
-    // requirement needs every path of it backed by a pass.
+    // Gate two. Its sub carries the run outcomes the conclusion is drawn from:
+    // one test passed, one failed, one never ran — which is why nothing is
+    // proven. A never-run test stays named, never rounded into a pass.
     expect(facts.find((f) => f.label === 'Requirements proven'))
-      .toMatchObject({ value: '0/6', tone: 'warn', sub: 'each path needs a test that passed' })
+      .toMatchObject({ value: '0/6', tone: 'warn', sub: '1/3 tests passed · 1 failed · 1 never ran' })
     expect(facts.some((f) => f.value.includes('KB'))).toBe(false)
   })
 
@@ -863,8 +861,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
         ],
       }),
     })
-    expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '2/2', sub: 'every test passed' })
+    expect(facts.find((f) => f.label === 'Requirements proven')?.sub).toBe('2/2 tests passed')
   })
 
   it('a proven axis joined to a DIFFERENT run names that run instead of speaking for this report', () => {
@@ -877,8 +874,9 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     })
     expect(facts.find((f) => f.label === 'Requirements proven')?.sub)
       .toBe('measured on run 2026-07-04T1130-q881, not this one')
-    // Said once. The specs tile reads the same join and does not repeat the caveat.
-    expect(facts.find((f) => f.label === 'Tests that passed')?.sub).toBe('1 failed · 1 never ran')
+    // The outcomes come off the same foreign join, so the caveat replaces them
+    // rather than sitting beside numbers it disowns.
+    expect(facts.some((f) => f.sub?.includes('tests passed'))).toBe(false)
   })
 
   it('with no recorded test outcomes, the run-backed slots remain as skeletons', () => {
@@ -901,11 +899,8 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.map((f) => f.label)).toEqual([
       'Requirements with tests',
       'Test depth',
-      'Tests that passed',
       'Requirements proven',
     ])
-    expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toEqual({ label: 'Tests that passed', value: '', awaiting: true })
     expect(facts.find((f) => f.label === 'Requirements proven'))
       .toEqual({ label: 'Requirements proven', value: '', awaiting: true })
   })
@@ -920,12 +915,19 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
       }),
     })
     expect(facts.find((f) => f.label === 'Requirements proven'))
-      .toMatchObject({ value: '6/6', tone: 'good', sub: 'every requirement had a test that passed' })
-    expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every test passed' })
+      .toMatchObject({ value: '6/6', tone: 'good', sub: '1/1 tests passed' })
   })
 
-  it('a retried pass and a merged summary displace "every test passed" — a flake is not a clean sweep', () => {
+  it('a proof joined without a recorded outcome states the rule instead of a 0/N run', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({ tests: [{ name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid' }] }),
+    })
+    expect(facts.find((f) => f.label === 'Requirements proven'))
+      .toMatchObject({ value: '0/6', sub: 'each path needs a test that passed' })
+  })
+
+  it('a retried pass and a merged summary ride the outcome line — a flake is not a clean sweep', () => {
     const facts = stageFacts(stage, flight(), undefined, {
       evalTask: task,
       ledger: joined({
@@ -938,8 +940,8 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
         ],
       }),
     })
-    expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '2/2', sub: '1 passed on a retry · across partial runs' })
+    expect(facts.find((f) => f.label === 'Requirements proven')?.sub)
+      .toBe('2/2 tests passed · 1 passed on a retry · across partial runs')
   })
 })
 

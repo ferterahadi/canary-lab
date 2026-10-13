@@ -347,7 +347,7 @@ class SummaryReporter implements Reporter {
     const skippedIds = skippedResults.flatMap((r) => r.id ? [r.id] : [])
     const includeKnownTests = this.sawSuiteInventory
     // Honesty markers for downstream reporting (the coverage ledger's proven
-    // axis, the flight's "Tests that passed" tile): a pass that needed a retry
+    // axis, the flight's "Requirements proven" tile): a pass that needed a retry
     // is flaky, and a summary still carrying seeded prior-execution results
     // never saw all its passes in one run. Both are facts of THIS summary, so
     // they live here rather than being re-derived by readers.

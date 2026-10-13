@@ -74,6 +74,11 @@ export function buildPlaybackIdentity(
     const matching = [...active].filter((attempt) => event.test.id
       ? attempt.id === event.test.id
       : attempt.name === event.test.name && (location === undefined || attempt.location === undefined || attempt.location === location))
+    // Playwright never runs one test id twice at once — a retry begins after
+    // the end, and repeat-each gets its own id — so a begin under an id that is
+    // still open means that attempt was cut off without an end (an aborted
+    // execution). Left open, it would make the new attempt's end ambiguous.
+    if (event.type === 'test-begin' && event.test.id) for (const stale of matching) active.delete(stale)
     let attempt = event.type !== 'test-begin' && matching.length === 1 ? matching[0] : undefined
     if (!attempt && (event.type === 'test-begin' || event.type === 'test-end' || matching.length === 0)) {
       // An orphan legacy step can be shown, but never attached to either of two workers.

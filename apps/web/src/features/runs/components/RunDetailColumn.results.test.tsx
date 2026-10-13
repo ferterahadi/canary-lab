@@ -80,6 +80,19 @@ function click(label: string): void {
   act(() => target!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
+// The test dialog and the Changes dialog are portalled to the body.
+const dialog = () => document.body.querySelector('[data-testid="test-result-dialog"]')
+const pressedEntry = () => document.body.querySelector('[data-testid="timeline-entry"][aria-pressed="true"]')?.textContent
+const entry = (title: string) => [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="timeline-entry"]')].find((b) => b.textContent?.includes(title))!
+const escape = () => act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+const fixCapture = {
+  capturedAt: '2026-10-08T10:09:30.000Z',
+  repos: [
+    { repoName: 'shop', patchPath: '/logs/runs/run-1/fixes/shop.patch', patchFile: 'shop.patch', repoRoot: '/repos/shop', baseSha: 'abc123', files: 1, fileNames: ['src/pricing.ts'] },
+    { repoName: 'gateway', patchPath: '/logs/runs/run-1/fixes/gateway.patch', patchFile: 'gateway.patch', repoRoot: '/repos/gateway', baseSha: 'def456', files: 1, fileNames: ['server.ts'] },
+  ],
+}
+
 function detailOf(executionType: 'run' | 'verify' | 'boot' = 'run', runId = 'run-1'): RunDetail {
   return {
     runId,
@@ -105,51 +118,67 @@ describe('run detail tabs', () => {
     expect(tabs()).toEqual(['Overview', 'Results & Fixes'])
     click('Results & Fixes')
     expect(container.querySelector('[data-testid="results-tests"]')).toBeTruthy()
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === 'Run-wide')).toBe(false)
+    // Verify never repairs, so it never offers a fix to ship.
+    const verify = detailOf('verify')
+    await show({ ...verify, manifest: { ...verify.manifest, fixCapture } })
+    expect(container.querySelector('[data-testid="run-changes-button"]')).toBeNull()
     await show(detailOf('boot', 'boot-1'))
     expect(tabs()).toEqual(['Overview', 'Run Logs', 'Services'])
   })
 
-  it('lands a focused test on its expanded row in Results & Fixes', async () => {
+  it('opens a focused test’s dialog on its latest run', async () => {
     await show(detailOf(), { focusTest: 'test-case-applies-the-discount' })
-    const open = container.querySelector('[data-open]')
-    expect(open?.textContent).toContain('applies the discount')
-    expect(open?.querySelector('select')?.value).toBe('2')
+    expect(dialog()?.textContent).toContain('applies the discount')
+    expect(pressedEntry()).toContain('Repair 2')
   })
 
-  it('re-opens a collapsed row when the same test is clicked again, and only then', async () => {
+  it('re-opens a closed dialog when the same test is clicked again, and only then', async () => {
     const detail = detailOf()
     const focus = { focusTest: 'test-case-applies-the-discount', focusTestId: 'discount' }
     await show(detail, { ...focus, focusRequest: 1 })
-    const header = () => container.querySelector<HTMLButtonElement>('[data-open] > button')
-    act(() => header()!.click())
-    expect(container.querySelector('[data-open]')).toBeNull()
-    // A pushed update with the same request leaves the reader's collapse alone.
+    escape()
+    expect(dialog()).toBeNull()
+    // A pushed update with the same request leaves the reader's close alone.
     await show({ ...detail }, { ...focus, focusRequest: 1 })
-    expect(container.querySelector('[data-open]')).toBeNull()
+    expect(dialog()).toBeNull()
     click('Overview')
     await show(detail, { ...focus, focusRequest: 2 })
-    expect(container.querySelector('[data-open]')?.textContent).toContain('applies the discount')
+    expect(dialog()?.textContent).toContain('applies the discount')
   })
 
-  it('lands a captured-fixes arrival on the run-wide evidence', async () => {
-    await show(detailOf(), { arriveTab: 'changes' })
-    expect(container.querySelector('[data-testid="results-run-wide"]')).toBeTruthy()
-  })
-
-  it('keeps the reader’s case and cycle across a tab switch, and drops them for another run', async () => {
-    await show(detailOf(), { focusTest: 'test-case-applies-the-discount' })
-    const select = container.querySelector<HTMLSelectElement>('[data-open] select')!
-    act(() => {
-      select.value = '1'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    click('Overview')
+  it('opens the run’s captured changes from the Results toolbar, and lands a captured-fixes arrival there', async () => {
+    const detail = detailOf()
+    await show({ ...detail, manifest: { ...detail.manifest, fixCapture } })
+    // It sits in the Results & Fixes toolbar, beside the results it explains.
     click('Results & Fixes')
-    expect(container.querySelector<HTMLSelectElement>('[data-open] select')?.value).toBe('1')
+    const changes = container.querySelector<HTMLButtonElement>('[data-testid="run-changes-button"]')!
+    expect(changes.textContent).toBe('Changes · 2 repos')
+    expect(document.body.querySelector('[data-testid="run-changes-dialog"]')).toBeNull()
+    act(() => changes.click())
+    expect(document.body.querySelector('[data-testid="run-changes-dialog"]')?.textContent).toContain("This run's changes")
+    escape()
+    expect(document.body.querySelector('[data-testid="run-changes-dialog"]')).toBeNull()
+    act(() => root.unmount())
+    root = createRoot(container)
+    await show(detailOf('run', 'run-3'), { arriveTab: 'changes' })
+    expect(document.body.querySelector('[data-testid="run-changes-dialog"]')).toBeTruthy()
+  })
+
+  it('offers no Changes button when the run captured no fix', async () => {
+    await show(detailOf())
+    expect(container.querySelector('[data-testid="run-changes-button"]')).toBeNull()
+  })
+
+  it('keeps the reader’s test and run across a tab switch, and drops them for another run', async () => {
+    await show(detailOf(), { focusTest: 'test-case-applies-the-discount' })
+    act(() => entry('Repair 1').click())
+    click('Overview')
+    expect(dialog()).toBeNull()
+    click('Results & Fixes')
+    expect(pressedEntry()).toContain('Repair 1')
     await show(detailOf('run', 'run-2'))
     click('Results & Fixes')
-    expect(container.querySelector('[data-open]')).toBeNull()
+    expect(dialog()).toBeNull()
   })
 
   it('keeps the live Heal Agent terminal mounted across a trip through Results & Fixes', async () => {
@@ -167,7 +196,7 @@ describe('run detail tabs', () => {
   it('keeps the Playwright terminal one click inside Results & Fixes', async () => {
     await show(detailOf())
     click('Results & Fixes')
-    click('Terminal')
+    click('Playwright')
     expect(paneTerminals.props.map((p) => p.paneId)).toContain('playwright')
   })
 })
@@ -181,32 +210,38 @@ describe('a full service log link', () => {
   const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
   const inspector = () => container.querySelector('[data-testid="service-log-inspector"]')
 
-  it('opens the span on its own service, and Back returns to the same test and cycle', async () => {
+  // The failed run before repair 2: its service output is what the repair read.
+  const openFailedRun = async () => {
+    act(() => entry('Repair 1').click())
+    await settle()
+  }
+
+  it('opens the span on its own service, and Back returns to the same test and run', async () => {
     Element.prototype.scrollIntoView = () => {}
     await show(withServices(), { focusTest: 'test-case-applies-the-discount' })
-    await settle()
-    const open = container.querySelector<HTMLButtonElement>('[data-testid="open-full-service-log"]')!
+    await openFailedRun()
+    const open = document.body.querySelector<HTMLButtonElement>('[data-testid="open-full-service-log"]')!
     act(() => open.click())
     await settle()
     expect(container.querySelector('[data-testid="results-tests"]')).toBeNull()
     expect(inspector()?.querySelector('[data-testid="service-log-anchor"]')?.textContent)
-      .toBe('Web · Repair cycle 2 · Before this repair · execution 2 · lines 120–124 highlighted')
+      .toBe('Web · Repair 1 · execution 2 · lines 120–124 highlighted')
     const { getRunServiceLogLines } = await import('@/shared/api/runs')
     expect(getRunServiceLogLines).toHaveBeenCalledWith('run-1', 'web', { execution: 2, from: 100, count: 600 })
+    expect(dialog()).toBeNull()
     click('Back to Results & Fixes')
-    const row = container.querySelector('[data-open]')
-    expect(row?.textContent).toContain('applies the discount')
-    expect(row?.querySelector('select')?.value).toBe('2')
+    expect(dialog()?.textContent).toContain('applies the discount')
+    expect(pressedEntry()).toContain('Repair 1')
   })
 
   it('returns to the live terminal on Latest output or another service, and forgets the link for another run', async () => {
     Element.prototype.scrollIntoView = () => {}
     const openLink = async () => {
-      act(() => container.querySelector<HTMLButtonElement>('[data-testid="open-full-service-log"]')!.click())
+      act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="open-full-service-log"]')!.click())
       await settle()
     }
     await show(withServices(), { focusTest: 'test-case-applies-the-discount' })
-    await settle()
+    await openFailedRun()
     await openLink()
     paneTerminals.props = []
     click('Latest output')
@@ -248,18 +283,36 @@ describe('a routed place inside the run', () => {
   ]
   const discount = { test: { name: 'test-case-applies-the-discount', location: 'e2e/checkout.spec.ts:12' } }
 
-  it('cold-loads a test, an earlier cycle and its journal entry, and reports the same place back', async () => {
+  it('cold-loads a test, an earlier run and its journal entry, and reports the same place back', async () => {
     const { listJournal } = await import('@/shared/api/runs')
     vi.mocked(listJournal).mockResolvedValue(journal)
     const reports: unknown[] = []
-    const location = { tab: 'results' as const, ...discount, cycle: 1, journal: 'entry' as const }
+    const location = { tab: 'results' as const, ...discount, attempt: 2, journal: 'entry' as const }
     await show(detailOf(), { focusTest: discount.test.name, focusTestLocation: discount.test.location, location, onLocationChange: (l) => reports.push(l) })
     await settle()
-    const open = container.querySelector('[data-open]')
-    expect(open?.textContent).toContain('applies the discount')
-    expect(open?.querySelector('select')?.value).toBe('1')
+    expect(dialog()?.textContent).toContain('applies the discount')
+    expect(pressedEntry()).toContain('Repair 1')
     expect(document.querySelector('[data-testid="journal-source-modal"]')?.textContent).toBe('Iteration 1')
     expect(reports.at(-1)).toEqual(location)
+  })
+
+  it('cold-loads an older link’s cycle on the run that checked it, and its Artifacts tab', async () => {
+    const reports: unknown[] = []
+    const location = { tab: 'results' as const, ...discount, cycle: 1, testTab: 'artifacts' as const }
+    await show(detailOf(), { focusTest: discount.test.name, focusTestLocation: discount.test.location, location, onLocationChange: (l) => reports.push(l) })
+    expect(pressedEntry()).toContain('Repair 1')
+    expect(document.body.querySelector('[data-testid="attempt-evidence"]')).toBeTruthy()
+    expect(reports.at(-1)).toEqual(location)
+  })
+
+  it('cold-loads the run’s Changes dialog', async () => {
+    const reports: unknown[] = []
+    const detail = detailOf()
+    await show({ ...detail, manifest: { ...detail.manifest, fixCapture } }, { location: { changes: true }, onLocationChange: (l) => reports.push(l) })
+    expect(document.body.querySelector('[data-testid="run-changes-dialog"]')).toBeTruthy()
+    expect(reports.at(-1)).toEqual({ changes: true })
+    escape()
+    expect(reports.at(-1)).toEqual({})
   })
 
   it('keeps a restored Services place when the test it carries resolves', async () => {
@@ -272,7 +325,7 @@ describe('a routed place inside the run', () => {
     expect(container.querySelector('[data-testid="service-log-inspector"]')).toBeTruthy()
     expect(reports.at(-1)).toEqual(location)
     click('Back to Results & Fixes')
-    expect(container.querySelector('[data-open]')?.textContent).toContain('applies the discount')
+    expect(dialog()?.textContent).toContain('applies the discount')
   })
 
   it('cold-loads a Full service log range on its service, even one the Services tab does not open first', async () => {
@@ -288,25 +341,33 @@ describe('a routed place inside the run', () => {
     expect(reports.at(-1)).toEqual({ tab: 'services', service: 'web' })
   })
 
-  it('reports each move: tab, test, cycle, sub-view and journal dialog', async () => {
+  it('reports each move: tab, test, run, dialog tab, journal, Changes and sub-view', async () => {
     const { listJournal } = await import('@/shared/api/runs')
     vi.mocked(listJournal).mockResolvedValue(journal)
     const reports: unknown[] = []
-    await show(detailOf(), { onLocationChange: (l) => reports.push(l) })
+    const detail = detailOf()
+    await show({ ...detail, manifest: { ...detail.manifest, fixCapture } }, { onLocationChange: (l) => reports.push(l) })
     expect(reports.at(-1)).toEqual({})
     click('Results & Fixes')
     expect(reports.at(-1)).toEqual({ tab: 'results' })
     const header = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="case-result"] > button')].find((b) => b.textContent?.includes('applies the discount'))!
     act(() => header.click())
     expect(reports.at(-1)).toEqual({ tab: 'results', ...discount })
-    const select = container.querySelector<HTMLSelectElement>('[data-open] select')!
-    act(() => { select.value = '1'; select.dispatchEvent(new Event('change', { bubbles: true })) })
-    expect(reports.at(-1)).toEqual({ tab: 'results', ...discount, cycle: 1 })
+    act(() => entry('Repair 1').click())
+    expect(reports.at(-1)).toEqual({ tab: 'results', ...discount, attempt: 2 })
     await settle()
-    click('Full run journal')
-    expect(reports.at(-1)).toEqual({ tab: 'results', ...discount, cycle: 1, journal: 'all' })
-    click('Run-wide')
-    expect(reports.at(-1)).toEqual({ tab: 'results', view: 'run-wide', ...discount, cycle: 1, journal: 'all' })
+    act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="journal-read-all"]')!.click())
+    expect(reports.at(-1)).toEqual({ tab: 'results', ...discount, attempt: 2, journal: 'all' })
+    // The journal belongs to the Summary, so the Artifacts tab closes it.
+    act(() => [...document.body.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === 'Artifacts')!.click())
+    expect(reports.at(-1)).toEqual({ tab: 'results', ...discount, attempt: 2, testTab: 'artifacts' })
+    escape()
+    expect(reports.at(-1)).toEqual({ tab: 'results' })
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="run-changes-button"]')!.click())
+    expect(reports.at(-1)).toEqual({ tab: 'results', changes: true })
+    escape()
+    click('Playwright')
+    expect(reports.at(-1)).toEqual({ tab: 'results', view: 'terminal' })
   })
 
   it('keeps naming a linked test until its events arrive, then explains a link this run never recorded', async () => {
@@ -317,13 +378,13 @@ describe('a routed place inside the run', () => {
     expect(container.querySelector('[data-testid="stale-test-link"]')).toBeNull()
     await show(detailOf(), { focusTest: 'test-case-gone', onLocationChange: (l) => reports.push(l) })
     expect(container.querySelector('[data-testid="stale-test-link"]')?.textContent).toContain('(test-case-gone)')
-    expect(container.querySelector('[data-open]')).toBeNull()
+    expect(dialog()).toBeNull()
   })
 
   it('explains a stale cycle and a stale service instead of swapping them silently', async () => {
     await show(detailOf(), { focusTest: discount.test.name, focusTestLocation: discount.test.location, location: { tab: 'results', ...discount, cycle: 7 } })
-    expect(container.querySelector('[data-testid="stale-cycle-link"]')?.textContent).toBe('Repair cycle 7 did not address this test; showing repair cycle 2.')
-    expect(container.querySelector<HTMLSelectElement>('[data-open] select')?.value).toBe('2')
+    expect(document.body.querySelector('[data-testid="stale-entry-link"]')?.textContent).toBe('Repair 7 did not address this test; showing its latest run.')
+    expect(pressedEntry()).toContain('Repair 2')
     // A cold load mounts the detail afresh.
     act(() => root.unmount())
     root = createRoot(container)

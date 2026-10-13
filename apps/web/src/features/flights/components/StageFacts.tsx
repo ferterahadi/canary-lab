@@ -138,7 +138,7 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
  *  is only meaningful when a match actually exists. */
 const slots = (...labels: string[]): readonly string[] => labels
 
-const REPORT_FACT_SLOTS = slots('Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven')
+const REPORT_FACT_SLOTS = slots('Requirements with tests', 'Test depth', 'Requirements proven')
 const RUN_HISTORY_FACT_SLOTS = slots('Runs performed', 'Succeeded', 'Avg duration')
 
 const FACT_SLOTS: Partial<Record<FlightStageKey, readonly string[]>> = {
@@ -571,12 +571,13 @@ function measuredStageFacts(
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
     case 'evaluation-export': {
-      // The Report measures four distinct evidence axes. This function emits
-      // only what was measured; the Report contract keeps every frontend slot
-      // mounted around it. Requirements and proof need a requirement
-      // model; test depth only needs authored tests; outcomes need recorded
-      // executions. Export identity and archive metadata stay on the
-      // deliverable card instead of replacing a missing evidence axis here.
+      // The Report measures three evidence axes. This function emits only what
+      // was measured; the Report contract keeps every frontend slot mounted
+      // around it. Requirements and proof need a requirement model; test depth
+      // only needs authored tests. The run's test outcomes ride the proof tile's
+      // sub-line, since they are what the conclusion is drawn from. Export
+      // identity and archive metadata stay on the deliverable card instead of
+      // replacing a missing evidence axis here.
       const led = ledgerEvidence(band.ledger)
       const reportRunId = evalTask?.runId ?? str(ev, 'runId')
       const bandFacts: StageFact[] = [
@@ -604,20 +605,9 @@ function measuredStageFacts(
               }
             })()]
           : []),
-        // Outcomes stay useful without requirement labels. Require at least one
-        // recorded result so an authored suite with no joined run does not read
-        // as a 0/N execution finding.
-        ...(led && led.outcomes.passed + led.outcomes.failed > 0
-          ? [{
-              label: 'Tests that passed',
-              value: `${led.outcomes.passed}/${led.outcomes.total}`,
-              big: true as const,
-              tone: led.outcomes.passed === led.outcomes.total ? 'good' as const : 'warn' as const,
-              sub: passedSub(led),
-            }]
-          : []),
-        // GATE TWO — the requirement conclusion stays last when that axis
-        // exists, after the evidence that explains it.
+        // GATE TWO — the requirement conclusion stays last, after the claim and
+        // depth that frame it. Its sub-line carries the run outcomes it is
+        // drawn from.
         ...(led && led.total > 0 && led.proven != null
           ? [{
               label: 'Requirements proven',
@@ -645,37 +635,37 @@ function claimedSub(led: LedgerEvidence): string {
   return `${gaps} not fully covered`
 }
 
-/** What became of every test in the suite. Empty buckets drop out, and a clean
- *  sweep says so rather than leaving the tile bare — "18/18" with no sub-line
- *  reads as a truncated tile.
+/** What became of every test in the suite, unmapped ones included. Empty
+ *  buckets drop out.
  *
- *  Two honesty caveats displace the clean-sweep line when they apply: a pass
- *  that needed a Playwright retry is a flake, not a clean pass, and a summary
- *  merged forward across partial heal reruns never saw all its passes in one
- *  execution. Both come off the run's own summary (never re-derived here), and
- *  "every test passed" without them would be the exact rounding-up this band
- *  exists to prevent. */
-function passedSub(led: LedgerEvidence): string {
+ *  Two honesty caveats ride along when they apply: a pass that needed a
+ *  Playwright retry is a flake, not a clean pass, and a summary merged forward
+ *  across partial heal reruns never saw all its passes in one execution. Both
+ *  come off the run's own summary (never re-derived here), and "7/7 tests
+ *  passed" without them would be the exact rounding-up this band exists to
+ *  prevent. */
+function outcomesLine(led: LedgerEvidence): string {
   const { outcomes } = led
   const parts = [
+    `${outcomes.passed}/${outcomes.total} tests passed`,
     ...(outcomes.failed > 0 ? [`${outcomes.failed} failed`] : []),
     ...(outcomes.neverRan > 0 ? [`${outcomes.neverRan} never ran`] : []),
     ...(outcomes.passedOnRetry > 0 ? [`${outcomes.passedOnRetry} passed on a retry`] : []),
+    ...(led.spansExecutions ? ['across partial runs'] : []),
   ]
-  const line = parts.length > 0 ? parts.join(' · ') : 'every test passed'
-  return led.spansExecutions ? `${line} · across partial runs` : line
+  return parts.join(' · ')
 }
 
-/** The conclusion tile's sub-line — the RULE that turns the other evidence into
- *  this number. A suite can have every requirement claimed and two tests passing
- *  and still prove nothing, because a requirement counts only when every path it
- *  declares is backed by a test that passed. Without that sentence the
- *  arithmetic looks broken.
+/** The conclusion tile's sub-line — the run outcomes the number is drawn from.
+ *  "1/3 tests passed · 1 failed · 1 never ran" under `0/6` is what explains it:
+ *  a requirement counts only when every path it declares is backed by a test
+ *  that passed, a rule the tooltip states. With no recorded outcome to show
+ *  (a proof the ledger joined without one), the line states that rule itself.
  *
  *  The engine joins the proven axis against the feature's LATEST recorded run,
  *  which is this report's run right after an export and stops being it the moment
  *  the suite runs again. When the ledger's run and the report's run differ, that
- *  caveat displaces the rule: a number attributed to the wrong run is a worse
+ *  caveat displaces the outcomes, which come off the same join: a number attributed to the wrong run is a worse
  *  problem than an unexplained one, and the deliverable card underneath names the
  *  report's own run a few inches below. */
 // `reportRunId` admits null as well as undefined because its two sources differ:
@@ -686,7 +676,7 @@ function provenSub(led: LedgerEvidence, reportRunId: string | null | undefined):
   if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
     return `measured on run ${led.provenRunId}, not this one`
   }
-  if (led.proven != null && led.proven === led.total) return 'every requirement had a test that passed'
+  if (led.outcomes.passed + led.outcomes.failed > 0) return outcomesLine(led)
   return 'each path needs a test that passed'
 }
 
@@ -812,14 +802,13 @@ export const FACT_HELP: Record<string, string> = {
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
   'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
   // Evaluation report
-  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under tests passed and requirements proven.',
+  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under requirements proven.',
   // All four tiers defined where the words are shown — the same definitions the
   // Composition card's hover titles carry (STRENGTH_TIER_HELP). The strong tier
   // needs a non-local URL, so a local-only suite genuinely tops out at solid;
   // saying so keeps its ceiling from reading as a defect.
   'Test depth': 'How much each test really checks. Strong — a real browser or outside system confirmed it. Solid — the app’s own API or UI said so. Basic — a database row changed. Shallow — only the app’s own log. Strong needs a non-local URL, so a local-only suite tops out at solid.',
-  'Tests that passed': 'Every test in this suite’s latest recorded run. A test the run never reached is not counted as a pass.',
-  'Requirements proven': 'A test has to exist and pass for every declared path. Depth is reported separately — a shallow pass still proves.',
+  'Requirements proven': 'A test has to exist and pass for every declared path; a shallow pass still proves. The line below counts every test in the latest run — one it never reached is not a pass.',
 }
 
 /** The static second line, used only when the fact carries no measured `sub`.
@@ -853,7 +842,6 @@ export const FACT_GLOSS: Record<string, string> = {
   'Files edited': 'fixed ports swapped out',
   'Instances proven': 'two copies ran at once',
   'Requirements with tests': 'claimed by a test’s label',
-  'Tests that passed': 'in the run this report reads',
   'Requirements proven': 'a passing test backs every path',
   'Cells run': 'test files × disturbances',
   'Findings': 'held in the green run, broke here',

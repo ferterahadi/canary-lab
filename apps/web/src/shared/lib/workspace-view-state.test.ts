@@ -124,15 +124,35 @@ describe('workspace-view-state (R12)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', focusTest: 'cart-total', testId: 't-1', testLocation: 'e2e/cart.spec.ts:9', runLocation }))
   })
 
-  it('round-trips a run-wide or terminal sub-view, an initial-execution pick and a service log range', () => {
-    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', view: 'run-wide' } }))
-    expect(readPersistedView().runLocation).toEqual({ tab: 'results', view: 'run-wide' })
+  it('round-trips the terminal sub-view, an initial-execution pick and a service log range', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', view: 'terminal' } }))
+    expect(readPersistedView().runLocation).toEqual({ tab: 'results', view: 'terminal' })
     persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', test: { name: 'cart-total' }, cycle: 'initial', journal: 'all' } }))
     expect(readPersistedView().runLocation).toEqual({ tab: 'results', test: { name: 'cart-total' }, cycle: 'initial', journal: 'all' })
     const log = { execution: 3, startLine: 120, endLine: 140, approximate: true }
     persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'services', service: 'api', log } }))
     expect(window.location.search).toBe('?feature=checkout&run=7cvh&runtab=services&svc=api&exec=3&lines=120-140&match=order')
     expect(readPersistedView().runLocation).toEqual({ tab: 'services', service: 'api', log })
+  })
+
+  // The test dialog's timeline pick and tab, and the run's captured changes.
+  it('round-trips the test dialog’s run and tab, and the captured changes dialog on any tab', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'results', test: { name: 'cart-total' }, attempt: 2, testTab: 'artifacts' } }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&test=cart-total&runtab=results&attempt=2&ttab=artifacts')
+    expect(readPersistedView().runLocation).toEqual({ tab: 'results', test: { name: 'cart-total' }, attempt: 2, testTab: 'artifacts' })
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'agent', changes: true } }))
+    expect(window.location.search).toBe('?feature=checkout&run=7cvh&runtab=agent&changes=1')
+    expect(readPersistedView().runLocation).toEqual({ tab: 'agent', changes: true })
+    persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { changes: true } }))
+    expect(readPersistedView().runLocation).toEqual({ changes: true })
+  })
+
+  it('opens the captured changes for a link from before they left Results & Fixes', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&run=7cvh&runtab=results&rview=run-wide')
+    expect(readPersistedView().runLocation).toEqual({ tab: 'results', changes: true })
+    // Only Results & Fixes ever had that sub-view.
+    window.history.replaceState(null, '', '/?feature=checkout&run=7cvh&runtab=agent&rview=run-wide')
+    expect(readPersistedView().runLocation).toEqual({ tab: 'agent' })
   })
 
   it('lets a reported place supersede the arrival that opened the run', () => {
@@ -148,7 +168,7 @@ describe('workspace-view-state (R12)', () => {
 
   it('drops every run qualifier without a run, and keeps them out of localStorage', () => {
     persistView(view({ feature: 'checkout', run: '7cvh', runLocation: { tab: 'services', service: 'api', log: { execution: 1, startLine: 1, endLine: 2, approximate: false } } }))
-    persistView(view({ feature: 'checkout', runLocation: { tab: 'results', view: 'terminal', test: { name: 'x' }, cycle: 1, journal: 'all', service: 'api' } }))
+    persistView(view({ feature: 'checkout', runLocation: { tab: 'results', view: 'terminal', changes: true, test: { name: 'x' }, attempt: 2, cycle: 1, testTab: 'summary', journal: 'all', service: 'api' } }))
     expect(window.location.search).toBe('?feature=checkout')
     expect(localStorage.getItem('cl.workspace.view')).toBe(JSON.stringify({ view: 'workspace', feature: 'checkout' }))
   })
@@ -157,6 +177,12 @@ describe('workspace-view-state (R12)', () => {
     const read = (qs: string) => { window.history.replaceState(null, '', `/?feature=checkout&run=7cvh${qs}`); return readPersistedView().runLocation }
     // A cycle or journal dialog with no test, a sub-view off Results & Fixes.
     expect(read('&runtab=agent&rview=terminal&cycle=2&journal=entry')).toEqual({ tab: 'agent' })
+    // A dialog run or tab with no test, or malformed.
+    expect(read('&runtab=results&attempt=2&ttab=artifacts')).toEqual({ tab: 'results' })
+    expect(read('&test=x&attempt=0&ttab=story')).toBeUndefined()
+    expect(read('&test=x&attempt=4')).toEqual({ test: { name: 'x' }, attempt: 4 })
+    expect(read('&test=x&ttab=summary')).toEqual({ test: { name: 'x' }, testTab: 'summary' })
+    expect(read('&changes=yes')).toBeUndefined()
     // A log range off the Services tab, with no service, or malformed.
     expect(read('&runtab=results&svc=api&exec=2&lines=4-9')).toEqual({ tab: 'results', service: 'api' })
     expect(read('&runtab=services&exec=2&lines=4-9')).toEqual({ tab: 'services' })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedStep } from '@shared/extracted-test'
 import type { TextPart } from '@shared/lib/comparison-diff'
@@ -10,6 +10,7 @@ import type { StoryCodeLineNumber } from '@shared/readable-tests/story-source-ma
 import {
   colorClassForStatus,
   statusLabel,
+  softStatusPillClassForStatus,
   statusPillClassForStatus,
   type StepStatus,
   type TestExecutionHighlightKind,
@@ -46,6 +47,7 @@ export function ShikiCode({
   showOpenButton = true,
   selectedSourceRange,
   storyLineNumbers,
+  numberBySource = false,
 }: {
   source: string
   lineHighlight?: CodeLineHighlight
@@ -62,8 +64,13 @@ export function ShikiCode({
    *  for a dirty test's body. Execution highlights take precedence when both
    *  refer to the same row. */
   changedLines?: Set<number>
+  /** Number each row by the source line it maps to (`96`, `97`, …) rather
+   *  than its position in the excerpt — for a code frame cut from a file. */
+  numberBySource?: boolean
 }) {
   const html = useCodeHighlight(source)?.html ?? null
+  // A frame numbered by source needs a gutter as wide as its largest number.
+  const gutter = numberBySource ? { '--code-gutter': `${String(Math.max(0, ...(sourceLineMap ?? []).map((line) => line.sourceLine))).length}ch` } as CSSProperties : undefined
 
   const openClickedLine = (target: EventTarget | null, openAt: OpenSourceAtLine): void => {
     const line = (target as HTMLElement | null)?.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
@@ -76,7 +83,7 @@ export function ShikiCode({
         {(openAt) => (
           <pre
             className={`cl-numbered-code cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-[1.65] ${sourceLocation ? 'cursor-pointer' : ''}`}
-            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', ...gutter }}
             onClick={(event) => openClickedLine(event.target, openAt)}
           >
             <code>
@@ -88,6 +95,7 @@ export function ShikiCode({
                 changedLines={changedLines}
                 selectedSourceRange={selectedSourceRange}
                 storyLineNumbers={storyLineNumbers}
+                numberBySource={numberBySource}
               />
             </code>
           </pre>
@@ -101,11 +109,12 @@ export function ShikiCode({
       {(openAt) => (
         <div
           className={`shiki-block cl-numbered-code cl-code-shell overflow-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
+          style={gutter}
           onClick={(event) => openClickedLine(event.target, openAt)}
           // Shiki has already escaped the source it highlighted;
           // decorateShikiLines only adds metadata and presentation wrappers.
           // eslint-disable-next-line no-restricted-syntax
-          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers) }}
+          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource) }}
         />
       )}
     </SourceOpenShell>
@@ -120,6 +129,7 @@ function FallbackCodeLines({
   changedLines,
   selectedSourceRange,
   storyLineNumbers,
+  numberBySource,
 }: {
   source: string
   lineHighlight?: CodeLineHighlight
@@ -128,13 +138,14 @@ function FallbackCodeLines({
   changedLines?: Set<number>
   selectedSourceRange?: { startLine: number; endLine: number }
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+  numberBySource?: boolean
 }) {
   const shownStorySequences = new Set<string>()
   return source.split('\n').map((line, index) => {
     const lineNumber = index + 1
     const { mapped, number, selected, changed, active, executionKind, executionLabel, style } = codeLinePresentation(
       lineNumber,
-      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers },
+      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource },
       shownStorySequences,
     )
     return (
@@ -220,6 +231,7 @@ function decorateShikiLines(
   changedLines?: Set<number>,
   selectedSourceRange?: { startLine: number; endLine: number },
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
+  numberBySource?: boolean,
 ): string {
   let lineNo = 0
   const shownStorySequences = new Set<string>()
@@ -227,7 +239,7 @@ function decorateShikiLines(
     lineNo += 1
     const { mapped, number, selected, changed, active, executionKind, executionLabel, style } = codeLinePresentation(
       lineNo,
-      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers },
+      { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource },
       shownStorySequences,
     )
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
@@ -256,6 +268,7 @@ interface CodeLinePresentationOptions {
   changedLines?: ReadonlySet<number>
   selectedSourceRange?: { startLine: number; endLine: number }
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+  numberBySource?: boolean
 }
 
 function codeLinePresentation(
@@ -263,9 +276,12 @@ function codeLinePresentation(
   options: CodeLinePresentationOptions,
   shownStorySequences: Set<string>,
 ) {
-  const { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers } = options
+  const { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource } = options
   const mapped = sourceMappingForDisplayLine(lineNumber, startLine, sourceLineMap)
-  const number = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
+  const physical = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
+  const number = numberBySource && mapped.sourceLine !== null
+    ? { ...physical, sequence: String(mapped.sourceLine), label: String(mapped.sourceLine) }
+    : physical
   const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
   const changed = changedLines?.has(lineNumber) === true
   const executionKind = lineHighlight?.lines.has(lineNumber) ? lineHighlight.kind : undefined
@@ -339,13 +355,24 @@ function sourceRangeIncludesAny(
   )
 }
 
-export function StepStatusBadge({ status, label }: { status: StepStatus; label?: string }) {
+export function StepStatusBadge({ status, label, soft = false }: { status: StepStatus; label?: string; soft?: boolean }) {
+  const text = label ?? statusLabel(status)
+  // The quiet form: no outline, sentence case, for a list whose rows already
+  // set each status apart. One width for every status — wide enough for the
+  // longest a timeline shows, "Not rerun" — so the chips line up in a column.
+  if (soft) {
+    return (
+      <span className={`inline-flex shrink-0 items-center justify-center rounded-full px-2 py-px text-[10.5px] font-medium ${softStatusPillClassForStatus(status)}`} style={{ minWidth: '4.75rem' }}>
+        {text.charAt(0).toUpperCase() + text.slice(1)}
+      </span>
+    )
+  }
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${statusPillClassForStatus(status)}`}
       style={{ fontFamily: 'var(--font-mono)', minWidth: '3.5rem' }}
     >
-      {label ?? statusLabel(status)}
+      {text}
     </span>
   )
 }

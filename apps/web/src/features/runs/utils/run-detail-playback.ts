@@ -9,6 +9,7 @@ import type {
 } from '@shared/configs/playwright-modes'
 import { parseLocation } from '@/shared/test-numbering'
 import { plural } from '@shared/lib/plural'
+import { parseSourceLocation } from '@shared/lib/source-location'
 
 export interface PlaybackTest {
   name: string
@@ -22,7 +23,7 @@ export interface PlaybackTest {
   durationMs?: number
   retry?: number
   error?: { message: string; snippet?: string }
-  steps: Array<{ title: string; category: string; ended: boolean }>
+  steps: CompactStep[]
 }
 
 export interface PlaybackCase extends PlaybackTest {
@@ -142,7 +143,21 @@ export function branchTooltip(service: Pick<ServiceManifestEntry, 'cwd'>, repo: 
   return parts.join('\n')
 }
 
-type PlaybackStep = PlaybackTest['steps'][number]
+/** A step as the Steps panel shows it. */
+export interface CompactStep {
+  title: string
+  category: string
+  ended: boolean
+  /** Where the step ran (`file:line[:col]`). A tally spans this line to `toLine`. */
+  location?: string
+  toLine?: number
+  /** How many consecutive runs of one source line this row stands for. */
+  count?: number
+  /** Each run's own title, when they differ — a loop's `expect(value, label)`. */
+  labels?: string[]
+}
+
+type PlaybackStep = CompactStep
 
 /** A step that survived filtering. `title: null` marks an assertion whose only
  *  content was the matcher name (`Expect "toBe"`): one such row says nothing,
@@ -153,7 +168,7 @@ interface MappedStep {
   title: string | null
 }
 
-export function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
+export function compactPlaybackSteps(steps: readonly CompactStep[]): CompactStep[] {
   const mapped = steps.flatMap<MappedStep>((step) => {
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
@@ -166,16 +181,19 @@ export function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest
 
   // Collapse each consecutive run of bare assertions into one tally, in place,
   // so the surrounding steps keep their order.
-  const out: PlaybackTest['steps'] = []
+  const out: CompactStep[] = []
   const pending: PlaybackStep[] = []
   const flush = (): void => {
     if (pending.length === 0) return
+    const last = pending[pending.length - 1]
+    const first = pending.find((step) => step.location)
     out.push({
-      ...pending[pending.length - 1],
+      title: `Verified ${plural(pending.length, 'assertion')}`,
+      category: last.category,
       // A tally is only finished when every assertion under it is: one still
       // open must not be reported as done.
       ended: pending.every((step) => step.ended),
-      title: `Verified ${plural(pending.length, 'assertion')}`,
+      ...(first ? lineSpan(first.location!, pending) : {}),
     })
     pending.length = 0
   }
@@ -185,10 +203,84 @@ export function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest
       continue
     }
     flush()
-    out.push({ ...entry.step, title: entry.title })
+    // One line run again and again — a loop — is one row, not one per pass.
+    const previous = out.at(-1)
+    if (previous?.labels && entry.step.location && previous.location === entry.step.location && previous.category === entry.step.category) {
+      previous.labels.push(entry.title)
+      previous.ended = previous.ended && entry.step.ended
+      continue
+    }
+    out.push({
+      title: entry.title,
+      category: entry.step.category,
+      ended: entry.step.ended,
+      ...(entry.step.location ? { location: entry.step.location } : {}),
+      labels: [entry.title],
+    })
   }
   flush()
+  return foldLoops(out).map(({ labels, ...row }) => {
+    if (!labels || labels.length === 1) return row
+    if (labels.every((label) => label === labels[0])) return { ...row, count: labels.length }
+    const title = row.category === 'expect' ? `Verified the same check ${labels.length} times` : `Ran the same step ${labels.length} times`
+    return { ...row, title, count: labels.length, labels }
+  })
+}
+
+/** The longest loop body this folds: a loop running more distinct lines per
+ *  pass is rare, and its passes stay readable unfolded. */
+const MAX_LOOP_BODY = 4
+
+/** Fold a loop whose body runs several lines — `94, 98, 94, 98, …` — into one
+ *  row per body line, each keeping every pass's label. One-line loops were
+ *  already merged as they arrived; this catches the interleaved ones. */
+function foldLoops(rows: readonly CompactStep[]): CompactStep[] {
+  const out: CompactStep[] = []
+  let i = 0
+  while (i < rows.length) {
+    const loop = loopAt(rows, i)
+    if (!loop) {
+      out.push(rows[i])
+      i += 1
+      continue
+    }
+    const body = rows.slice(i, i + loop.period).map((row) => ({ ...row, labels: [...row.labels!] }))
+    for (let j = i + loop.period; j < loop.end; j += 1) {
+      const row = body[(j - i) % loop.period]
+      row.labels.push(...rows[j].labels!)
+      row.ended = row.ended && rows[j].ended
+    }
+    out.push(...body)
+    i = loop.end
+  }
   return out
+}
+
+/** A loop starting at `i`: a body of 2–4 distinct located lines that repeats
+ *  for at least two whole passes. */
+function loopAt(rows: readonly CompactStep[], i: number): { period: number; end: number } | undefined {
+  const loopable = (row: CompactStep | undefined) => Boolean(row?.labels && row.location)
+  for (let period = 2; period <= MAX_LOOP_BODY; period += 1) {
+    const body = rows.slice(i, i + period)
+    if (body.length < period || !body.every(loopable) || new Set(body.map((row) => row.location)).size < period) continue
+    let end = i + period
+    while (end < rows.length && loopable(rows[end]) && rows[end].location === rows[i + ((end - i) % period)].location) end += 1
+    const passes = Math.floor((end - i) / period)
+    if (passes >= 2) return { period, end: i + passes * period }
+  }
+  return undefined
+}
+
+/** The lines a tally covers: from its first located assertion to the last one
+ *  in the same file. An assertion in another file (a helper) widens nothing. */
+function lineSpan(location: string, steps: readonly PlaybackStep[]): Pick<CompactStep, 'location' | 'toLine'> {
+  const { file, line } = parseSourceLocation(location)
+  const lines = steps.flatMap((step) => {
+    const at = step.location ? parseSourceLocation(step.location) : undefined
+    return at?.file === file && at.line ? [Number(at.line)] : []
+  })
+  const last = Math.max(...lines)
+  return { location, ...(line && last > Number(line) ? { toLine: last } : {}) }
 }
 
 /** An `expect` step that named a matcher and nothing else. */

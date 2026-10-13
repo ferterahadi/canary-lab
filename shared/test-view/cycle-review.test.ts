@@ -158,7 +158,7 @@ describe('cycleFileAlignedInput', () => {
   it('places each patch line at its real line number, so the aligned rows read the hunk numbers', () => {
     const [pricing] = cycleReviewFromPatch(TWO_FILE_CYCLE)
     const { review, rows, labels } = cycleFileAlignedInput(pricing, 2)
-    expect(labels).toEqual({ before: 'Before repair cycle 2', after: 'After repair cycle 2' })
+    expect(labels).toEqual({ before: 'Before repair 2', after: 'After repair 2' })
     const before = review.before.source.split('\n')
     expect(before).toHaveLength(41)
     expect(before[1]).toBe('export const total = (p: number) => Math.round(p * 0.95)')

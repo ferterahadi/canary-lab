@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { activeBodyLineForTest, statusForTest, statusFromPlaybackResult, colorClassForStatus, statusLabel, statusPillClassForStatus } from './test-step-status'
+import { activeBodyLineForTest, statusForTest, statusFromPlaybackResult, colorClassForStatus, softStatusPillClassForStatus, statusLabel, statusPillClassForStatus } from './test-step-status'
 import { slugify, summaryEntryName } from '@shared/test-names'
 
 import type { RunSummary } from '@shared/run-detail'
@@ -308,6 +308,24 @@ describe('statusPillClassForStatus', () => {
     const className = statusPillClassForStatus('pending')
     expect(className).toContain('idle')
     expect(className).toContain('bg-transparent')
+    expect(className).not.toMatch(RAW_PALETTE_RE)
+  })
+})
+
+describe('softStatusPillClassForStatus', () => {
+  it.each([
+    ['testing', 'running'],
+    ['failed', 'danger'],
+    ['passed', 'success'],
+    ['timedout', 'warning'],
+    ['skipped', 'warning'],
+    ['pending', 'elevated'],
+    ['unmatched', 'elevated'],
+  ] as const)('tints %s with its token and draws no outline', (status, token) => {
+    const className = softStatusPillClassForStatus(status)
+    expect(className).toContain(token)
+    expect(className).not.toContain('border')
+    expect(className).not.toContain('dark:')
     expect(className).not.toMatch(RAW_PALETTE_RE)
   })
 })

@@ -99,7 +99,10 @@ export function Tooltip({
           style={{
             position: 'fixed',
             top: coords?.top ?? anchor.bottom + GAP,
-            left: coords?.left ?? anchor.centerX,
+            // Measured at the viewport's left edge: at the anchor, a mark near the
+            // right edge leaves the tip a few pixels to shrink into, so it wrapped
+            // a word per line and kept that width once clamped back inside.
+            left: coords?.left ?? 0,
             // Hidden for the one pre-paint commit before coords are measured, so
             // it never flashes at an unclamped position.
             visibility: coords ? 'visible' : 'hidden',

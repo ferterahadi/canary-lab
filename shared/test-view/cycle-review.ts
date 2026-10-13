@@ -311,6 +311,6 @@ export function cycleFileAlignedInput(file: CycleReviewFile, cycle: number): Cyc
   return {
     review: { before: { source: padded('before'), tests: [] }, after: { source: padded('after'), tests: [] }, supportingFile: true },
     rows: file.rows,
-    labels: { before: `Before repair cycle ${cycle}`, after: `After repair cycle ${cycle}` },
+    labels: { before: `Before repair ${cycle}`, after: `After repair ${cycle}` },
   }
 }

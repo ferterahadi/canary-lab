@@ -54,5 +54,5 @@ function ComparisonValue({ value, parts, side, changed, fullSource }: { fullSour
 }
 
 export function ComparisonLegend() {
-  return <p className="cl-comparison-legend"><span>− Removed</span><span>+ Added</span><span>Color describes edits, not test results.</span></p>
+  return <p className="cl-comparison-legend"><span>− Removed</span><span>+ Added</span></p>
 }

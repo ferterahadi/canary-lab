@@ -145,7 +145,9 @@ export function indexPlaywrightArtifacts(
     if (!fs.existsSync(dir)) return
     for (const filePath of listFiles(dir)) {
       const rel = path.relative(dir, filePath)
-      if (seenRel.has(rel)) continue
+      // Playwright's own status file at the output root records which tests
+      // failed last time; it belongs to no test and is not evidence.
+      if (seenRel.has(rel) || rel === '.last-run.json') continue
       const firstSegment = rel.split(path.sep)[0]
       // Synthesize a path rooted at currentDir so resolveFile picks whichever
       // dir actually contains the file and the rel-path → URL mapping stays

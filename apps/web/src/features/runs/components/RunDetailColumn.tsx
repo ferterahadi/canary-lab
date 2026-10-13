@@ -16,6 +16,8 @@ import { ManualHealBanner } from './ManualHealBanner'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
 import { RunPane } from './RunPane'
 import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
+import { ChangesTab } from './ChangesTab'
+import { CODE_DIALOG_SIZE, Modal } from '@/shared/ui/Overlays'
 import type { ResultsSelection, ServiceLogAnchor } from '../utils/results-fixes'
 import { ServiceLogInspector } from './ServiceLogInspector'
 import { useResultsFocus } from '../state/use-results-focus'
@@ -68,7 +70,7 @@ export function RunDetailColumn({
   focusRequest?: number
   /** Which tab to open on, when the view that linked here named one instead of a
    *  failing test — the flight's Test Run stage sends its captured fixes to
-   *  `changes`, which is Results & Fixes' run-wide view. Routed as
+   *  `changes`, the run's captured changes dialog. Routed as
    *  `?run=…&runtab=…`, so a refresh lands the same way. */
   arriveTab?: RunArrivalTab
   /** The boot-failure detail dialog, routed as `?run=…&dialog=boot-failure`.
@@ -88,7 +90,10 @@ export function RunDetailColumn({
   const [tab, setTab] = useState<Tab>(location ? location.tab ?? 'overview' : focusTest || arriveTab ? 'results' : 'overview')
   // By safe name, so a link names the same service whatever order it boots in.
   const [serviceKey, setServiceKey] = useState<string | null>(location?.service ?? null)
-  const [resultsView, setResultsView] = useState<ResultsView>(location ? location.view ?? 'tests' : arriveTab === 'changes' && !focusTest ? 'run-wide' : 'tests')
+  const [resultsView, setResultsView] = useState<ResultsView>(location?.view ?? 'tests')
+  // The run's captured changes: one fix for the whole run, shipped per repo,
+  // so it opens from the run header rather than from any one test.
+  const [changesOpen, setChangesOpen] = useState(location ? location.changes ?? false : arriveTab === 'changes' && !focusTest)
   // A restored place applies once, to the run it was restored for: its case
   // and cycle when the routed test resolves, its tab instead of the one a
   // focused test would otherwise imply.
@@ -159,6 +164,7 @@ export function RunDetailColumn({
     setSelection({ caseKey: null })
     setLogAnchor(null)
     setServiceKey(null)
+    setChangesOpen(false)
   }, [runId])
   const focusKey = JSON.stringify([focusTest, focusTestId, focusTestLocation, focusRequest])
   const seeding = seed.current?.runId === runId && seed.current.focusKey === focusKey ? seed.current.location : undefined
@@ -185,7 +191,9 @@ export function RunDetailColumn({
     setSelection({
       caseKey,
       ...(focusTarget ? { test: focusTarget } : {}),
+      ...(seeding?.attempt !== undefined ? { attempt: seeding.attempt } : {}),
       ...(seeding?.cycle !== undefined ? { cycle: seeding.cycle } : {}),
+      ...(seeding?.testTab ? { tab: seeding.testTab } : {}),
       ...(seeding?.journal ? { journal: seeding.journal } : {}),
     })
   })
@@ -193,8 +201,7 @@ export function RunDetailColumn({
   // while that run is already open) — otherwise the click looks ignored.
   useEffect(() => {
     if (arriveTab !== 'changes') return
-    setTab('results')
-    setResultsView('run-wide')
+    setChangesOpen(true)
   }, [arriveTab, runId])
   useEffect(() => {
     if (isVerifyRun && tab !== 'overview' && tab !== 'results') setTab('overview')
@@ -208,12 +215,19 @@ export function RunDetailColumn({
   // it rather than dropping it.
   const pendingTest = appliedFocus === `${runId}:${focusKey}` ? undefined : focusTarget
   const selectedTest = selection.caseKey ? selection.test : pendingTest
+  // Until the selection resolves, the seed is what the URL says about the test.
+  const place = selection.caseKey
+    ? { attempt: selection.attempt, cycle: selection.cycle, testTab: selection.tab, journal: selection.journal }
+    : { attempt: seeding?.attempt, cycle: seeding?.cycle, testTab: seeding?.testTab, journal: seeding?.journal }
   const routedLocation: RunLocation = {
     ...(tab !== 'overview' ? { tab } : {}),
     ...(tab === 'results' && resultsView !== 'tests' ? { view: resultsView } : {}),
+    ...(changesOpen ? { changes: true as const } : {}),
     ...(selectedTest ? { test: selectedTest } : {}),
-    ...(selectedTest && (selection.caseKey ? selection.cycle : seeding?.cycle) !== undefined ? { cycle: (selection.caseKey ? selection.cycle : seeding?.cycle)! } : {}),
-    ...(selectedTest && (selection.caseKey ? selection.journal : seeding?.journal) ? { journal: (selection.caseKey ? selection.journal : seeding?.journal)! } : {}),
+    ...(selectedTest && place.attempt !== undefined ? { attempt: place.attempt } : {}),
+    ...(selectedTest && place.cycle !== undefined ? { cycle: place.cycle } : {}),
+    ...(selectedTest && place.testTab ? { testTab: place.testTab } : {}),
+    ...(selectedTest && place.journal ? { journal: place.journal } : {}),
     ...(serviceKey ? { service: serviceKey } : {}),
     ...(tab === 'services' && logAnchor && logAnchor.service === serviceKey ? { log: { execution: logAnchor.execution, startLine: logAnchor.startLine, endLine: logAnchor.endLine, approximate: logAnchor.approximate } } : {}),
   }
@@ -247,6 +261,8 @@ export function RunDetailColumn({
   // list can open it. A dependency blocker has its own panel and no dialog.
   const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
   const bootErrors = compilerErrors(bootFailure?.excerpt)
+  // A verify run never repairs, so it never captures a fix to ship.
+  const capturedRepos = isVerify ? 0 : m.fixCapture?.repos.length ?? 0
 
   return (
     <div className="cl-panel relative flex h-full flex-col">
@@ -363,7 +379,6 @@ export function RunDetailColumn({
             selection={selection}
             onSelectionChange={setSelection}
             {...(focus === 'unmatched' && focusTest ? { unmatchedTest: focusTest } : {})}
-            repairEvidence={!isVerify}
             diagnostics={m.verification?.diagnostics}
             onOpenServiceLog={(anchor) => {
               if (!services.some((s) => s.safeName === anchor.service)) return
@@ -372,6 +387,7 @@ export function RunDetailColumn({
               setTab('services')
             }}
             {...(onOpenPlaywrightSettings ? { onOpenArtifactSettings: () => onOpenPlaywrightSettings(m.feature) } : {})}
+            {...(capturedRepos > 0 ? { changes: { repos: capturedRepos, onOpen: () => setChangesOpen(true) } } : {})}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
@@ -435,6 +451,32 @@ export function RunDetailColumn({
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand
           an open dialog's route. */}
+      {changesOpen && (
+        <Modal
+          open
+          portal
+          onClose={() => setChangesOpen(false)}
+          eyebrow="Run"
+          title="This run's changes"
+          description="The repair agent made these edits in an isolated copy of each repo. Your repos stay unchanged until you open the edits in your editor or merge a pull request."
+          {...CODE_DIALOG_SIZE}
+          testId="run-changes-dialog"
+        >
+          <div className="p-4">
+            <ChangesTab
+              framed={false}
+              runId={m.runId}
+              healCycles={m.healCycles}
+              run={m}
+              fixCapture={m.fixCapture}
+              worktrees={m.worktrees}
+              proposedPrs={m.proposedPrs}
+              prAttempt={m.prAttempt}
+              repoBranches={repoBranches}
+            />
+          </div>
+        </Modal>
+      )}
       {bootFailure && bootErrors.length > 0 && (
         <BootFailureDialog
           open={bootFailureDialogOpen}

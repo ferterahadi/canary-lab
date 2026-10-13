@@ -33,6 +33,15 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.3 — 2026-10-13
+
+> After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to pick up shared approvals and the new run-recovery instructions.
+
+- **[Test Runner]** **One place for a run's results and fixes.** The Playwright, Changes, and Journal tabs merge into Results & Fixes. Each test shows its runs in order: what each repair changed, in the same code editor as your tests, and how the test went after it.
+- **[Test Runner]** **See whether a fix is in your code yet.** The repair agent edits an isolated copy of each repo. The Changes dialog labels each repo "Not in your repo", "In your repo, uncommitted", or "Already in your repo".
+- **[Test Runner]** **Runs recover from a server restart.** A run whose server stopped mid-run is marked aborted with the reason instead of looking stuck, and you can restart it from where it was.
+- **[General]** **Answer an agent's question once.** A question an agent asks through a form shows up in your chat app and in Canary Notifications. Answer it in either place.
+
 ## 2.3.2 — 2026-10-03
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to pick up the refreshed run and verify instructions.

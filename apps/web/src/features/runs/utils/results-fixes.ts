@@ -1,114 +1,169 @@
-// What a test's Results & Fixes accordion shows for the reader's selection.
+// What a test's Results & Fixes dialog shows for the reader's selection.
 //
-// Pure presentation over the shared run-evidence projection: which cycles a
-// case offers, which one is rendered, and the plain words for runner outcomes
-// and media gaps. Verdicts stay the runner's — nothing here decides a pass.
-import { mediaForAttempt, type AttemptMedia, type CaseCycle, type CaseEvidence, type CycleVerification, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
-import type { JournalSection, PlaywrightArtifactGroup, RunDetail, RunSummary, ServiceLogExcerpt } from '@shared/run-detail'
+// Pure presentation over the shared run-evidence projection: the test's
+// timeline of runs, which one is open, and the plain words for media gaps.
+// Verdicts stay the runner's — nothing here decides a pass.
+import { type AttemptMedia, type CaseCycle, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
+import type { JournalSection, RunDetail, RunSummary, ServiceLogExcerpt } from '@shared/run-detail'
 import type { PlaybackCaseEntry } from '@shared/playback-identity'
 import { buildTestNumbering, parseLocation, testNumberKey } from '@/shared/test-numbering'
 import { playbackFocusCase, playbackTests } from './run-detail-playback'
-import { statusFromPlaybackResult, statusLabel, type StepStatus } from './test-step-status'
+import { statusFromPlaybackResult, type StepStatus } from './test-step-status'
 
-/** A run-wide repair-cycle number, or the case's first recorded execution. */
+/** A run-wide repair-cycle number, or the case's first recorded execution —
+ *  how an older link names a place in a test's story. */
 export type CycleChoice = number | 'initial'
 
-export interface CycleOption { value: CycleChoice; label: string }
+/** The open test dialog's two tabs. */
+export type TestDialogTab = 'summary' | 'artifacts'
 
-/** The reader's place in Results & Fixes. `cycle` absent = follow the case's
- *  latest cycle, so a new cycle advances the view; a number or `'initial'` is
- *  an explicit pick that a later cycle never replaces. `test` names the open
- *  case the way a link does (the key is in-memory only), and `journal` is the
- *  repair notes' open source dialog. */
+/** The reader's place in Results & Fixes. `caseKey` is the open test dialog;
+ *  `test` names it the way a link does (the key is in-memory only). `attempt`
+ *  is the timeline entry the reader picked — absent = follow the latest, so a
+ *  new run advances the dialog. `cycle` is an older link's place, read only
+ *  until the reader picks an entry. `tab` absent = the test's default tab, and
+ *  `journal` is the repair notes' open source dialog. */
 export interface ResultsSelection {
   caseKey: string | null
   test?: { name: string; id?: string; location?: string }
+  attempt?: number
   cycle?: CycleChoice
+  tab?: TestDialogTab
   journal?: 'entry' | 'all'
 }
 
 /** An attempt that has not ended reads as running; no attempt at all is the
- *  roster's not-run case, never a pass. */
+ *  roster's not-run case, never a pass. One the runner stopped mid-test has
+ *  no result either, and says so through `attemptLabel`. */
 export function attemptStatus(attempt: EvidenceAttempt | undefined): StepStatus {
+  if (attempt?.stopped) return 'pending'
   return attempt ? statusFromPlaybackResult(attempt) : 'pending'
 }
 
-function sentenceCase(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1)
+/** Badge text where the status word alone would mislead. */
+export function attemptLabel(attempt: EvidenceAttempt | undefined): string | undefined {
+  if (!attempt) return 'not run'
+  return attempt.stopped ? 'stopped' : undefined
 }
 
-export function verificationOutcome(verification: CycleVerification): string {
-  if (verification.kind === 'observed') return sentenceCase(statusLabel(attemptStatus(verification.attempt)))
-  return verification.kind === 'pending' ? 'Verification pending' : 'Not rerun'
+/** The collapsed row's mark for a case whose badge hides an earlier failure:
+ *  it passes, is skipped, or is running again now, but failed before. A case
+ *  failing now says so in its own badge, so it carries no mark. */
+export function recoveredNote(evidence: CaseEvidence): string | undefined {
+  const status = attemptStatus(evidence.latest)
+  if (status !== 'passed' && status !== 'skipped' && status !== 'testing') return undefined
+  const failedBefore = evidence.attempts.some((a) => a !== evidence.latest && ['failed', 'timedout'].includes(attemptStatus(a)))
+  if (!failedBefore) return undefined
+  const cycle = evidence.cycles.at(-1)?.cycle
+  const execution = evidence.latest!.executionIndex
+  if (status === 'passed') return cycle ? `Failed first · passed after repair ${cycle}` : 'Failed first · passed on retry'
+  if (status === 'skipped') return `Failed first · skipped${execution !== undefined ? ` in execution ${execution}` : ''}`
+  return cycle ? `Failed first · running again after repair ${cycle}` : 'Failed first · running again'
 }
 
-/** Latest cycle first, then the initial execution. Empty when the case never
- *  entered a repair, so no selector is drawn for it. */
-export function cycleOptions(evidence: CaseEvidence): CycleOption[] {
-  if (evidence.cycles.length === 0) return []
-  const cycles = [...evidence.cycles].reverse().map((cycle, i): CycleOption => ({
-    value: cycle.cycle,
-    label: `Repair cycle ${cycle.cycle} — ${verificationOutcome(cycle.verification)}${i === 0 ? ' (latest)' : ''}`,
-  }))
-  return [...cycles, { value: 'initial', label: `Initial execution — ${sentenceCase(statusLabel(attemptStatus(evidence.initial)))}` }]
-}
-
-/** The choice to render: an explicit pick the case still offers, else its
- *  latest cycle, else its initial execution. */
-export function resolveCycleChoice(evidence: CaseEvidence, requested: CycleChoice | undefined): CycleChoice {
-  if (requested === 'initial') return requested
-  if (requested !== undefined && evidence.cycles.some((c) => c.cycle === requested)) return requested
-  return evidence.cycles.at(-1)?.cycle ?? 'initial'
-}
-
-export interface SelectedResult {
-  /** Absent outside a repair cycle. */
+/** One run of a test in its dialog's timeline. An entry owns exactly one
+ *  attempt and the repair this test went through just before it, so its
+ *  summary and artifacts never have to choose between two runs. */
+export interface RunEntry {
+  key: string
+  /** Position in the test's history, oldest = 1 — what a link names. */
+  number: number
+  /** Absent for a repair the runner has not checked on this test yet, or a
+   *  test that has not run at all. */
+  attempt?: EvidenceAttempt
   cycle?: CaseCycle
-  /** The failed input of a cycle; the initial execution's attempt for a
-   *  repaired case; the latest result for a case no repair addressed — its
-   *  first result would hide a later regression. */
-  before?: EvidenceAttempt
-  /** Only an attempt the runner observed after the repair — never borrowed. */
-  after?: EvidenceAttempt
+  title: string
+  subtitle: string
+  status: StepStatus
+  /** Badge text where the status word alone would mislead. */
+  label?: string
 }
 
-export function selectedResult(evidence: CaseEvidence, choice: CycleChoice): SelectedResult {
-  const cycle = choice === 'initial' ? undefined : evidence.cycles.find((c) => c.cycle === choice)
-  if (!cycle) {
-    const shown = evidence.cycles.length > 0 ? evidence.initial : evidence.latest
-    return shown ? { before: shown } : {}
+/** The test's runs, newest first. */
+export function runEntries(evidence: CaseEvidence): RunEntry[] {
+  const entries: RunEntry[] = evidence.attempts.map((attempt, i) => {
+    const cycle = evidence.cycles.find((c) => c.verification.kind === 'observed' && c.verification.attempt.attemptKey === attempt.attemptKey)
+    const retry = attempt.retry ?? 0
+    const title = i === 0 ? 'Initial run' : cycle ? `Repair ${cycle.cycle}` : retry > 0 ? `Retry ${retry}` : 'Run again'
+    // A retry entry's title already says which retry it is.
+    return { key: attempt.attemptKey, number: i + 1, attempt, ...(cycle ? { cycle } : {}), title, subtitle: retry > 0 && title !== `Retry ${retry}` ? `retry ${retry}` : '', status: attemptStatus(attempt), ...(attempt.stopped ? { label: 'stopped' } : {}) }
+  })
+  // The title names the run; its execution number is only worth showing to
+  // tell apart two runs that share a title. Only "Run again" can repeat — each
+  // repair is checked by one run, and a retry's title carries its number — and
+  // it never has a retry note, so the execution is the whole subtitle.
+  for (const entry of entries) {
+    const execution = entry.attempt!.executionIndex
+    if (execution === undefined || entries.filter((e) => e.title === entry.title).length < 2) continue
+    entry.subtitle = `execution ${execution}`
   }
-  return {
-    cycle,
-    before: cycle.input,
-    ...(cycle.verification.kind === 'observed' ? { after: cycle.verification.attempt } : {}),
+  // A repair the runner has not checked on this test still happened, so it
+  // gets an entry of its own with no run under it.
+  for (const cycle of evidence.cycles) {
+    if (cycle.verification.kind === 'observed') continue
+    const notRerun = cycle.verification.kind === 'not-rerun'
+    entries.push({
+      key: `cycle-${cycle.cycle}`, number: entries.length + 1, cycle, title: `Repair ${cycle.cycle}`,
+      subtitle: notRerun ? 'not run again' : 'waiting for the runner', status: 'pending', label: notRerun ? 'not rerun' : 'pending',
+    })
   }
+  if (entries.length === 0) return [{ key: 'not-run', number: 1, title: 'Not run', subtitle: 'not in this run yet', status: 'pending', label: 'not run' }]
+  // Newest sits at the top, so it needs no "latest" label. A lone run says
+  // whether a repair followed, since no other entry shows it.
+  const [only] = entries
+  if (entries.length === 1 && only.status === 'passed') only.subtitle = `${only.subtitle ? `${only.subtitle} · ` : ''}no repair needed`
+  else if (entries.length === 1 && only.status !== 'testing') only.subtitle = `${only.subtitle ? `${only.subtitle} · ` : ''}no repair ran`
+  return entries.reverse()
 }
 
-/** The runner's word on a repair, in a sentence. The not-rerun and pending
- *  cases name the result that still stands, so nothing reads as re-observed. */
-export function verificationSummary(verification: CycleVerification, latest: EvidenceAttempt | undefined): string {
-  const standing = `The latest recorded result is still ${statusLabel(attemptStatus(latest))}${latest?.executionIndex !== undefined ? ` from execution ${latest.executionIndex}` : ''}.`
-  if (verification.kind === 'observed') {
-    const status = attemptStatus(verification.attempt)
-    const where = verification.attempt.executionIndex !== undefined ? ` in execution ${verification.attempt.executionIndex}` : ''
-    if (status === 'passed') return `Passed${where} — the assertion held after this repair.`
-    if (status === 'testing') return `Running${where}.`
-    return `${sentenceCase(statusLabel(status))}${where} — the assertion still did not hold after this repair.`
+/** The entry to open: the one a link or pick names, else the latest. `stale`
+ *  says what was asked for when the test has no such entry, so the dialog can
+ *  explain the fallback instead of swapping it silently. */
+export function resolveRunEntry(entries: readonly RunEntry[], selection: Pick<ResultsSelection, 'attempt' | 'cycle'>): { entry: RunEntry; stale?: string } {
+  const latest = entries[0]
+  if (selection.attempt !== undefined) {
+    const entry = entries.find((e) => e.number === selection.attempt)
+    return entry ? { entry } : { entry: latest, stale: `This test has no run ${selection.attempt}; showing its latest run.` }
   }
-  if (verification.kind === 'not-rerun') return `Execution ${verification.execution} ran after this repair without this test, so nothing re-observed it. ${standing}`
-  if (verification.execution !== undefined) return `Execution ${verification.execution} is running and has not reached this test yet.`
-  return `No execution has run since this repair. ${standing}`
+  if (selection.cycle === undefined) return { entry: latest }
+  const entry = selection.cycle === 'initial' ? entries.at(-1)! : entries.find((e) => e.cycle?.cycle === selection.cycle)
+  return entry ? { entry } : { entry: latest, stale: `Repair ${selection.cycle} did not address this test; showing its latest run.` }
 }
 
-/** Why an attempt has no media to show. */
-export function mediaGapCopy(media: Extract<AttemptMedia, { kind: 'none' }>): string {
-  switch (media.reason) {
-    case 'pending': return 'Media is saved when this execution finishes.'
+/** What an entry's Summary tab holds. Everything but `sections` leaves the
+ *  whole tab empty — there is nothing to say beyond the timeline's own chip. */
+export type SummaryKind = 'passed-clean' | 'passed-retry' | 'running-first' | 'not-run' | 'sections'
+
+export function summaryKind(entry: RunEntry): SummaryKind {
+  if (entry.cycle) return 'sections'
+  if (!entry.attempt) return 'not-run'
+  if (entry.status === 'passed') return (entry.attempt.retry ?? 0) > 0 ? 'passed-retry' : 'passed-clean'
+  if (entry.status === 'testing' && entry.number === 1) return 'running-first'
+  return 'sections'
+}
+
+/** Why an attempt has no media to show. An execution still running is not a
+ *  gap — its media is kept when it ends — so it has no wording here. */
+export function mediaGapCopy(reason: Exclude<Extract<AttemptMedia, { kind: 'none' }>['reason'], 'pending'>): string {
+  switch (reason) {
     case 'not-retained': return 'No screenshot, video or trace was retained for this execution.'
     case 'superseded': return 'Not retained: this run kept one copy per test, and a later attempt replaced it.'
     case 'ambiguous': return 'Not shown: another test with the same name could own the retained copy.'
   }
+}
+
+/** Why a run that kept its media has no screenshot or video of this kind, in
+ *  the terms of the suite's artifact policy. */
+export function missingMediaCopy(kind: 'screenshot' | 'video', mode: string, passed: boolean): string {
+  const noun = kind === 'screenshot' ? 'Screenshots are' : 'Video is'
+  if (mode === 'off') {
+    return kind === 'screenshot'
+      ? 'Screenshots were off for this run, so Playwright kept none. Turn them on in Artifact settings to record the next run.'
+      : 'Video recording was off for this run, so Playwright kept none. Turn it on in Artifact settings to record the next run.'
+  }
+  if (mode === 'on-first-retry' || mode === 'on-all-retries') return `${noun} recorded only when Playwright retries a test, and this run was not a retry.`
+  if (passed && mode !== 'on') return `${noun} kept only when a test fails, and this run passed.`
+  return `Playwright kept no ${kind} for this run.`
 }
 
 /** The stable `#n` per case, numbered against the run's full declared roster
@@ -141,7 +196,7 @@ export function journalMarkdown(sections: readonly JournalSection[]): string {
  *  entry's own terms — never a claim that the diagnosis was this test's. */
 export function runWideReason(section: JournalSection, sameNameCases: number): string {
   const listed = section.failingTests?.length ?? 0
-  if (listed > 1) return `This cycle entry covers ${listed} tests.`
+  if (listed > 1) return `This repair's entry covers ${listed} tests.`
   if (sameNameCases > 1) return 'Another test shares this name, so the entry cannot single this one out.'
   if (listed === 0) return 'The entry does not name the tests it addressed.'
   return 'The entry names a different test as its input.'
@@ -179,7 +234,7 @@ export interface ServiceLogAnchor {
   approximate: boolean
   /** Absent when the range came from a link rather than a click. */
   caseTitle?: string
-  /** e.g. "Repair cycle 2 · Before this repair". */
+  /** e.g. "Repair 2 · Before this repair". */
   context?: string
 }
 
@@ -198,16 +253,4 @@ export function excerptGapCopy(excerpts: readonly ServiceLogExcerpt[], execution
     return `Execution ${execution}'s service output was not retained — this run was recorded before Canary kept each execution's service log.`
   }
   return `No service printed this test's markers in execution ${execution}.`
-}
-
-/** Playwright's run-folder copies that no test's story shows. A story shows
- *  one only for an unstamped latest attempt with a unique name; every other
- *  copy — a stamped run's, or one two same-name tests could own — would
- *  otherwise be unreachable, though the run kept it. */
-export function unshownLatestCopies(
-  evidence: RunEvidence,
-  detail: Pick<RunDetail, 'attemptArtifacts' | 'playwrightArtifacts'>,
-): PlaywrightArtifactGroup[] {
-  const shown = new Set(evidence.cases.flatMap((c) => (c.latest && mediaForAttempt(c.latest, evidence, detail).kind === 'latest-copy' ? [c.latest.name] : [])))
-  return (detail.playwrightArtifacts ?? []).filter((g) => g.artifacts.length > 0 && !shown.has(g.testName))
 }

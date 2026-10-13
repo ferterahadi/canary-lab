@@ -156,6 +156,11 @@ function useModalFocus(ref: RefObject<HTMLDivElement | null>, open: boolean): vo
   }, [open, ref])
 }
 
+/** The one size every dialog that reads code takes — the test-version diff,
+ *  a test's result and a run's changes — so they open as the same room:
+ *  near-full window, fixed height, with the body owning the scroll. */
+export const CODE_DIALOG_SIZE = { width: 2560, height: '96vh', viewportInset: 2 } as const
+
 export function Modal({
   open,
   onClose,

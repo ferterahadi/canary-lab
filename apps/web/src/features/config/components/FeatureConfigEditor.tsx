@@ -43,8 +43,11 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
     // The cache lives here, so it is born and dies with the dialog: every open
     // re-reads from disk, and within one open a tab switch is a pure render.
     <ConfigDocCacheProvider>
+      {/* Portaled, so a dialog opened from inside another portaled dialog (a
+          test's Artifact settings) lands above it rather than behind. */}
       <Modal
         open
+        portal
         onClose={onClose}
         eyebrow="Suite configuration"
         title={feature}

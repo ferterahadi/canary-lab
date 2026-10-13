@@ -154,6 +154,17 @@ describe('readPlaywrightPlaybackEvents / indexPlaywrightArtifacts', () => {
     ])
   })
 
+  it('leaves out Playwright\'s own status file, which belongs to no test', () => {
+    const dir = path.join(tmpDir, 'playwright-artifacts')
+    fs.mkdirSync(path.join(dir, 'a-test'), { recursive: true })
+    fs.writeFileSync(path.join(dir, '.last-run.json'), '{"status":"passed","failedTests":[]}')
+    fs.writeFileSync(path.join(dir, 'a-test', '.last-run.json'), 'a test attachment that shares the name')
+    expect(indexPlaywrightArtifacts('r-status', tmpDir, undefined)?.map((g) => [g.testName, g.artifacts.map((a) => a.path)]))
+      .toEqual([['a-test', [path.join('a-test', '.last-run.json')]]])
+    fs.rmSync(path.join(dir, 'a-test'), { recursive: true })
+    expect(indexPlaywrightArtifacts('r-status-only', tmpDir, undefined)).toBeUndefined()
+  })
+
   it('sorts multiple artifact groups by test name', () => {
     for (const slug of ['zebra-test', 'alpha-test']) {
       const file = path.join(tmpDir, 'playwright-artifacts', slug, 'trace.zip')

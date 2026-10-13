@@ -61,6 +61,17 @@ describe.each([['legacy (derived)', legacy, 'derived'], ['current (stamped)', st
 })
 
 describe('buildRunEvidence — partial and live runs', () => {
+  // The reporter writes `passed: false` for a skip as well as a failure.
+  it('puts a skipped case in no repair cycle, though the reporter marks the skip not passed', () => {
+    const skippedHome = stampedEvidencePlaybackEvents().map((e) => (
+      e.type === 'test-end' && e.test.location === 'e2e/home.spec.ts:5' ? { ...e, status: 'skipped', passed: false } : e
+    ))
+    const evidence = buildRunEvidence({ events: skippedHome, known: evidenceKnownTests, lifecycle: stampedEvidenceLifecycleEvents() })
+    expect(byId(evidence, 'home-loads').latest).toMatchObject({ status: 'skipped', passed: false })
+    expect(byId(evidence, 'home-loads').cycles).toEqual([])
+    expect(byId(evidence, 'discount').cycles.map((c) => c.cycle)).toEqual([1, 2])
+  })
+
   it('reports a repair with no execution after it as pending, and a case the rerun skipped as not rerun', () => {
     // Cut the stamped run right after cycle 2 started: no execution 3 yet.
     const lifecycle = stampedEvidenceLifecycleEvents().slice(0, 6)
@@ -111,6 +122,42 @@ describe('buildRunEvidence — partial and live runs', () => {
     expect(evidence.cycles.map((c) => c.cycle)).toEqual([1, 2])
     expect(evidence.executions.at(-1)).toMatchObject({ index: 2, afterCycle: 2 })
     expect(evidence.executions.at(-1)!.endedAt).toBeUndefined()
+  })
+
+  it('marks an attempt the runner stopped mid-test, and leaves one still running live', () => {
+    const t = { id: 'counts', name: 'test-case-counts', title: 'counts', location: 'e2e/counts.spec.ts:112' }
+    const lifecycle = [
+      { phase: 'running-tests', headline: 'h', updatedAt: '2026-10-01T10:00:00.000Z' },
+      { phase: 'failed', headline: 'h', updatedAt: '2026-10-01T10:01:00.000Z' },
+      { phase: 'agent-healing', headline: 'h', updatedAt: '2026-10-01T10:02:00.000Z', activeCycle: 1 },
+      { phase: 'rerunning-tests', headline: 'h', updatedAt: '2026-10-01T10:03:00.000Z' },
+      // The run was aborted while execution 2 was mid-test: its begin never ended.
+      { phase: 'completed', headline: 'h', updatedAt: '2026-10-01T10:04:00.000Z' },
+      { phase: 'rerunning-tests', headline: 'h', updatedAt: '2026-10-01T10:05:00.000Z' },
+    ] as const
+    const events: PlaywrightPlaybackEvent[] = [
+      { type: 'test-begin', time: '2026-10-01T10:00:10.000Z', test: t },
+      { type: 'test-end', time: '2026-10-01T10:00:20.000Z', test: t, status: 'failed', passed: false, durationMs: 1, retry: 0 },
+      { type: 'test-begin', time: '2026-10-01T10:03:10.000Z', test: t },
+      { type: 'test-begin', time: '2026-10-01T10:05:10.000Z', test: t },
+    ]
+    const stoppedInExecution = (evidence: RunEvidence) => evidence.cases[0].attempts.map((a) => [a.executionIndex, a.stopped ?? false])
+    // Execution 3 is still open, so its attempt is running, not stopped.
+    expect(stoppedInExecution(buildRunEvidence({ events, lifecycle: [...lifecycle] }))).toEqual([[1, false], [2, true], [3, false]])
+    const passed: PlaywrightPlaybackEvent = { type: 'test-end', time: '2026-10-01T10:05:20.000Z', test: t, status: 'passed', passed: true, durationMs: 1, retry: 0 }
+    const finished = buildRunEvidence({ events: [...events, passed], lifecycle: [...lifecycle] })
+    expect(stoppedInExecution(finished)).toEqual([[1, false], [2, true], [3, false]])
+    expect(finished.cases[0].latest).toMatchObject({ executionIndex: 3, status: 'passed' })
+    expect(finished.cases[0].cycles[0].verification).toMatchObject({ kind: 'observed', attempt: { executionIndex: 2, stopped: true } })
+  })
+
+  it('marks an unended attempt stopped once a later attempt of its case begins, with no lifecycle to say so', () => {
+    const t = { id: 'counts', name: 'test-case-counts', title: 'counts' }
+    const events: PlaywrightPlaybackEvent[] = [
+      { type: 'test-begin', time: '1', test: t },
+      { type: 'test-begin', time: '2', test: t },
+    ]
+    expect(buildRunEvidence({ events }).cases[0].attempts.map((a) => a.stopped ?? false)).toEqual([true, false])
   })
 
   it('keeps a declared case that never ran, without inventing an attempt or a result', () => {
@@ -181,9 +228,17 @@ describe('playbackAttempts', () => {
       { type: 'step-begin', time: '0', test: { name: 'orphan', title: 'orphan' }, step: { title: 's', category: 'pw:api' } },
       { type: 'test-begin', time: '1', test: { name: 'a', title: 'a', location: 'a.spec.ts:1' } },
       { type: 'step-end', time: '2', test: { name: 'a', title: '' }, step: { title: 'unopened', category: 'pw:api' } },
+      { type: 'step-begin', time: '3', test: { name: 'a', title: 'a' }, step: { title: 'located', category: 'expect', location: '/repo/e2e/a.spec.ts:7' } },
+      { type: 'step-end', time: '4', test: { name: 'a', title: 'a' }, step: { title: 'located', category: 'expect', location: '/repo/e2e/a.spec.ts:7' } },
+      { type: 'step-end', time: '5', test: { name: 'a', title: 'a' }, step: { title: 'late', category: 'expect', location: '/repo/e2e/a.spec.ts:9' } },
     ]
-    const { attempts, caseEvidence } = playbackAttempts(events, { eventKeys: [null, { caseKey: 'a', attemptKey: '1' }, { caseKey: 'a', attemptKey: '1' }] })
-    expect(attempts).toEqual([{ attemptKey: '1', caseKey: 'a', name: 'a', title: 'a', location: 'a.spec.ts:1', startedAt: '1', steps: [{ title: 'unopened', category: 'pw:api', ended: true }] }])
+    const key = { caseKey: 'a', attemptKey: '1' }
+    const { attempts, caseEvidence } = playbackAttempts(events, { eventKeys: [null, key, key, key, key, key] })
+    expect(attempts).toEqual([{ attemptKey: '1', caseKey: 'a', name: 'a', title: 'a', location: 'a.spec.ts:1', startedAt: '1', steps: [
+      { title: 'unopened', category: 'pw:api', ended: true },
+      { title: 'located', category: 'expect', ended: true, location: '/repo/e2e/a.spec.ts:7' },
+      { title: 'late', category: 'expect', ended: true, location: '/repo/e2e/a.spec.ts:9' },
+    ] }])
     expect([...caseEvidence.get('a')!.locations]).toEqual(['a.spec.ts:1'])
   })
 })

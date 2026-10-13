@@ -1,15 +1,18 @@
 import { useApplyPreflight } from '../state/use-apply-preflight'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import type { ApplyTarget } from '@/shared/api/runs'
 import type { RunFixCaptureRepo, RunProposedPr } from '@shared/run-state'
 import { StatusDot } from '@/shared/ui/atoms'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { editorLabel } from '@/features/config/components/settings-options'
-import { fileCountLabel, groupByDirectory, isTestPath } from '../utils/repair-files'
+import { fileCountLabel, isTestPath } from '../utils/repair-files'
 import { prBlockedLine } from '../utils/pr-blocked-copy'
 import { CopyIconButton } from './RunServicePanels'
-import { RepairPatchDialog } from './RepairPatchDialog'
+import { cycleReviewFromPatch } from '@shared/test-view/cycle-review'
+import { DisclosureCaret, HintIcon } from '@/shared/ui/Icons'
+import { CycleFileReview } from './CycleFileReview'
+import { FieldRow } from './ResultRows'
 import { displayError } from '@/shared/api/error-message'
 
 // One repo of a run's repair, as a card — the unit both the Changes tab and the
@@ -146,14 +149,9 @@ export function useRepoOpener(runId: string, finalCapture: boolean, provisional 
   }
 }
 
-/** How many file paths a card lists before it rolls them up per directory. Past
- *  this the list stops being a legend you can scan against your editor and
- *  becomes a wall; which areas were touched is the question that survives. */
+/** How many edited test files the warning row names; the editor's file
+ *  picker holds the rest. */
 export const FILE_LIST_LIMIT = 8
-
-/** How many directory rows the rollup shows before folding the tail into a
- *  count — the same wall problem one level up. */
-export const DIR_ROLLUP_LIMIT = 6
 
 export function RepairedRepoCard({
   runId,
@@ -170,6 +168,8 @@ export function RepairedRepoCard({
   liveWorktreeRoot,
   canUseFinalCapture,
   onProposeClick,
+  capturedAt,
+  defaultExpanded = false,
 }: {
   runId: string
   repoName: string
@@ -187,202 +187,167 @@ export function RepairedRepoCard({
   liveWorktreeRoot?: string
   canUseFinalCapture: boolean
   onProposeClick: () => void
+  /** The capture's timestamp: an open patch re-reads when it moves, so live
+   *  edits during healing reach the editor without a reopen. */
+  capturedAt?: string
+  /** Opens on the editor — the Changes tab expands its first repaired repo. */
+  defaultExpanded?: boolean
 }) {
-  const [patchOpen, setPatchOpen] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const changed = repo !== undefined
   const names = repo?.fileNames ?? []
   const repoRoot = provisional ? liveWorktreeRoot ?? '' : target?.repoRoot ?? repo?.repoRoot ?? ''
   // The repo isn't where the run left it, so there is nothing to apply into and
-  // nothing to open — the patch becomes the only route to the repair.
+  // nothing to open; the PR dialog says why a pull request can't go out either.
   const moved = target?.ready === false
   const tests = names.filter(isTestPath)
-  const source = names.filter((f) => !isTestPath(f))
-  const rolled = names.length > FILE_LIST_LIMIT
-  const dirs = rolled ? groupByDirectory(source) : []
-  const foldedDirs = Math.max(0, dirs.length - DIR_ROLLUP_LIMIT)
-  // Whether the card is telling the whole story. It isn't when the list was
-  // rolled up — and it isn't for a capture recorded before file names were kept
-  // either, which is the case that must not lose its way to the patch.
-  const listedEverything = !rolled && names.length >= (repo?.files ?? 0)
   const waitForStop = 'Available after this run stops and captures its final changes.'
+
+  const preflightLine = preflight && !preflight.confirmed
+  // Only what explains the header's Open in editor — its result, or why it is
+  // disabled — earns a row; the header already says everything else.
+  const openLine = preflightLine || openState.kind === 'failed' || openState.kind === 'done'
+  const prLine = pr !== undefined || blockedReason !== undefined
+  // The head's hairline closes the title strip, so only bands after the first
+  // draw their own.
+  const bands = [tests.length > 0, changed && expanded, changed && openLine, changed && prLine]
+  const ruled = (index: number) => bands.slice(0, index).some(Boolean)
 
   return (
     <li className="cl-card group/card overflow-hidden" data-testid={`changes-repo-${repoName}`}>
-      <div className="cl-card-head">
-        {/* Sky for a repair waiting to be reviewed — the app's in-progress hue,
-            and this is unfinished work until it's read or merged. An untouched
-            repo takes the idle dot rather than going unmarked. No pulse: this
-            state isn't changing while you look at it. */}
-        <StatusDot state={changed ? 'running' : 'idle'} pulse={false} />
-        <div
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          style={{ color: changed ? 'var(--text-primary)' : 'var(--text-secondary)' }}
-          title={repoRoot || undefined}
-        >
-          {repoName}
-        </div>
+      <div className={`cl-card-head${bands.some(Boolean) ? '' : ' border-b-0'}`}>
+        {changed ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left"
+            data-testid={`changes-toggle-${repoName}`}
+            title={repoRoot || undefined}
+          >
+            <DisclosureCaret open={expanded} />
+            <span className="min-w-0 truncate text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{repoName}</span>
+            <span className="shrink-0 text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid={`changes-state-${repoName}`}>{fileCountLabel(repo!.files)}</span>
+            {target?.inRepo && (
+              <span className="min-w-0 truncate text-[11px]" style={{ color: 'var(--text-secondary)' }} title={IN_REPO[target.inRepo].hint} data-testid={`changes-in-repo-${repoName}`}>
+                {IN_REPO[target.inRepo].label}
+              </span>
+            )}
+          </button>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-2 pl-5" title={repoRoot || undefined}>
+            <span className="min-w-0 truncate text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{repoName}</span>
+            <span className="shrink-0 text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid={`changes-state-${repoName}`}>unchanged</span>
+          </span>
+        )}
         {repoRoot && <CopyIconButton label="repo path" value={repoRoot} />}
-        <span
-          className={`cl-status-chip ${changed ? 'bg-[var(--bg-base)] text-secondary' : 'text-muted'}`}
-          data-testid={`changes-state-${repoName}`}
-        >
-          {changed ? fileCountLabel(repo!.files) : 'unchanged'}
-        </span>
+        {changed && !moved && (
+          <button
+            type="button"
+            data-testid={`changes-open-repo-${repoName}`}
+            onClick={onOpen}
+            disabled={openState.kind === 'working' || (!provisional && (!canUseFinalCapture || preflight?.confirmed === false))}
+            title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+          >
+            {openState.kind === 'working' ? 'Opening…' : 'Open in editor'}
+          </button>
+        )}
+        {changed && (
+          <span title={canUseFinalCapture ? undefined : waitForStop} className={`inline-flex shrink-0 ${canUseFinalCapture ? '' : 'cursor-not-allowed'}`}>
+            <button
+              type="button"
+              data-testid={`changes-propose-${repoName}`}
+              onClick={onProposeClick}
+              disabled={!canUseFinalCapture}
+              aria-label={canUseFinalCapture ? 'Commit and open PR' : `Commit and open PR. ${waitForStop}`}
+              className="cl-button px-2 py-0.5 text-[11px] disabled:pointer-events-none disabled:opacity-50"
+              title={canUseFinalCapture ? 'Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff' : undefined}
+            >
+              Commit &amp; open PR…
+            </button>
+          </span>
+        )}
       </div>
 
-      {changed && (tests.length > 0 || source.length > 0) && (
-        <div className="cl-card-body space-y-2">
-          {tests.length > 0 && (
-            // A repair is supposed to fix the app, not the test — so an edited spec
-            // is the one thing on this card that must not sit at position 23 of a
-            // flat list.
-            <div data-testid={`changes-tests-${repoName}`}>
-              <div className="flex items-center gap-2">
-                <StatusDot state="warning" pulse={false} />
-                <span className="text-[11px]" style={{ color: 'var(--warning)' }}>
-                  {tests.length === 1 ? '1 test file was edited' : `${tests.length} test files were edited`} — review these first
-                </span>
-              </div>
-              <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 pl-[18px]">
-                {tests.slice(0, FILE_LIST_LIMIT).map((f) => (
-                  <li
-                    key={f}
-                    className="min-w-0 truncate text-[11px]"
-                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-                    title={f}
-                  >
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {!rolled && source.length > 0 && (
-            <ul className="m-0 flex list-none flex-col gap-0.5 p-0" data-testid={`changes-files-${repoName}`}>
-              {source.map((f) => (
-                <li
-                  key={f}
-                  className="min-w-0 truncate text-[11px]"
-                  style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-                  title={f}
-                >
-                  {f}
-                </li>
+      {tests.length > 0 && (
+        // A repair is supposed to fix the app, not the test — so an edited spec
+        // stays in view whether or not the editor is open.
+        <dl className="m-0" data-testid={`changes-tests-${repoName}`}>
+          <FieldRow label="Tests" mark={<HintIcon glyph="!" hint="A repair fixes the app, not the test. Review these edits first." />}>
+            <p className="m-0" style={{ color: 'var(--text-primary)' }}>
+              {tests.length === 1 ? 'Edits 1 test file' : `Edits ${tests.length} test files`} — review these first
+            </p>
+            <ul className="m-0 mt-0.5 flex list-none flex-col p-0">
+              {tests.slice(0, FILE_LIST_LIMIT).map((f) => (
+                <li key={f} className="min-w-0 truncate text-[11px]" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={f}>{f}</li>
               ))}
             </ul>
-          )}
+          </FieldRow>
+        </dl>
+      )}
 
-          {rolled && (
-            <div
-              className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5"
-              data-testid={`changes-dirs-${repoName}`}
-            >
-              {dirs.slice(0, DIR_ROLLUP_LIMIT).map((g) => (
-                <div key={g.dir} className="col-span-2 grid grid-cols-subgrid">
-                  <span
-                    className="min-w-0 truncate text-[11px]"
-                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
-                    title={g.dir}
-                  >
-                    {g.dir}
-                  </span>
-                  <span className="text-[11px]" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                    {g.count}
-                  </span>
-                </div>
-              ))}
-              {foldedDirs > 0 && (
-                <span className="col-span-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  +{foldedDirs} more {foldedDirs === 1 ? 'directory' : 'directories'}
-                </span>
-              )}
-            </div>
-          )}
+      {changed && expanded && (
+        <div className={ruled(1) ? 'border-t' : ''} style={{ borderColor: 'var(--border-default)' }}>
+          <RepoPatch runId={runId} repoName={repoName} capturedAt={capturedAt} />
         </div>
       )}
 
-      {changed && (
-        <>
-          <div className="cl-card-foot">
-            {moved ? (
-              <button
-                type="button"
-                data-testid={`changes-view-patch-${repoName}`}
-                onClick={() => setPatchOpen(true)}
-                title="Shows the captured diff — this repo can no longer be opened"
-                className="cl-button cl-button-accent px-2.5 py-1 text-[11px]"
-              >
-                View patch
-              </button>
-            ) : (
-              <button
-                type="button"
-                data-testid={`changes-open-repo-${repoName}`}
-                onClick={onOpen}
-                disabled={openState.kind === 'working' || (!provisional && (!canUseFinalCapture || preflight?.confirmed === false))}
-                title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
-                className="cl-button cl-button-accent px-2.5 py-1 text-[11px]"
-              >
-                {openState.kind === 'working' ? 'Opening…' : 'Open in editor'}
-              </button>
-            )}
-            <span title={canUseFinalCapture ? undefined : waitForStop} className={`inline-flex ${canUseFinalCapture ? '' : 'cursor-not-allowed'}`}>
-              <button
-                type="button"
-                data-testid={`changes-propose-${repoName}`}
-                onClick={onProposeClick}
-                disabled={!canUseFinalCapture}
-                aria-label={canUseFinalCapture ? 'Commit and open PR' : `Commit and open PR. ${waitForStop}`}
-                className="cl-button px-2.5 py-1 text-[11px] disabled:pointer-events-none disabled:opacity-50"
-                title={canUseFinalCapture ? 'Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff' : undefined}
-              >
-                Commit &amp; open PR…
-              </button>
-            </span>
-            {/* One entrance to the dialog per card: `View patch` already is it
-                when the repo has moved. */}
-            {!listedEverything && !moved && (
-              <button
-                type="button"
-                data-testid={`changes-all-files-${repoName}`}
-                onClick={() => setPatchOpen(true)}
-                className="cl-button px-2.5 py-1 text-[11px]"
-              >
-                All {repo!.files} files
-              </button>
-            )}
-            {/* The outcome of the actions above, on its own full-width line
-                inside the same strip; collapses when there is nothing to say. */}
-            <div className="flex basis-full flex-col gap-1 empty:hidden">
-              {preflight && !preflight.confirmed && (
+      {changed && (openLine || prLine) && (
+        <dl className="m-0">
+          {openLine && (
+            <FieldRow label="Open" first={!ruled(2)}>
+              {preflightLine && (
                 <div role="status" className="text-[11px] text-muted">
-                  {preflight.error ? `Repository status unavailable: ${preflight.error}` : 'Checking current repository status…'}
+                  {preflight!.error ? `Repository status unavailable: ${preflight!.error}` : 'Checking current repository status…'}
                   {target && ' Last known status shown.'}
-                  <button type="button" className="cl-button ml-2 px-2 py-0.5" onClick={preflight.refresh}>Refresh status</button>
+                  <button type="button" className="cl-button ml-2 px-2 py-0.5" onClick={preflight!.refresh}>Refresh status</button>
                 </div>
               )}
-              <OpenOutcome repoName={repoName} state={openState} target={target} />
-              <PrLine
-                repoName={repoName}
-                pr={pr}
-                blockedReason={blockedReason}
-                auto={auto}
-              />
-            </div>
-          </div>
-
-          <RepairPatchDialog
-            open={patchOpen}
-            onClose={() => setPatchOpen(false)}
-            runId={runId}
-            repoName={repoName}
-            files={repo!.files}
-            fileNames={names}
-          />
-        </>
+              <OpenOutcome repoName={repoName} state={openState} />
+            </FieldRow>
+          )}
+          {prLine && (
+            <FieldRow label="Pull request" first={!ruled(3)}>
+              <PrLine repoName={repoName} pr={pr} blockedReason={blockedReason} auto={auto} />
+            </FieldRow>
+          )}
+        </dl>
       )}
     </li>
+  )
+}
+
+/** Where the repair stands in the user's own repo. The run edited an isolated
+ *  copy, so a card with a diff must not read as a change already made. */
+const IN_REPO = {
+  absent: { label: 'Not in your repo', hint: 'The agent edited an isolated copy. Open in editor applies it here as uncommitted changes; a merged pull request lands it.' },
+  uncommitted: { label: 'In your repo, uncommitted', hint: 'Your working tree holds this repair, not yet committed.' },
+  committed: { label: 'Already in your repo', hint: 'Your repo holds this repair, committed.' },
+} as const
+
+/** The repo's captured patch in the code editor the repair cycles use, read
+ *  when the card opens and again whenever the capture moves. */
+function RepoPatch({ runId, repoName, capturedAt }: { runId: string; repoName: string; capturedAt?: string }) {
+  const [patch, setPatch] = useState<runsApi.RunFixPatch | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    setError(null)
+    runsApi.getRunFixPatch(runId, repoName)
+      .then((r) => { if (live) setPatch(r) })
+      .catch((e: unknown) => { if (live) setError(displayError(e)) })
+    return () => { live = false }
+  }, [runId, repoName, capturedAt])
+  const files = useMemo(() => patch ? cycleReviewFromPatch(patch.diff) : [], [patch])
+  if (error) return <p className="m-0 px-3 py-2.5 text-[11px]" style={{ color: 'var(--danger)' }} data-testid={`changes-patch-error-${repoName}`}>{error}</p>
+  if (!patch) return <p className="m-0 px-3 py-2.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>Reading the patch…</p>
+  return (
+    <div data-testid={`changes-patch-${repoName}`}>
+      {files.length > 0
+        ? <CycleFileReview files={files} cycle={0} span="run" bare />
+        : <p className="m-0 px-3 py-2.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>The patch holds no file changes.</p>}
+    </div>
   )
 }
 
@@ -407,28 +372,19 @@ function OutcomeLine({
   )
 }
 
-/** The result of the last open attempt, and — before any attempt — the reason
- *  this repo can't be opened at all. Silence here is the failure mode this card
- *  exists to avoid. */
-function OpenOutcome({ repoName, state, target }: { repoName: string; state: OpenState; target?: ApplyTarget }) {
+/** The result of the last open attempt. */
+function OpenOutcome({ repoName, state }: { repoName: string; state: OpenState }) {
   if (state.kind === 'failed') {
     return (
-      <OutcomeLine state="failed" tone="var(--danger)" testId={`changes-open-error-${repoName}`}>
+      <OutcomeLine state="failed" tone="var(--text-secondary)" testId={`changes-open-error-${repoName}`}>
         {state.reason}
       </OutcomeLine>
     )
   }
   if (state.kind === 'done') {
     return (
-      <OutcomeLine state="success" tone="var(--success)" testId={`changes-open-done-${repoName}`}>
+      <OutcomeLine state="success" tone="var(--text-secondary)" testId={`changes-open-done-${repoName}`}>
         {state.provisional ? 'Opened live run worktree' : 'Applied to your repo'}{state.editor ? ` · opened in ${editorLabel(state.editor)}` : ''}
-      </OutcomeLine>
-    )
-  }
-  if (state.kind === 'idle' && target?.ready === false) {
-    return (
-      <OutcomeLine state="warning" tone="var(--warning)" testId={`changes-open-blocked-${repoName}`}>
-        {target.reason}
       </OutcomeLine>
     )
   }
