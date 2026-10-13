@@ -179,5 +179,9 @@ describe('step rows', () => {
     expect(compactPlaybackSteps([bare(50)])[0]).toEqual({ title: 'Verified 1 assertion', category: 'expect', ended: true, location: `${spec}:50` })
     expect(compactPlaybackSteps([{ title: 'Expect "toBe"', category: 'expect', ended: true }])[0].location).toBeUndefined()
     expect(compactPlaybackSteps([{ title: 'Expect "toBe"', category: 'expect', ended: true, location: spec }])[0]).toEqual({ title: 'Verified 1 assertion', category: 'expect', ended: true, location: spec })
+    // An assertion the reporter gave no location widens nothing either.
+    expect(compactPlaybackSteps([bare(50), { title: 'Expect "toBe"', category: 'expect', ended: true }, bare(65)])).toEqual([
+      { title: 'Verified 3 assertions', category: 'expect', ended: true, location: `${spec}:50`, toLine: 65 },
+    ])
   })
 })
