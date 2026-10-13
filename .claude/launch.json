@@ -10,16 +10,6 @@
       ],
       "port": 5173,
       "autoPort": true
-    },
-    {
-      "name": "test-dialog-preview",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "cd /Users/oddle/Documents/canary-lab-prototypes/run-dialog-preview && node /Users/oddle/Documents/canary-lab/node_modules/vite/bin/vite.js --config vite.config.mjs"
-      ],
-      "port": 51363,
-      "autoPort": true
     }
   ]
 }
