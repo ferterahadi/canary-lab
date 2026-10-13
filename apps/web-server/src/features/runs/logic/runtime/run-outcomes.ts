@@ -1,7 +1,7 @@
-import fs from 'fs'
-import path from 'path'
 import { readRunsIndex } from './manifest'
-import { runDirFor } from './run-paths'
+import { runDirFor, runSummaryPath } from './run-paths'
+import { failedNames, passedNames } from './summary-names'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
@@ -43,22 +43,14 @@ export function readLatestRunOutcomes(logsDir: string, feature: string): LatestR
     .filter((e) => e.feature === feature && !isAuxiliaryExecution(e.executionType))
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
   for (const entry of entries) {
-    const summaryPath = path.join(runDirFor(logsDir, entry.runId), 'e2e-summary.json')
-    let parsed: { passedNames?: unknown; failed?: unknown; passedOnRetry?: unknown; mergedFromPriorExecution?: unknown }
-    try {
-      parsed = JSON.parse(fs.readFileSync(summaryPath, 'utf-8')) as typeof parsed
-    } catch { continue }
-    const passed = new Set(
-      (Array.isArray(parsed.passedNames) ? parsed.passedNames : [])
-        .filter((n): n is string => typeof n === 'string' && n.length > 0),
+    // `undefined` is the unreadable sentinel: JSON never parses to it.
+    const parsed = readJsonOr<{ passedNames?: unknown; failed?: unknown; passedOnRetry?: unknown; mergedFromPriorExecution?: unknown } | undefined>(
+      runSummaryPath(runDirFor(logsDir, entry.runId)),
+      undefined,
     )
-    const failed = new Set(
-      (Array.isArray(parsed.failed) ? parsed.failed : [])
-        .map((f) => (f && typeof f === 'object' && typeof (f as { name?: unknown }).name === 'string'
-          ? (f as { name: string }).name
-          : ''))
-        .filter((n) => n.length > 0),
-    )
+    if (parsed === undefined) continue
+    const passed = new Set(passedNames(parsed).filter((n) => n.length > 0))
+    const failed = new Set(failedNames(parsed))
     const passedOnRetry = new Set(
       (Array.isArray(parsed.passedOnRetry) ? parsed.passedOnRetry : [])
         .filter((n): n is string => typeof n === 'string' && n.length > 0),

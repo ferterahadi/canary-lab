@@ -5,25 +5,12 @@ import { completedUserInput, inputPending, requestUserInput } from '../elicitati
 import { asJsonResult, errorResult, type ToolGroupContext } from '../tool-support'
 import { healWaitNext } from '../heal-task-wait'
 import { TEST_REVIEW_WAIT_MS, testReviewOutcome, waitForTestReview } from '../test-review-wait'
-import type { RunStartRequest } from '../../../../../shared/test-review'
+import { normalizeRunTestReview, testReviewUrl, type RunTestReview, type RunStartRequest } from '../../../../../shared/test-review'
 
 // A read-only wait follows disclosed review evidence or a capability fallback.
 // Reconnect obtains a new token; the decision itself lives in the run store.
 const waitSecret = randomBytes(32)
 const browserWaitToken = (scope: unknown) => createHmac('sha256', waitSecret).update(JSON.stringify(scope)).digest('hex')
-
-interface TestReview {
-  runId: string
-  feature: string
-  review_revision: string
-  files: Array<{ file: string; change: string }>
-  patchPath: string
-  patch?: string
-  canAdopt: boolean
-  reviewState: 'pending-active' | 'pending-terminal' | 'settled' | 'locked'
-  allowedActions: Array<'adopt-and-rerun' | 'approve-new-run' | 'restore' | 'leave-pending'>
-  nextAction: 'rerun-current' | 'start-new-run' | 'restore-or-leave' | 'none'
-}
 
 export function registerTestReviewTools(ctx: ToolGroupContext): void {
   const continuation = async (requestId: string | undefined, runId: string, value: Record<string, unknown>) => {
@@ -60,15 +47,14 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
             : `The original request is ${request.status}. ${request.error ?? 'Do not start a replacement implicitly.'}`,
     }
   }
-  const reviewUrl = (review: TestReview) => {
+  const reviewUrl = (review: RunTestReview) => {
     const base = ctx.deps.getUiUrl?.()
     if (!base) return undefined
-    const url = new URL(base)
-    for (const [key, value] of Object.entries({ feature: review.feature, run: review.runId, dialog: 'tests-review', reviewBase: 'run', reviewMode: 'code' })) url.searchParams.set(key, value)
+    const url = new URL(testReviewUrl(review.feature, review.runId), base)
     if (review.files[0]) url.searchParams.set('reviewFile', review.files[0].file)
     return url.toString()
   }
-  const browserHandoff = (review: TestReview, requestId: string | undefined, waitToken: string, reason: string, facts: ReturnType<typeof ctx.clientFacts>) => ({
+  const browserHandoff = (review: RunTestReview, requestId: string | undefined, waitToken: string, reason: string, facts: ReturnType<typeof ctx.clientFacts>) => ({
     status: 'needs-input', reason, runId: review.runId, reviewUrl: reviewUrl(review), patchPath: review.patchPath,
     review_revision: review.review_revision, browser_wait_token: waitToken,
     ...(requestId ? { request_id: requestId, nextSteps: ['get_test_review', 'review_test_changes'],
@@ -84,8 +70,8 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     if (!ctx.deps.testReviewRequest) return errorResult('Test review is unavailable on this server.')
     const response = await ctx.deps.testReviewRequest({ method: 'GET', url: `/api/runs/${encodeURIComponent(runId)}/test-review` })
     if (response.statusCode >= 400) return errorResult(JSON.stringify(response.body))
-    const review = response.body as TestReview
-    const reviewState = review.reviewState ?? (review.canAdopt ? 'pending-active' : undefined)
+    const review = response.body as RunTestReview
+    const { reviewState } = normalizeRunTestReview(review)
     return asJsonResult(await continuation(request_id, runId, { ...review, reviewUrl: reviewUrl(review),
       browser_wait_token: browserWaitToken([request?.sessionId, ['test-review', ctx.deps.projectRoot, runId], review.review_revision]),
       next: reviewState === 'pending-active'
@@ -121,9 +107,9 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     if (!send) return errorResult('Test review is unavailable on this server.')
     const response = await send({ method: 'GET', url: `/api/runs/${encodeURIComponent(runId)}/test-review` })
     if (response.statusCode >= 400) return errorResult(JSON.stringify(response.body))
-    const review = response.body as TestReview
-    const allowedActions = review.allowedActions ?? (review.canAdopt ? ['adopt-and-rerun', 'restore', 'leave-pending'] as const : [])
-    const reviewState = review.reviewState ?? (review.canAdopt ? 'pending-active' : undefined)
+    const review = response.body as RunTestReview
+    const { allowedActions } = normalizeRunTestReview(review)
+    const { reviewState } = normalizeRunTestReview(review)
     if (!allowedActions.includes('adopt-and-rerun') && !allowedActions.includes('approve-new-run') && !allowedActions.includes('restore')) {
       if (!reviewState) return inputPending('Run is no longer active. Resume it with start_run(run_ref), then fetch and review the pending changes.')
       return inputPending('This review has no available decision action. Fetch the current run and review state before continuing.')
@@ -133,7 +119,7 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     return requestUserInput(request, facts, {
       scope, revision: review_revision,
       mode: 'form', schema: z.object({ choice: z.enum(['Accept & commit', 'Restore recorded files']) }),
-      message: `Review ${review.files.length} changed suite files for ${review.feature} (${runId}). ${reviewUrl(review) ? `Optional comparison: ${reviewUrl(review)}. ` : ''}Patch: ${review.patchPath}. Revision ${review_revision}. Choose Accept & commit or Restore recorded files. Cancel leaves the review pending. Acceptance is not a passing test result.`,
+      message: `${review.feature} has ${review.files.length} changed test-suite file${review.files.length === 1 ? '' : 's'}. Accept and commit the changes, or restore the files used in the run? Approval does not mean the tests passed. Cancel leaves this pending.${reviewUrl(review) ? `\n\n[Compare changes in Canary](${reviewUrl(review)}).` : ''}`,
       fallback: () => asJsonResult(browserHandoff(review, request_id, waitToken, 'elicitation-unavailable', facts)),
       onNonAccept: async (reason) => asJsonResult(await continuation(request_id, runId, browserHandoff(review, request_id, waitToken, reason, facts))),
     }, async (answer) => {

@@ -1,63 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -65,7 +15,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -74,28 +24,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.runHealAgent', () => {
   it('throws when auto-heal is not configured', async () => {
-    const { factory } = makeFakeFactory()
+    const { factory } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -105,9 +38,9 @@ describe('RunOrchestrator.runHealAgent', () => {
   })
 
   it('submits a real prompt message to the live REPL on cycle 2+', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1, repos: [] }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1, repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -146,10 +79,10 @@ describe('RunOrchestrator.runHealAgent', () => {
   })
 
   it('passes the project root to the Codex spawn builder for scoped trust', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let workspaceRoot: string | undefined
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1, repos: [] }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1, repos: [] }),
       projectRoot: tmpDir,
       runId: RUN_ID,
       runDir,
@@ -194,7 +127,7 @@ describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultS
         { name: 'c', location: 'not-a-playwright-location' },
       ],
     })).toEqual(['e2e/a.spec.ts:10'])
-    const f = makeFeature()
+    const f = demoFeature(tmpDir)
     const suiteDir = buildRunPaths(runDir).suiteSnapshotDir
     const inv = defaultPlaywrightSpawner({ feature: f, suiteDir, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('playwright test')

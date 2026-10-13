@@ -1,3 +1,5 @@
+import { findSummaryTest } from '@shared/summary-test-identity'
+import { parseSourceLocation } from '@shared/lib/source-location'
 import { summaryEntryName } from '@shared/test-names'
 // Pure utilities to map a Playwright test (extracted from the AST) onto its
 // status and latest reporter-owned step location from e2e-summary.json. The
@@ -25,6 +27,9 @@ export interface StatusPresentation {
   label: string
   cardClassName: string
   pillClassName: string
+  /** The borderless tinted chip, for a list whose rows already separate
+   *  each status (the test dialog's timeline). */
+  softPillClassName: string
 }
 
 export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
@@ -32,36 +37,43 @@ export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
     label: 'passed',
     cardClassName: 'border-success/40 bg-success/5 dark:border-success/50',
     pillClassName: 'border-success/60 bg-success/10 text-success',
+    softPillClassName: 'bg-success/10 text-success',
   },
   testing: {
     label: 'running',
     cardClassName: 'border-running/50 bg-running/10 dark:border-running/60',
     pillClassName: 'border-running/60 bg-running/10 text-running',
+    softPillClassName: 'bg-running/10 text-running',
   },
   failed: {
     label: 'failed',
     cardClassName: 'border-danger/50 bg-danger/5 dark:border-danger/60',
     pillClassName: 'border-danger/60 bg-danger/10 text-danger',
+    softPillClassName: 'bg-danger/10 text-danger',
   },
   skipped: {
     label: 'skipped',
     cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
     pillClassName: 'border-warning/60 bg-warning/10 text-warning',
+    softPillClassName: 'bg-warning/10 text-warning',
   },
   timedout: {
     label: 'timeout',
     cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
     pillClassName: 'border-warning/60 bg-warning/10 text-warning',
+    softPillClassName: 'bg-warning/10 text-warning',
   },
   unmatched: {
     label: 'no matching result',
     cardClassName: 'border-line-strong bg-elevated/40',
     pillClassName: 'border-idle/70 bg-transparent text-secondary',
+    softPillClassName: 'bg-elevated text-secondary',
   },
   pending: {
     label: 'pending',
     cardClassName: 'border-line-strong bg-elevated/40',
     pillClassName: 'border-idle/70 bg-transparent text-secondary',
+    softPillClassName: 'bg-elevated text-secondary',
   },
 }
 
@@ -86,7 +98,7 @@ export function statusForTest(
   // instead of sticking on the stale "failed" label.
   if (isRunActivelyTesting && runningTestForTest(summary, identity)) return 'testing'
   if (!identity.id && identity.allowNameFallback === false) return 'unmatched'
-  const failed = summaryEntryForIdentity(summary.failed, expected, identity.id, identity.allowNameFallback)
+  const failed = findSummaryTest(summary.failed, { ...identity, name: expected })
   if (failed) {
     const msg = failed.error?.message ?? ''
     if (/Test timeout of/i.test(msg)) return 'timedout'
@@ -141,12 +153,7 @@ export function executionLineHighlightForTest(
     return bodyLine == null ? null : { kind: 'running', bodyLine }
   }
   const failed = input.summary
-    ? summaryEntryForIdentity(
-        input.summary.failed,
-        expectedName,
-        input.testId,
-        input.allowNameFallback,
-      )
+    ? findSummaryTest(input.summary.failed, { name: expectedName, id: input.testId, allowNameFallback: input.allowNameFallback })
     : undefined
   if (!failed) return null
   const bodyLine = bodyLineForLocations(
@@ -166,34 +173,13 @@ export function runningTestForTest(
   summary: RunSummary,
   test: TestStatusIdentity,
 ): RunningTestSummary | undefined {
-  return summaryEntryForIdentity(
-    runningEntries(summary),
-    summaryEntryName(test.name),
-    test.id,
-    test.allowNameFallback,
-  )
+  return findSummaryTest(runningEntries(summary), { ...test, name: summaryEntryName(test.name) })
 }
 
 function runningEntries(summary: RunSummary): RunningTestSummary[] {
-  return [
-    ...(summary.runningTests ?? []),
-    ...(summary.running ? [summary.running] : []),
-  ]
-}
-
-function summaryEntryForIdentity<T extends { id?: string; name: string }>(
-  entries: T[],
-  summaryName: string,
-  id?: string,
-  allowNameFallback = true,
-): T | undefined {
-  const matchingNames = entries.filter((entry) => entry.name === summaryName)
-  if (!id) return allowNameFallback ? matchingNames[0] : undefined
-  const byId = matchingNames.find((entry) => entry.id === id)
-  if (byId) return byId
-  // Older summaries have no ids at all. Preserve their title fallback, but
-  // never let one identified sibling stand in for another duplicate title.
-  return matchingNames.some((entry) => entry.id) ? undefined : matchingNames[0]
+  const entries = [...(summary.runningTests ?? [])]
+  if (summary.running && !findSummaryTest(entries, summary.running)) entries.push(summary.running)
+  return entries
 }
 
 function bodyLineForLocations(
@@ -232,17 +218,15 @@ function bodyLineForLocations(
 }
 
 function lineFromLocation(location: string): number | null {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  if (!match) return null
-  const line = Number(match[1])
+  const parsed = parseSourceLocation(location)
+  if (parsed.line === undefined) return null
+  const line = Number(parsed.line)
   return Number.isFinite(line) ? line : null
 }
 
 function fileFromLocation(location: string): string | null {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  if (!match || match.index == null) return null
-  const file = location.slice(0, match.index)
-  return file.length > 0 ? file : null
+  const parsed = parseSourceLocation(location)
+  return parsed.line !== undefined && parsed.file.length > 0 ? parsed.file : null
 }
 
 export function sameSourceFile(a: string, b: string): boolean {
@@ -277,6 +261,10 @@ export function colorClassForStatus(status: StepStatus): string {
 
 export function statusPillClassForStatus(status: StepStatus): string {
   return STATUS_PRESENTATION[status].pillClassName
+}
+
+export function softStatusPillClassForStatus(status: StepStatus): string {
+  return STATUS_PRESENTATION[status].softPillClassName
 }
 
 export function statusLabel(status: StepStatus): string {

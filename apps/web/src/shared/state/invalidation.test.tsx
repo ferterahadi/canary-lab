@@ -1,23 +1,15 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it } from 'vitest'
 import { InvalidationProvider, useInvalidation, useInvalidationKey } from './invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // A leaf that surfaces its subscribed version + a render counter, so a test can
 // assert both the value AND whether an unrelated bump re-rendered it.

@@ -7,6 +7,10 @@ import {
   type TestReviewRequired,
 } from '@/shared/api/runs'
 import { Modal } from '@/shared/ui/Overlays'
+import { displayError } from '@/shared/api/error-message'
+import { errorMessage } from '@shared/lib/error-message'
+import { plural } from '@shared/lib/plural'
+import { ChevronRightIcon } from '@/shared/ui/Icons'
 
 // Maps a failed `POST /api/runs` into a human headline, the raw server reason,
 // and a "what to do next" hint. Kept pure + exported so it's unit-testable
@@ -55,7 +59,9 @@ export function describeRunStartError(err: unknown, feature: string): {
   }
   return {
     title: 'Couldn’t reach the server',
-    detail: err instanceof Error ? err.message : String(err),
+    // The raw failure, not `displayError`'s connection sentence: the title and
+    // hint already say the server is unreachable.
+    detail: errorMessage(err),
     hint: 'The Canary Lab server may have stopped or restarted. Confirm it’s running, then reload and retry.',
   }
 }
@@ -109,7 +115,7 @@ function TestReviewBody({ review, onReviewTests, onClose }: { review: TestReview
     <>
       <h2 className="text-sm font-semibold text-primary">Review test changes before starting</h2>
       <p className="mt-2 text-[13px] leading-relaxed text-secondary">
-        {count} suite file{count === 1 ? '' : 's'} changed for <span className="font-mono">{review.feature}</span> since the recorded run.
+        {plural(count, 'suite file')} changed for <span className="font-mono">{review.feature}</span> since the recorded run.
         {' '}Please review these changes before running the updated tests.
       </p>
       <p className="mt-2 text-[13px] leading-relaxed text-muted">
@@ -184,7 +190,7 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
     try {
       await fn()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
+      setActionError(displayError(err))
       setBusy(null)
     }
   }
@@ -300,7 +306,7 @@ function OptionCard({ singleBranch, title, rows, sideLabel, action, recommended,
           {action}
         </div>
       </div>
-      <ChevronRightIcon />
+      <ChevronRightIcon size={16} className="cl-branch-chevron mt-0.5 shrink-0" />
     </button>
   )
 }
@@ -320,17 +326,7 @@ function GitBranchIcon() {
   )
 }
 
-function ChevronRightIcon() {
-  return (
-    <svg
-      className="cl-branch-chevron mt-0.5 shrink-0"
-      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  )
-}
+
 
 function currentBranchLabel(r: { isGitRepo: boolean; detached: boolean; current: string | null }): string {
   if (!r.isGitRepo) return 'not a git repo'

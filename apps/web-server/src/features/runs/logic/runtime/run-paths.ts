@@ -11,6 +11,9 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   playwrightEventsPath: string
+  // JSONL audit trail of every external (MCP/REST) heal command against the
+  // run, one entry per command, created lazily on the first append.
+  externalCommandsPath: string
   // Newline-delimited `--test-list` entries for a targeted rerun, rewritten
   // before each Playwright invocation that uses one. Kept in the run dir rather
   // than a temp file so a rerun's exact selection stays inspectable afterwards.
@@ -26,6 +29,10 @@ export interface RunPaths {
   // this keep dir; new artifacts for the same pw-slug overwrite the previous
   // copy so the keep dir always reflects the latest attempt per test.
   playwrightArtifactsKeepDir: string
+  // Immutable per-execution copy of the same per-test dirs, under
+  // `execution-<n>/`. The keep dir answers "the latest attempt"; this answers
+  // "what did execution n leave", which a later execution must not overwrite.
+  playwrightArtifactsHistoryDir: string
   agentSessionIdPath: string
   // Small JSON pointer that records which agent ran and where its CLI-native
   // JSONL session log is on disk (e.g. ~/.claude/projects/.../<uuid>.jsonl
@@ -61,6 +68,25 @@ export interface RunPaths {
   rerunSignal: string
   healSignal: string
   serviceLog(safeName: string): string
+  // `serviceLog` is truncated before every rerun and restart so the live pane
+  // shows one execution. What it held is appended here first, named for the
+  // last execution that wrote into it (0 = boot output before any execution).
+  serviceLogSegment(safeName: string, execution: number): string
+}
+
+/** The run manifest's file name — exported for the observer, which watches
+ *  run-dir entries by name rather than by full path. */
+export const RUN_MANIFEST_FILE = 'manifest.json'
+
+/** `<runDir>/manifest.json`: the one artifact every run reader starts from,
+ *  so readers that need nothing else skip building the whole layout. */
+export function runManifestPath(runDir: string): string {
+  return path.join(runDir, RUN_MANIFEST_FILE)
+}
+
+/** `<runDir>/e2e-summary.json`: the Playwright reporter's per-test results. */
+export function runSummaryPath(runDir: string): string {
+  return path.join(runDir, 'e2e-summary.json')
 }
 
 /**
@@ -76,14 +102,16 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
   const signalsDir = overrides?.signalsDir ?? path.join(runDir, 'signals')
   return {
     runDir,
-    manifestPath: path.join(runDir, 'manifest.json'),
-    summaryPath: path.join(runDir, 'e2e-summary.json'),
+    manifestPath: runManifestPath(runDir),
+    summaryPath: runSummaryPath(runDir),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    externalCommandsPath: path.join(runDir, 'external-commands.jsonl'),
     rerunListPath: path.join(runDir, 'rerun-test-list.txt'),
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     playwrightArtifactsKeepDir: path.join(runDir, 'playwright-artifacts-keep'),
+    playwrightArtifactsHistoryDir: path.join(runDir, 'playwright-artifacts-history'),
     agentSessionIdPath: path.join(runDir, 'agent-session-id.txt'),
     agentSessionRefPath: path.join(runDir, 'agent-session.json'),
     runnerLogPath: path.join(runDir, 'runner.log'),
@@ -100,6 +128,8 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     rerunSignal: path.join(signalsDir, '.rerun'),
     healSignal: path.join(signalsDir, '.heal'),
     serviceLog: (safeName: string) => path.join(runDir, `svc-${safeName}.log`),
+    serviceLogSegment: (safeName: string, execution: number) =>
+      path.join(runDir, 'service-logs', safeName, `execution-${execution}.log`),
   }
 }
 

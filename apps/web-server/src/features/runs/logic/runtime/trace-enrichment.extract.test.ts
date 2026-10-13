@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
 import { chromium } from '@playwright/test'
 import { extractTraceSummary } from './trace-enrichment'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('trace-ext-')
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
@@ -48,11 +50,8 @@ function mockByCommand(handlers: Record<string, () => CliResult>): void {
 describe('extractTraceSummary', () => {
   let tmp: string
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-ext-')))
+    tmp = tempDir()
     execFileMock.mockReset()
-  })
-  afterEach(() => {
-    try { fs.rmSync(tmp, { recursive: true, force: true }) } catch { /* ignore */ }
   })
 
   it('writes a self-contained trace-extract/ from a real trace', async () => {

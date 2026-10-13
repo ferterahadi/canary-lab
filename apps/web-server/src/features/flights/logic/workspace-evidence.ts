@@ -1,3 +1,4 @@
+import { configuredRepoPaths } from '../../../shared/repo-identity'
 import { capturedEnvsetCount } from './envset-evidence'
 import fs from 'fs'
 import path from 'path'
@@ -15,7 +16,7 @@ import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { isAuxiliaryExecution } from '../../../../../../shared/verification'
+import { isSuiteVerdictRun } from '../../../../../../shared/run-index'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 
 // Read-time stage evidence, probed from the workspace for stages that never
@@ -85,6 +86,8 @@ function specsCoverageEvidence({ deps, feature, featureDir }: EvidenceContext): 
   return {
     coveragePct: ledger.coveragePct,
     mappingState: ledger.state?.coverage,
+    summaryState: ledger.state?.summary,
+    freshnessState: ledger.freshness?.state,
     requirementCount: ledger.requirements.length,
     testsWritten: ledger.tests.length,
     covered: ledger.totals.covered,
@@ -141,12 +144,7 @@ function portifyEvidence({ deps, feature, featureDir, config }: EvidenceContext)
 /** The latest SETTLED test run for this feature. Boots/benchmarks/verifies are
  *  not feature runs, and an active run has no verdict to report yet. */
 function latestSettledRun(deps: WorkspaceEvidenceDeps, feature: string): { runId: string; status: string } | undefined {
-  const runs = listRuns(deps.logsDir, { feature }).filter(
-    (r) =>
-      !isAuxiliaryExecution(r.executionType) &&
-      r.executionType !== 'verify' &&
-      (r.status === 'passed' || r.status === 'failed'),
-  )
+  const runs = listRuns(deps.logsDir, { feature }).filter((r) => isSuiteVerdictRun(r, ['passed', 'failed']))
   const latest = runs[0]
   return latest ? { runId: latest.runId, status: latest.status } : undefined
 }
@@ -196,13 +194,8 @@ function evaluationExportEvidence({ deps, feature }: EvidenceContext): EvidenceB
  *  Deduplicated for the reason `distinctRepoPaths` exists: services sharing one
  *  source tree are one repository. */
 function scoutEvidence({ config }: EvidenceContext): EvidenceBlock | undefined {
-  const paths = new Set(
-    (config.repos ?? [])
-      .map((r) => r.localPath)
-      .filter((p): p is string => typeof p === 'string' && p.length > 0)
-      .map((p) => p.replace(/[\\/]+$/, '')),
-  )
-  return paths.size > 0 ? { repos: paths.size } : undefined
+  const paths = configuredRepoPaths(config.repos)
+  return paths.length > 0 ? { repos: paths.length } : undefined
 }
 
 /** Per-stage probe. `similarity` is deliberately absent: it reports which suites
@@ -228,16 +221,21 @@ export function workspaceStageEvidence(
   feature: string,
   keys: FlightStageKey[],
   env?: string,
+  strict = false,
 ): Partial<Record<FlightStageKey, EvidenceBlock>> {
   const wanted = keys.filter((k) => PROBES[k])
   if (wanted.length === 0) return {}
   let config: FeatureConfig | undefined
   try {
     config = findFeature(deps.featuresDir, feature)
-  } catch {
+  } catch (error) {
+    if (strict) throw error
     return {}
   }
-  if (!config?.featureDir) return {}
+  if (!config?.featureDir) {
+    if (strict) throw new Error('Suite configuration is unavailable')
+    return {}
+  }
   let settled: { value: ReturnType<typeof latestSettledRun> } | undefined
   const context: EvidenceContext = {
     deps, feature, config, featureDir: config.featureDir, env,
@@ -252,7 +250,8 @@ export function workspaceStageEvidence(
     try {
       const block = PROBES[key]!(context)
       if (block) out[key] = block
-    } catch {
+    } catch (error) {
+      if (strict) throw error
       // Probe failed — leave the stage as it was.
     }
   }

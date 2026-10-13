@@ -1,11 +1,14 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { createDraft, readDraft, paths as draftPaths } from '../../features/wizard/logic/draft-store'
 import type { DraftRecord } from '../../../../../shared/draft-types'
 import { registerExternalDraftTools } from './authoring-drafts'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-drafts-')
 
 // The external-draft record lifecycle: create → stage updates → apply.
 //
@@ -20,12 +23,7 @@ let featuresDir: string
 let logsDir: string
 
 function writeFeature(name: string, repos: Array<{ name: string; localPath: string; branch?: string }> = []): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: '${name}', description: 'd', envs: ['local'], featureDir: __dirname, repos: ${JSON.stringify(repos)} } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: ['local'], repos })
 }
 
 /** A feature config with no `repos` key at all — what a bare scaffold writes. */
@@ -63,16 +61,26 @@ function harness(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-drafts-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
 describe('start_external_draft', () => {
+  it('releases the demo claim if the draft cannot be persisted', async () => {
+    writeFeature('checkout')
+    fs.writeFileSync(path.join(logsDir, 'drafts'), 'blocked directory')
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-write-failure' })
+    const { call } = harness({ gettingStartedDemo: gs.demo })
+    await expect(call('start_external_draft', {
+      feature: 'checkout', stage: 'scaffolding', session_id: 's', client_kind: 'claude',
+    })).rejects.toThrow()
+    expect(gs.abandoned).toEqual(['gs-write-failure'])
+    expect(gs.attached).toEqual([])
+  })
+
   it('refuses a feature that does not exist', async () => {
     const { text } = harness()
 

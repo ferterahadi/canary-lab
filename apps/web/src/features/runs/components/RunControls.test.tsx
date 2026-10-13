@@ -8,8 +8,6 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 const paneTerminalState = vi.hoisted(() => ({
   props: [] as Array<{ paneId?: string; onExit?: (code: number) => void }>,
 }))
@@ -124,8 +122,37 @@ describe('run launch controls', () => {
       expect(menu()).toBeNull()
       act(() => trigger.click())
       expect(menu()).not.toBeNull()
+      act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(menu()).toBeNull()
+      act(() => trigger.click())
+      expect(menu()).not.toBeNull()
       setWidth(500)
       expect(menu()).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('dismisses compact run actions on Escape without changing selection or opening confirmation', () => {
+    let resize: ResizeObserverCallback = () => {}
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    const select = vi.fn()
+    const run: RunIndexEntry = {
+      runId: 'run-1', feature: 'alpha', status: 'running', startedAt: '2026-01-01T00:00:00Z',
+    }
+    try {
+      act(() => root.render(<RunsColumn feature="alpha" runs={[run]} selectedRunId="run-1"
+        onSelectRun={select} onStartRun={() => {}} onStartVerification={async () => {}} />))
+      act(() => resize([{ contentRect: { width: 300 } } as ResizeObserverEntry], {} as ResizeObserver))
+      const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Run actions"]')!
+      act(() => trigger.click())
+      expect(document.querySelector('[role="menu"][data-run-menu]')).not.toBeNull()
+      act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(document.querySelector('[role="menu"][data-run-menu]')).toBeNull()
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(select).not.toHaveBeenCalled()
     } finally { vi.unstubAllGlobals() }
   })
 
@@ -571,7 +598,7 @@ describe('run overview', () => {
     })
 
     const healTab = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Heal agent')
+      .find((button) => button.textContent?.trim() === 'Heal Agent')
     expect(healTab).toBeTruthy()
 
     await act(async () => {
@@ -610,7 +637,7 @@ describe('run overview', () => {
     })
 
     const healTab = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Heal agent')
+      .find((button) => button.textContent?.trim() === 'Heal Agent')
     expect(healTab).toBeTruthy()
 
     await act(async () => {
@@ -643,7 +670,7 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
     await act(async () => {
-      clickButton('Heal agent')
+      clickButton('Heal Agent')
     })
 
     expect(container.querySelector('[data-testid="heal-empty"]')?.textContent).toContain('No repairs needed')
@@ -664,7 +691,7 @@ describe('run overview', () => {
       root.render(<RunDetailColumn runId="run-1" />)
     })
     await act(async () => {
-      clickButton('Heal agent')
+      clickButton('Heal Agent')
     })
 
     expect(container.querySelector('[data-testid="heal-empty"]')).toBeNull()

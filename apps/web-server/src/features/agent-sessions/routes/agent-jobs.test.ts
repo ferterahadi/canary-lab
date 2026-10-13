@@ -1,6 +1,3 @@
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { EventEmitter } from 'events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,6 +6,9 @@ import { agentJobRoutes } from './agent-jobs'
 import { agentJobStore } from '../logic/agent-jobs/store'
 import { runAgentProcess } from '../logic/agent-process'
 import type { AgentJobManifest } from '../logic/agent-jobs/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-agentjob-routes-')
 
 // Reading and stopping one agent, rather than pausing a whole flight.
 
@@ -16,14 +16,13 @@ let logsDir: string
 let app: FastifyInstance
 
 beforeEach(async () => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentjob-routes-')))
+  logsDir = tempDir()
   app = Fastify()
   await app.register(agentJobRoutes, { logsDir })
 })
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(logsDir, { recursive: true, force: true })
 })
 
 const job = (over: Partial<AgentJobManifest> = {}): AgentJobManifest => ({

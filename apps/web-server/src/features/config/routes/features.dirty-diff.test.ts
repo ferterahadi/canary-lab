@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { featuresRoutes } from './features'
@@ -14,14 +13,17 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-import { git } from '../../../../../../tools/test-helpers/git-repo'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-froutes-')
 
 let tmpDir: string
 
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-froutes-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
   clearPlaywrightListCache()
@@ -87,11 +89,7 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('flags only the changed test, with its changed line, against the HEAD body', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, 'init', '-q')
-    git(dir, 'config', 'user.email', 't@t.dev')
-    git(dir, 'config', 'user.name', 'test')
-    git(dir, 'add', '-A')
-    git(dir, 'commit', '-q', '-m', 'baseline')
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), EDITED)
 
     const app = await build()
@@ -122,11 +120,7 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('flags every line of a test added since the last commit', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, 'init', '-q')
-    git(dir, 'config', 'user.email', 't@t.dev')
-    git(dir, 'config', 'user.name', 'test')
-    git(dir, 'add', '-A')
-    git(dir, 'commit', '-q', '-m', 'baseline')
+    initGitRepo(dir)
     fs.writeFileSync(
       path.join(dir, 'e2e', 'a.spec.ts'),
       `${COMMITTED}test('brand new', async () => { expect(3).toBe(3) })\n`,
@@ -141,11 +135,7 @@ describe('GET /api/features/:name/dirty-diff', () => {
 
   it('omits an empty-body test added since the last commit (no lines to flag)', async () => {
     const dir = writeFeature('alpha', { spec: COMMITTED })
-    git(dir, 'init', '-q')
-    git(dir, 'config', 'user.email', 't@t.dev')
-    git(dir, 'config', 'user.name', 'test')
-    git(dir, 'add', '-A')
-    git(dir, 'commit', '-q', '-m', 'baseline')
+    initGitRepo(dir)
     fs.writeFileSync(
       path.join(dir, 'e2e', 'a.spec.ts'),
       `${COMMITTED}test('brand new empty')\n`,

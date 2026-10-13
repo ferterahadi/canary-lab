@@ -1,4 +1,6 @@
-import type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightPlaybackEvent } from '@shared/run-detail'
+import { latestPlaybackAttempt, playbackCaseKey, playbackLocationKey, reconcilePlaybackCases, type PlaybackIdentity, type PlaybackCaseEntry } from '@shared/playback-identity'
+import { playbackAttempts } from '@shared/run-evidence'
+import type { PlaywrightArtifact, PlaywrightPlaybackEvent } from '@shared/run-detail'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manifest'
 import type {
   PlaywrightArtifactPolicy,
@@ -6,6 +8,8 @@ import type {
   PlaywrightScreenshotMode,
 } from '@shared/configs/playwright-modes'
 import { parseLocation } from '@/shared/test-numbering'
+import { plural } from '@shared/lib/plural'
+import { parseSourceLocation } from '@shared/lib/source-location'
 
 export interface PlaybackTest {
   name: string
@@ -19,7 +23,13 @@ export interface PlaybackTest {
   durationMs?: number
   retry?: number
   error?: { message: string; snippet?: string }
-  steps: Array<{ title: string; category: string; ended: boolean }>
+  steps: CompactStep[]
+}
+
+export interface PlaybackCase extends PlaybackTest {
+  caseKey: string
+  ids: string[]
+  locations: string[]
 }
 
 export interface PlaybackArtifacts {
@@ -34,78 +44,44 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   trace: 'retain-on-failure',
 }
 
-export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[] {
-  const tests = new Map<string, PlaybackTest>()
-  const activeKeyByName = new Map<string, string>()
-  const latestKeyByName = new Map<string, string>()
-  // Tracks the `location` (file:line) for each attempt's key — only test-begin
-  // and test-end events carry location, so we record it as we see them.
-  const locationByKey = new Map<string, string>()
-  for (const event of events ?? []) {
-    let key = activeKeyByName.get(event.test.name) ?? latestKeyByName.get(event.test.name) ?? event.test.name
-    if (event.type === 'test-begin') {
-      key = `${event.test.name}:${event.time}`
-      activeKeyByName.set(event.test.name, key)
-      latestKeyByName.set(event.test.name, key)
-    }
-    if ((event.type === 'test-begin' || event.type === 'test-end') && event.test.location) {
-      locationByKey.set(key, event.test.location)
-    }
-    const current = tests.get(key) ?? { name: event.test.name, title: event.test.title, steps: [] }
-    current.title = event.test.title || current.title
-    if (event.type === 'test-begin') current.startedAt = event.time
-    if (event.type === 'step-begin') {
-      current.steps.push({ title: event.step.title, category: event.step.category, ended: false })
-    }
-    if (event.type === 'step-end') {
-      const open = [...current.steps].reverse().find((s) => s.title === event.step.title && !s.ended)
-      if (open) open.ended = true
-      else current.steps.push({ title: event.step.title, category: event.step.category, ended: true })
-    }
-    if (event.type === 'test-end') {
-      current.status = event.status
-      current.passed = event.passed
-      current.durationMs = event.durationMs
-      current.retry = event.retry
-      current.error = event.error
-      current.endedAt = event.time
-      activeKeyByName.delete(event.test.name)
-    }
-    tests.set(key, current)
-    latestKeyByName.set(event.test.name, key)
-  }
-  // Collapse attempts to one entry per (name, spec file). Retries and
-  // heal-cycle reruns fold into the latest attempt — the line number is
-  // deliberately ignored because heal edits shift a test's line between
-  // cycles (e.g. :205 → :222) while it stays the same test. Two distinct
-  // tests that happen to share a title (and therefore a `name`) but live in
-  // different files stay as separate entries — the export HTML disambiguates
-  // them via positional anchor IDs. Map preserves first-seen identity order,
-  // last write wins so the latest attempt is kept.
-  // Carries the test alongside its key: every entry here comes straight out of
-  // `tests`, so re-looking it up afterwards only added a `has`/`get` pair whose
-  // miss arm nothing could reach.
-  const latestByIdentity = new Map<string, { key: string; test: PlaybackTest }>()
-  for (const [key, test] of tests.entries()) {
-    const file = parseLocation(locationByKey.get(key))?.file ?? ''
-    const identity = `${test.name}@${file}`
-    latestByIdentity.set(identity, { key, test })
-  }
-  return [...latestByIdentity.values()]
-    .map(({ key, test }) => ({
-      ...test,
-      location: test.location ?? locationByKey.get(key),
-      steps: compactPlaybackSteps(test.steps),
-    }))
+export function playbackTests(events: PlaywrightPlaybackEvent[] = [], identity?: PlaybackIdentity, known: readonly PlaybackCaseEntry[] = []): PlaybackCase[] {
+  const { attempts, caseEvidence } = playbackAttempts(events, identity, known)
+  const byCase = new Map<string, typeof attempts>()
+  for (const attempt of attempts) byCase.set(attempt.caseKey, [...(byCase.get(attempt.caseKey) ?? []), attempt])
+  return [...byCase.entries()].map(([caseKey, own]) => {
+    // Every case in the map holds at least the attempt that created it.
+    const { attemptKey: _attemptKey, caseKey: _caseKey, execution: _execution, ...test } = latestPlaybackAttempt(own)!
+    const evidence = caseEvidence.get(caseKey)!
+    return { ...test, caseKey, ids: [...evidence.ids], locations: [...evidence.locations], steps: compactPlaybackSteps(test.steps) }
+  })
 }
 
-export function artifactsForPlayback(
-  testName: string,
-  artifactGroups: PlaywrightArtifactGroup[] | undefined,
-  policy: PlaywrightArtifactPolicy | undefined,
-): PlaybackArtifacts {
+/** Focus belongs to a case, including earlier attempts whose ids/lines moved. */
+export function playbackFocusCase(tests: readonly PlaybackCase[], target: PlaybackCaseEntry, known: readonly PlaybackCaseEntry[] = []): string | undefined {
+  const uniqueKey = (matches: readonly PlaybackCase[]) => matches.length === 1 ? matches[0].caseKey : undefined
+  if (target.id) {
+    const identified = tests.filter((test) => test.ids.includes(target.id!))
+    if (identified.length) {
+      const key = uniqueKey(identified)
+      const conflictingLocation = target.location && tests.some((test) => test.caseKey !== key &&
+        test.locations.some((location) => playbackLocationKey(location) === playbackLocationKey(target.location!)))
+      return conflictingLocation ? undefined : key
+    }
+  }
+  if (target.location) {
+    const located = tests.filter((test) => test.name === target.name && test.locations.some((location) =>
+      playbackLocationKey(location) === playbackLocationKey(target.location!)))
+    if (located.length) return uniqueKey(located)
+    const resolved = reconcilePlaybackCases(known, [target]).find((item) => item.attempts.length)
+    return resolved?.declared ? uniqueKey(tests.filter((test) => test.caseKey === playbackCaseKey(resolved.entry))) : undefined
+  }
+  return target.id ? undefined : uniqueKey(tests.filter((test) => test.name === target.name))
+}
+
+/** One attempt's (or one test's) retained files, as the suite's artifact
+ *  policy lets the evidence rail show them. */
+export function artifactsUnderPolicy(artifacts: readonly PlaywrightArtifact[], policy: PlaywrightArtifactPolicy | undefined): PlaybackArtifacts {
   const effective = policy ?? DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY
-  const artifacts = artifactGroups?.find((g) => g.testName === testName)?.artifacts ?? []
   return {
     screenshotMode: effective.screenshot,
     screenshots: effective.screenshot === 'off' ? [] : preferredScreenshots(artifacts),
@@ -167,7 +143,21 @@ export function branchTooltip(service: Pick<ServiceManifestEntry, 'cwd'>, repo: 
   return parts.join('\n')
 }
 
-type PlaybackStep = PlaybackTest['steps'][number]
+/** A step as the Steps panel shows it. */
+export interface CompactStep {
+  title: string
+  category: string
+  ended: boolean
+  /** Where the step ran (`file:line[:col]`). A tally spans this line to `toLine`. */
+  location?: string
+  toLine?: number
+  /** How many consecutive runs of one source line this row stands for. */
+  count?: number
+  /** Each run's own title, when they differ — a loop's `expect(value, label)`. */
+  labels?: string[]
+}
+
+type PlaybackStep = CompactStep
 
 /** A step that survived filtering. `title: null` marks an assertion whose only
  *  content was the matcher name (`Expect "toBe"`): one such row says nothing,
@@ -178,7 +168,7 @@ interface MappedStep {
   title: string | null
 }
 
-function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
+export function compactPlaybackSteps(steps: readonly CompactStep[]): CompactStep[] {
   const mapped = steps.flatMap<MappedStep>((step) => {
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
@@ -191,16 +181,19 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
 
   // Collapse each consecutive run of bare assertions into one tally, in place,
   // so the surrounding steps keep their order.
-  const out: PlaybackTest['steps'] = []
+  const out: CompactStep[] = []
   const pending: PlaybackStep[] = []
   const flush = (): void => {
     if (pending.length === 0) return
+    const last = pending[pending.length - 1]
+    const first = pending.find((step) => step.location)
     out.push({
-      ...pending[pending.length - 1],
+      title: `Verified ${plural(pending.length, 'assertion')}`,
+      category: last.category,
       // A tally is only finished when every assertion under it is: one still
       // open must not be reported as done.
       ended: pending.every((step) => step.ended),
-      title: `Verified ${pending.length} assertion${pending.length === 1 ? '' : 's'}`,
+      ...(first ? lineSpan(first.location!, pending) : {}),
     })
     pending.length = 0
   }
@@ -210,10 +203,84 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
       continue
     }
     flush()
-    out.push({ ...entry.step, title: entry.title })
+    // One line run again and again — a loop — is one row, not one per pass.
+    const previous = out.at(-1)
+    if (previous?.labels && entry.step.location && previous.location === entry.step.location && previous.category === entry.step.category) {
+      previous.labels.push(entry.title)
+      previous.ended = previous.ended && entry.step.ended
+      continue
+    }
+    out.push({
+      title: entry.title,
+      category: entry.step.category,
+      ended: entry.step.ended,
+      ...(entry.step.location ? { location: entry.step.location } : {}),
+      labels: [entry.title],
+    })
   }
   flush()
+  return foldLoops(out).map(({ labels, ...row }) => {
+    if (!labels || labels.length === 1) return row
+    if (labels.every((label) => label === labels[0])) return { ...row, count: labels.length }
+    const title = row.category === 'expect' ? `Verified the same check ${labels.length} times` : `Ran the same step ${labels.length} times`
+    return { ...row, title, count: labels.length, labels }
+  })
+}
+
+/** The longest loop body this folds: a loop running more distinct lines per
+ *  pass is rare, and its passes stay readable unfolded. */
+const MAX_LOOP_BODY = 4
+
+/** Fold a loop whose body runs several lines — `94, 98, 94, 98, …` — into one
+ *  row per body line, each keeping every pass's label. One-line loops were
+ *  already merged as they arrived; this catches the interleaved ones. */
+function foldLoops(rows: readonly CompactStep[]): CompactStep[] {
+  const out: CompactStep[] = []
+  let i = 0
+  while (i < rows.length) {
+    const loop = loopAt(rows, i)
+    if (!loop) {
+      out.push(rows[i])
+      i += 1
+      continue
+    }
+    const body = rows.slice(i, i + loop.period).map((row) => ({ ...row, labels: [...row.labels!] }))
+    for (let j = i + loop.period; j < loop.end; j += 1) {
+      const row = body[(j - i) % loop.period]
+      row.labels.push(...rows[j].labels!)
+      row.ended = row.ended && rows[j].ended
+    }
+    out.push(...body)
+    i = loop.end
+  }
   return out
+}
+
+/** A loop starting at `i`: a body of 2–4 distinct located lines that repeats
+ *  for at least two whole passes. */
+function loopAt(rows: readonly CompactStep[], i: number): { period: number; end: number } | undefined {
+  const loopable = (row: CompactStep | undefined) => Boolean(row?.labels && row.location)
+  for (let period = 2; period <= MAX_LOOP_BODY; period += 1) {
+    const body = rows.slice(i, i + period)
+    if (body.length < period || !body.every(loopable) || new Set(body.map((row) => row.location)).size < period) continue
+    let end = i + period
+    while (end < rows.length && loopable(rows[end]) && rows[end].location === rows[i + ((end - i) % period)].location) end += 1
+    const passes = Math.floor((end - i) / period)
+    if (passes >= 2) return { period, end: i + passes * period }
+  }
+  return undefined
+}
+
+/** The lines a tally covers: from its first located assertion to the last one
+ *  in the same file. An assertion in another file (a helper) widens nothing. */
+function lineSpan(location: string, steps: readonly PlaybackStep[]): Pick<CompactStep, 'location' | 'toLine'> {
+  const { file, line } = parseSourceLocation(location)
+  const lines = steps.flatMap((step) => {
+    const at = step.location ? parseSourceLocation(step.location) : undefined
+    return at?.file === file && at.line ? [Number(at.line)] : []
+  })
+  const last = Math.max(...lines)
+  return { location, ...(line && last > Number(line) ? { toLine: last } : {}) }
 }
 
 /** An `expect` step that named a matcher and nothing else. */
@@ -244,7 +311,7 @@ function assertionRow(title: string, category: string): string | null | undefine
   return `Verified ${target} ${matcherPhrase(matcher[2], Boolean(matcher[1]))}`.trimEnd()
 }
 
-function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
+function preferredScreenshots(artifacts: readonly PlaywrightArtifact[]): PlaywrightArtifact[] {
   const screenshots = artifacts
     .filter((a) => a.kind === 'screenshot')
     .sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))

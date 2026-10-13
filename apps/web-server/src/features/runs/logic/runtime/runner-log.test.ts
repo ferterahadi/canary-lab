@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   RunnerLog,
@@ -8,11 +7,13 @@ import {
   renderEvent,
   stripAnsi,
 } from './runner-log'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-rl-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rl-')))
+  tmpDir = tempDir()
 })
 
 describe('stripAnsi', () => {

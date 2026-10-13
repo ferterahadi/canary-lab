@@ -1,14 +1,15 @@
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { extractTestsFromSource } from '../../../shared/ast-extractor'
 import { attachSourceChanges } from './test-source-changes'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-source-markers-')
 
 let root: string
 let file: string
-const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' })
 const original = `import { test, expect } from '@playwright/test'
 test('first', () => {
   expect(1).toBe(1)
@@ -18,13 +19,11 @@ test('second', () => {
 })
 `
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-source-markers-')))
+  root = tempDir()
   file = path.join(root, 'a.spec.ts')
   fs.writeFileSync(file, original)
-  git('init', '-q'); git('config', 'user.email', 'test@example.test'); git('config', 'user.name', 'Test')
-  git('add', '.'); git('commit', '-qm', 'baseline')
+  initGitRepo(root)
 })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 async function markers(source: string) {
   const { tests } = extractTestsFromSource(file, source)
   await attachSourceChanges(root, file, source, tests)
@@ -42,7 +41,7 @@ it('clears markers after the exact edit is committed', async () => {
   const edited = original.replace('expect(1).toBe(1)', 'expect(1).toBe(3)')
   expect((await markers(edited))[0]?.changedLines).toEqual([3])
   fs.writeFileSync(file, edited)
-  git('add', '.'); git('commit', '-qm', 'edit')
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'edit')
   expect(await markers(edited)).toEqual([
     { changedLines: [], count: 0 }, { changedLines: [], count: 0 },
   ])
@@ -56,7 +55,7 @@ it('does not mark Playwright registration tags as changed executable source', as
   { tag: ['@path-happy'] },
   () => {`)
   fs.writeFileSync(file, tagged)
-  git('add', '.'); git('commit', '-qm', 'add test tags')
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'add test tags')
 
   const edited = tagged.replace("['@path-happy']", "['@path-happy', '@req-R1']")
   expect((await markers(edited))[0]).toEqual({ changedLines: [], count: 1 })
@@ -111,15 +110,11 @@ it('uses the body diff for a newly added declaration when the caller has its bod
 })
 
 it('leaves source markers untouched when the suite has no committed baseline', async () => {
-  const noGit = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-source-markers-no-git-'))
+  const noGit = tempDir('cl-source-markers-no-git-')
   const untracked = path.join(noGit, 'a.spec.ts')
-  try {
-    const { tests } = extractTestsFromSource(untracked, original)
-    await attachSourceChanges(noGit, untracked, original, tests)
-    expect(tests.map((test) => test.sourceChanges)).toEqual([undefined, undefined])
-  } finally {
-    fs.rmSync(noGit, { recursive: true, force: true })
-  }
+  const { tests } = extractTestsFromSource(untracked, original)
+  await attachSourceChanges(noGit, untracked, original, tests)
+  expect(tests.map((test) => test.sourceChanges)).toEqual([undefined, undefined])
 })
 
 it('marks added rows using the declaration span when a legacy extraction has no body boundary', async () => {

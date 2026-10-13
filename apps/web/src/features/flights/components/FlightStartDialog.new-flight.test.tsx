@@ -50,8 +50,6 @@ let { FlightStartDialog, START_FRESH_LABEL } = await import('./FlightStartDialog
 import { STAGE_BLURB } from './stage-meta'
 import { FLIGHT_STAGE_LABEL as STAGE_LABEL } from '@shared/flights/stage-labels'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 let container: HTMLDivElement
 
 let root: Root

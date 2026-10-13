@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -8,6 +7,9 @@ import {
   isGettingStartedRunActive,
   type GettingStartedStatusResolver,
 } from './getting-started-session'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-getting-started-')
 
 let logsDir: string
 let runStatus: string | null
@@ -34,7 +36,7 @@ function store(setTimer?: (fn: () => void, ms: number) => void): GettingStartedS
 }
 
 beforeEach(() => {
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-getting-started-'))
+  logsDir = tempDir()
   runStatus = null
   flightStatus = null
   changes = 0
@@ -42,12 +44,27 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  fs.rmSync(logsDir, { recursive: true, force: true })
 })
 
 const sessionFile = (): string => path.join(logsDir, 'getting-started', 'session.json')
 
 describe('GettingStartedSessionStore', () => {
+  it('publishes a claim only after its state is persisted with the original JSON format', () => {
+    const snapshots: string[] = []
+    const sessions = new GettingStartedSessionStore(logsDir, resolver(), () => {
+      snapshots.push(fs.readFileSync(sessionFile(), 'utf8'))
+    }, () => '2026-08-19T00:00:00.000Z')
+    const active = sessions.claim('run', 'internal')
+    expect(snapshots).toEqual([`${JSON.stringify({ active, completed: {} }, null, 2)}\n`])
+    expect(fs.readdirSync(path.dirname(sessionFile()))).toEqual(['session.json'])
+  })
+
+  it('does not announce a claim when persistence fails', () => {
+    fs.mkdirSync(sessionFile(), { recursive: true })
+    expect(() => store().claim('run', 'internal')).toThrow()
+    expect(changes).toBe(0)
+  })
+
   it('allows one owner and returns a typed conflict to every competitor', () => {
     const sessions = store()
     const active = sessions.claim('run', 'internal')

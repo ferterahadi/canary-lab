@@ -1,3 +1,4 @@
+import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 import { listFiles } from '../../../shared/list-files'
 import { stripTerminalEscapes } from '../../../shared/terminal-text'
 import fs from 'fs'
@@ -9,6 +10,7 @@ import type {
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
+  VerificationTargetIndex,
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup } from '../../../../../../shared/run-detail'
@@ -18,14 +20,10 @@ import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
 import { bootsServicesForEnv } from '../../runs/logic/runtime/service-specs'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { readTextOrNull } from '../../../../../../shared/lib/read-file-or'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
-}
-
-export interface VerificationTargetIndex {
-  targets: VerificationTarget[]
-  targetUrls: Record<string, string>
 }
 
 export interface SaveVerificationConfigInput {
@@ -217,7 +215,7 @@ export function buildVerificationDiagnostics(
   runDir: string,
 ): VerificationDiagnostics {
   const targetUrls = detail.manifest.verification?.targetUrls ?? {}
-  const rawPlaywrightOutput = tail(stripAnsi(safeRead(path.join(runDir, 'playwright.log')) ?? ''), 16_000)
+  const rawPlaywrightOutput = tail(stripAnsi(readTextOrNull(path.join(runDir, 'playwright.log')) ?? ''), 16_000)
   const failedTests = (detail.summary?.failed ?? []).map((entry) =>
     diagnosticForFailedTest(entry, detail.playwrightArtifacts, runDir, targetUrls),
   )
@@ -402,12 +400,9 @@ function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefin
   if (!fs.existsSync(setDir)) return {}
   const out: Record<string, string> = {}
   for (const file of listFiles(setDir)) {
-    const raw = safeRead(file)
+    const raw = readTextOrNull(file)
     if (!raw) continue
-    for (const line of raw.split(/\r?\n/)) {
-      const parsed = parseDotenvLine(line)
-      if (!parsed) continue
-      const { key, value } = parsed
+    for (const { key, value } of parseDotenv(raw).entries) {
       if (!/^https?:\/\//i.test(value)) continue
       if (!/(^|_)URL$|TARGET_URL|BASE_URL|GATEWAY_URL/.test(key)) continue
       out[key] = value
@@ -416,30 +411,17 @@ function readEnvsetUrlEntries(feature: FeatureConfig, envsetId: string | undefin
   return out
 }
 
-function parseDotenvLine(line: string): { key: string; value: string } | null {
-  const trimmed = line.trim()
-  if (!trimmed || trimmed.startsWith('#')) return null
-  const idx = trimmed.indexOf('=')
-  if (idx <= 0) return null
-  const key = trimmed.slice(0, idx).trim()
-  let value = trimmed.slice(idx + 1).trim()
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    value = value.slice(1, -1)
-  }
-  return { key, value }
-}
-
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
   const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return null
-  return safeRead(path.join(runDir, traceSummaryFile))
+  return readTextOrNull(path.join(runDir, traceSummaryFile))
 }
 
 function readTraceExtractLines(runDir: string, entry: RunSummaryFailedEntry, filename: string): string[] {
   const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return []
   const extractDir = path.join(runDir, path.dirname(traceSummaryFile), 'trace-extract')
-  const raw = safeRead(path.join(extractDir, filename))
+  const raw = readTextOrNull(path.join(extractDir, filename))
   if (!raw) return []
   return raw
     .split(/\r?\n/)
@@ -463,10 +445,6 @@ function targetForEndpoint(endpoint: string | undefined, targetUrls: Record<stri
 function httpStatusFrom(value: string): number | undefined {
   const match = value.match(/\b([1-5]\d\d)\b/)
   return match ? Number(match[1]) : undefined
-}
-
-function safeRead(file: string): string | null {
-  try { return fs.readFileSync(file, 'utf-8') } catch { return null }
 }
 
 function tail(value: string, maxChars: number): string {

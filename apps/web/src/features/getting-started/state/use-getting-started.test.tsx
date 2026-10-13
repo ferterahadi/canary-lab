@@ -10,7 +10,6 @@ import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidati
 import { DemoDialog } from '../components/DemoDialog'
 import { useGettingStarted } from './use-getting-started'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const api = vi.hoisted(() => ({
   getOnboardingSamples: vi.fn(), getProjectConfig: vi.fn(), putProjectConfig: vi.fn(),
   startRun: vi.fn(), startFlight: vi.fn(), startCoverageJob: vi.fn(), getFlightEntryOptions: vi.fn(),

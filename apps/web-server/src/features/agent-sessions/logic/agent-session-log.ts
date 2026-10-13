@@ -1,3 +1,5 @@
+import { realpathOrSelf } from '../../../shared/realpath-or-self'
+import type { AgentSessionEvent, AgentSessionMeta } from '../../../../../../shared/agent-session-types'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
 //
@@ -24,7 +26,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { applyAgentSessionMetaLine, parseAgentSessionLine } from './agent-session-parse'
-import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, realpathOrSelf, safeMtimeMs } from './agent-session-paths'
+import { claudeSessionLogPath, findClaudeLogBySessionId, locateCodexSessionLog, locateLatestClaudeSessionLog, locateLatestCodexSessionLog, readCodexDiscoveryHint, safeMtimeMs } from './agent-session-paths'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { isAgentKind } from './agent-binary'
 
 export type AgentKind = 'claude' | 'codex'
 
@@ -38,27 +42,6 @@ export interface AgentSessionRef {
 export interface AgentSessionRefFile {
   activeAgent?: AgentKind
   sessions: Partial<Record<AgentKind, AgentSessionRef>>
-}
-
-export type AgentEvent =
-  | { kind: 'user-message'; timestamp: string; text: string }
-  // `apiError` marks a turn the CLI synthesized after the model's HTTP stream
-  // dropped mid-response ("Connection closed mid-response"). It is NOT the
-  // agent's own prose — the surrounding text is whatever partial output was
-  // recovered — so the UI renders it as a termination, not a conclusion.
-  | { kind: 'assistant-message'; timestamp: string; text: string; apiError?: boolean }
-  | { kind: 'assistant-thinking'; timestamp: string; text: string }
-  | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
-  | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
-
-// Session-level metadata that doesn't map to a timeline event: which model the
-// agent ran and (codex only) its reasoning effort. Both agents record this in
-// their JSONL but in different lines — codex in a `turn_context` record,
-// claude in each assistant message's `message.model`. Claude has no notion of
-// reasoning effort, so `effort` stays undefined for it.
-export interface AgentSessionMeta {
-  model?: string
-  effort?: string
 }
 
 export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | null {
@@ -79,7 +62,7 @@ export function parseAgentSessionRefFile(raw: string): AgentSessionRefFile | nul
   }
 
   const out: AgentSessionRefFile = { sessions: {} }
-  if (obj.activeAgent === 'claude' || obj.activeAgent === 'codex') {
+  if (isAgentKind(obj.activeAgent)) {
     out.activeAgent = obj.activeAgent
   }
   if (obj.sessions && typeof obj.sessions === 'object') {
@@ -101,7 +84,7 @@ export function selectAgentSessionRef(file: AgentSessionRefFile, preferredAgent?
 function normalizeAgentSessionRef(value: unknown): AgentSessionRef | null {
   if (!value || typeof value !== 'object') return null
   const ref = value as { agent?: unknown; sessionId?: unknown; logPath?: unknown }
-  if (ref.agent !== 'claude' && ref.agent !== 'codex') return null
+  if (!isAgentKind(ref.agent)) return null
   if (typeof ref.sessionId !== 'string' || typeof ref.logPath !== 'string') return null
   return { agent: ref.agent, sessionId: ref.sessionId, logPath: ref.logPath }
 }
@@ -129,28 +112,30 @@ export function writeWorkflowAgentRef(
   opts: { agent: AgentKind; cwd: string; spawnedAt: string; sessionId?: string },
   homeDir: string = os.homedir(),
 ): void {
+  if (opts.agent === 'claude' && opts.sessionId) {
+    writeClaudeWorkflowAgentRef(dir, opts.cwd, opts.sessionId, homeDir)
+  } else {
+    persistWorkflowAgentRef(dir, () => ({
+      activeAgent: 'codex', codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt },
+    }))
+  }
+}
+
+export function writeClaudeWorkflowAgentRef(dir: string, cwd: string, sessionId: string, homeDir: string = os.homedir()): void {
+  persistWorkflowAgentRef(dir, () => ({
+    activeAgent: 'claude',
+    sessions: { claude: { agent: 'claude', sessionId, logPath: claudeSessionLogPath(cwd, sessionId, homeDir) } },
+  }))
+}
+
+function persistWorkflowAgentRef(
+  dir: string,
+  build: () => AgentSessionRefFile | { activeAgent: 'codex'; codexDiscovery: { cwd: string; spawnedAt: string } },
+): void {
   try {
-    const file =
-      opts.agent === 'claude' && opts.sessionId
-        ? {
-            activeAgent: 'claude' as const,
-            sessions: {
-              claude: {
-                agent: 'claude' as const,
-                sessionId: opts.sessionId,
-                logPath: claudeSessionLogPath(opts.cwd, opts.sessionId, homeDir),
-              },
-            },
-          }
-        : { activeAgent: 'codex' as const, codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt } }
-    // Create the sidecar dir first: a flight's per-stage dir (flightDir/<stage>)
-    // is NOT pre-created by the store, so without this the write ENOENTs and the
-    // catch below swallows it — the agent's session is orphaned (its JSONL still
-    // lands in ~/.claude/projects, but no ref points the UI at it → a blank
-    // Activity rail even though the agent ran). Idempotent for callers whose dir
-    // already exists (benchmark, coverage).
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'agent-session.json'), JSON.stringify(file, null, 2))
+    // Flight stages and Portify callers may not have created their sidecar dir;
+    // the write creates it.
+    atomicWriteJson(path.join(dir, 'agent-session.json'), build())
   } catch {
     /* best-effort — the surface falls back to its empty state */
   }
@@ -202,10 +187,10 @@ export function locateMostRecentAgentSessionRef(
 // events and the session-level metadata (model/effort). Prefer this over
 // calling `loadAgentSessionLog` + `loadAgentSessionMeta` separately so the file
 // is only read and parsed once.
-export function loadAgentSession(ref: AgentSessionRef): { events: AgentEvent[]; meta: AgentSessionMeta } {
+export function loadAgentSession(ref: AgentSessionRef): { events: AgentSessionEvent[]; meta: AgentSessionMeta } {
   let raw: string
   try { raw = fs.readFileSync(ref.logPath, 'utf-8') } catch { return { events: [], meta: {} } }
-  const events: AgentEvent[] = []
+  const events: AgentSessionEvent[] = []
   const meta: AgentSessionMeta = {}
   for (const line of raw.split('\n')) {
     for (const ev of parseAgentSessionLine(ref.agent, line)) events.push(ev)
@@ -214,7 +199,7 @@ export function loadAgentSession(ref: AgentSessionRef): { events: AgentEvent[]; 
   return { events, meta }
 }
 
-export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
+export function loadAgentSessionLog(ref: AgentSessionRef): AgentSessionEvent[] {
   return loadAgentSession(ref).events
 }
 

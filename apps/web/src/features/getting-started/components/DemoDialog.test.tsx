@@ -2,12 +2,11 @@
 import type { GettingStartedSessionState, GettingStartedTarget, OnboardingWorkflow, OnboardingWorkflowAction, OnboardingWorkflowId } from '@shared/getting-started'
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DemoDialog } from './DemoDialog'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const WORKFLOWS: OnboardingWorkflow[] = [
   ['run', 'start', 1, 'Repair a broken suite', '/canary-lab-run'],
@@ -34,21 +33,13 @@ const WORKFLOWS: OnboardingWorkflow[] = [
 
 const READY: GettingStartedSessionState = { active: null, completed: {} }
 
-let container: HTMLDivElement
 let root: Root
 const writeText = vi.fn().mockResolvedValue(undefined)
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   writeText.mockClear()
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 interface Overrides {

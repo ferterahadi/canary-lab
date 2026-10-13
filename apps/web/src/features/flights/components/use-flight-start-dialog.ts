@@ -18,6 +18,7 @@ import type {
 } from '@shared/flights/types'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { usePlanFeaturesTask } from './use-plan-features-task'
+import { displayError } from '@/shared/api/error-message'
 
 type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
@@ -170,7 +171,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       })
       .catch((err: unknown) => {
         if (!alive) return
-        setLoadError(err instanceof Error ? err.message : String(err))
+        setLoadError(displayError(err))
       })
     return () => { alive = false }
   }, [resolvedFeature, newFlight, intent, fromStage, entryNonce])
@@ -228,7 +229,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ? (err.body as { error?: string; type?: string; conflicts?: string[] } | null)
       : null
     if (body?.type === 'feature_name_conflicts') setConflicts(body.conflicts ?? [])
-    setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
+    setStartError(body?.error ?? displayError(err))
     setBusy(false)
   }
 
@@ -275,7 +276,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       setResolvedFeature(derivedFeature)
       return
     }
-    setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
+    setStartError(body?.error ?? displayError(err))
     setBusy(false)
   }
 
@@ -326,7 +327,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       .then(() => closeTask(taskId))
       .catch((err: unknown) => {
         if (!taskIsCurrent(taskId)) return
-        setStartError(err instanceof Error ? err.message : String(err))
+        setStartError(displayError(err))
         setBusy(false)
       })
   }
@@ -367,7 +368,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       })
       .catch((err: unknown) => {
         if (!mounted.current) return
-        setStartError(err instanceof Error ? err.message : String(err))
+        setStartError(displayError(err))
         setBusy(false)
       })
   }

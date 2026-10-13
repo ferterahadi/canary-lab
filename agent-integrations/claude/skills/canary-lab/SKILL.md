@@ -15,15 +15,24 @@ stage that does not meet the requested target.
 
 ## User input through MCP 2.0
 
-Let the owning MCP command request missing input with SDK 2.0 elicitation
-(`input_required`). The client collects the response and retries the command.
-Do not answer a user form yourself or ask the same question in chat first.
-Existing user instructions and autopilot choices still apply without another ask.
-On `needs-input`, leave work pending after decline/cancel, stale input, or an
-unfinished UI action; never retry or repeat the question automatically. Chat is
-only the fallback when elicitation is unavailable. Never collect passwords, API
-keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
-Setup and reconnection questions still use chat while MCP is unavailable.
+Use the native Canary connector in the requesting chat so SDK 2.0 elicitation
+(`input_required`) reaches the human there. Do not substitute a shell MCP client,
+answer a form yourself, or recreate the question in chat. Existing explicit
+instructions and autopilot choices still apply without another ask.
+
+Form decisions have one shared record. The native form links to the same approval
+in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
+the ID; repeat on `still_waiting`. The human answers once in either surface.
+A browser answer resolves the server decision; some clients keep their native
+form visible until the human dismisses it. Dismissal then returns the stored
+result. Client decline/cancel alone does not represent a human decision.
+
+Without an `approvalId`, leave `needs-input` pending after decline/cancel, stale
+input, or an unfinished UI action; do not automatically retry or repeat the
+question. Setup/reconnection can use chat while MCP is unavailable. Never collect
+passwords, API keys, or access tokens in chat or form elicitation; use the returned
+Canary UI URL for secret entry.
 
 ## MCP Invocation
 
@@ -221,6 +230,8 @@ respond to the checkpoint instead of waiting.
 | `waiting-for-approval` | Respond via `respond_flight_checkpoint`. |
 | `waiting-for-approval` + `checkpoint.data.takeoverRequestedAt` | Stop external work and release with `choice: "run-internally"`; do not submit. |
 | `paused`, `pauseReason: "queued"` | Narrate as waiting — do NOT resume it. |
+| `paused` + `attention.state: "resolved"` | The earlier failure is historical and current evidence satisfies that stage. Describe remaining work; do not resume automatically. |
+| `paused` + `attention.state: "unavailable"` | Current evidence could not be verified. Re-read `get_flight` before recommending recovery. |
 | `paused`, other `pauseReason` | Re-call `start_flight` (OMIT `repoPaths` + `description`) to resume. |
 | `paused` + `remedy` in the result | A stage is blocked by uncommitted repo changes. Help the user clean each listed repo — `git stash push -u` (undoable) or commit — then `start_flight` resumes and the stage retries. |
 | `done` | Point the user at `links.evaluationZip`. |

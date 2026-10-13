@@ -96,7 +96,7 @@ export function applyTagToFile(
   const abs = path.join(featureDir, relFile)
   if (!fs.existsSync(abs)) return false
   const source = fs.readFileSync(abs, 'utf-8')
-  const next = writeCoversTag(source, testName, { requirements, pathTypes, variants })
+  const next = writeCoversTag(source, testName, { requirements, pathTypes, variants }, abs)
   if (next === source) return false
   fs.writeFileSync(abs, next)
   return true

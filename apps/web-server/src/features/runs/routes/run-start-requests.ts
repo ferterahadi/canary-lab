@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 import { RunStartRequests } from '../logic/run-start-requests'
+import { notFound } from '../../../shared/http-error'
 
 /** The browser observes internal continuations. Only the original external
  * session may consume an external request, through the MCP transport. */
@@ -12,12 +13,12 @@ export function registerRunStartRequests(app: FastifyInstance, deps: RunsRouteDe
   }
   app.get<{ Params: { requestId: string } }>('/api/run-requests/:requestId', async (req, reply) => {
     const request = requests.get(req.params.requestId)
-    return request ?? reply.code(404).send({ error: 'Run request not found' })
+    return request ?? notFound(reply, 'Run request')
   })
   for (const action of ['resume', 'cancel'] as const) {
     app.post<{ Params: { requestId: string }; Body?: { sessionId?: string } }>(`/api/run-requests/:requestId/${action}`, async (req, reply) => {
       const request = requests.get(req.params.requestId)
-      if (!request) return reply.code(404).send({ error: 'Run request not found' })
+      if (!request) return notFound(reply, 'Run request')
       if (!requests.owns(request, req.body?.sessionId, req.headers['x-canary-origin'] === 'mcp')) {
         return reply.code(409).send({ error: 'Continue this request in the client that started it.', request })
       }

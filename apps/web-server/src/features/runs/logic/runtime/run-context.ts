@@ -1,3 +1,4 @@
+import { DEFAULT_HEALTH_POLL_MS, DEFAULT_HEALTH_DEADLINE_MS } from './service-readiness'
 // Everything one run knows about itself: what was fixed at construction, what
 // was injected, and the state that changes as the run proceeds.
 //
@@ -46,6 +47,8 @@ import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from '../../../../../../../shared/run-manifest'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
+import type { RunExecutionRef } from '../../../../../../../shared/run-state'
+import { sleep } from '../../../../../../../shared/lib/sleep'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -123,6 +126,9 @@ export interface RunContext {
   dependencyProvenance: RunDependencyProvenance[]
   status: RunManifest['status']
   healCycles: number
+  /** The latest Playwright invocation this process started. Undefined until
+   *  the first one, when numbering resumes from `manifest.playwrightExecutions`. */
+  currentExecution: RunExecutionRef | undefined
   startedAt: string
   stopped: boolean
   servicePtys: Map<string, PtyHandle>
@@ -206,7 +212,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
   const repoPathOverrides: Record<string, string> = {}
   for (const handle of worktreeHandles) repoPathOverrides[handle.repoName] = handle.localPath
   const logsRoot = path.dirname(path.dirname(opts.runDir))
-  const healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
+  const healthPollIntervalMs = opts.healthPollIntervalMs ?? DEFAULT_HEALTH_POLL_MS
 
   return {
     runId: opts.runId,
@@ -229,7 +235,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
 
     ptyFactory: opts.ptyFactory,
     healthCheck: opts.healthCheck ?? isHealthy,
-    delay: opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
+    delay: opts.delay ?? sleep,
     playwrightSpawner: opts.playwrightSpawner ?? defaultPlaywrightSpawner,
     runnerLog: opts.runnerLog,
     // Default to a file-only sink so unit tests + the CLI shim don't have to
@@ -245,7 +251,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     emit,
 
     healthPollIntervalMs,
-    healthDeadlineMs: opts.healthDeadlineMs ?? 60_000,
+    healthDeadlineMs: opts.healthDeadlineMs ?? DEFAULT_HEALTH_DEADLINE_MS,
     autoHeal: opts.autoHeal,
     ...(opts.models === undefined ? {} : { models: opts.models }),
     manualHeal: opts.manualHeal ?? false,
@@ -270,6 +276,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     suiteDir: fs.existsSync(paths.suiteSnapshotDir) ? paths.suiteSnapshotDir : opts.feature.featureDir,
     status: 'running',
     healCycles: opts.initialHealCycles ?? 0,
+    currentExecution: undefined,
     startedAt: '',
     stopped: false,
     servicePtys: new Map(),

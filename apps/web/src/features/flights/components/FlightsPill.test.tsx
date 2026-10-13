@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   FLIGHT_STAGE_KEYS,
   type FlightIndexEntry,
@@ -10,7 +10,7 @@ import {
   type PlanFeaturesTask,
 } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill } from './FlightsPill'
+import { FlightsPillHarness } from './__fixtures__/FlightsPillHarness'
 import {
   ACTIVITY_CHIP,
   RUNNING_STAGE_CHIP,
@@ -21,6 +21,7 @@ import {
   resolveFeatureFlightTarget,
   summarizeFlightActivity,
 } from './FlightChipState'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
 vi.mock('@/shared/api/coverage', async (importOriginal) => ({
@@ -38,22 +39,14 @@ const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   ...over,
 })
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
   listCoverageStates.mockReset()
   listCoverageStates.mockResolvedValue([])
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 const flight = (over: Partial<FlightIndexEntry>): FlightIndexEntry => ({
   id: 'fl_1',
@@ -69,7 +62,7 @@ const flight = (over: Partial<FlightIndexEntry>): FlightIndexEntry => ({
 })
 
 function render(flights: FlightIndexEntry[], onOpenFlight = vi.fn()) {
-  act(() => { root.render(<FlightsPill flights={flights} onOpenFlight={onOpenFlight} />) })
+  act(() => { root.render(<FlightsPillHarness flights={flights} onOpenFlight={onOpenFlight} />) })
   return onOpenFlight
 }
 
@@ -82,7 +75,7 @@ it('shares one active count across the pill and status bar', () => {
   expect([...summary.activeFeatures]).toEqual(['checkout', 'search'])
   expect(summary.preFlightRows.map((task) => task.taskId)).toEqual(['fp_running', 'fp_done'])
   expect(summary.activeCount).toBe(4)
-  act(() => { root.render(<FlightsPill flights={flights} preFlights={preFlights} activity={activity} onOpenFlight={vi.fn()} />) })
+  act(() => { root.render(<FlightsPillHarness flights={flights} preFlights={preFlights} activity={activity} onOpenFlight={vi.fn()} />) })
   expect(container.querySelector('[data-testid="flights-pill-count"]')?.textContent).toBe(String(summary.activeCount))
 })
 
@@ -119,7 +112,7 @@ describe('FlightsPill', () => {
     const rows = [...menu!.querySelectorAll('[data-testid^="flight-open-"]')]
     expect(rows[0]?.getAttribute('data-testid')).toBe('flight-open-fl_wait')
     act(() => { (rows[0] as HTMLButtonElement).click() })
-    expect(onOpen).toHaveBeenCalledWith('fl_wait')
+    expect(onOpen).toHaveBeenCalledWith('fl_wait', 'scout')
   })
 
   it('offers the flight command as the empty state (never dead-end)', () => {
@@ -132,7 +125,7 @@ describe('FlightsPill', () => {
     const onOpenPreFlight = vi.fn()
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           preFlights={[preFlight({ taskId: 'fp_9', status: 'running' })]}
           onOpenFlight={vi.fn()}
@@ -154,7 +147,7 @@ describe('FlightsPill', () => {
   it('a settled pre-flight reads "to review" and flags the pill for attention', () => {
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           preFlights={[preFlight({ taskId: 'fp_done', status: 'done' })]}
           onOpenFlight={vi.fn()}
@@ -186,7 +179,7 @@ describe('FlightsPill', () => {
         : key === 'evaluation-export' ? 'failed' as const : 'pending' as const,
       startedAt: '2026-09-23T00:00:00Z',
     }))
-    act(() => root.render(<FlightsPill
+    act(() => root.render(<FlightsPillHarness
       flights={[flight({ status: 'paused', stages })]}
       activity={activity}
       coverageJobs={[
@@ -218,7 +211,7 @@ describe('FlightsPill', () => {
       kind: 'running', runId: 'run-1',
       waiting: { kind: 'queued', label: 'Queued', detail: 'Waiting for the repo.' },
     }]])
-    act(() => root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} open />))
+    act(() => root.render(<FlightsPillHarness flights={[]} activity={activity} onOpenFlight={vi.fn()} open />))
     const run = document.querySelector<HTMLElement>('[data-testid="stage-mini-cell-run"]')!
     expect(run.getAttribute('aria-label')).toBe('Test run — Queued')
     expect(run.style.background).toContain('var(--text-muted)')
@@ -229,7 +222,7 @@ describe('FlightsPill', () => {
       kind: 'healing', runId: 'run-1',
       waiting: { kind: 'agent', label: 'Awaiting Agent', detail: 'Resume the repair agent.' },
     }]])
-    act(() => root.render(<FlightsPill flights={[flight({ currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} open />))
+    act(() => root.render(<FlightsPillHarness flights={[flight({ currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} open />))
     const chip = document.body.querySelector<HTMLElement>('[data-testid="flight-status-chip"]')
     expect(chip?.textContent).toBe('Awaiting Agent')
     expect(chip?.style.width).toBe('120px')
@@ -241,27 +234,27 @@ describe('FlightsPill', () => {
 
   it('lights up from activity alone (a standalone run, zero flights)', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'r1' }]])
-    act(() => { root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
     expect(container.textContent).toContain('Flights · 1 active')
     expect(container.querySelector('[data-testid="flights-pill-count"]')?.textContent).toBe('1')
   })
 
   it('dedupes a flight and its own stage job to one active feature', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'portifying', workflowId: 'wf1' }]])
-    act(() => { root.render(<FlightsPill flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} />) })
     expect(container.textContent).toContain('Flights · 1 active')
   })
 
   it("the feature's chip narrates the live activity verb over the flight status", () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'authoring', draftId: 'd1' }]])
-    act(() => { root.render(<FlightsPill flights={[flight({ status: 'done' })]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[flight({ status: 'done' })]} activity={activity} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Writing')
   })
 
   it('a healing run reads "Healing" in amber, not the flight\'s generic "running"', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'healing', runId: 'r1' }]])
-    act(() => { root.render(<FlightsPill flights={[flight({ status: 'running', currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[flight({ status: 'running', currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const chip = document.body.querySelector<HTMLElement>('[data-testid="flight-status-chip"]')
     expect(chip?.textContent).toBe('Healing')
@@ -297,7 +290,7 @@ describe('FlightsPill', () => {
   it('updates the open picker chip and Test run mini rail as a run heals', () => {
     const row = flight({ status: 'running', currentStage: 'run' })
     const renderActivity = (kind: 'running' | 'healing') => act(() => {
-      root.render(<FlightsPill flights={[row]} activity={new Map([['checkout', { kind, runId: 'r1' }]])} onOpenFlight={vi.fn()} open />)
+      root.render(<FlightsPillHarness flights={[row]} activity={new Map([['checkout', { kind, runId: 'r1' }]])} onOpenFlight={vi.fn()} open />)
     })
     renderActivity('running')
     expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Running')
@@ -310,7 +303,7 @@ describe('FlightsPill', () => {
   })
 
   it('with no activity the chip shows the LAST state (done / failed / aborted)', () => {
-    act(() => { root.render(<FlightsPill flights={[flight({ status: 'failed' })]} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[flight({ status: 'failed' })]} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Failed')
   })
@@ -327,7 +320,7 @@ describe('FlightsPill', () => {
   it('activity on a feature with no flight gets a row (progress chip, no "no flight" label) that opens it', () => {
     const onOpenActivity = vi.fn()
     const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
-    act(() => { root.render(<FlightsPill flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} onOpenActivity={onOpenActivity} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} onOpenActivity={onOpenActivity} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const row = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-open-pay"]')
     expect(row).toBeTruthy()
@@ -349,7 +342,7 @@ describe('FlightsPill', () => {
     const activity = new Map<string, FeatureActivity>([['live-f', { kind: 'running', runId: 'r1' }]])
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[
             flight({ flightId: 'fl_done', id: 'fl_done', feature: 'done-f', status: 'done' }),
             flight({ flightId: 'fl_live', id: 'fl_live', feature: 'live-f', status: 'done' }),
@@ -371,7 +364,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     const onStartFlight = vi.fn()
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[flight({ status: 'done', currentStage: null })]}
           features={[{ name: 'checkout' }, { name: 'menu-management' }]}
           onOpenFlight={vi.fn()}
@@ -402,7 +395,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     ] as const
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           features={[{ name: 'todo-api', stages: [...stages] }]}
           onOpenFlight={vi.fn()}
@@ -434,7 +427,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     const onStartFlight = vi.fn()
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           features={[{ name: 'go-smoke', stages }]}
           onOpenFlight={onOpenFlight}
@@ -459,7 +452,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     const onStartFlight = vi.fn()
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           features={[{ name: 'bare', stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })) }]}
           onOpenFlight={onOpenFlight}
@@ -524,7 +517,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[]}
           activity={activity}
           features={[{ name: 'pay', stages: [{ key: 'scout', status: 'done' }, { key: 'scaffold', status: 'done' }, { key: 'env-capture', status: 'done' }] }]}
@@ -543,7 +536,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
   it('never duplicates a feature that already has a flight row, and not-flown rows sink to the bottom', () => {
     act(() => {
       root.render(
-        <FlightsPill
+        <FlightsPillHarness
           flights={[flight({ feature: 'checkout', status: 'waiting-for-approval' })]}
           features={[{ name: 'checkout' }, { name: 'aaa-never-flown' }]}
           onOpenFlight={vi.fn()}
@@ -723,7 +716,7 @@ describe('external-work hand-off (a step running in the user\'s own agent)', () 
   })
 
   it('paints the parked cell of the mini rail as running, matching its chip', () => {
-    act(() => { root.render(<FlightsPill flights={[handOff()]} onOpenFlight={vi.fn()} />) })
+    act(() => { root.render(<FlightsPillHarness flights={[handOff()]} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const cell = document.body.querySelector<HTMLElement>('[data-testid="stage-mini-cell-scout"]')
     expect(cell?.style.background).toBe('var(--running)')
@@ -743,12 +736,12 @@ it('shows an adoption wait as review needed, and returns to active when the wait
     kind: 'test-review', label: 'Awaiting test review', detail: 'Adopt or restore the edits.',
   } }
   const activity = new Map([['checkout', work]])
-  act(() => { root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
+  act(() => { root.render(<FlightsPillHarness flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
   expect(container.textContent).toContain('Flights · review needed')
   const state = featureChipState(null, work)
   expect(state).toMatchObject({ label: 'Awaiting test review', chipWidth: 136, live: false, rank: 0 })
   expect(resolveFeatureFlightAction('checkout', [flight({})], work)).toMatchObject({ label: 'Awaiting test review', chipWidth: 136, live: false, attention: true })
-  act(() => { root.render(<FlightsPill flights={[]} activity={new Map([['checkout', { kind: 'running', runId: 'r1' }]])} onOpenFlight={vi.fn()} />) })
+  act(() => { root.render(<FlightsPillHarness flights={[]} activity={new Map([['checkout', { kind: 'running', runId: 'r1' }]])} onOpenFlight={vi.fn()} />) })
   expect(container.textContent).toContain('Flights · 1 active')
   expect(container.textContent).not.toContain('review needed')
 })
@@ -759,14 +752,14 @@ it('searches inside collapsed groups and filters attention without treating queu
     flight({ flightId: 'queued', feature: 'batch-queued', status: 'paused', pauseReason: 'queued' }),
     flight({ flightId: 'external', feature: 'batch-external', status: 'waiting-for-approval', stageProducer: 'external' }),
   ]
-  act(() => root.render(<FlightsPill flights={entries} features={entries.map((entry) => ({ name: entry.feature, group: 'Batch' }))} onOpenFlight={vi.fn()} open />))
+  act(() => root.render(<FlightsPillHarness flights={entries} features={entries.map((entry) => ({ name: entry.feature, group: 'Batch' }))} onOpenFlight={vi.fn()} open />))
   const input = document.querySelector<HTMLInputElement>('[aria-label="Search flights"]')!
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'batch')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
   expect(document.querySelectorAll('[data-testid^="flight-open-"]')).toHaveLength(3)
-  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs input'))!
+  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs attention'))!
   act(() => filter.click())
   expect(document.querySelector('[data-testid="flight-open-paused"]')).not.toBeNull()
   expect(document.querySelector('[data-testid="flight-open-queued"]')).toBeNull()

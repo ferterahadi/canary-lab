@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore, type FlightStore } from './store'
 import {
@@ -28,12 +27,12 @@ import {
   FlightStageEntryError,
 } from './flight-errors'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightOptions,
-  type FlightStageKey,
-} from '../../../../../../shared/flights/types'
-import { sameRepoSet, type StageAdapter, type StageAdapters, type StageOutcome } from './flight-stages'
+import { FLIGHT_STAGE_KEYS, type FlightOptions } from '../../../../../../shared/flights/types'
+import { sameRepoSet, type StageAdapters, type StageOutcome } from './flight-stages'
+import { allDoneAdapters } from './__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-')
 
 let tmpDir: string
 
@@ -42,30 +41,16 @@ let store: FlightRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 
 const now = () => '2026-01-01T00:00:00Z'
 
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
-
-const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
-  teardown: () => null,
-  run: async (ctx) => {
-    calls?.push(ctx.manifest().currentStage as FlightStageKey)
-    return { kind: 'done' }
-  },
-})
-
-function allDone(calls?: FlightStageKey[]): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((k) => [k, doneAdapter(calls)])) as StageAdapters
-}
 
 function deps(adapters: StageAdapters): FlightConductorDeps {
   return { store, adapters, now, newFlightId: ids }
@@ -79,7 +64,7 @@ describe('store events', () => {
   it('emits changed on every manifest transition', async () => {
     const events: string[] = []
     store.onEvent((e) => events.push(e.kind))
-    const { completion } = startFlight(args(), deps(allDone()))
+    const { completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     expect(events.length).toBeGreaterThan(FLIGHT_STAGE_KEYS.length) // start + per-stage transitions + settle
     expect(new Set(events)).toEqual(new Set(['changed']))
@@ -89,13 +74,13 @@ describe('store events', () => {
     const events: string[] = []
     const listener = (e: { kind: string }) => events.push(e.kind)
     store.onEvent(listener)
-    const { completion } = startFlight(args(), deps(allDone()))
+    const { completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const countAfterFirst = events.length
     expect(countAfterFirst).toBeGreaterThan(0)
 
     store.offEvent(listener)
-    const second = startFlight({ ...args('/repo/other'), feature: 'other' }, deps(allDone()))
+    const second = startFlight({ ...args('/repo/other'), feature: 'other' }, deps(allDoneAdapters()))
     await second.completion
     expect(events.length).toBe(countAfterFirst)
   })
@@ -104,7 +89,7 @@ describe('store events', () => {
 describe('index row staleness (merge-upsert can update but never delete)', () => {
   it('resume clears pauseReason from the INDEX row, not just the manifest', async () => {
     let attempts = 0
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.portify = {
       teardown: () => null,
       run: async () => {
@@ -134,7 +119,7 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     // The pill, picker, suites column and toasts never load a manifest, so
     // without this they cannot tell an `external-work` hand-off (work running in
     // the user's own agent) from a question aimed at the human.
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({
@@ -163,22 +148,22 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     // neither of which loads a manifest to find out who is driving.
     const external = startFlight(
       { ...args('/repo/ext'), feature: 'ext-flight', opts: { ...OPTS, stageProducer: 'external' } },
-      deps(allDone()),
+      deps(allDoneAdapters()),
     )
     await external.completion
     expect(store.list().find((e) => e.flightId === external.manifest.flightId)!.stageProducer).toBe('external')
 
-    const internal = startFlight({ ...args('/repo/int'), feature: 'int-flight' }, deps(allDone()))
+    const internal = startFlight({ ...args('/repo/int'), feature: 'int-flight' }, deps(allDoneAdapters()))
     await internal.completion
     expect(store.list().find((e) => e.flightId === internal.manifest.flightId)!.stageProducer).toBeUndefined()
   })
 
   it('redo clears endedAt from the INDEX row of a settled flight', async () => {
-    const first = startFlight(args(), deps(allDone()))
+    const first = startFlight(args(), deps(allDoneAdapters()))
     await first.completion
     expect(store.list().find((e) => e.flightId === first.manifest.flightId)!.endedAt).toBeTruthy()
 
-    const redone = startFlight({ ...args(), mode: 'redo' }, deps(allDone()))
+    const redone = startFlight({ ...args(), mode: 'redo' }, deps(allDoneAdapters()))
     expect(redone.manifest.flightId).toBe(first.manifest.flightId)
     // The reset record has no endedAt; the row must drop it too, not keep the
     // old settle time glued to a freshly running flight.
@@ -387,7 +372,7 @@ describe('missing-stage backfill', () => {
 
 describe('FlightRunStore.remove', () => {
   it('removes a flight and emits a removed event', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
     const events: { kind: string; flightId?: string }[] = []
     store.onEvent((e) => events.push(e))
@@ -404,9 +389,9 @@ describe('FlightRunStore.renameFeature', () => {
   it('re-homes every flight on the renamed suite and reports the count', async () => {
     // A suite rename has to carry the new name into flight history rather than
     // orphaning it behind the old one.
-    const a = startFlight({ ...args('/repo/a'), feature: 'checkout' }, deps(allDone()))
+    const a = startFlight({ ...args('/repo/a'), feature: 'checkout' }, deps(allDoneAdapters()))
     await a.completion
-    const b = startFlight({ ...args('/repo/b'), feature: 'other' }, deps(allDone()))
+    const b = startFlight({ ...args('/repo/b'), feature: 'other' }, deps(allDoneAdapters()))
     await b.completion
 
     expect(store.renameFeature('checkout', 'checkout_v2')).toBe(1)
@@ -417,7 +402,7 @@ describe('FlightRunStore.renameFeature', () => {
   })
 
   it('is a no-op when no flight carries the old name', async () => {
-    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDone()))
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDoneAdapters()))
     await completion
     expect(store.renameFeature('absent', 'whatever')).toBe(0)
     expect(store.get(manifest.flightId)!.feature).toBe('checkout')
@@ -426,7 +411,7 @@ describe('FlightRunStore.renameFeature', () => {
 
 describe('FlightRunStore repo lookups', () => {
   it('activeForRepos skips an active flight whose repo set does not intersect', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
@@ -440,7 +425,7 @@ describe('FlightRunStore repo lookups', () => {
   })
 
   it('activeForRepos ignores an intersecting flight that is not active (done)', async () => {
-    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDone()))
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDoneAdapters()))
     await completion
     expect(store.get(manifest.flightId)!.status).toBe('done')
 
@@ -449,13 +434,13 @@ describe('FlightRunStore repo lookups', () => {
   })
 
   it('latestForRepos returns null when no flight intersects the repo set', async () => {
-    const { completion } = startFlight(args('/repo/a'), deps(allDone()))
+    const { completion } = startFlight(args('/repo/a'), deps(allDoneAdapters()))
     await completion
     expect(store.latestForRepos(['/repo/nonexistent'])).toBeNull()
   })
 
   it('tolerates a legacy index entry with no repoPaths field', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
@@ -475,12 +460,11 @@ describe('FlightRunStore repo lookups', () => {
   })
 })
 
-
 it('matches persisted aliases without rewriting history or changing newest/active precedence', async () => {
   const repo = path.join(tmpDir, 'repo')
   const alias = path.join(tmpDir, 'alias')
   fs.mkdirSync(repo); fs.symlinkSync(repo, alias, 'dir')
-  const first = startFlight(args(alias), deps(allDone()))
+  const first = startFlight(args(alias), deps(allDoneAdapters()))
   await first.completion
   const original = store.get(first.manifest.flightId)!
   store.save({ ...original, status: 'running' })

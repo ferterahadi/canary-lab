@@ -1,25 +1,25 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { RunOrchestrator } from './orchestrator'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-verify-orch-')
 let tmpDir: string
 let runDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-verify-orch-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), 'verify-run-1')
   fs.mkdirSync(runDir, { recursive: true })
 })
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
   vi.useRealTimers()
 })
 

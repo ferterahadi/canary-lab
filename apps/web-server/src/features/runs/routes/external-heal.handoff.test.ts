@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { externalHealRoutes, makeExternalHealAuditLogger } from './external-heal'
@@ -17,6 +16,9 @@ import { writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import type { RunStoreEvent } from '../logic/run-store'
 import type { HealSignalKind, RunStatus } from '../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-external-heal-')
 
 let tmpDir: string
 
@@ -25,7 +27,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-external-heal-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

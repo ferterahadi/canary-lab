@@ -1,3 +1,4 @@
+import { flightNeedsAttention, type FlightAttention } from '@shared/flights/attention'
 import type {
   FlightCheckpointKind,
   FlightIndexEntry,
@@ -106,21 +107,6 @@ export function presentedIndexStages(
 // mutation remains visible but inert. The server enforces the same ownership
 // line — see flight-decision-origin.ts — so this is presentation, not security.
 
-/** True while this flight's decisions belong to the MCP client that started
- *  it. Live-only: once the flight settles the agent is gone and the record is
- *  the UI's again (Fly again, Continue from a step, delete). */
-export function isExternallyDriven(
-  flight: { status: FlightStatus; opts?: { stageProducer?: 'internal' | 'external' }; stageProducer?: 'internal' | 'external' } | null | undefined,
-): boolean {
-  if (!flight) return false
-  // Accepts either shape: the manifest carries it under `opts`, the slim index
-  // entry hoists it to the top level (the pill/picker/toasts never load a
-  // manifest). One predicate for both keeps the surfaces from disagreeing.
-  const producer = flight.opts?.stageProducer ?? flight.stageProducer
-  if (producer !== 'external') return false
-  return flight.status === 'running' || flight.status === 'waiting-for-approval' || flight.status === 'paused'
-}
-
 /** Standalone external work — a skill the user invoked (author, coverage,
  *  portify, export) is working on this SUITE from their own agent session, with
  *  no flight record driving it. The flight page monitors while the agent acts.
@@ -152,10 +138,10 @@ export function externalMutationTooltip(owner: ExternalMutationOwner, action: st
  *  own agent drives never demands a click here, whatever it is parked on. */
 export function flightAwaitsUser(
   flight:
-    | { status: FlightStatus; checkpointKind?: FlightCheckpointKind; stageProducer?: 'internal' | 'external' }
+    | { status: FlightStatus; checkpointKind?: FlightCheckpointKind; stageProducer?: 'internal' | 'external'; attention?: FlightAttention }
     | null
     | undefined,
 ): boolean {
   if (!flight || flight.status !== 'waiting-for-approval') return false
-  return !isExternalWorkPark(flight) && !isExternallyDriven(flight)
+  return flightNeedsAttention(flight)
 }

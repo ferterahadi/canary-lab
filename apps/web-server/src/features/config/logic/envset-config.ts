@@ -1,3 +1,4 @@
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
 import fs from 'fs'
 import path from 'path'
 import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
@@ -35,7 +36,7 @@ export function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {
 export function writeEnvsetsConfig(envsetsDir: string, cfg: EnvsetsConfigJson): void {
   fs.mkdirSync(envsetsDir, { recursive: true })
   const cfgPath = path.join(envsetsDir, 'envsets.config.json')
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
+  atomicWriteJson(cfgPath, cfg, undefined, { uniqueTemporary: true, followSymlinks: true, createParents: false })
 }
 
 /** List the env folder names (alphabetised) under a feature's `envsets/` dir.

@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { ServicesDialog } from './ServicesDialog'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const state = vi.hoisted(() => ({ sessions: [{ runId: 'r1', feature: 'shop', status: 'booted' }], abort: vi.fn() }))
 vi.mock('../state/RunsContext', () => ({
@@ -11,10 +12,9 @@ vi.mock('../state/RunsContext', () => ({
   useRun: () => ({ detail: { manifest: { lifecycle: { phase: 'services-ready' } } }, status: 'booted', transient: null }),
 }))
 vi.mock('./RunDetailColumn', () => ({ RunDetailColumn: ({ runId }: { runId: string }) => <div>Details {runId}</div> }))
-let container: HTMLDivElement
 let root: Root
-beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); state.abort.mockReset(); state.abort.mockResolvedValue(undefined) })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
+beforeEach(() => { state.abort.mockReset(); state.abort.mockResolvedValue(undefined) })
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === label)!
 
 it('closing Services leaves the session running; stopping uses a separate confirmation', async () => {

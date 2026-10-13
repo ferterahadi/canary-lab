@@ -11,7 +11,7 @@ import {
   servicePrimaryLabel,
   serviceTabLabelParts,
 } from './RunOverviewTabs'
-import { shortLocation } from './RunPlaybackPanels'
+import { shortSourceLocation } from '@shared/lib/source-location'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {
@@ -76,10 +76,10 @@ describe('evaluation export helpers', () => {
   })
 })
 
-describe('shortLocation', () => {
+describe('shortSourceLocation', () => {
   it('keeps the final two path segments for compact runtime labels', () => {
-    expect(shortLocation('/Users/dev/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
-    expect(shortLocation('checkout.spec.ts:12')).toBe('checkout.spec.ts:12')
+    expect(shortSourceLocation('/Users/dev/workspace/e2e/helpers/login.ts:209')).toBe('helpers/login.ts:209')
+    expect(shortSourceLocation('checkout.spec.ts:12')).toBe('checkout.spec.ts:12')
   })
 })
 

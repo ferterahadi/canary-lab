@@ -127,7 +127,7 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
     () => asJsonResult({ status: 'needs-docs', feature, reason: resolution?.status === 'missing' ? resolution.reason : 'Requirements needed',
       next: `${elicitationAdviceFor(ctx.clientFacts(), 'form')} ASK THE USER for the missing requirements, then write_feature_doc and retry ${command}. Never invent a document.` }), supplied,
     { revision: [options.revision, collection.docsHash, selection, resolution], beforeWrite: options.beforeWrite,
-      message: resolution?.status === 'missing' ? `Requirements for ${feature} are missing: ${resolution.reason}` : undefined,
+      reason: resolution?.status === 'missing' ? resolution.reason : undefined,
       command })
   if (replay && !options.documentSource && (!resolution || resolution.status === 'resolved')) return inputPending('This discovery outcome has no elicitation to resume. Nothing was applied.')
   if (!replay && resolution?.status === 'missing' && selection?.decisionKey === decisionKey && selection.reviewedDocsHash === collection.docsHash) return ready(featureDir)
@@ -144,7 +144,7 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
   if (resolution.status === 'resolved') return use(sources)
   const choices = resolution.candidates.map((candidate, i) => `${i + 1}: ${candidate.label}`)
   const schema = z.object({ choice: z.enum([choices[0], ...choices.slice(1), 'Provide requirements', 'Upload documents']) })
-  const message = `${resolution.question}\n${resolution.candidates.map((candidate, i) => `${choices[i]}\n${candidate.sources.map((source) => `${source.path}: ${source.reason}`).join('\n')}`).join('\n')}`
+  const message = `${resolution.question}\n\n${resolution.candidates.map((candidate, i) => `${choices[i]}\n${candidate.sources.map((source) => `- ${source.path} — ${source.reason}`).join('\n')}`).join('\n\n')}`
   const facts = ctx.clientFacts()
   return requestUserInput(request, facts, {
     scope, revision: [options.revision, collection.docsHash, selection, resolution], mode: 'form', schema, message,

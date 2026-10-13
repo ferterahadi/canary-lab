@@ -1,6 +1,5 @@
 import type { GettingStartedSessionState } from '../../../shared/getting-started'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -8,7 +7,9 @@ import { createServer } from './server'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import { writeManifest, writeRunsIndex } from './features/runs/logic/runtime/manifest'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-getting-started-server-')
 
 const inertPty: PtyFactory = () => ({
   pid: 0, onData: () => ({ dispose() {} }), onExit: () => ({ dispose() {} }),
@@ -22,7 +23,7 @@ function toolBody(result: Awaited<ReturnType<Client['callTool']>>): Record<strin
 
 describe('Getting Started production wiring', () => {
   it('recovers before serving onboarding and delivers external draft transitions to UI and MCP clients', async () => {
-    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-getting-started-server-'))
+    const projectRoot = tempDir()
     const featuresDir = path.join(projectRoot, 'features')
     const logsDir = path.join(projectRoot, 'logs')
     const suiteDir = path.join(featuresDir, 'workflow-workbench')
@@ -80,7 +81,6 @@ describe('Getting Started production wiring', () => {
       socket.close()
       await client.close()
       await app.close()
-      fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   }, 15_000)
 })

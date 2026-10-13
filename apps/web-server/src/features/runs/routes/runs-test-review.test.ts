@@ -6,7 +6,6 @@ import { reviewReceipt } from '../../../../../../shared/__fixtures__/test-review
 // are covered end-to-end through the real MCP + REST path in
 // `mcp/server.test-review.test.ts`.
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,8 +14,11 @@ import { RunStore } from '../logic/run-store'
 import { createRegistry } from '../logic/run-registry'
 import { updateManifest, writeManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+const tempDir = trackTempDirs('cl-run-review-')
+
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The 409 below guards a write that lands WHILE the patch is being built, so the
 // test has to place one at that instant. Hooking the awaited diff step is the
@@ -40,7 +42,7 @@ let registry: ReturnType<typeof createRegistry>
 
 beforeEach(() => {
   duringDiff.run = () => {}
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-run-review-')))
+  tmpDir = tempDir()
   for (const dir of ['logs', 'features/demo/e2e', 'snap/e2e']) fs.mkdirSync(path.join(tmpDir, dir), { recursive: true })
   fs.writeFileSync(path.join(tmpDir, 'snap/e2e/a.spec.ts'), "test('a', () => expect(1).toBe(1))\n")
   live = path.join(tmpDir, 'features/demo/e2e/a.spec.ts')

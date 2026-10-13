@@ -1,54 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
-import fs from 'fs'
-import os from 'os'
-import Fastify from 'fastify'
-import { registerMcpRoutes } from './server'
-import { RunStore } from '../features/runs/logic/run-store'
-import { createRegistry } from '../features/runs/logic/run-registry'
-import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { createMcpHarness, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function createMcpHarness(opts: {
-  logsDir: string
-  projectRoot: string
-  featuresDir: string
-  startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
-  restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
-  startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
-}) {
-  const app = Fastify()
-  const runStore = new RunStore(opts.logsDir, createRegistry())
-  const broker = new ExternalHealBroker({
-    now: () => Date.now(),
-    emit: (event) => runStore.emit('event', event),
-    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
-    audit: () => {},
-  })
-  await app.register(registerMcpRoutes, {
-    store: runStore,
-    broker,
-    featuresDir: opts.featuresDir,
-    projectRoot: opts.projectRoot,
-    startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
-    restartExternalRun: opts.restartExternalRun,
-    startVerification: opts.startVerification,
-  })
-  return { app, runStore }
-}
+const tempDir = trackTempDirs('cl-mcp-start-ambiguous-')
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -72,7 +28,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run returns candidates for an ambiguous run suffix', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ambiguous-')))
+    const logsDir = tempDir()
     const featuresDir = path.join(projectRoot, 'features')
     const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
     let client: Client | null = null
@@ -108,7 +64,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      const body = JSON.parse(toolText(result))
+      const body = JSON.parse(smokeToolText(result))
       expect(body).toMatchObject({
         type: 'ambiguous_run_ref',
         run_ref: '7cvh',
@@ -125,7 +81,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('start_run starts a new run when no matching run is healing and no run ref is provided', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-new-')))
+    const logsDir = tempDir('cl-mcp-start-new-')
     const featuresDir = path.join(projectRoot, 'features')
     const starts: string[] = []
     const { app } = await createMcpHarness({
@@ -157,7 +113,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         runId: 'fresh-run',
         reused: false,
         claimed: true,
@@ -171,7 +127,7 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('boot_services starts a boot-mode run with no heal agent', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-boot-')))
+    const logsDir = tempDir('cl-mcp-boot-')
     const featuresDir = path.join(projectRoot, 'features')
     const calls: Array<{ feature: string; env?: string; healAgent: unknown; isolation?: string; executionType?: string }> = []
     const { app } = await createMcpHarness({
@@ -194,7 +150,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { feature: 'demo_inventory', env: 'local' },
       })
 
-      expect(JSON.parse(toolText(result))).toMatchObject({
+      expect(JSON.parse(smokeToolText(result))).toMatchObject({
         runId: 'boot-run',
         booted: true,
       })

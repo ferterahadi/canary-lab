@@ -1,17 +1,18 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectAgentSessionOptions } from '@/shared/api/agent-session-socket'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { AgentSessionView } from './AgentSessionView'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), connect: vi.fn((_options: ConnectAgentSessionOptions) => ({ close: vi.fn() })) }))
 vi.mock('@/shared/api/flights', async (original) => ({
   ...(await original<typeof import('@/shared/api/flights')>()), getFlightAgentSession: mocks.get,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const event = (text: string, timestamp: string): AgentSessionEvent => ({ kind: 'assistant-message', text, timestamp })
 
 describe('interleaved Activity', () => {
@@ -19,11 +20,8 @@ describe('interleaved Activity', () => {
   let root: Root
   beforeEach(() => {
     vi.clearAllMocks()
-    host = document.createElement('div')
-    document.body.appendChild(host)
-    root = createRoot(host)
   })
-  afterEach(() => { act(() => root.unmount()); host.remove() })
+  mountRoot({ attach: true, onMount: (mounted) => ({ container: host, root } = mounted) })
   const texts = () => [...host.querySelectorAll('[data-activity-id]')].map((node) => node.textContent).join('\n')
 
   it('merges overlapping sessions, individual system messages, and external lifecycles by timestamp', async () => {

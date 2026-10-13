@@ -1,0 +1,31 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { createRunDetailObserver } from './run-detail-observer'
+afterEach(() => vi.useRealTimers())
+it('shares subscriptions, transitions cadences and releases the last observer', () => {
+  vi.useFakeTimers()
+  let active = true; let exists = true; let hidden = false
+  const read = vi.fn(); const invalidate = vi.fn()
+  const observer = createRunDetailObserver({ active: () => active, exists: () => exists, hidden: () => hidden, read, invalidate })
+  const a = observer.subscribe('r'); const b = observer.subscribe('r')
+  expect(read).toHaveBeenCalledTimes(1)
+  vi.advanceTimersByTime(1000); expect(read).toHaveBeenLastCalledWith('r')
+  a(); active = false; observer.sync(); vi.advanceTimersByTime(14_999); expect(read).toHaveBeenCalledTimes(2)
+  vi.advanceTimersByTime(1); expect(read).toHaveBeenCalledTimes(3)
+  hidden = true; observer.refresh(); vi.advanceTimersByTime(30_000); expect(read).toHaveBeenCalledTimes(3)
+  hidden = false; observer.refresh(); expect(read).toHaveBeenCalledTimes(4)
+  exists = false; observer.sync(); observer.refresh(); vi.advanceTimersByTime(30_000); expect(read).toHaveBeenCalledTimes(4)
+  exists = true; observer.sync(); vi.advanceTimersByTime(15_000); expect(read).toHaveBeenCalledTimes(5)
+  observer.sync(); b(); vi.advanceTimersByTime(30_000); expect(read).toHaveBeenCalledTimes(5)
+  expect(vi.getTimerCount()).toBe(0)
+  observer.close()
+})
+it('does not read missing or hidden runs and closes all subscriptions', () => {
+  vi.useFakeTimers()
+  const read = vi.fn(); const invalidate = vi.fn()
+  const observer = createRunDetailObserver({ active: () => false, exists: id => id !== 'missing', hidden: () => false, read, invalidate })
+  observer.subscribe('missing'); observer.subscribe('present')
+  expect(read).toHaveBeenCalledTimes(1)
+  observer.close(); expect(invalidate.mock.calls).toEqual([['missing'], ['present']]); expect(vi.getTimerCount()).toBe(0)
+  const hidden = createRunDetailObserver({ active: () => false, exists: () => true, hidden: () => true, read, invalidate })
+  hidden.subscribe('hidden'); hidden.close(); expect(read).toHaveBeenCalledTimes(1)
+})

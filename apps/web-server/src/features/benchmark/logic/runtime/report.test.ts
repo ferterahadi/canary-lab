@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { computeBenchmarkReport, type ArmIterationResult } from './report'
+import { computeBenchmarkReport } from './report'
+import type { ArmIterationResult } from '../../../../../../../shared/benchmark-index'
 
 function r(
   arm: 'A' | 'B',

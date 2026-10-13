@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 import { writeHealIndex } from './heal-index'
 
+const tempDir = trackTempDirs('cl-le-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-')))
+  tmpDir = tempDir()
 })
 
 describe('writeHealIndex cross-run flake history', () => {
@@ -217,21 +218,17 @@ describe('cross-run flake history when the runs root is unreadable', () => {
     // history scan walks) does not exist. A run that cannot look at its
     // siblings must still get an index — losing the flake line is acceptable,
     // losing the agent's instructions is not.
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-'))
+    const base = tempDir()
     const healIndexPath = path.join(base, 'missing-root', 'run-1', 'heal-index.md')
-    try {
-      writeHealIndex({
-        manifest: { feature: 'demo' },
-        summary: { failed: [{ name: 'test-case-a', error: { message: 'boom' } }] },
-        healIndexPath,
-        journalPath: path.join(base, 'missing-root', 'run-1', 'journal.md'),
-      })
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'test-case-a', error: { message: 'boom' } }] },
+      healIndexPath,
+      journalPath: path.join(base, 'missing-root', 'run-1', 'journal.md'),
+    })
 
-      const written = fs.readFileSync(healIndexPath, 'utf-8')
-      expect(written).toContain('## Failures')
-      expect(written).not.toContain('flaky')
-    } finally {
-      fs.rmSync(base, { recursive: true, force: true })
-    }
+    const written = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(written).toContain('## Failures')
+    expect(written).not.toContain('flaky')
   })
 })

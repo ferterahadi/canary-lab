@@ -51,3 +51,9 @@ export function RunPane({
     </div>
   )
 }
+
+/** A tab's own padded pane, or nothing when a host pane already frames it —
+ *  so one tab body can stand alone or sit inside another pane's scroller. */
+export function Frame({ framed, children }: { framed: boolean; children: ReactNode }) {
+  return framed ? <RunPane padded>{children}</RunPane> : <>{children}</>
+}

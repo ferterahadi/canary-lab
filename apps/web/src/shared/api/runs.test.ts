@@ -13,6 +13,9 @@ import {
   applyRunFixes,
   getGhStatus,
   getRunPrPreflight,
+  getRunCycleReview,
+  getRunServiceExcerpts,
+  getRunServiceLogLines,
   getRunFixPatch,
   getRunApplyPreflight,
   openRunRepo,
@@ -326,6 +329,27 @@ describe('runs api', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
     await expect(getRunFixPatch('run 9', 'mighty cns', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/fixes/mighty%20cns/patch', { method: 'GET' })
+  })
+
+  it('getRunServiceExcerpts GETs one attempt\'s service spans by execution, name and its place among same-name attempts', async () => {
+    const body = { execution: 2, excerpts: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunServiceExcerpts('run 9', { execution: 2, name: 'test-case-a b', occurrence: 1, of: 2 }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/service-excerpts?execution=2&name=test-case-a+b&occurrence=1&of=2', { method: 'GET' })
+  })
+
+  it('getRunServiceLogLines GETs a window of one service\'s retained log', async () => {
+    const body = { service: 'api', execution: 1, source: 'segment', totalLines: 3, firstLine: 1, lines: ['a'], truncated: true }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunServiceLogLines('run 9', 'my api', { execution: 1, from: 1, count: 50 }, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/service-logs/my%20api/lines?execution=1&from=1&count=50', { method: 'GET' })
+  })
+
+  it('getRunCycleReview GETs one repair cycle\'s files by iteration', async () => {
+    const body = { iteration: 2, source: 'patch', patchPath: '/r/diffs/iteration-2.patch', truncated: false, healMode: 'service', files: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunCycleReview('run 9', 2, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/cycle-reviews/2', { method: 'GET' })
   })
 
   it('getRunFixPatch surfaces the 410 once the patch has been cleaned away', async () => {

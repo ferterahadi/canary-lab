@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -138,48 +139,13 @@ vi.mock('@/features/portify/state/PortifyContext', async () => {
 // (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
 // over the SAME api mocks the panel-local fetches used to consume — fixtures
 // keep working unchanged.
-vi.mock('@/features/runs/state/RunsContext', async () => {
-  const React = await import('react')
-  return {
-    useRun: (runId?: string | null) => {
-      const [detail, setDetail] = React.useState<unknown>(undefined)
-      React.useEffect(() => {
-        let alive = true
-        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
-        return () => { alive = false }
-      }, [runId])
-      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
-    },
-    useRuns: () => {
-      const [runs, setRuns] = React.useState<unknown[]>([])
-      React.useEffect(() => {
-        let alive = true
-        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
-        return () => { alive = false }
-      }, [])
-      return {
-        runs,
-        connection: 'live',
-        transients: {},
-        errors: {},
-        refresh: vi.fn(),
-        startRun: vi.fn(),
-        startVerification: vi.fn(),
-        abort: vi.fn(),
-        delete: vi.fn(),
-        pauseHeal: vi.fn(),
-        cancelHeal: vi.fn(),
-        clearError: vi.fn(),
-      }
-    },
-  }
-})
+vi.mock('@/features/runs/state/RunsContext', async () => (await import('./__fixtures__/flight-page-mocks')).runsContextMock(mocks))
 
 import { FlightPage } from './FlightPage'
+import { manifest } from './__fixtures__/flight-page-part7-fixtures'
+import { renderFlightPage } from './__fixtures__/FlightPageHarness'
 
 ;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -219,48 +185,14 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
-
-function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl_1',
-    feature: 'checkout',
-    repoPaths: ['/repo/shop'],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'scout',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
-}
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
 // remount key per call remounts FlightPage, which re-runs its fetch effect —
 // the same observable effect, without a prop lever.
-let renderSeq = 0
-
-async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
-  renderSeq += 1
-  await act(async () => {
-    root.render(
-      <InvalidationProvider>
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
-      </InvalidationProvider>,
-    )
-  })
-}
+const render = (flightId: string, extraProps?: Record<string, unknown>) => renderFlightPage(root, FlightPage, flightId, extraProps)
 
 describe('FlightPage', () => {
   it('renders the full stage rail and auto-selects the stage that needs eyes', async () => {

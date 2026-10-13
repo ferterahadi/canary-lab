@@ -1,3 +1,4 @@
+import { expandHomePath } from '../../../shared/home-path'
 // Feature-config REST — the generic filesystem browser and the workspace dir
 // picker (git remote/status, checkout, clone). Bodies are unchanged.
 import type { FastifyInstance } from 'fastify'
@@ -9,7 +10,7 @@ import path from 'path'
 import { parseDotenv } from '../../../../../../shared/lib/dotenv-edit'
 import { checkoutBranch, getGitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
-import { notFound } from '../../../shared/http-error'
+import { notFound, replyFailure } from '../../../shared/http-error'
 
 export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── generic filesystem browser ────────────────────────────────────────
@@ -22,15 +23,12 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
   // SlotEditor "Copy from… → From file" flow. Local-only dev tool — same posture
   // as /api/fs/browse.
   app.get<{ Querystring: { path?: string } }>('/api/fs/read-dotenv', async (req, reply) => {
-    const home = os.homedir()
     const raw = (req.query.path ?? '').trim()
     if (!raw) {
       reply.code(400)
       return { error: 'path required' }
     }
-    const expanded = raw.startsWith('~/') || raw === '~'
-      ? path.join(home, raw.slice(1))
-      : raw
+    const expanded = expandHomePath(raw)
     if (!path.isAbsolute(expanded)) {
       reply.code(400)
       return { error: 'path must be absolute or start with ~' }
@@ -44,9 +42,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
   app.get<{ Querystring: { dir?: string } }>('/api/fs/browse', async (req) => {
     const home = os.homedir()
     const raw = (req.query.dir ?? '').trim()
-    const expanded = raw.startsWith('~/') || raw === '~'
-      ? path.join(home, raw.slice(1))
-      : raw
+    const expanded = expandHomePath(raw)
     const target = expanded === ''
       ? home
       : path.isAbsolute(expanded)
@@ -84,9 +80,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
   app.get<{ Querystring: { at?: string } }>('/api/workspace/dirs', async (req) => {
     const home = os.homedir()
     const requested = req.query.at ?? ''
-    const expanded = requested.startsWith('~/') || requested === '~'
-      ? path.join(home, requested.slice(1))
-      : requested
+    const expanded = expandHomePath(requested)
     const target = expanded === ''
       ? home
       : path.isAbsolute(expanded)
@@ -122,8 +116,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
       reply.code(400)
       return { error: 'path query required' }
     }
-    const home = os.homedir()
-    const target = raw.startsWith('~/') || raw === '~' ? path.join(home, raw.slice(1)) : raw
+    const target = expandHomePath(raw)
     if (!path.isAbsolute(target)) {
       reply.code(400)
       return { error: 'path must be absolute or start with ~' }
@@ -158,8 +151,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
       reply.code(400)
       return { error: 'path query required' }
     }
-    const home = os.homedir()
-    const target = raw.startsWith('~/') || raw === '~' ? path.join(home, raw.slice(1)) : raw
+    const target = expandHomePath(raw)
     if (!path.isAbsolute(target)) {
       reply.code(400)
       return { error: 'path must be absolute or start with ~' }
@@ -207,11 +199,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
         expectedBranch: null,
       }
     } catch (err) {
-      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500
-      reply.code(code)
-      return { error: err instanceof Error ? err.message : String(err) }
+      return replyFailure(reply, err)
     }
   })
 

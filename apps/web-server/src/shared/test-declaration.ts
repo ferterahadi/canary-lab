@@ -44,3 +44,16 @@ export function isTestCall(call: ts.CallExpression): boolean {
   return rest.length === 0 && isTestModifier(modifier)
 }
 
+
+export function testFunctionBody(node: ts.CallExpression): ts.ConciseBody | undefined {
+  // Playwright accepts both test(title, body) and test(title, details, body),
+  // where the 3-arg form carries a { tag, annotation } object — exactly what the
+  // coverage annotator (tag-writer.ts) inserts after the title. That shifts the
+  // callback to the last argument, so scan from the end rather than assuming
+  // arguments[1], or every tag-annotated test reads as "Source unavailable".
+  for (let i = node.arguments.length - 1; i >= 1; i -= 1) {
+    const arg = node.arguments[i]
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg.body
+  }
+  return undefined
+}

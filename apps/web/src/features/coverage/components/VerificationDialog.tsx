@@ -6,6 +6,7 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { Section } from '@/shared/ui/atoms'
 import { Modal } from '@/shared/ui/Overlays'
+import { displayError } from '@/shared/api/error-message'
 
 // The dialog is built from the app's shared dialog chrome — `Modal` (backdrop,
 // eyebrow + title header, scrollable body, pinned footer) and `Section` (titled
@@ -181,7 +182,7 @@ function VerificationSettings({
       if (current.playwrightEnvsetId === playwrightEnvsetId) setPlaywrightEnvsetId(saved.playwrightEnvsetId)
       if (current.targetUrls === targetUrls) setTargetUrls(saved.targetUrls)
     } catch (err) {
-      if (lifetime.active) setError(err instanceof Error ? err.message : 'Save failed')
+      if (lifetime.active) setError(displayError(err, 'Save failed'))
     } finally {
       if (lifetime.active) setSaving(false)
     }
@@ -202,7 +203,7 @@ function VerificationSettings({
       })
       if (lifetime.active) onClose()
     } catch (err) {
-      if (lifetime.active) setError(err instanceof Error ? err.message : 'Verification failed to start')
+      if (lifetime.active) setError(displayError(err, 'Verification failed to start'))
     } finally {
       if (lifetime.active) setStarting(false)
     }

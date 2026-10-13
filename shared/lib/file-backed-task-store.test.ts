@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   abortOnRestart,
@@ -12,6 +11,9 @@ import {
   sharedTaskStore,
   TaskListeners,
 } from './file-backed-task-store'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('fbts-')
 
 interface Rec {
   id: string
@@ -43,8 +45,7 @@ function makeStore(logsDir: string) {
 
 describe('FileBackedTaskStore', () => {
   let dir: string
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fbts-')) })
-  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+  beforeEach(() => { dir = tempDir() })
 
   it('save writes the record to <dir>/<id>/<recordFile> and creates the index', () => {
     const store = makeStore(dir)
@@ -406,11 +407,10 @@ describe('sharedTaskStore', () => {
   let dir: string
   beforeEach(() => {
     resetSharedTaskStores()
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fbts-shared-'))
+    dir = tempDir('fbts-shared-')
   })
   afterEach(() => {
     resetSharedTaskStores()
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('hands the same instance back for a record directory', () => {
@@ -437,12 +437,8 @@ describe('sharedTaskStore', () => {
   })
 
   it('separates instances by logs dir', () => {
-    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'fbts-other-'))
-    try {
-      expect(sharedTaskStore<Rec>(config(dir))).not.toBe(sharedTaskStore<Rec>(config(other)))
-    } finally {
-      fs.rmSync(other, { recursive: true, force: true })
-    }
+    const other = tempDir('fbts-other-')
+    expect(sharedTaskStore<Rec>(config(dir))).not.toBe(sharedTaskStore<Rec>(config(other)))
   })
 
   it('resolves the path, so two spellings of one directory are one store', () => {
@@ -458,8 +454,7 @@ describe('sharedTaskStore', () => {
 
 describe('FileBackedTaskStore.rows', () => {
   let logsDir: string
-  beforeEach(() => { logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-task-rows-')) })
-  afterEach(() => { fs.rmSync(logsDir, { recursive: true, force: true }) })
+  beforeEach(() => { logsDir = tempDir('cl-task-rows-') })
 
   it('lists the feature-shaped rows without the store bookkeeping', () => {
     const store = makeStore(logsDir)

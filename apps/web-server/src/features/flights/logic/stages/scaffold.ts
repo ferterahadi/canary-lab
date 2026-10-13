@@ -52,8 +52,8 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     return {
       kind: 'config-approval',
       message: extra?.error
-        ? `The edited settings for "${m.feature}" don't parse — fix them and approve again. (${extra.error})`
-        : `Suite "${m.feature}" is set up. Check the settings below (the ✎ on each service edits it in place), then approve — Canary starts the app afterwards to confirm they work. Redraft re-runs the repo scan.`,
+        ? `Fix the settings for "${m.feature}", then approve again.\n\n${extra.error}`
+        : `Review the settings for "${m.feature}". Approve to start the app and check them, or redraft to scan the repo again.`,
       options: [...CHECKPOINT_OPTIONS['config-approval']],
       data: { feature: m.feature, configPath, configSource, ...(extra?.error ? { error: extra.error } : {}) },
     }

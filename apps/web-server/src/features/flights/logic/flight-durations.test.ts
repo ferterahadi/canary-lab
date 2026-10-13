@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore } from './store'
 import {
@@ -18,6 +17,9 @@ import {
   type FlightOptions,
   type FlightStageKey,
 } from '../../../../../../shared/flights/types'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-dur-')
 
 // The work clock (FlightStage.activeMs / activeSince, FlightManifest.startedAt).
 // Every test drives a real conductor over a tick-able clock, because the whole
@@ -32,13 +34,11 @@ let n: number
 let clock: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-dur-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
   clock = Date.parse('2026-01-01T00:00:00Z')
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 const now = () => new Date(clock).toISOString()

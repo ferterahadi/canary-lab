@@ -9,6 +9,7 @@ import {
 } from './evaluation-export-store'
 import type { EvaluationExportTaskRecord } from '../../../../../../shared/evaluation-export-types'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
+import { newTimedTaskId } from '../../../shared/task-id'
 import type { EvaluationRewrite } from './test-review/types'
 
 // The externally-authored evaluation export's task lifecycle — one home shared
@@ -19,7 +20,7 @@ import type { EvaluationRewrite } from './test-review/types'
 // runs here, never on the client, and a failed run's status is preserved.
 
 export function newEvaluationTaskId(): string {
-  return `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return newTimedTaskId('eval')
 }
 
 export interface CreateExternalEvaluationTaskArgs {

@@ -3,23 +3,22 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { auditEnglishWorkspace, main, resolveEnglishWorkspace } from './check-english'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
-const temporary: string[] = []
+const tempDir = trackTempDirs('english-audit-')
 const initialExitCode = process.exitCode
 
 afterEach(() => {
-  for (const root of temporary.splice(0)) fs.rmSync(root, { recursive: true, force: true })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   process.exitCode = initialExitCode
 })
 
 function workspace(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'english-audit-'))
-  temporary.push(root)
+  const root = tempDir()
   fs.mkdirSync(path.join(root, 'features', 'example', 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { 'canary-lab': '*' } }))
-  return fs.realpathSync(root)
+  return root
 }
 
 function registry(...paths: string[]) {

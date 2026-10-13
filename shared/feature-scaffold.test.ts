@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   applyFeatureScaffold,
   buildFeatureScaffold,
@@ -11,15 +10,13 @@ import {
   validateGeneratedFeatureFiles,
   validateGeneratedSpecFiles,
 } from './feature-scaffold'
+import { trackTempDirs } from '../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('feature-scaffold-')
 let tmp: string
 
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-scaffold-'))
-})
-
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
+  tmp = tempDir()
 })
 
 describe('buildFeatureScaffold', () => {
@@ -83,6 +80,14 @@ describe('validateGeneratedFeatureFiles', () => {
     if (!r.ok) expect(r.error).toContain('stale envsets shape')
   })
 
+  it('rejects a spec outside e2e/ even when the scaffold has one in place', () => {
+    const files = buildFeatureScaffold({ featureName: 'demo_login' })
+    const spec = files.find((file) => file.path.startsWith('e2e/') && file.path.endsWith('.spec.ts'))!
+    files.push({ path: 'tests/stray.spec.ts', content: spec.content })
+    expect(validateGeneratedFeatureFiles('demo_login', files))
+      .toEqual({ ok: false, error: 'spec file "tests/stray.spec.ts" must live under e2e/' })
+  })
+
   it('rejects specs that do not use the log marker fixture', () => {
     const files = buildFeatureScaffold({ featureName: 'demo_login' }).map((file) => (
       file.path.endsWith('.spec.ts')
@@ -115,20 +120,17 @@ describe('validateGeneratedFeatureFiles', () => {
       .filter((file) => !file.path.endsWith('.spec.ts'))
     const r = validateGeneratedFeatureFiles('demo_login', files)
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toBe('missing required e2e/*.spec.ts file')
+    if (!r.ok) expect(r.error).toBe('missing required spec or test file under e2e/')
   })
 
-  it('rejects a spec nested below e2e/', () => {
-    // Playwright's testDir is `./e2e` and is not recursive here, so a nested
-    // spec would be silently skipped rather than run.
+  it('accepts a spec nested below e2e/', () => {
     const files = buildFeatureScaffold({ featureName: 'demo_login' })
     files.push({
       path: 'e2e/nested/deep.spec.ts',
       content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n",
     })
     const r = validateGeneratedFeatureFiles('demo_login', files)
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('must live directly under e2e/')
+    expect(r).toEqual({ ok: true })
   })
 
   it('rejects a feature.config.cjs that does not declare the expected fields', () => {
@@ -203,7 +205,7 @@ describe('validateGeneratedSpecFiles', () => {
       },
     ])
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('directly under e2e/')
+    if (!r.ok) expect(r.error).toContain('under e2e/')
   })
 
   it('rejects an empty set, duplicates, and a set with no spec at all', () => {
@@ -218,7 +220,7 @@ describe('validateGeneratedSpecFiles', () => {
     // Non-spec files are allowed alongside specs, but on their own they mean
     // the generation produced no runnable test.
     expect(validateGeneratedSpecFiles([{ path: 'e2e/helpers.ts', content: 'export const x = 1\n' }]))
-      .toEqual({ ok: false, error: 'missing required e2e/*.spec.ts file' })
+      .toEqual({ ok: false, error: 'missing required spec or test file under e2e/' })
   })
 
   it('rejects external specs that escape the feature directory or skip the fixture', () => {

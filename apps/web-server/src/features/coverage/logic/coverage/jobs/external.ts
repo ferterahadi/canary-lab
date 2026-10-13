@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import { featureExists, FeatureNotFoundError } from '../service'
 import {
   applyExternalCoverageMappings,
@@ -13,7 +12,7 @@ import {
   type ApplyExternalSummaryResult,
   type SummaryAuthoringContext,
 } from '../feature-docs'
-import { CoverageJobConflictError } from './runner'
+import { assertCoverageJobAvailable, createCoverageJobManifest } from './creation'
 import { IncompleteCoverageAnswerError, missingFromRoster } from '../external-submissions'
 import type { CoverageJobStore } from './store'
 import type { ParsedRequirement } from '../prd-summary-parse'
@@ -51,10 +50,6 @@ export interface ExternalCoverageDeps {
   store: CoverageJobStore
 }
 
-function defaultJobId(): string {
-  return `cj_${crypto.randomBytes(6).toString('hex')}`
-}
-
 /** A stale answer cannot be retried against its old context. Release the job's
  * single-flight claim so the same session can request current inputs. */
 function applyCurrentInputs<T>(job: CoverageJobManifest, deps: ExternalCoverageDeps, now: () => string, apply: () => T): T {
@@ -79,22 +74,12 @@ export function startExternalCoverage(
   if (!featureExists(args.featuresDir, args.feature)) throw new FeatureNotFoundError(args.feature)
   if (!hasPrdSummary(args.featuresDir, args.feature)) return { kind: 'needs-summary', feature: args.feature }
 
-  const now = args.now ?? (() => new Date().toISOString())
-  const newJobId = args.newJobId ?? defaultJobId
-
-  // Single-flight: one coverage job per feature, internal or external alike.
-  const active = deps.store.activeFor(args.feature, 'coverage')
-  if (active) throw new CoverageJobConflictError(args.feature, 'coverage', active.jobId)
+  assertCoverageJobAvailable(deps.store, args.feature, 'coverage')
 
   const context = buildCoverageMappingContext({ featuresDir: args.featuresDir, feature: args.feature })
 
   const manifest: CoverageJobManifest = {
-    jobId: newJobId(),
-    feature: args.feature,
-    kind: 'coverage',
-    status: 'running',
-    startedAt: now(),
-    log: '[external] coverage offloaded to the calling client — Canary will recompute on submit_external_coverage\n',
+    ...createCoverageJobManifest({ feature: args.feature, kind: 'coverage', log: '[external] coverage offloaded to the calling client — Canary will recompute on submit_external_coverage\n' }, args),
     producer: 'external',
     // Pin the roster the client is being handed, so submit can check the answer
     // covers it. Recomputing the roster at submit time instead would blame the
@@ -211,21 +196,11 @@ export function startExternalSummary(
   const built = buildSummaryAuthoringContext({ featuresDir: args.featuresDir, feature: args.feature })
   if (built.kind === 'needs-docs') return { kind: 'needs-docs', feature: args.feature }
 
-  const now = args.now ?? (() => new Date().toISOString())
-  const newJobId = args.newJobId ?? defaultJobId
-
-  // Single-flight: one summary job per feature, internal or external alike.
-  const active = deps.store.activeFor(args.feature, 'summary')
-  if (active) throw new CoverageJobConflictError(args.feature, 'summary', active.jobId)
+  assertCoverageJobAvailable(deps.store, args.feature, 'summary')
 
   const manifest: CoverageJobManifest = {
-    jobId: newJobId(),
-    feature: args.feature,
-    kind: 'summary',
+    ...createCoverageJobManifest({ feature: args.feature, kind: 'summary', log: '[external] PRD summary offloaded to the calling client — Canary will write the summary on submit_external_summary\n' }, args),
     inputRevision: built.context.docsHash,
-    status: 'running',
-    startedAt: now(),
-    log: '[external] PRD summary offloaded to the calling client — Canary will write the summary on submit_external_summary\n',
     producer: 'external',
     ...(args.clientKind ? { externalClientKind: args.clientKind } : {}),
     externalSessionId: args.sessionId,

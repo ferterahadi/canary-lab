@@ -6,6 +6,7 @@ import type { RunStore } from './run-store'
 import { generateRunId } from './runtime/run-id'
 import { suiteReviewFiles } from './runtime/suite-review'
 import { suiteRuntimeInputTargetsForSnapshot } from './runtime/suite-runtime-inputs'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 interface StoredRequest extends RunStartRequest {
   payload: Record<string, unknown>
@@ -190,7 +191,7 @@ export class RunStartRequests {
       }
       return { ...result, body: { ...result.body, request: this.public(record) } }
     } catch (error) {
-      record = this.save(record, { status: 'failed', error: error instanceof Error ? error.message : 'The run could not start.' })
+      record = this.save(record, { status: 'failed', error: errorMessage(error, 'The run could not start.') })
       return { statusCode: 500, body: { error: record.error, request: this.public(record) } }
     } finally {
       this.activeDispatches.delete(id)

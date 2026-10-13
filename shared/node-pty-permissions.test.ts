@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { ensureSpawnHelperExecutable, fixSpawnHelperPermissions, resolveNodePtyRoot } from './node-pty-permissions'
+import { trackTempDirs } from '../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('fix-pty-')
 let tmp: string
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fix-pty-')))
+  tmp = tempDir()
 })
 
 function makeFakePty(root: string, files: { rel: string; mode: number }[]): void {

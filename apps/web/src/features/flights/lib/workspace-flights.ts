@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '@shared/flights/types'
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus } from '@shared/flights/types'
 import { presentedIndexStages } from './external-work'
 
@@ -8,7 +9,7 @@ export function coverageGeneratingFlight(
 ): { flightId: string; stage: FlightStageKey; stageStatus: FlightStageStatus } | null {
   if (!selectedFeature) return null
   const flight = flights.find((entry) =>
-    (entry.status === 'running' || entry.status === 'waiting-for-approval') && entry.feature === selectedFeature)
+    isActiveFlightStatus(entry.status) && entry.feature === selectedFeature)
   const stage = flight?.currentStage
   if (!flight || !stage) return null
   if (stage !== 'docs' && stage !== 'prd-summary' && stage !== 'specs-coverage') return null

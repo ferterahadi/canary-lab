@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
 import { atomicWrite } from '../../shared/lib/atomic-write'
+import { registryDir } from '../../shared/runtime/workspace-registry'
 
 type Fingerprints = Record<string, Record<string, string[]>>
 
@@ -26,7 +27,7 @@ export function skillFiles(dir: string, prefix = ''): Record<string, string> | n
 
 function knownFingerprints(assets: string, homeDir: string): Fingerprints {
   const packaged = JSON.parse(fs.readFileSync(path.join(assets, 'skill-fingerprints.json'), 'utf-8')) as Fingerprints
-  const receipt = path.join(homeDir, '.canary-lab', 'agent-integrations', 'skill-fingerprints.json')
+  const receipt = path.join(registryDir(homeDir), 'agent-integrations', 'skill-fingerprints.json')
   if (fs.existsSync(receipt)) {
     const installed = JSON.parse(fs.readFileSync(receipt, 'utf-8')) as Fingerprints
     for (const [skill, files] of Object.entries(installed)) {
@@ -49,7 +50,7 @@ export function isManagedSkill(dir: string, source: string, assets: string, home
 }
 
 export function recordManagedSkill(dir: string, homeDir: string): void {
-  const file = path.join(homeDir, '.canary-lab', 'agent-integrations', 'skill-fingerprints.json')
+  const file = path.join(registryDir(homeDir), 'agent-integrations', 'skill-fingerprints.json')
   const known: Fingerprints = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : {}
   const skill = path.basename(dir)
   for (const [relative, hash] of Object.entries(skillFiles(dir)!)) {
@@ -61,7 +62,7 @@ export function recordManagedSkill(dir: string, homeDir: string): void {
 }
 
 export function retireLegacySkill(dir: string, homeDir: string): string {
-  const backups = path.join(homeDir, '.canary-lab', 'agent-integrations', 'skill-backups')
+  const backups = path.join(registryDir(homeDir), 'agent-integrations', 'skill-backups')
   fs.mkdirSync(backups, { recursive: true })
   const backup = fs.mkdtempSync(path.join(backups, `${path.basename(dir)}-`))
   fs.renameSync(dir, path.join(backup, path.basename(dir)))

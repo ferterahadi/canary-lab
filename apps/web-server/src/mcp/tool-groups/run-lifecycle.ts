@@ -5,7 +5,7 @@
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
-import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-counts'
+import { normalizeRunCounts } from '../../../../../shared/run-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import {
@@ -15,9 +15,13 @@ import {
   claimRun,
   errorResult,
   failureResult,
+  gettingStartedBusyResult,
+  repoCollisionResult,
   findContinuingRunForFeature,
   resolveRunRef,
   runCandidate,
+  serverExitedGuidance,
+  settledOrphanError,
 } from '../tool-support'
 import { bootSessionValue, healWaitNext, isActiveBootRun } from '../heal-task-wait'
 import { readCoverageUpdate } from '../coverage-catchup'
@@ -26,6 +30,7 @@ import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE, NEW_RUN_REQUIRED_NEXT_STEPS } from '../../shared/single-attempt'
 import { findFeature } from '../../shared/feature-loader'
 import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
+import { repositoryIsolationMessage } from '../../shared/approval-messages'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -46,6 +51,7 @@ const coverageChangeResponse = z.object({
     activeJobOwner: z.string().optional(),
     flightId: z.string().optional(),
     flightStatus: z.string().optional(),
+    flightAttention: z.object({ state: z.enum(['none', 'actionable', 'resolved', 'unavailable']), reason: z.string() }).optional(),
   }),
 })
 
@@ -103,12 +109,21 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const parsed = coverageChangeResponse.safeParse(await readCoverageUpdate(feature, deps))
       return parsed.success ? parsed.data.change : undefined
     }
+    const recoveryOwner = (change: CoverageChange, flightOwnsRecovery: boolean): string => {
+      if (change.activeJobId) {
+        return `Coverage job ${change.activeJobId}${change.activeJobOwner ? ` (${change.activeJobOwner})` : ''} already owns this update; follow it instead of starting another.`
+      }
+      if (change.flightAttention?.state === 'unavailable') {
+        return 'Could not verify current Flight state. Read get_flight again before choosing a recovery action.'
+      }
+      if (flightOwnsRecovery) {
+        return `Flight ${change.flightId}${change.flightStatus ? ` is ${change.flightStatus}` : ''} owns this update; resume it instead of starting duplicate coverage work.`
+      }
+      return 'Call start_external_coverage, submit the mapping, confirm freshness, then retry start_run.'
+    }
     const coverageRecovery = (change: CoverageChange): CallToolResult => {
-      const owner = change.activeJobId
-        ? `Coverage job ${change.activeJobId}${change.activeJobOwner ? ` (${change.activeJobOwner})` : ''} already owns this update; follow it instead of starting another.`
-        : change.flightId
-          ? `Flight ${change.flightId}${change.flightStatus ? ` is ${change.flightStatus}` : ''} owns this update; resume it instead of starting duplicate coverage work.`
-          : 'Call start_external_coverage, submit the mapping, confirm freshness, then retry start_run.'
+      const flightOwnsRecovery = Boolean(change.flightId) && change.flightAttention?.state !== 'resolved'
+      const owner = recoveryOwner(change, flightOwnsRecovery)
       return asJsonResult({
         type: 'coverage_update_required',
         runStarted: false,
@@ -116,8 +131,9 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         freshness: change.freshness,
         ...(change.activeJobId ? { activeJobId: change.activeJobId, activeJobOwner: change.activeJobOwner } : {}),
         ...(change.flightId ? { flightId: change.flightId, flightStatus: change.flightStatus } : {}),
+        ...(change.flightAttention ? { flightAttention: change.flightAttention } : {}),
         message: `Run not started. ${owner}`,
-        nextSteps: change.activeJobId || change.flightId
+        nextSteps: change.activeJobId || flightOwnsRecovery
           ? ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run']
           : ['start_external_coverage', 'submit_external_coverage', 'get_feature_coverage', 'start_run'],
       })
@@ -157,7 +173,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const hosts = Object.values(target.targetOrigins).join(', ')
       const spec = {
         ...remoteQuestion(target),
-        message: `${feature} boots no services in "${target.env}" and targets deployed hosts (${hosts}). A run's repair cycle edits local code those hosts never read. Check them with Verify, or run with repair anyway?`,
+        message: `${feature} targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
         fallback: () => asJsonResult({
           type: 'remote_target_requires_choice',
           runStarted: false,
@@ -185,7 +201,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const askCoverage = (change: CoverageChange): CallToolResult | InputRequiredResult => {
       const spec = {
         ...coverageQuestion(change),
-        message: `${change.freshness.reasons.join(' ')} Previous coverage percentages do not describe the current tests. Update coverage before running, or run now for diagnostics with coverage still marked stale?`,
+        message: 'The coverage report may not match the current tests. Update it first, or run the tests anyway?',
         fallback: () => asJsonResult({
           type: 'coverage_update_requires_choice',
           runStarted: false,
@@ -362,12 +378,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           update_repos,
         )
         if (outcome.kind === 'getting-started-busy') {
-          return asJsonResult({
-            type: 'getting_started_busy',
-            active: outcome.active,
-            message: outcome.message,
-            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-          })
+          return gettingStartedBusyResult({ ...outcome, variant: 'run' })
         }
         if (outcome.kind === 'repo-update-refused') {
           // A tracked repo could not be brought to its upstream tip. Nothing
@@ -387,15 +398,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (outcome.kind === 'collision') {
           // Same-repo collision and the client didn't choose. Nothing started —
           // ask the user, then re-call start_run with isolation:"worktree"|"queue".
-          return askIsolation(coverageDecision, () => asJsonResult({
-            type: 'repo_collision_requires_choice',
-            conflictingRunId: outcome.conflictingRunId,
-            conflictingFeature: outcome.conflictingFeature,
-            repoPaths: outcome.repoPaths,
-            options: outcome.options,
-            message: outcome.message,
-            nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message)
+          return askIsolation(coverageDecision, () => repoCollisionResult(outcome), repositoryIsolationMessage(outcome.conflictingFeature))
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -480,18 +483,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     // One `chosen` for both entries: the fresh ask never runs it (it returns the
     // question), and the answering call reaches it through `applyUserInput`.
     const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
-    const ask = (fallback: () => CallToolResult, message = 'Boot in an isolated worktree now, or queue until the repositories are free?') =>
+    const ask = (fallback: () => CallToolResult, message: string) =>
       requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
     const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
         if (outcome.kind === 'getting-started-busy') {
-          return asJsonResult({
-            type: 'getting_started_busy',
-            active: outcome.active,
-            message: outcome.message,
-            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-          })
+          return gettingStartedBusyResult({ ...outcome, variant: 'run' })
         }
         if (outcome.kind === 'repo-update-refused') {
           // Boots honour the feature's `track: 'upstream'` setting too, so a
@@ -510,15 +508,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           })
         }
         if (outcome.kind === 'collision') {
-          return ask(() => asJsonResult({
-            type: 'repo_collision_requires_choice',
-            conflictingRunId: outcome.conflictingRunId,
-            conflictingFeature: outcome.conflictingFeature,
-            repoPaths: outcome.repoPaths,
-            options: outcome.options,
-            message: outcome.message,
-            nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message)
+          return ask(() => repoCollisionResult(outcome), repositoryIsolationMessage(outcome.conflictingFeature))
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -548,7 +538,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const orch = deps.store.registry.get(runId)
-    if (!orch) return errorResult(`run not active: ${runId}`)
+    if (!orch) return settledOrphanError(deps, runId) ?? errorResult(`run not active: ${runId}`)
     const result = await orch.pauseAndHeal()
     if (!result.ok) return errorResult(`could not pause: ${result.reason}`)
     return asJsonResult({ status: 'healing', failureCount: result.failureCount })
@@ -559,7 +549,12 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const orch = deps.store.registry.get(runId)
-    if (!orch) return errorResult(`run not active: ${runId}`)
+    if (!orch) {
+      // A heal whose server exited has already stopped; settling records it.
+      return deps.store.settleIfOrphaned(runId)
+        ? asJsonResult({ status: 'aborted', reason: 'server-exited', runId, ...serverExitedGuidance(runId) })
+        : errorResult(`run not active: ${runId}`)
+    }
     const result = await orch.cancelHeal()
     if (!result.ok) return errorResult(`could not cancel: ${result.reason}`)
     return asJsonResult({ status: 'cancelled' })
@@ -577,6 +572,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const scope = ['abort-run', deps.projectRoot, runId]
     const completed = completedUserInput(request, scope)
     if (completed) return completed
+    // Nothing is left to stop on a run whose server exited, so recording that
+    // needs no human stop decision.
+    if (deps.store.settleIfOrphaned(runId)) {
+      return asJsonResult({ aborted: true, runId, reason: 'server-exited', ...serverExitedGuidance(runId) })
+    }
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
     if (!isActiveRunStatus(detail.manifest.status)) return errorResult(`run not active: ${runId}`)
@@ -585,7 +585,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       revision: [detail.manifest.startedAt, detail.manifest.status, detail.manifest.healCycles],
       mode: 'form',
       schema: z.object({ action: z.enum(['keep', 'abort']).describe('Keep the existing run, or stop it and its services.') }),
-      message: `Stop run ${runId} (${detail.manifest.feature}) and its services? Keeping it preserves the current repair cycle.`,
+      message: `Stop run ${runId} for ${detail.manifest.feature} and its services? Choose keep to let it continue.`,
       fallback: () => asJsonResult({
         type: 'abort_requires_confirmation', runId,
         message: 'Stop this run from its Run panel. confirm:true from an agent is not a human cancellation decision.',

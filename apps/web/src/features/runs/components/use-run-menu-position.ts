@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { RefObject } from 'react'
 import { useAnchoredPosition } from '@/shared/ui/use-anchored-position'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 export function useRunMenuPosition(
   anchorRef: RefObject<HTMLElement | null>,
@@ -12,11 +13,7 @@ export function useRunMenuPosition(
     const el = anchorRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    let left = rect.right - width
-    if (left < 8) left = 8
-    const maxLeft = window.innerWidth - width - 8
-    if (left > maxLeft) left = maxLeft
-    setPos({ top: rect.bottom + 6, left })
+    setPos({ top: rect.bottom + 6, left: clampToViewport(rect, width, 'end', window.innerWidth) })
   }, [anchorRef, width])
   useAnchoredPosition(open, reposition, 'layout')
   return open ? pos : null

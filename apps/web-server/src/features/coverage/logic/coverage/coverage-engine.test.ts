@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { computeFeatureCoverage } from './service'
 import { runCoverageEngine as runCoverageEngineReal, flagMappingIssues } from './coverage-engine'
@@ -8,6 +7,10 @@ import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs
 import type { ProposedMapping } from '../../../../../../../shared/coverage/types'
 import { CoverageJobRunStore } from './jobs/store'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-engine-')
 
 // Coverage generation is LLM-only; unit tests inject the fake agent through the
 // `summarize` / `propose` dep seams instead of spawning a real claude/codex.
@@ -21,15 +24,11 @@ let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-engine-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 // One untagged test whose name overlaps the "Create todo" requirement.
@@ -41,16 +40,10 @@ const SPEC = `
 `
 
 function writeFeature(name: string): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item')
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, {
+    specs: { 'a.spec.ts': SPEC },
+    docs: { 'spec.md': '# Create todo\na user can create a new todo item' },
+  })
 }
 
 async function seedSummary(name: string) {
@@ -197,7 +190,7 @@ describe('collectTests — duplicate test name union', () => {
       })
       `,
     )
-    // Add a second top-level spec file (listSpecFiles only scans one level of e2e/)
+    // Add a second top-level spec file
     // with the same test name but tagged R2.
     fs.writeFileSync(
       path.join(dir, 'e2e', 'b.spec.ts'),

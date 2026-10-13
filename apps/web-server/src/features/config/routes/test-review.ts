@@ -1,34 +1,25 @@
+import { confinedFile } from '../../../shared/path-containment'
+import { readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { TestFileReview, ReviewSource } from '../../../../../../shared/test-review'
 import { findFeature, listSpecFiles } from '../../../shared/feature-loader'
-import { extractTestsFromSource, extractTestPredicatesFromSource, extractTestMetadataFromSource } from '../../../shared/ast-extractor'
-import { translateReadableSource } from '../../../shared/readable-tests/translator'
+import { extractTestPredicatesFromSource, extractTestMetadataFromSource } from '../../../shared/ast-extractor'
+import { reviewSourceFor } from '../../../shared/readable-tests/review-source'
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
-import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { runDirFor, runManifestPath } from '../../runs/logic/runtime/run-paths'
 import { suiteReviewFiles } from '../../runs/logic/runtime/suite-review'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
 import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from '../logic/test-declaration-changes'
-
-/** Resolve existing parents too: a deleted file behind a symlink must not
- * bypass the same boundary as a readable file. */
-function confinedFile(root: string, relative: string): string {
-  const realRoot = fs.realpathSync(root)
-  const target = path.resolve(realRoot, relative)
-  let parent = target
-  while (!fs.existsSync(parent)) parent = path.dirname(parent)
-  const realTarget = path.resolve(fs.realpathSync(parent), path.relative(parent, target))
-  if (!realTarget.startsWith(`${realRoot}${path.sep}`)) throw new Error('Test file is outside the suite')
-  return realTarget
-}
+import { notFound } from '../../../shared/http-error'
 
 function readSource(file: string): string {
-  try { return fs.readFileSync(file, 'utf8') } catch (error) {
+  try { return readSpecSource(file) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
     throw error
   }
@@ -36,7 +27,7 @@ function readSource(file: string): string {
 
 function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | undefined): { dir: string } | { status: number; error: string } {
   if (!deps.logsDir || !runId || !/^[\w.-]+$/.test(runId) || runId === '.' || runId === '..') return { status: 400, error: 'Invalid run' }
-  const manifest = readManifest(path.join(runDirFor(deps.logsDir, runId), 'manifest.json'))
+  const manifest = readManifest(runManifestPath(runDirFor(deps.logsDir, runId)))
   if (!manifest || manifest.feature !== feature) return { status: 404, error: 'Run not found for this suite' }
   if (manifest.suiteSnapshot?.kind !== 'taken' || !fs.existsSync(manifest.suiteSnapshot.dir)) return { status: 409, error: 'This run’s test snapshot is unavailable. Choose committed changes or open the file in your editor.' }
   return { dir: manifest.suiteSnapshot.dir }
@@ -45,7 +36,7 @@ function runSnapshot(deps: FeaturesRouteDeps, feature: string, runId: string | u
 export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/test-source-comparison', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const snapshot = runSnapshot(deps, feature.name, req.query.runId)
     if ('error' in snapshot) return reply.code(snapshot.status).send({ error: snapshot.error })
     const relativeFiles = (root: string) => listSpecFiles(root).map((file) => path.relative(root, file))
@@ -70,9 +61,9 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
   })
   app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string; summary?: string } }>('/api/features/:name/test-review', async (req, reply) => {
     const feature = findFeature(deps.featuresDir, req.params.name)
-    if (!feature) return reply.code(404).send({ error: 'Suite not found' })
+    if (!feature) return notFound(reply, 'Suite')
     const file = req.query.file
-    const supportingFile = !!file && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)
+    const supportingFile = !!file && !isSpecFile(file)
     if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || (supportingFile && !req.query.runId)) {
       return reply.code(400).send({ error: 'A suite-relative test file is required' })
     }
@@ -97,13 +88,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         const before = old?.toString('utf8') ?? ''
         const after = current?.toString('utf8') ?? ''
         if (req.query.summary === 'true') return { changed: before !== after, affectedTests: [], verdict: 'unclassifiable' }
-        const readableSource = (source: string): ReviewSource => {
-          if (!/\.[cm]?[jt]sx?$/.test(file)) return { source, tests: [] }
-          const parsed = extractTestsFromSource(file, source, feature.semanticRules)
-          return { source, tests: [], ...(!parsed.parseError
-            ? { story: translateReadableSource(file, source, feature.semanticRules) }
-            : { parseError: parsed.parseError }) }
-        }
+        const readableSource = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: false })
         return { file, currentPath, baseline: 'run-start', supportingFile: true,
           before: readableSource(before), after: readableSource(after),
           patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
@@ -144,14 +129,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         ).verdict,
       }
     }
-    const extract = (source: string): ReviewSource => {
-      const result = extractTestsFromSource(file, source, feature.semanticRules)
-      // `endLine` is optional on ExtractedTest only because the tests route
-      // emits helper-defined entries with no AST match; every test that comes
-      // out of `extractTestsFromSource` — the only producer here — carries one.
-      // A `?? test.line` fallback would be an arm nothing could reach.
-      return { source, ...(!result.parseError ? { story: translateReadableSource(file, source, feature.semanticRules) } : {}), tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine!, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
-    }
+    const extract = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true })
     const beforePredicates = extractTestPredicatesFromSource(file, beforeSource)
     const afterPredicates = extractTestPredicatesFromSource(file, afterSource)
     const pairs = pairTestDeclarations(extractTestMetadataFromSource(file, beforeSource).tests, extractTestMetadataFromSource(file, afterSource).tests)

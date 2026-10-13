@@ -1,3 +1,4 @@
+import { isActiveFlightStatus } from '../../../../../../shared/flights/types'
 // Flights REST — the multi-repo plan surface (propose a plan, poll the task,
 // launch the planned flights) plus stage evidence and abort. Bodies unchanged.
 import { resolveRepoPaths } from '../../../shared/repo-identity'
@@ -7,11 +8,14 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { resolveWorkflowAgentRef } from '../../agent-sessions/logic/agent-session-log'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
+import { isAgentKind } from '../../agent-sessions/logic/agent-binary'
 import { abortFlight, drainQueuedFlights } from '../logic/flight-queue'
 import { deriveFeatureSlug, isTerminalFlightStatus, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
 import { cancelPlanFeatures, startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { executePlannedLaunch, resolveFlightModels } from './flight-route-support'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
+import { replyFailure } from '../../../shared/http-error'
 
 export async function registerFlightPlanRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -40,7 +44,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
           repoPaths: resolved,
           description: body.description.trim(),
           ...(body.autopilot === false ? { autopilot: false } : {}),
-          ...(body.agent === 'claude' || body.agent === 'codex' ? { agent: body.agent } : {}),
+          ...(isAgentKind(body.agent) ? { agent: body.agent } : {}),
         },
         planStore,
         {
@@ -111,17 +115,12 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
           .map((flightId) => store.get(flightId))
           .filter((flight): flight is NonNullable<typeof flight> =>
             flight !== null && !isTerminalFlightStatus(flight.status))
-          .sort((a, b) => Number(a.status === 'running' || a.status === 'waiting-for-approval')
-            - Number(b.status === 'running' || b.status === 'waiting-for-approval'))
+          .sort((a, b) => Number(isActiveFlightStatus(a.status))
+            - Number(isActiveFlightStatus(b.status)))
         for (const flight of descendants) await abortFlight(flight.flightId, conductorDeps)
         return planStore.get(req.params.taskId) ?? task
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        const statusCode = err instanceof Error && 'statusCode' in err
-          ? Number((err as Error & { statusCode: number }).statusCode)
-          : 500
-        reply.code(statusCode)
-        return { error: message }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -187,6 +186,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
     }
     // The shared helper settles name collisions BEFORE anything is created — a
     // partial launch (2 of 5 flights minted) would be worse than a rejection.
+    const agent = body.agent ?? task.agent
     const outcome = executePlannedLaunch(
       {
         repoPaths: task.repoPaths,
@@ -195,12 +195,10 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
         coverageTarget: body.coverageTarget ?? 100,
         yolo: body.yolo === true,
         ...((body.autopilot ?? task.autopilot) === false ? { autopilot: false } : {}),
-        ...((body.agent ?? task.agent) === 'claude' || (body.agent ?? task.agent) === 'codex'
-          ? { agent: (body.agent ?? task.agent) as 'claude' | 'codex' }
-          : {}),
+        ...(isAgentKind(agent) ? { agent } : {}),
         models: resolveFlightModels(
           deps.projectRoot,
-          (body.agent ?? task.agent) === 'codex' ? 'codex' : 'claude',
+          agent === 'codex' ? 'codex' : 'claude',
           body.models,
         ),
       },
@@ -244,7 +242,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
     try {
       return await abortFlight(req.params.id, conductorDeps)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }
     }

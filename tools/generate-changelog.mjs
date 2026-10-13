@@ -16,18 +16,15 @@
 //   node tools/generate-changelog.mjs           -> write to CHANGELOG.md
 //   node tools/generate-changelog.mjs --dry-run -> print the generated section to stdout
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { git } from "./lib/git.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const version = pkg.version;
 const currentBranch = `release/${version}`;
-
-function git(args) {
-  return execFileSync("git", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" }).trim();
-}
 
 // Find the previous release branch: the latest `release/<semver>` (local or
 // remote-tracking) that isn't the current one. Semver-desc sort means a

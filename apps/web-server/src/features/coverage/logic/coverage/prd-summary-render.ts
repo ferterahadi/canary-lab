@@ -1,7 +1,9 @@
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 import fs from 'fs'
 import path from 'path'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 /** Generated artifact filenames under docs/. */
 export const PRD_SUMMARY_JSON = '_prd-summary.json'
@@ -72,17 +74,11 @@ export function writePrdSummary(
   fs.mkdirSync(docsDir, { recursive: true })
   const { markdown, requirements } = renderPrdSummaryMarkdown(summary, featureName)
   const withRanges: PrdSummary = { ...summary, requirements }
-  fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_JSON), JSON.stringify(withRanges, null, 2) + '\n')
+  atomicWriteJson(path.join(docsDir, PRD_SUMMARY_JSON), withRanges, undefined, { uniqueTemporary: true, followSymlinks: true, createParents: false })
   fs.writeFileSync(path.join(docsDir, PRD_SUMMARY_MD), markdown)
   return withRanges
 }
 
 export function readPrdSummary(featureDir: string): PrdSummary | null {
-  const file = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
-  if (!fs.existsSync(file)) return null
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as PrdSummary
-  } catch {
-    return null
-  }
+  return readJsonOr<PrdSummary | null>(path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON), null)
 }

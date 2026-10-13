@@ -1,9 +1,11 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { discoveryRepairStore } from './discovery-repair-store'
 import type { DiscoveryRepair, DiscoveryRepairOwner } from '../../../../../../shared/discovery-repair'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('discovery-store-')
 
 // The store's own wiring, driven directly: which records a restart writes off,
 // and that a suite rename carries its repair history along. The repair
@@ -39,9 +41,8 @@ function save(rec: DiscoveryRepair): DiscoveryRepair {
 beforeEach(() => {
   // A fresh directory per test: the module memoizes one store per resolved
   // logsDir, so a shared path would carry records between tests.
-  logsDir = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-store-'))), 'logs')
+  logsDir = path.join(tempDir(), 'logs')
 })
-afterEach(() => fs.rmSync(path.dirname(logsDir), { recursive: true, force: true }))
 
 describe('discoveryRepairStore', () => {
   it('hands the same instance back for the same logs directory, so every caller shares one listener set', () => {

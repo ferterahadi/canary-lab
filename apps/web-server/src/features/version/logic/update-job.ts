@@ -4,6 +4,7 @@ import path from 'path'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, abortOnRestart } from '../../../../../../shared/lib/file-backed-task-store'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import type { UpdateJobManifest } from '../../../../../../shared/version-status'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 // Background driver + single-flight gate for the self-update job: it runs
 // `npm install <pkg>@latest` in the workspace root, then invokes the newly
 // installed CLI's `upgrade --silent` itself. An explicit `npm install <pkg>`
@@ -94,7 +95,7 @@ function runLoggedCommand(
     child.stdout?.on('data', (d) => onOutput(d.toString()))
     child.stderr?.on('data', (d) => onOutput(d.toString()))
     child.on('error', (err) => {
-      onOutput(`\n[spawn error] ${err instanceof Error ? err.message : String(err)}\n`)
+      onOutput(`\n[spawn error] ${errorMessage(err)}\n`)
       settle(1)
     })
     child.on('close', (code) => settle(code ?? 1))
@@ -180,7 +181,7 @@ export function startUpdateJob(args: StartUpdateJobArgs, deps: UpdateJobRunnerDe
       code = await run({ cwd: args.projectRoot, packageName: args.packageName, onOutput: append })
     } catch (err) {
       code = 1
-      append(`\n[error] ${err instanceof Error ? err.message : String(err)}\n`)
+      append(`\n[error] ${errorMessage(err)}\n`)
     }
     manifest = code === 0
       ? { ...manifest, status: 'done', endedAt: now() }

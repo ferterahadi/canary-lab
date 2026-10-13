@@ -1,6 +1,6 @@
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from '../EvaluationExportContext'
-import { FakeWebSocket } from '../EvaluationExportContext.test'
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../../tools/test-helpers/fake-websocket'
 
 export function workspaceSocket(): FakeWebSocket {
   const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')

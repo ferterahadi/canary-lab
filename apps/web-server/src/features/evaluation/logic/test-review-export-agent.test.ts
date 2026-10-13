@@ -1,23 +1,24 @@
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../../../../../shared/run-detail'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-agent-')
 
 let tmpDir: string
 let spawnCalls: Array<{ command: string; args: string[]; child: FakeChild }> = []
 let availableAgents: string[] = []
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-agent-')))
+  tmpDir = tempDir()
   spawnCalls = []
   availableAgents = []
   vi.resetModules()
 })
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
   vi.resetModules()
   vi.restoreAllMocks()
 })

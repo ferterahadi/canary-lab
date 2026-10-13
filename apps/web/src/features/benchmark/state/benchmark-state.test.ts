@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { benchmarkIndex } from './benchmark-state'
-import type { BenchmarkManifest } from '../api/benchmark-types'
+import type { BenchmarkManifest } from '@shared/benchmark-index'
 
 const { reducer: benchmarkReducer, initialState: initialBenchmarkState, frameToAction } = benchmarkIndex
 
@@ -124,7 +124,6 @@ describe('frameToAction', () => {
       type: 'removed',
       benchmarkId: 'b1',
     })
-    // @ts-expect-error — forwards-compat unknown frame
     expect(frameToAction({ type: 'nope' })).toBeNull()
   })
 })

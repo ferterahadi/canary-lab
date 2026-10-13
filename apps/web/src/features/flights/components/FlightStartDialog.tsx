@@ -3,7 +3,7 @@ import { type ReactNode } from 'react'
 import type { FlightStageKey } from '@shared/flights/types'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { StatusDot } from '@/shared/ui/atoms'
-import { ChevronRightIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret, PlaneIcon } from '@/shared/ui/Icons'
 import { Modal } from '@/shared/ui/Overlays'
 import { Textarea, Toggle } from '@/shared/ui/FormFields'
 import { FLIGHT_OVERVIEW, STAGE_BLURB, STAGE_ICON, stageStatusTone } from './stage-meta'
@@ -222,13 +222,7 @@ export function FlightStartDialog({
           onClick={() => setShowSteps((v) => !v)}
           className="cl-hover-row flex w-full items-center gap-2 px-3 py-2 text-left"
         >
-          <span
-            aria-hidden="true"
-            className="inline-flex shrink-0 transition-transform duration-150"
-            style={{ color: 'var(--text-muted)', transform: showSteps ? 'rotate(90deg)' : 'none' }}
-          >
-            <ChevronRightIcon />
-          </span>
+          <DisclosureCaret open={showSteps} />
           <span className="cl-type-title text-primary">The full flight</span>
           <span className="cl-aside">{stepCount} steps, fully automated</span>
           {(newFlight || freshMode) && (
@@ -345,10 +339,7 @@ export function FlightStartDialog({
       height={formView ? 'min(608px, 80vh)' : undefined}
       footer={formView ? formFooter : undefined}
       icon={
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M22 2 11 13" />
-          <path d="M22 2 15 22l-4-9-9-4Z" />
-        </svg>
+        <PlaneIcon size={17} />
       }
       title={resolvedFeature ?? 'Start a flight'}
       description={

@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReadableSource, ReadableTest } from '@shared/readable-tests/types'
 import { ReadableTestView } from './ReadableTestView'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 const highlighter = vi.hoisted(() => ({ load: vi.fn() }))
 vi.mock('./code-highlighter', () => ({
   codeThemeFor: (resolved: 'dark' | 'light') => resolved === 'dark' ? 'one-dark-pro' : 'one-light',

@@ -3,8 +3,9 @@ import { ApiError } from '@/shared/api/internal'
 import { getFlight } from '@/shared/api/flights'
 import type { FlightManifest } from '@shared/flights/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
+import { withUnverifiedAttention } from '../lib/attention-history'
 
-const RECONCILE_MS = 30_000
+const RECONCILE_MS = 5_000
 
 /** Pushes supply the record; REST only fills gaps and checks a quiet channel.
  * A failed read retains evidence, but a confirmed 404 must retire it. */
@@ -30,9 +31,10 @@ export function useFlightRecord(id: string | null, live: FlightManifest | null |
   }, [refreshResource])
   const absent = missing || (resource.value?.manifest === null && resource.value.observedPush === live)
   const currentLive = live?.flightId === id ? live : null
+  const manifest = absent ? null : resource.value && resource.value.observedPush === live
+    ? resource.value.manifest : currentLive ?? resource.value?.manifest ?? null
   return {
-    manifest: absent ? null : resource.value && resource.value.observedPush === live
-      ? resource.value.manifest : currentLive ?? resource.value?.manifest ?? null,
+    manifest: resource.error && manifest ? withUnverifiedAttention(manifest, resource.error) : manifest,
     missing: absent,
     error: resource.error,
     refresh,

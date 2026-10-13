@@ -7,8 +7,8 @@ import type { ServiceSpec } from './run-orchestrator-types'
 import { type RunContext } from './run-context'
 import fs from 'fs'
 import path from 'path'
-import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/types'
-import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
+import type { HttpProbe } from '../../../../../../../shared/launcher/types'
+import { readinessProbe, waitForServiceReadiness } from './service-readiness'
 import {
   COMPILER_FAILURE_NEXT_ACTION,
   type RunBootEvidence,
@@ -20,9 +20,10 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { prepareWorktreeDependencies } from './dependency-provenance'
 import { dependencyIncompatibilityReason } from '../../../../../../../shared/dependency-provenance'
-import { loadFeatures } from '../../../../shared/feature-loader'
+import { findFeature } from '../../../../shared/feature-loader'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import { readWatchCompilerFailure } from './watch-compiler-result'
+import { errorMessage } from '../../../../../../../shared/lib/error-message'
 
 // node-pty reports the raw signal number; spawnSync reports the name. The
 // manifest stores names only, so one record can never read "signal 15" where
@@ -122,7 +123,7 @@ export async function preflightServiceBoot(ctx: RunContext): Promise<boolean> {
     let latest: RunContext['feature'] | undefined
     try {
       if (ctx.dependencyConfigPath && fs.existsSync(ctx.dependencyConfigPath)) {
-        latest = loadFeatures(path.dirname(ctx.feature.featureDir)).find((feature) => feature.name === ctx.feature.name)
+        latest = findFeature(path.dirname(ctx.feature.featureDir), ctx.feature.name)
       }
     } catch {
       // An unreadable configuration becomes a durable blocker below, never a
@@ -240,7 +241,7 @@ export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
       env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
     })
   } catch (err) {
-    const message = redactDiagnosticText(err instanceof Error ? err.message : String(err))
+    const message = redactDiagnosticText(errorMessage(err))
     try { fs.appendFileSync(logPath, `${message}\n`) } catch { /* best-effort; manifest still carries the spawn error */ }
     recordBootFailure(ctx, {
       service: svc.name,
@@ -328,21 +329,8 @@ export async function waitForServiceReady(ctx: RunContext, svc: ServiceSpec): Pr
     return
   }
 
-  if ('http' in probe) {
-    await pollUntilReady(ctx, svc, 'http', () => attemptHttp(ctx, probe.http))
-    return
-  }
-  if ('tcp' in probe) {
-    await pollUntilReady(ctx, svc, 'tcp', () => isTcpListening(
-      coerceTcpPort(probe.tcp.port),
-      probe.tcp.host ?? '127.0.0.1',
-      probe.tcp.timeoutMs,
-    ))
-    return
-  }
-  // Exhaustiveness: TS proves this is unreachable; the validator already
-  // rejects malformed shapes at config-load time.
-  throw new Error(`Unknown probe shape for ${svc.name}: ${JSON.stringify(probe)}`)
+  const readiness = readinessProbe(probe, ctx.healthCheck, svc.name)
+  await pollUntilReady(ctx, svc, readiness.transport, readiness.attempt)
 }
 
 /** One HTTP attempt — wraps the existing `isHealthy` so tests can stub it. */
@@ -361,54 +349,32 @@ export async function pollUntilReady(ctx: RunContext,
   attempt: () => Promise<boolean>,
 ): Promise<void> {
   const probe = svc.healthProbe!
-  const deadlineMs = (transport === 'http'
-    ? (probe as { http: HttpProbe }).http.deadlineMs
-    : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? ctx.healthDeadlineMs
-  const deadline = Date.now() + deadlineMs
-  // Fast local services should not pay a full one-second polling interval.
-  // Back off for slower boots, respecting callers' tighter polling bounds.
-  const maxPollMs = Math.max(1, ctx.healthPollIntervalMs)
-  let pollMs = Math.min(100, maxPollMs)
-
-  // `health-timeout` unless we observe the process die first (below), in
-  // which case there's no point polling a dead port until the deadline.
-  let failureReason: RunBootFailure['reason'] = 'health-timeout'
-  while (Date.now() < deadline) {
-    if (ctx.stopped) return
-    if (ctx.bootFailure || ctx.serviceFailure) return
-    const ready = await attempt()
-    if (ctx.stopped) return
-    if (ctx.bootFailure || ctx.serviceFailure) return
-    // The process may exit while an in-flight probe is returning green.
-    // Its exit evidence belongs to this attempt (spawn clears older evidence).
-    if (ready && !ctx.serviceExitEvidence.has(svc.name)) {
-      ctx.serviceReady.add(svc.name)
-      ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'ready')
-      ctx.emit('health-check', { service: svc, healthy: true, transport })
-      recordLifecycle(ctx, ctx.status === 'healing' ? 'agent-healing' : 'starting-services', `Health passed: ${svc.name}`, {
-        detail: `${transport.toUpperCase()} readiness probe passed.`,
-        severity: 'success',
-      })
-      return
-    }
-    // Fast-fail: the service process exited before it became healthy (e.g. a
-    // crash or compile error). spawnService's onExit removed it from the pty
-    // map, so a missing entry means the process is gone — fail now instead of
-    // polling a dead port for the rest of the deadline.
-    if (!ctx.servicePtys.has(svc.name) || ctx.serviceExitEvidence.has(svc.name)) {
-      failureReason = 'process-exited'
-      break
-    }
-    const remainingMs = deadline - Date.now()
-    if (remainingMs <= 0) break
-    await ctx.delay(Math.min(pollMs, remainingMs))
-    pollMs = Math.min(pollMs * 2, maxPollMs)
+  const result = await waitForServiceReadiness({
+    probe, attempt, serviceName: svc.name,
+    pollIntervalMs: ctx.healthPollIntervalMs,
+    deadlineMs: ctx.healthDeadlineMs,
+    delay: ctx.delay,
+    interruption: () => {
+      // Another service's failure already owns the run's published evidence.
+      if (ctx.stopped || ctx.bootFailure || ctx.serviceFailure) return { status: 'cancelled' }
+      if (!ctx.servicePtys.has(svc.name) || ctx.serviceExitEvidence.has(svc.name)) return { status: 'service-failed' }
+      return null
+    },
+  })
+  if (result.status === 'cancelled') return
+  if (result.status === 'ready') {
+    ctx.serviceReady.add(svc.name)
+    ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'ready')
+    ctx.emit('health-check', { service: svc, healthy: true, transport })
+    recordLifecycle(ctx, ctx.status === 'healing' ? 'agent-healing' : 'starting-services', `Health passed: ${svc.name}`, {
+      detail: `${transport.toUpperCase()} readiness probe passed.`, severity: 'success',
+    })
+    return
   }
+  const failureReason = result.status === 'service-failed' ? 'process-exited' : 'health-timeout'
   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'timeout')
   ctx.emit('health-check', { service: svc, healthy: false, transport })
-  const probeTarget = transport === 'http'
-    ? `url=${(probe as { http: HttpProbe }).http.url}`
-    : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
+  const probeTarget = readinessProbe(probe, undefined, svc.name).target
   const detail = failureReason === 'process-exited'
     ? `Service process exited before ${transport.toUpperCase()} readiness (${probeTarget}).`
     : `Timed out waiting for ${transport.toUpperCase()} readiness (${probeTarget}).`

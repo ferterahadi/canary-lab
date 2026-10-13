@@ -21,8 +21,11 @@ export interface PortifyPaths {
   pendingOverlayPath: string
 }
 
+/** The `<logs>/` subdirectory name — shared with the store's record layout. */
+export const PORTIFY_DIR_NAME = 'portify'
+
 export function portifyRoot(logsDir: string): string {
-  return path.join(logsDir, 'portify')
+  return path.join(logsDir, PORTIFY_DIR_NAME)
 }
 
 export function portifyIndexPath(logsDir: string): string {

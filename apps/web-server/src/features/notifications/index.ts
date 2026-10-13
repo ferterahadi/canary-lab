@@ -4,11 +4,12 @@ import { createNotificationRuntime } from './logic/notification-runtime'
 import { notificationRoutes, registerFeatureNotificationRoute } from './routes/notifications'
 
 export async function register(app: FastifyInstance, ctx: ServerContext): Promise<void> {
+  const flights = ctx.flightAttention ?? ctx.flightStore
   const runtime = createNotificationRuntime({
     logsDir: ctx.logsDir,
     featuresDir: ctx.featuresDir,
     runStore: ctx.runStore,
-    flightStore: ctx.flightStore,
+    flightStore: flights,
     dirtySpecStore: ctx.dirtySpecStore,
     workspaceEvents: ctx.workspaceEvents,
     log: app.log,
@@ -16,7 +17,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
   runtime.start()
   app.addHook('onClose', runtime.dispose)
   registerFeatureNotificationRoute(app, {
-    store: runtime.store, reconcile: runtime.reconcile, listFlights: () => ctx.flightStore.list(),
+    store: runtime.store, reconcile: runtime.reconcile, listFlights: () => flights.list(),
   })
   await app.register(notificationRoutes, { store: runtime.store, reconcile: runtime.reconcile, refresh: runtime.refreshAction })
 }

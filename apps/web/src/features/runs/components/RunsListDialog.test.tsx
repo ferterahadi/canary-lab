@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunIndexEntry } from '@shared/run-index'
 import { RunsListDialog } from './RunsListDialog'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const runs: RunIndexEntry[] = [
   { runId: 'r-run', feature: 'app_a', startedAt: '2026-05-31T10:00:00.000Z', status: 'running' },
@@ -27,17 +26,10 @@ vi.mock('../state/RunsContext', () => ({
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe('RunsListDialog', () => {
   it('groups runs by status and surfaces ports + queue reason', async () => {

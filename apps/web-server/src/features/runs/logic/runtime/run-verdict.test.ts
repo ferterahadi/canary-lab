@@ -1,6 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import {
@@ -17,20 +16,16 @@ import {
   computeNonPassedTargets,
 } from './rerun-targets'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // Branch-level cover for the verdict helpers that were unreachable while they
 // lived inside orchestrator.ts as module-private functions. Each test names the
 // arm it exists for, so a future edit that deletes the arm also fails a test
 // with an explanatory name rather than only moving a coverage number.
 
-const tmpDirs: string[] = []
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
-
+const tempDir = trackTempDirs('cl-rv-')
 function mkFeatureDir(): string {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rv-')))
-  tmpDirs.push(root)
+  const root = tempDir()
   const dir = path.join(root, 'features', 'demo')
   fs.mkdirSync(dir, { recursive: true })
   return dir

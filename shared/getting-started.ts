@@ -12,6 +12,9 @@ export type GettingStartedWorkflow =
   | 'verify'
   | 'export'
 export type GettingStartedOwner = 'internal' | 'external'
+/** The Getting Started card a normal run is attributed to: the starter repair
+ *  card (`run`) or the workbench run/heal card (`heal`). */
+export type GettingStartedRunWorkflow = 'run' | 'heal'
 /** What a claim is linked to. `run`/`flight` predate the widening and stay
  *  featureless (persisted session.json records exist in that shape); the newer
  *  kinds carry `feature` because their open-target navigation is feature-first

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
 const mocks = vi.hoisted(() => ({
   createServer: vi.fn(),
@@ -12,6 +12,8 @@ vi.mock('../web-server/src/server', () => ({ createServer: mocks.createServer })
 vi.mock('../web-server/src/shared/open-browser', () => ({ openBrowser: mocks.openBrowser }))
 
 const { parsePort, runUi } = await import('./ui-command')
+
+const tempDir = trackTempDirs('cl-ui-')
 
 const originalBeforeExitListeners = process.listeners('beforeExit')
 const originalSigintListeners = process.listeners('SIGINT')
@@ -35,7 +37,6 @@ function restoreProcessListeners(): void {
   }
 }
 
-let agentHome: string | undefined
 let priorAgentHome: string | undefined
 // A valid Canary Lab workspace (has a `features/` dir) so runUi's
 // enabled-workspace guard passes for lifecycle tests.
@@ -48,9 +49,8 @@ beforeEach(() => {
   // the developer's real ~/.claude during the test run. The temp home has no
   // installed skill, so refreshInstalled() is a guaranteed no-op.
   priorAgentHome = process.env.CANARY_LAB_AGENT_HOME
-  agentHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
-  process.env.CANARY_LAB_AGENT_HOME = agentHome
-  wsRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-ws-')))
+  process.env.CANARY_LAB_AGENT_HOME = tempDir('cl-agent-home-')
+  wsRoot = tempDir('cl-ui-ws-')
   fs.mkdirSync(path.join(wsRoot, 'features'))
   fs.writeFileSync(path.join(wsRoot, 'package.json'), JSON.stringify({ devDependencies: { 'canary-lab': 'file:x' } }))
 })
@@ -60,8 +60,6 @@ afterEach(() => {
   vi.unstubAllEnvs()
   if (priorAgentHome === undefined) delete process.env.CANARY_LAB_AGENT_HOME
   else process.env.CANARY_LAB_AGENT_HOME = priorAgentHome
-  if (agentHome) { fs.rmSync(agentHome, { recursive: true, force: true }); agentHome = undefined }
-  if (wsRoot) fs.rmSync(wsRoot, { recursive: true, force: true })
 })
 
 describe('runUi signal cleanup', () => {
@@ -295,10 +293,8 @@ describe('runUi signal cleanup', () => {
 })
 
 describe('runUi port resolution', () => {
-  const tmpDirs: string[] = []
   function mkProject(config?: Record<string, unknown>): string {
-    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-port-')))
-    tmpDirs.push(dir)
+    const dir = tempDir('cl-ui-port-')
     // A real workspace declares canary-lab as a dependency (what `init` writes);
     // the boot guard requires that, not merely a `features/` dir.
     fs.mkdirSync(path.join(dir, 'features'))
@@ -306,9 +302,6 @@ describe('runUi port resolution', () => {
     if (config) fs.writeFileSync(path.join(dir, 'canary-lab.config.json'), JSON.stringify(config))
     return dir
   }
-  afterEach(() => {
-    while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-  })
 
   function mockServer() {
     const app = { listen: vi.fn(async () => {}), close: vi.fn(async () => {}) }
@@ -344,14 +337,12 @@ describe('runUi port resolution', () => {
   })
 
   it('refuses to boot in a dir with a stray features/ but no canary-lab dependency, and never writes the registry', async () => {
-    const homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-home-')))
-    tmpDirs.push(homeDir)
+    const homeDir = tempDir('cl-ui-home-')
     vi.stubEnv('CANARY_LAB_HOME', homeDir)
     vi.stubEnv('CANARY_LAB_AGENT_HOME', homeDir)
     // Mirrors the real bug: a dir that happens to have features/ (e.g. a feature
     // accidentally scaffolded into ~) but is NOT an init'd workspace.
-    const strayDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-stray-')))
-    tmpDirs.push(strayDir)
+    const strayDir = tempDir('cl-ui-stray-')
     fs.mkdirSync(path.join(strayDir, 'features'))
     const app = mockServer()
     const exit = vi.fn()
@@ -371,8 +362,7 @@ describe('runUi port resolution', () => {
     // actually bit: `isCanaryLabWorkspace` is true for a package.json named
     // `canary-lab`, so the source tree passed the marker check while having no
     // features/ at all. A UI booted there answers `list_features` with `[]`.
-    const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-checkout-')))
-    tmpDirs.push(checkout)
+    const checkout = tempDir('cl-ui-checkout-')
     fs.writeFileSync(path.join(checkout, 'package.json'), JSON.stringify({ name: 'canary-lab' }))
     const app = mockServer()
     const exit = vi.fn()

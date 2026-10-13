@@ -2,52 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
 
-import Fastify, { type FastifyInstance } from 'fastify'
-
-import { flightsRoutes } from './flights'
+import type { FastifyInstance } from 'fastify'
 
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 
-import type { StageAdapters } from '../logic/flight-stages'
-
-import type { FlightAgentSpawner } from '../logic/stages/context'
-
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-
 import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from '../logic/__fixtures__/stage-adapters'
+import { buildFlightsApp, waitForFlightStatus } from './__fixtures__/flights-app'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-routes-')
 
 let tmpDir: string
 
 let repoDir: string
 
 let app: FastifyInstance
-
-function allDone(): StageAdapters {
-  return Object.fromEntries(
-    FLIGHT_STAGE_KEYS.map((k) => [k, { run: async () => ({ kind: 'done' as const }) }]),
-  ) as StageAdapters
-}
-
-async function buildApp(
-  adapters: StageAdapters,
-  flightStore?: FlightStore,
-  planAgent?: FlightAgentSpawner,
-): Promise<FastifyInstance> {
-  const instance = Fastify({ logger: false })
-  await instance.register(flightsRoutes, {
-    featuresDir: path.join(tmpDir, 'features'),
-    logsDir: tmpDir,
-    projectRoot: tmpDir,
-    adapters,
-    ...(flightStore ? { flightStore } : {}),
-    ...(planAgent ? { planAgent } : {}),
-  })
-  return instance
-}
 
 /** A store stub whose `save` throws a non-Error value synchronously — used to
  *  exercise startFlight's non-FlightConflictError rethrow path. */
@@ -86,14 +58,13 @@ function saveThrowsStore(thrown: unknown): FlightStore {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-routes-')))
+  tmpDir = tempDir()
   repoDir = path.join(tmpDir, 'product-repo')
   fs.mkdirSync(repoDir, { recursive: true })
 })
 
 afterEach(async () => {
   await app?.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const startBody = (over: Record<string, unknown> = {}) => ({
@@ -103,20 +74,9 @@ const startBody = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3000): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const resp = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
-    const manifest = resp.json() as Record<string, unknown>
-    if (statuses.includes(String(manifest.status))) return manifest
-    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
 describe('flights routes', () => {
   it('validates the start payload', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     for (const body of [
       {},
       startBody({ repoPaths: [] }),
@@ -134,7 +94,7 @@ describe('flights routes', () => {
   })
 
   it('stores the external agent session on an MCP-driven Flight', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({
       method: 'POST',
       url: '/api/flights',
@@ -161,7 +121,7 @@ describe('flights routes', () => {
   })
 
   it('starts a flight (201, non-blocking) and exposes it via list + get', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     expect(started.statusCode).toBe(201)
     const manifest = started.json() as { flightId: string; status: string; repoPaths: string[] }
@@ -171,20 +131,20 @@ describe('flights routes', () => {
     const listed = await app.inject({ method: 'GET', url: '/api/flights' })
     expect((listed.json() as { flights: unknown[] }).flights).toHaveLength(1)
 
-    const settled = await waitForStatus(manifest.flightId, ['done'])
+    const settled = await waitForFlightStatus(app, manifest.flightId, ['done'])
     expect(settled.currentStage).toBeNull()
   })
 
   it('409s a second start for the same repo while one is active (single-flight)', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
-    app = await buildApp(adapters)
+    app = await buildFlightsApp(tmpDir, adapters)
     const first = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (first.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['waiting-for-approval'])
+    await waitForFlightStatus(app, flightId, ['waiting-for-approval'])
 
     const dup = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ feature: 'other' }) })
     expect(dup.statusCode).toBe(409)
@@ -193,14 +153,14 @@ describe('flights routes', () => {
 
   it('fills a missing runVerdict from settled run-stage evidence, and drops a REPORT link whose archive is gone', async () => {
     const store = new FlightRunStore(tmpDir)
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     // A run stage settled by evidence (external work / older records) writes no
     // top-level runVerdict — the strip's RUN must still read the verdict.
     adapters.run = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { runId: 'r1', status: 'passed' } }) }
-    app = await buildApp(adapters, store)
+    app = await buildFlightsApp(tmpDir, adapters, store)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['done'])
+    await waitForFlightStatus(app, flightId, ['done'])
 
     // The stored record has no runVerdict (stub adapters never set it) and a
     // links path pointing at a deleted archive.
@@ -224,7 +184,7 @@ describe('flights routes', () => {
   })
 
   it('404s an unknown flight', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const resp = await app.inject({ method: 'GET', url: '/api/flights/fl_nope' })
     expect(resp.statusCode).toBe(404)
     const resumed = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/resume' })
@@ -236,7 +196,7 @@ describe('flights routes', () => {
   })
 
   it('accepts an explicit base branch option', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const resp = await app.inject({
       method: 'POST',
       url: '/api/flights',
@@ -248,7 +208,7 @@ describe('flights routes', () => {
   })
 
   it('builds its own store when flightStore is omitted', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     expect(started.statusCode).toBe(201)
     const flightId = (started.json() as { flightId: string }).flightId
@@ -257,27 +217,27 @@ describe('flights routes', () => {
   })
 
   it('defaults an undefined POST body to {} and 400s on missing repoPaths', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const resp = await app.inject({ method: 'POST', url: '/api/flights' })
     expect(resp.statusCode).toBe(400)
     expect(resp.json()).toMatchObject({ error: 'Pick at least one repo folder first.' })
   })
 
   it('rethrows a non-conflict error raised while starting a flight', async () => {
-    app = await buildApp(allDone(), saveThrowsStore('disk full'))
+    app = await buildFlightsApp(tmpDir, allDoneAdapters(), saveThrowsStore('disk full'))
     const resp = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     expect(resp.statusCode).toBe(500)
   })
 
   it('carries autopilot:false from the start payload into the flight options', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ autopilot: false, agent: 'codex' }) })
     expect(started.statusCode).toBe(201)
     expect((started.json() as { opts: { autopilot?: boolean; agent?: string } }).opts).toMatchObject({ autopilot: false, agent: 'codex' })
   })
 
   it('carries stageProducer into the flight options, and drops an unknown value', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const external = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ stageProducer: 'external' }) })
     expect(external.statusCode).toBe(201)
     expect((external.json() as { opts: { stageProducer?: string } }).opts.stageProducer).toBe('external')
@@ -285,14 +245,14 @@ describe('flights routes', () => {
     // Unknown values DEGRADE to the internal default rather than 400 — same
     // posture as `agent`, so an older client sending nonsense still starts a
     // flight instead of failing at the door.
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const bogus = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ feature: 'other', stageProducer: 'sampling' }) })
     expect(bogus.statusCode).toBe(201)
     expect('stageProducer' in (bogus.json() as { opts: Record<string, unknown> }).opts).toBe(false)
   })
 
   it('400s when repoPaths contains a non-string entry', async () => {
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const resp = await app.inject({
       method: 'POST',
       url: '/api/flights',
@@ -307,9 +267,9 @@ describe('flights routes', () => {
     // throws ENOTDIR, which the entry route's best-effort try/catch must
     // swallow rather than 500ing the whole menu.
     fs.writeFileSync(path.join(tmpDir, 'features'), 'not a directory')
-    app = await buildApp(allDone())
+    app = await buildFlightsApp(tmpDir, allDoneAdapters())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
-    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+    await waitForFlightStatus(app, (started.json() as { flightId: string }).flightId, ['done'])
 
     const resp = await app.inject({ method: 'GET', url: '/api/flights/entry?feature=checkout' })
     expect(resp.statusCode).toBe(200)

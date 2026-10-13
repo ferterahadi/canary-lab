@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import { safeFilename, evaluationArchiveBase } from '../../../../../../shared/evaluation-archive-naming'
 import fs from 'fs'
 import path from 'path'
@@ -8,6 +9,7 @@ import { createEvaluationExport } from './test-review-export'
 import type { AssertionHtmlOptions } from './test-review/types'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
+import { findFeature } from '../../../shared/feature-loader'
 import type { EvaluationArchiveContents } from '../../../../../../shared/evaluation-export-types'
 import { buildBehaviorCertificate } from './behavior-certificate'
 import {
@@ -49,6 +51,7 @@ export async function buildEvaluationExportArchive(
     rewrite: options.rewrite,
     videoLinksByTestName: videoLinksByTestName(videos),
     coverage,
+    semanticRules: options.featuresDir ? findFeature(options.featuresDir, detail.manifest.feature)?.semanticRules : undefined,
   })
   const videoEntries = videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) }))
   const certificate = buildBehaviorCertificate(detail, { coverage })
@@ -86,7 +89,7 @@ function assertionVideos(
     .flatMap((group) => group.artifacts.map((artifact) => ({ artifact, testName: group.testName })))
     .map(({ artifact, testName }) => {
       const rel = path.relative(artifactsDir, path.resolve(artifactsDir, artifact.path))
-      const valid = !rel.startsWith('..') && !path.isAbsolute(rel)
+      const valid = isPathUnder(path.resolve(artifactsDir, artifact.path), artifactsDir, true)
       const filePath = valid ? fileAt(rel) : null
       return { artifact, filePath, testName, valid }
     })

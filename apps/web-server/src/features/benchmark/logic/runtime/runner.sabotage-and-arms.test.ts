@@ -1,6 +1,5 @@
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -17,6 +16,9 @@ import { runAgentProcess } from '../../../agent-sessions/logic/agent-process'
 import { createBenchmarkRunner } from './runner'
 
 import { OFF_BY_ONE, feat, flatFixture, gitInit, makeDeps, nestedFixture, pollUntil, roots, waitForStatus } from './__fixtures__/runner-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('bench-a-')
 
 // This runner wires the REAL (tested-elsewhere) BenchmarkOrchestrator/BenchmarkRace/
 // runSabotage control-flow modules to real git plumbing (worktrees, commits) against
@@ -31,6 +33,7 @@ const amock = vi.hoisted(() => ({
   editMode: 'default' as 'default' | 'none' | 'spec',
   pending: false,
   killThrows: false,
+  rejectAgent: false,
   calls: 0,
 }))
 
@@ -70,10 +73,11 @@ vi.mock('../../../agent-sessions/logic/agent-process', async (importOriginal) =>
         // 'none' → the agent makes no edits at all.
       } catch { /* best-effort, matches the real agent's failure tolerance */ }
       opts.onChunk?.('mock agent output\n', 'stdout')
-      const child = { kill: amock.killThrows ? () => { throw new Error('ESRCH') } : vi.fn() }
-      const done = amock.pending
+      const child = { kill: vi.fn(() => { if (amock.killThrows) throw new Error('ESRCH') }) }
+      let done = amock.pending
         ? new Promise(() => { /* never resolves — simulates a stuck/aborted agent */ })
         : Promise.resolve({ code: 0, signal: null, stdout: '', stderr: '' })
+      if (amock.rejectAgent) done = Promise.reject(new Error('agent launch failed'))
       return { child, done, stop: vi.fn() }
     }),
   }
@@ -120,6 +124,7 @@ beforeEach(() => {
   amock.editMode = 'default'
   amock.pending = false
   amock.killThrows = false
+  amock.rejectAgent = false
   amock.calls = 0
   rmock.statusQueue = []
   rmock.pauseNext = false
@@ -357,15 +362,15 @@ describe('createBenchmarkRunner', () => {
 
   describe('abort', () => {
     it('is a no-op for an unknown benchmarkId', () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-a-')), loadFeatures: () => [] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [] })
       const { abort } = createBenchmarkRunner(deps)
       expect(() => abort('nope')).not.toThrow()
     })
 
-    it('rejects a concurrent second benchmark, then frees the slot and kills the stuck agent child (kill throws are swallowed)', async () => {
+    it('rejects a concurrent benchmark and stops the retained agent handle on abort', async () => {
       const { appRepo, logsDir } = await flatFixture()
       amock.pending = true // the sabotage agent subprocess never exits
-      amock.killThrows = true // exercises the try/catch around c.kill()
+      amock.killThrows = true // direct child signaling must never be used
       const { store, deps } = makeDeps({
         logsDir,
         loadFeatures: () => [feat({ featureDir: appRepo, repos: [{ name: 'app', localPath: appRepo }] })],
@@ -385,10 +390,14 @@ describe('createBenchmarkRunner', () => {
         .rejects.toMatchObject({ statusCode: 409 })
 
       abort(benchmarkId)
+      const handle = vi.mocked(runAgentProcess).mock.results.at(-1)!.value
+      expect(handle.stop).toHaveBeenCalledWith('SIGTERM')
+      expect(handle.child.kill).not.toHaveBeenCalled()
       expect(store.get(benchmarkId)!.status).toBe('aborted')
     })
 
-    it('mid-race abort stops the live arm RunOrchestrator via orchRefs and marks the benchmark aborted', async () => {
+    it.each([false, true])('mid-race abort stops the arm but not its settled agent (rejected: %s)', async (rejected) => {
+      amock.rejectAgent = rejected
       // Uses the flat (no node_modules) fixture — the complement of the
       // full-pipeline test's nested/node_modules-present fixture — so
       // linkNodeModules's "nothing to symlink" branch gets exercised too.
@@ -407,6 +416,8 @@ describe('createBenchmarkRunner', () => {
 
       abort(benchmarkId)
       expect(rmock.instances[0].stop).toHaveBeenCalledWith('aborted')
+      const settledAgent = vi.mocked(runAgentProcess).mock.results.at(-1)!.value
+      expect(settledAgent.stop).not.toHaveBeenCalled()
       expect(store.get(benchmarkId)!.status).toBe('aborted')
 
       // Let arm A's paused runFullCycle resolve so the background pipeline

@@ -2,20 +2,28 @@ import { type ReactNode, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRunMenuPosition } from './use-run-menu-position'
 
-// Inline SVG icons (no new dependency). Sizes are tuned to align with the
-// 10 px text on the action buttons.
-export const ICON_STOP = (
-  <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true">
-    <rect x="3" y="3" width="10" height="10" rx="1.5" />
-  </svg>
-)
+// Inline SVG icons (no new dependency). The 10 px default aligns with the
+// 10 px text on the action buttons; the run kebab's menu rows draw them at 11.
+export function StopIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <rect x="3" y="3" width="10" height="10" rx="1.5" />
+    </svg>
+  )
+}
 
-export const ICON_PAUSE = (
-  <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true">
-    <rect x="3" y="3" width="3" height="10" rx="1" />
-    <rect x="10" y="3" width="3" height="10" rx="1" />
-  </svg>
-)
+export function PauseIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <rect x="3" y="3" width="3" height="10" rx="1" />
+      <rect x="10" y="3" width="3" height="10" rx="1" />
+    </svg>
+  )
+}
+
+export const ICON_STOP = <StopIcon />
+
+export const ICON_PAUSE = <PauseIcon />
 
 type LaunchMode = 'boot' | 'test' | 'verify'
 

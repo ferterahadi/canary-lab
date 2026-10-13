@@ -1,17 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { readLatestRunOutcomes, lastRunOutcomeForTitle } from './run-outcomes'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-ro-')
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ro-')))
-})
-
-afterEach(() => {
-  fs.rmSync(logsDir, { recursive: true, force: true })
+  logsDir = tempDir()
 })
 
 function seedIndex(entries: Array<{ runId: string; feature: string; startedAt: string; executionType?: string }>): void {

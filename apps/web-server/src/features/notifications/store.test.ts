@@ -1,23 +1,23 @@
 import { runManifest as makeRunManifest } from '../runs/logic/__fixtures__/run-manifest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
 import { notificationRoutes } from './routes/notifications'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
 import type { RunManifest } from '../../../../../shared/run-manifest'
 import { suiteReviewRevision } from '../runs/logic/runtime/suite-review'
 import { WorkspaceEventBus } from '../../shared/workspace-events'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+import { git } from '../../../../../tools/test-helpers/git-repo'
 
+const tempDir = trackTempDirs('notifications-')
 
 let dir: string
 const events = { publish: vi.fn() }
 const source: NotificationSource = { key: 'flight:f1', signature: 'failed:run', message: { title: 'checkout paused', body: 'Test run failed', target: { kind: 'flight', flightId: 'f1' }, toast: true } }
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notifications-')); events.publish.mockClear(); fs.mkdirSync(path.join(dir, 'shop')); fs.writeFileSync(path.join(dir, 'shop', 'feature.config.cjs'), 'module.exports = { name: "shop" }') })
-afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+beforeEach(() => { dir = tempDir(); events.publish.mockClear(); fs.mkdirSync(path.join(dir, 'shop')); fs.writeFileSync(path.join(dir, 'shop', 'feature.config.cjs'), 'module.exports = { name: "shop" }') })
 
 it('keeps passive coverage state out of the inbox and resolves test review through its owning event', async () => {
   const { register } = await import('./index')
@@ -50,7 +50,6 @@ it('keeps passive coverage state out of the inbox and resolves test review throu
 
 it('resolves a review as soon as its live suite config disappears, before a deletion is committed', async () => {
   const { register } = await import('./index')
-  const git = (...args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
   const featuresDir = path.join(dir, 'features')
   const live = path.join(featuresDir, 'shop')
   const snapshot = path.join(dir, 'snapshot')
@@ -62,9 +61,9 @@ it('resolves a review as soon as its live suite config disappears, before a dele
   fs.writeFileSync(path.join(live, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
   fs.writeFileSync(path.join(snapshot, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
   fs.writeFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(2).toBe(2))")
-  git('init', '-q')
-  git('add', 'features')
-  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
+  git(dir, 'init', '-q')
+  git(dir, 'add', 'features')
+  git(dir, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
   const manifest = makeRunManifest({ runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
     suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   const app = Fastify()
@@ -81,8 +80,8 @@ it('resolves a review as soon as its live suite config disappears, before a dele
     fs.unlinkSync(path.join(live, 'feature.config.cjs'))
     const [unavailable] = (await app.inject('/api/notifications')).json()
     expect(unavailable).toMatchObject({ id: review.id, resolvedAt: expect.any(String) })
-    git('rm', '-qr', 'features/shop')
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'retire suite')
+    git(dir, 'rm', '-qr', 'features/shop')
+    git(dir, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'retire suite')
     fs.mkdirSync(path.join(live, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(live, 'e2e', 'leftover.spec.ts'), 'untracked remnant')
     const [history] = (await app.inject('/api/notifications')).json()
@@ -504,7 +503,6 @@ it.each([0, 1])('archives a legacy missing-suite alert with %i pending historica
     expect(JSON.stringify(manifest)).toBe(originalManifest)
   } finally { await app.close() }
 })
-
 
 it('settles stale dirty and pending metadata when only the suite config disappears and no snapshot exists', async () => {
   const { register } = await import('./index')

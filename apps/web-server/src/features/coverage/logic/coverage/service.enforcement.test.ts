@@ -1,9 +1,11 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { applyExternalSummary } from './feature-docs'
 import { computeFeatureCoverage } from './service'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-enf-')
 
 // The time axis (D11) rides the single ledger computation: computeFeatureCoverage
 // joins the run records (index + summaries + manifests) to the requirements the
@@ -38,7 +40,7 @@ function seedRun(runId: string, startedAt: string, passedNames: string[], manife
 }
 
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-enf-')))
+  tmp = tempDir()
   featuresDir = path.join(tmp, 'features')
   logsDir = path.join(tmp, 'logs')
   fs.mkdirSync(path.join(dir(), 'docs'), { recursive: true })
@@ -50,10 +52,6 @@ beforeEach(() => {
   )
   fs.writeFileSync(path.join(dir(), 'docs', 'spec.md'), '# Checkout\n\n## Totals\nThe total equals the sum of lines.\n')
   fs.writeFileSync(path.join(dir(), 'e2e', 'a.spec.ts'), SPEC)
-})
-
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('computeFeatureCoverage — the time axis', () => {

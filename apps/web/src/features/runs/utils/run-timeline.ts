@@ -2,7 +2,7 @@ import type { AuditEntry } from '@/shared/api/types-wizard'
 import type { ClientKind } from '@shared/run-mode'
 import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
 import type { RunLifecyclePhase, RunLifecycleSeverity, RunLifecycleEvent } from '@shared/run-state'
-import { formatDuration } from '@/shared/lib/format'
+import { formatDuration, truncateText } from '@/shared/lib/format'
 
 export type TimelineRowSource = 'engine' | 'external'
 
@@ -122,19 +122,15 @@ function formatArgsSummary(args: Record<string, unknown> | undefined): string | 
   for (const [key, value] of Object.entries(args)) {
     if (value == null) continue
     if (typeof value === 'string') {
-      parts.push(`${key}=${truncate(value, 40)}`)
+      parts.push(`${key}=${truncateText(value, 40)}`)
     } else if (typeof value === 'number' || typeof value === 'boolean') {
       parts.push(`${key}=${String(value)}`)
     } else {
-      parts.push(`${key}=${truncate(JSON.stringify(value), 40)}`)
+      parts.push(`${key}=${truncateText(JSON.stringify(value), 40)}`)
     }
     if (parts.length >= 3) break
   }
   return parts.length === 0 ? null : parts.join('  ')
-}
-
-function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`
 }
 
 // This surface labels an unknown client "External" (terser than the shared

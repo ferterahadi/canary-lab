@@ -1,13 +1,12 @@
+import type { ProjectConfigResponse } from '@shared/project-config'
 // @vitest-environment happy-dom
 import type { OnboardingSamples } from '@shared/getting-started'
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProjectConfig } from '@/shared/api/config'
-import type { DemoLauncher } from './demo-launcher'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import type { DemoLauncher } from './demo-launcher'
 
 // The derivation (`deriveDemoAvailability`, `demoFlightLaunch`, the seen flag) is
 // covered against the real rules in demo-launcher.test.ts. This suite owns what
@@ -68,7 +67,7 @@ beforeEach(() => {
   keys.onboarding = 0
   keys['project-config'] = 0
   api.getOnboardingSamples.mockReset().mockResolvedValue(samples())
-  api.getProjectConfig.mockReset().mockResolvedValue({ showDemo: true } as ProjectConfig)
+  api.getProjectConfig.mockReset().mockResolvedValue({ showDemo: true } as ProjectConfigResponse)
   api.putProjectConfig.mockReset().mockImplementation(async (patch) => ({ showDemo: true, ...patch }))
 })
 
@@ -104,7 +103,7 @@ describe('useDemoLauncher', () => {
   })
 
   it('treats an explicit showDemo:false as the pill being turned off', async () => {
-    api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfig)
+    api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfigResponse)
 
     await mount()
 
@@ -135,7 +134,7 @@ describe('useDemoLauncher', () => {
 
   it('refetches the config when the project-config slot is bumped', async () => {
     await mount()
-    api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfig)
+    api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfigResponse)
 
     keys['project-config'] = 1
     await rerender()
@@ -173,7 +172,7 @@ describe('useDemoLauncher', () => {
 
   it('drops both initial responses that land after unmount', async () => {
     let settleSamples: (value: OnboardingSamples) => void = () => {}
-    let settleConfig: (value: ProjectConfig) => void = () => {}
+    let settleConfig: (value: ProjectConfigResponse) => void = () => {}
     api.getOnboardingSamples.mockReturnValue(new Promise((r) => { settleSamples = r }))
     api.getProjectConfig.mockReturnValue(new Promise((r) => { settleConfig = r }))
 
@@ -181,7 +180,7 @@ describe('useDemoLauncher', () => {
     act(() => { root.unmount() })
     await act(async () => {
       settleSamples(samples({ sampleSuite: 'late' }))
-      settleConfig({ showDemo: true } as ProjectConfig)
+      settleConfig({ showDemo: true } as ProjectConfigResponse)
     })
 
     // The `alive` guards are the point: no setState after unmount, so the last
@@ -212,13 +211,13 @@ describe('useDemoLauncher', () => {
 })
 
 it('serializes visibility writes and preserves the newest optimistic choice', async () => {
-  let finish!: (value: ProjectConfig) => void
+  let finish!: (value: ProjectConfigResponse) => void
   api.putProjectConfig.mockReturnValueOnce(new Promise((yes) => { finish = yes }))
   await mount()
   await act(async () => { launcher.setShowDemo(false); launcher.setShowDemo(true) })
   expect(api.putProjectConfig).toHaveBeenCalledTimes(1)
   expect(launcher.showDemo).toBe(true)
-  await act(async () => { finish({ showDemo: false } as ProjectConfig) })
+  await act(async () => { finish({ showDemo: false } as ProjectConfigResponse) })
   expect(api.putProjectConfig.mock.calls).toEqual([[{ showDemo: false }], [{ showDemo: true }]])
   expect(launcher.showDemo).toBe(true)
 })
@@ -229,14 +228,14 @@ it('failed visibility writes reveal the latest accepted configuration and teardo
   api.putProjectConfig.mockReturnValueOnce(new Promise((_, no) => { fail = no }))
   await mount()
   await act(async () => { launcher.setShowDemo(false) })
-  api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfig)
+  api.getProjectConfig.mockResolvedValue({ showDemo: false } as ProjectConfigResponse)
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); fail(new Error('offline')) })
   expect(launcher.showDemo).toBe(false)
-  let finish!: (value: ProjectConfig) => void
+  let finish!: (value: ProjectConfigResponse) => void
   api.putProjectConfig.mockReturnValueOnce(new Promise((yes) => { finish = yes }))
   await act(async () => { launcher.setShowDemo(true); launcher.setShowDemo(false) })
   await act(async () => { root.render(null) })
-  await act(async () => { finish({ showDemo: true } as ProjectConfig); await vi.advanceTimersByTimeAsync(10000) })
+  await act(async () => { finish({ showDemo: true } as ProjectConfigResponse); await vi.advanceTimersByTimeAsync(10000) })
   expect(api.putProjectConfig).toHaveBeenCalledTimes(2)
 })
 

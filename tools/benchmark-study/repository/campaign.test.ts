@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { digest, json, sha, write } from '../files'
@@ -12,11 +11,12 @@ import { repositoryCacheDigest, repositoryCacheEntries } from './dependencies'
 import { assertRepositoryWorkerOwner } from './worker-owner'
 import { studyStatus } from '../study-status'
 import { writeRepositoryFailureContext } from './failure-context'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('repository-campaign-')
+afterEach(() => { vi.restoreAllMocks() })
 function fixture(live = false): StudyManifest {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-campaign-'))); roots.push(root)
+  const root = tempDir()
   for (const scenario of ['overlap', 'independent']) {
     for (const prefix of ['frozen', 'attempts']) {
       const directory = path.join(root, prefix, scenario, ...(prefix === 'attempts' ? ['source'] : []))
@@ -217,7 +217,7 @@ it('delivers a new durable revision to a waiting consumer and recovers missed re
 })
 
 it('fingerprints only lockfile-selected cache bytes and rejects missing or changed dependencies', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repository-cache-')); roots.push(root)
+  const root = tempDir('repository-cache-')
   const hash = 'a'.repeat(40)
   const name = `npm-@synthetic-package-1.0.0-${hash}-integrity`
   write(path.join(root, 'v6', name, 'package.js'), 'pinned')

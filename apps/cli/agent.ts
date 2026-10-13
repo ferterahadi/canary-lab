@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import fs from 'fs'
-import { REGISTERED_CANARY_LAB_MCP_PROFILE, resolveCliPath, isTempInstallPath } from './mcp-registration'
+import { REGISTERED_CANARY_LAB_MCP_PROFILE, SERVER_NAME, resolveCliPath, isTempInstallPath } from './mcp-registration'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
 import { copyDirRecursive } from '../../shared/lib/copy-dir'
+import { agentHomeOverride, registryDir } from '../../shared/runtime/workspace-registry'
 import { claudeConfigDir, codexConfigDir } from '../web-server/src/features/agent-sessions/logic/agent-session-paths'
 import { isManagedSkill, recordManagedSkill, retireLegacySkill } from './agent-skill-ownership'
 
@@ -68,14 +69,14 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
   log(`  npx -y canary-lab mcp --profile ${REGISTERED_CANARY_LAB_MCP_PROFILE}`)
   log('')
   log('Codex config snippet:')
-  log('[mcp_servers.Canary_Lab]')
+  log(`[mcp_servers.${SERVER_NAME}]`)
   log('command = "npx"')
   log(`args = ["-y", "canary-lab", "mcp", "--profile", "${REGISTERED_CANARY_LAB_MCP_PROFILE}"]`)
   log('')
   log('Claude Code config snippet:')
   log(JSON.stringify({
     mcpServers: {
-      'Canary_Lab': {
+      [SERVER_NAME]: {
         command: 'npx',
         args: ['-y', 'canary-lab', 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE],
         alwaysLoad: true,
@@ -166,7 +167,7 @@ export function refreshAgentIntegrationsQuietly(
   }
   try {
     return refreshInstalled('all', {
-      homeDir: opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+      homeDir: opts.homeDir ?? agentHomeOverride(),
       log: opts.log,
     })
   } catch (error) {
@@ -218,7 +219,7 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
   operations.push({
     label: 'Canary Lab plugin bundle',
     from: path.join(assets, 'plugin', 'canary-lab'),
-    to: path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin'),
+    to: path.join(registryDir(home), 'agent-integrations', 'canary-lab-plugin'),
     group: 'plugin',
   })
   return operations

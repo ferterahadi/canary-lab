@@ -1,23 +1,24 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-envset-wiring-')
 
 let root: string
 let server: Awaited<ReturnType<typeof createServer>>
 let client: Client
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-envset-wiring-')))
+  root = tempDir()
   vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
 })
 afterEach(async () => {
   await client?.close()
   await server?.app.close()
   vi.unstubAllEnvs()
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each(['CANARY_LAB', 'CANARY_LAB_PROJECT_ROOT'])('applies the REST-displayed %s target during real run preparation and restores it at stop', async (alias) => {

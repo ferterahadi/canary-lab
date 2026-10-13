@@ -31,6 +31,7 @@ import type {
   FlightStatus,
 } from '@shared/flights/types'
 import { flightNeedsAttention } from '@shared/flights/attention'
+import { plural } from '@shared/lib/plural'
 
 export const AGGREGATE_TOAST_ID = 'flights-need-input'
 
@@ -107,7 +108,7 @@ export function diffFlightToasts(
     return [{
       id: AGGREGATE_TOAST_ID,
       kind: 'aggregate',
-      title: `${waiting.length} flight${waiting.length === 1 ? '' : 's'} need your input`,
+      title: `${plural(waiting.length, 'flight')} need your input`,
       body: 'Open the flights view to respond',
     }]
   }

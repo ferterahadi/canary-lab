@@ -10,7 +10,7 @@ describe('notification sources', () => {
     const [first] = flightNotificationSources([flight({ updatedAt: 't1' })])
     const [second] = flightNotificationSources([flight({ updatedAt: 't2' })])
     expect(first).toEqual(second)
-    expect(first.message?.target).toEqual({ kind: 'flight', flightId: 'f1' })
+    expect(first.message?.target).toEqual({ kind: 'flight', flightId: 'f1', stage: 'run' })
     expect(first.message).toMatchObject({ title: 'shop: Test run failed', toast: true })
     expect(flightNotificationSources([flight({ currentStage: 'docs' })])[0].signature).not.toBe(first.signature)
   })

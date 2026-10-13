@@ -1,10 +1,12 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { repositoryConsumerKey } from '@shared/repository-observation'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { StageErrorPanel } from '../components/StageStatePanels'
 import { useFlightRemedy } from './use-flight-remedy'
+import { advanceAct as advance } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let root: Root
 let container: HTMLDivElement
@@ -19,14 +21,13 @@ function Reader({ flightId }: { flightId: string }) {
   return <StageErrorPanel flightId={flightId} stageLabel="Parallel readiness" detail="has uncommitted changes" />
 }
 const render = (flightId = 'flight') => act(async () => { root.render(<InvalidationProvider><Reader flightId={flightId} /></InvalidationProvider>) })
-const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 const button = () => container.querySelector<HTMLButtonElement>('[data-testid="stage-remedy-stash"]')!
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0); modified = 2
   fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => reply(modified))
-  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.restoreAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it('shares simultaneous reads and keeps an open panel current after scoped events and missed events, including zero-to-dirty', async () => {
   await render()

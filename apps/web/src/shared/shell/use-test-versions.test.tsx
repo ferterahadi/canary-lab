@@ -6,7 +6,6 @@ import * as featuresApi from '../api/features'
 import { useTestVersions } from './use-test-versions'
 import type { TestSourceComparison } from '@shared/test-review'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('../api/config', () => ({
   getFeatureTests: vi.fn(async () => []),
 }))

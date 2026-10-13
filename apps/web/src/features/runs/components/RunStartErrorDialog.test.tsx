@@ -1,25 +1,16 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
 import { RunStartErrorDialog, describeRunStartError } from './RunStartErrorDialog'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 async function render(props: Partial<Parameters<typeof RunStartErrorDialog>[0]> = {}) {
   const onClose = vi.fn()

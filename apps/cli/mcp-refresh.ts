@@ -13,6 +13,7 @@ import {
   claudeDesktopInstalled,
   type DesktopRegistrationResult,
 } from './desktop-registration'
+import { agentHomeOverride } from '../../shared/runtime/workspace-registry'
 
 export interface RefreshOptions {
   log?: (msg: string) => void
@@ -96,7 +97,7 @@ export function refreshClaudeDesktopMcpQuietly(
   if (isTempInstallPath(opts.cliPath ?? resolveCliPath())) return 'skipped'
   try {
     const configPath = opts.configPath
-      ?? claudeDesktopConfigPath(opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME)
+      ?? claudeDesktopConfigPath(opts.homeDir ?? agentHomeOverride())
     if (!claudeDesktopInstalled(configPath)) return 'skipped'
     return registerClaudeDesktopMcp({
       refreshOnly: true,

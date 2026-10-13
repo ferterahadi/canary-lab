@@ -8,7 +8,6 @@ import type { TestSourceComparison } from '@shared/test-review'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useTestSourceComparison } from './use-test-source-comparison'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('../api/features', () => ({
   getTestSourceComparison: vi.fn(),
 }))

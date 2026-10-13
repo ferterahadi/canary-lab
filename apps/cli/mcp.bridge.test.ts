@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
 import { doctor, isDefaultLocalMcpUrl, main, resolveDefaultMcpUrl } from './mcp'
@@ -8,6 +7,9 @@ import { bridge, REINIT_ID, type BridgeTransport } from './mcp-bridge'
 import { ensureMcpServerReachable, resolveUiProjectRootForMcpAutostart } from './mcp-reachability'
 import { inferClientKindFromProcessLines, inferMcpClientKind } from './mcp-client-kind'
 import type { JSONRPCMessage } from '@modelcontextprotocol/server'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-usable-')
 
 class BufferWritable extends Writable {
   chunks: string[] = []
@@ -268,7 +270,7 @@ describe('bridge cold start', () => {
     const created: FakeTransport[] = []
     const stdio = new FakeTransport('stdio')
     const stderr = new BufferWritable()
-    const usable = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-usable-')))
+    const usable = tempDir()
     fs.mkdirSync(path.join(usable, 'features'))
     const root = { path: '/' }
     const servingRoot = (async () => new Response(JSON.stringify({ ok: true, projectRoot: root.path }), {
@@ -276,30 +278,26 @@ describe('bridge cold start', () => {
       headers: { 'content-type': 'application/json' },
     })) as unknown as typeof fetch
 
-    try {
-      const ok = await bridge('http://127.0.0.1:7420/mcp', {
-        ...coldStartOpts({ healthy: false }),
-        stderr,
-        fetch: servingRoot,
-        createHttpTransport: (url) => { const t = new FakeTransport(url); created.push(t); return t },
-        createStdioTransport: () => stdio,
-      })
-      expect(ok).toBe(true)
+    const ok = await bridge('http://127.0.0.1:7420/mcp', {
+      ...coldStartOpts({ healthy: false }),
+      stderr,
+      fetch: servingRoot,
+      createHttpTransport: (url) => { const t = new FakeTransport(url); created.push(t); return t },
+      createStdioTransport: () => stdio,
+    })
+    expect(ok).toBe(true)
 
-      await waitFor(() => stderr.text().includes('unusable projectRoot "/"'))
-      // Reachable the whole time, and still never attached to.
-      expect(created).toHaveLength(1)
-      expect(created[0].started).toBe(false)
-      // Warned once, not once per poll.
-      expect(stderr.text().match(/unusable projectRoot/g)).toHaveLength(1)
+    await waitFor(() => stderr.text().includes('unusable projectRoot "/"'))
+    // Reachable the whole time, and still never attached to.
+    expect(created).toHaveLength(1)
+    expect(created[0].started).toBe(false)
+    // Warned once, not once per poll.
+    expect(stderr.text().match(/unusable projectRoot/g)).toHaveLength(1)
 
-      // The same server moves to a real workspace root; now it is attachable.
-      root.path = usable
-      await waitFor(() => created.length === 2)
-      expect(created[1].started).toBe(true)
-    } finally {
-      fs.rmSync(usable, { recursive: true, force: true })
-    }
+    // The same server moves to a real workspace root; now it is attachable.
+    root.path = usable
+    await waitFor(() => created.length === 2)
+    expect(created[1].started).toBe(true)
   })
 
   it('clears the reconnect guard when re-resolving the target throws', async () => {

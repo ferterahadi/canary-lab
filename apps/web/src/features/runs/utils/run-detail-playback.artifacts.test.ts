@@ -4,7 +4,7 @@ import type { RepoBranchSnapshot, ServiceManifestEntry } from '@shared/run-manif
 
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,
-  artifactsForPlayback,
+  artifactsUnderPolicy,
   branchForService,
   branchLabel,
   branchTooltip,
@@ -22,6 +22,12 @@ function artifact(kind: PlaywrightArtifactGroup['artifacts'][number]['kind'], na
   }
 }
 
+// The panel reads one attempt's retained list; these fixtures still name the
+// test the list belongs to, so the lookup lives here rather than in the helper.
+function artifactsFor(testName: string, groups: PlaywrightArtifactGroup[], policy: Parameters<typeof artifactsUnderPolicy>[1]) {
+  return artifactsUnderPolicy(groups.find((g) => g.testName === testName)?.artifacts ?? [], policy)
+}
+
 function repo(repoPath: string, branch: string | null): RepoBranchSnapshot {
   return {
     name: 'repo',
@@ -36,7 +42,7 @@ function service(cwd: string): Pick<ServiceManifestEntry, 'cwd'> {
   return { cwd }
 }
 
-describe('artifactsForPlayback', () => {
+describe('artifactsUnderPolicy', () => {
   const groups: PlaywrightArtifactGroup[] = [
     {
       testName: 'auth.spec.ts:login',
@@ -51,7 +57,7 @@ describe('artifactsForPlayback', () => {
   ]
 
   it('uses default policy when no run policy exists', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, undefined)).toEqual({
+    expect(artifactsFor('auth.spec.ts:login', groups, undefined)).toEqual({
       screenshotMode: DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY.screenshot,
       screenshots: [artifact('screenshot', 'canary-lab-final-page-login.png', 2)],
       links: [artifact('trace', 'trace.zip')],
@@ -59,7 +65,7 @@ describe('artifactsForPlayback', () => {
   })
 
   it('hides screenshots and retained links disabled by policy', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, {
+    expect(artifactsFor('auth.spec.ts:login', groups, {
       screenshot: 'off',
       video: 'off',
       trace: 'off',
@@ -71,7 +77,7 @@ describe('artifactsForPlayback', () => {
   })
 
   it('includes retained video links when policy enables them', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, {
+    expect(artifactsFor('auth.spec.ts:login', groups, {
       screenshot: 'on',
       video: 'on-first-retry',
       trace: 'retain-on-failure',
@@ -83,7 +89,7 @@ describe('artifactsForPlayback', () => {
   })
 
   it('returns empty artifacts when the test has no artifact group', () => {
-    expect(artifactsForPlayback('missing', groups, {
+    expect(artifactsFor('missing', groups, {
       screenshot: 'on',
       video: 'on',
       trace: 'on',
@@ -105,7 +111,7 @@ describe('artifactsForPlayback', () => {
       },
     ]
 
-    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithoutFinal, {
+    expect(artifactsFor('auth.spec.ts:login', groupsWithoutFinal, {
       screenshot: 'only-on-failure',
       video: 'off',
       trace: 'off',
@@ -130,7 +136,7 @@ describe('artifactsForPlayback', () => {
       },
     ]
 
-    const result = artifactsForPlayback('auth.spec.ts:login', groupsWithoutMtime, {
+    const result = artifactsFor('auth.spec.ts:login', groupsWithoutMtime, {
       screenshot: 'on',
       video: 'off',
       trace: 'off',
@@ -151,7 +157,7 @@ describe('artifactsForPlayback', () => {
       },
     ]
 
-    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithAttachmentDuplicate, {
+    expect(artifactsFor('auth.spec.ts:login', groupsWithAttachmentDuplicate, {
       screenshot: 'on',
       video: 'off',
       trace: 'off',

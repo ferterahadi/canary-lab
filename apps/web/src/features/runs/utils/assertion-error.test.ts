@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssertionError } from './assertion-error'
+import { errorLayout, matcherCaption, parseAssertionError, parseCodeFrame } from './assertion-error'
 
 describe('parseAssertionError', () => {
   it('splits a matcher failure into its headline and the expected/received pair', () => {
@@ -32,5 +32,48 @@ describe('parseAssertionError', () => {
     expect(parseAssertionError('TypeError: cannot read properties of undefined')).toBeNull()
     expect(parseAssertionError('Error: expect(received).toEqual(expected)\n\n- Expected  - 1\n+ Received  + 1')).toBeNull()
     expect(parseAssertionError('Expected: "a"\nReceived: "b"')).toBeNull()
+  })
+})
+
+describe('matcherCaption', () => {
+  it('names the matcher and its comparison note', () => {
+    expect(matcherCaption('expect(received).toBe(expected) // Object.is equality')).toBe('toBe · Object.is equality')
+    expect(matcherCaption('Error: expect(locator).not.toBeVisible()')).toBe('toBeVisible')
+  })
+
+  it('leaves a sentence alone', () => {
+    expect(matcherCaption('Error: RERATE_MONTH run started off minute 17')).toBeNull()
+  })
+})
+
+describe('errorLayout', () => {
+  it('moves a custom message forward and the matcher line into the caption', () => {
+    const parts = parseAssertionError('Error: run started off minute 17\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: "0"\nReceived: "1"\n\nCall log:\n  - waited')!
+    expect(errorLayout(parts)).toEqual({ message: 'run started off minute 17', caption: 'toBe · Object.is equality', rest: 'Call log:\n  - waited' })
+  })
+
+  it('has no sentence when the headline is the matcher line', () => {
+    const parts = parseAssertionError('Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: "ready"\nReceived: "broken"')!
+    expect(errorLayout(parts)).toEqual({ message: '', caption: 'toBe · Object.is equality', rest: '' })
+  })
+
+  it('keeps context that is not a matcher line', () => {
+    const parts = parseAssertionError('Error: total is off\nExpected: 90\nReceived: 95\nTimeout 5000ms exceeded.')!
+    expect(errorLayout(parts)).toEqual({ message: 'total is off', caption: null, rest: 'Timeout 5000ms exceeded.' })
+  })
+})
+
+describe('parseCodeFrame', () => {
+  it('numbers each line, marks the failing one, and drops the caret row', () => {
+    expect(parseCodeFrame("   97 |   `run`,\n>  98 |   ).toBe('0')\n      |     ^\n   99 | }")).toEqual([
+      { line: 97, text: '  `run`,', failing: false },
+      { line: 98, text: "  ).toBe('0')", failing: true },
+      { line: 99, text: '}', failing: false },
+    ])
+  })
+
+  it('declines a snippet that is not a code frame', () => {
+    expect(parseCodeFrame('at checkout.spec.ts:12')).toBeNull()
+    expect(parseCodeFrame('\n')).toBeNull()
   })
 })

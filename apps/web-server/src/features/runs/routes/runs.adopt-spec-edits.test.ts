@@ -1,12 +1,11 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 // POST /api/runs/:runId/adopt-spec-edits — the human-only lever that lets a
 // mid-run spec edit into a run (D9/D13). Beside /approve-dirty: no
 // unrestricted MCP tool wraps it; elicited review passes an exact revision.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { RunStore } from '../logic/run-store'
@@ -15,13 +14,17 @@ import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
 import { writeManifest, readManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteReviewRevision } from '../logic/runtime/suite-review'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+const tempDir = trackTempDirs('cl-adopt-')
+
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-adopt-')))
+  tmpDir = tempDir()
   fs.mkdirSync(path.join(tmpDir, 'logs'), { recursive: true })
   fs.mkdirSync(path.join(tmpDir, 'features'), { recursive: true })
 })
@@ -34,7 +37,7 @@ async function build(events: WorkspaceEvent[] = []) {
     featuresDir: path.join(tmpDir, 'features'),
     store,
     startRun: async () => { throw new Error('not configured') },
-    workspaceEvents: { publish: (event) => { events.push(event) } },
+    workspaceEvents: captureEvents(events),
   })
   return { app, registry, store }
 }
@@ -47,12 +50,7 @@ function terminalReview(status: 'passed' | 'failed' | 'aborted' = 'passed') {
   for (const dir of [featureDir, snapshot]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(snapshot, 'e2e/a.spec.ts'), 'recorded\n')
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'recorded\n')
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' })
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'initial')
+  initGitRepo(featureDir)
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
   const revision = suiteReviewRevision(snapshot, featureDir)
   writeManifest(path.join(runDir, 'manifest.json'), {
@@ -226,13 +224,12 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
   it('keeps an already committed deletion in the run review receipt', async () => {
     const { app } = await build()
     const seeded = terminalReview('passed')
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: seeded.featureDir, stdio: 'pipe' }).toString().trim()
     fs.writeFileSync(path.join(seeded.snapshot, 'e2e/subscription.cjs'), 'recorded helper\n')
     fs.writeFileSync(path.join(seeded.featureDir, 'e2e/subscription.cjs'), 'recorded helper\n')
-    git('add', 'e2e/subscription.cjs')
-    git('commit', '-qm', 'record helper')
-    git('rm', 'e2e/subscription.cjs')
-    git('commit', '-qm', 'remove helper from suite')
+    git(seeded.featureDir, 'add', 'e2e/subscription.cjs')
+    git(seeded.featureDir, 'commit', '-qm', 'record helper')
+    git(seeded.featureDir, 'rm', 'e2e/subscription.cjs')
+    git(seeded.featureDir, 'commit', '-qm', 'remove helper from suite')
     const revision = suiteReviewRevision(seeded.snapshot, seeded.featureDir)
 
     const response = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: revision } })
@@ -242,7 +239,7 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
       files: ['e2e/a.spec.ts', 'e2e/subscription.cjs'],
       git: { status: 'committed' }, execution: { status: 'new-run-required' },
     })
-    expect(git('show', '--format=', '--name-only', 'HEAD')).toBe('e2e/a.spec.ts')
+    expect(git(seeded.featureDir, 'show', '--format=', '--name-only', 'HEAD')).toBe('e2e/a.spec.ts')
     expect(readManifest(path.join(seeded.runDir, 'manifest.json'))?.specEdits?.reviewDecisions?.[0]?.receipt?.files).toEqual([
       'e2e/a.spec.ts', 'e2e/subscription.cjs',
     ])
@@ -396,4 +393,36 @@ describe('terminal review idempotency and validation', () => {
     writeManifest(manifestPath, { ...manifest })
     expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
   })
+})
+
+it.each(['accepted', 'restored'] as const)('returns the active orchestrator’s recorded %s receipt and publishes the suite change', async (decision) => {
+  const events: WorkspaceEvent[] = []
+  const { app, registry, store } = await build(events)
+  const seeded = terminalReview('passed')
+  const receipt = {
+    decision, review_revision: seeded.revision, files: ['e2e/a.spec.ts'], at: 'recorded-time',
+    git: { status: 'not-requested' as const }, execution: { status: 'none' as const },
+  }
+  const recordReceipt = () => store.patchManifest('terminal', {
+    specEdits: { checkedAt: 'recorded-time', pending: [], adopted: [], reviewDecisions: [
+      { at: 'older', revision: 'old-revision', decision: 'restored' },
+      { at: 'recorded-time', revision: seeded.revision, decision: decision === 'accepted' ? 'adopted' : 'restored', receipt },
+    ] },
+  })
+  registry.set('terminal', {
+    ...stub(async () => {
+      recordReceipt()
+      return { ok: true, adopted: receipt.files, rerun: 'signalled' }
+    }),
+    restoreSpecEdits: () => {
+      recordReceipt()
+      return { ok: true, restored: receipt.files }
+    },
+  })
+  const action = decision === 'accepted' ? 'accept-test-review' : 'restore-spec-edits'
+  const response = await app.inject({ method: 'POST', url: `/api/runs/terminal/${action}`, payload: { expectedRevision: seeded.revision } })
+  expect(response.statusCode).toBe(decision === 'accepted' ? 202 : 200)
+  expect(response.json()).toEqual(receipt)
+  expect(events).toContainEqual({ type: 'tests-changed', feature: 'demo' })
+  await app.close()
 })

@@ -2,9 +2,10 @@ import {
   portifyIndexEntry,
   isActionablePortifyStatus,
   type PortifyIndexEntry,
+  type PortifyManifest,
 } from '../../../../../../../shared/portify-index'
-import type { PortifyManifest } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, legacyEntryId, abortOnRestart } from '../../../../../../../shared/lib/file-backed-task-store'
+import { PORTIFY_DIR_NAME } from './paths'
 
 // File-backed, event-emitting store for port-ification workflows. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the portify-specific
@@ -44,7 +45,7 @@ export class PortifyRunStore implements PortifyStore {
   constructor(logsDir: string) {
     this.store = new FileBackedTaskStore<PortifyManifest>({
       logsDir,
-      dirName: 'portify',
+      dirName: PORTIFY_DIR_NAME,
       recordFile: 'portify.json',
       idOf: (m) => m.workflowId,
       statusOf: (m) => m.status,

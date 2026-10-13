@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/notifications'
 import * as typesApi from '@shared/notifications/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
+import { displayError } from '@/shared/api/error-message'
 
 export function useNotifications() {
   const resource = useLiveResource('notifications', 'workspace', () => api.getNotifications(), { reconcileMs: 10_000 })
@@ -44,7 +45,7 @@ export function useNotifications() {
         const item = result.items.find((entry) => entry.id === id)
         return result.status === 'current' && item && result.target ? { target: result.target, item } : undefined
       } catch (err) {
-        if (mounted.active) fail(err instanceof Error ? err.message : 'Could not verify notification action')
+        if (mounted.active) fail(displayError(err, 'Could not verify notification action'))
         return undefined
       } finally { finish(mounted) }
     },
@@ -57,7 +58,7 @@ export function useNotifications() {
         setActionError(null)
         return true
       } catch (err) {
-        if (mounted.active) fail(err instanceof Error ? err.message : 'Could not update notifications')
+        if (mounted.active) fail(displayError(err, 'Could not update notifications'))
         return false
       } finally { finish(mounted) }
     },

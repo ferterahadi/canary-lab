@@ -1,3 +1,4 @@
+import { SPEC_INVENTORY_VERSION, readSpecSource } from '../../../../../../shared/spec-files'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -96,7 +97,8 @@ function certifySuite(snapshot: RunDetail['manifest']['suiteSnapshot'], suiteDir
   if (!suiteDir || !fs.existsSync(suiteDir)) {
     return { source: 'none', digest: digestOfSpecHashes({}), runStartCheck: 'unverifiable', reason: 'the run recorded no readable suite directory', files: [] }
   }
-  const hashes = hashFeatureSpecs(suiteDir)
+  const specInventoryVersion = snapshot?.kind === 'taken' ? snapshot.specInventoryVersion ?? 1 : SPEC_INVENTORY_VERSION
+  const hashes = hashFeatureSpecs(suiteDir, specInventoryVersion)
   const files = Object.keys(hashes).sort().map((rel) => ({
     path: rel,
     sha256: hashes[rel],
@@ -106,6 +108,7 @@ function certifySuite(snapshot: RunDetail['manifest']['suiteSnapshot'], suiteDir
   const runStartDigest = snapshot?.kind === 'taken' ? snapshot.digest : undefined
   const base = {
     dir: suiteDir,
+    specInventoryVersion,
     digest,
     ...(runStartDigest ? { runStartDigest } : {}),
     runStartCheck: runStartDigest ? (runStartDigest === digest ? 'matches' : 'differs') : 'unverifiable',
@@ -133,7 +136,7 @@ interface ExtractedSpec {
 function extractSuite(suiteDir: string): Map<string, ExtractedSpec> {
   const out = new Map<string, ExtractedSpec>()
   for (const rel of Object.keys(hashFeatureSpecs(suiteDir)).sort()) {
-    const source = fs.readFileSync(path.join(suiteDir, rel), 'utf8')
+    const source = readSpecSource(path.join(suiteDir, rel))
     out.set(rel, {
       tests: extractTestPredicatesFromSource(rel, source).tests,
       requirements: testRequirementsOf(rel, source),
@@ -269,6 +272,7 @@ function notProvenBy(
     'That the requirement set is complete. This certificate lists the requirements the suite claims; whether the product needed more is answered by coverage, separately.',
     'Anything the listed assertions did not observe. Only the Playwright checks written in these tests are certified; API, state and log planes are proven only where a listed assertion reached them.',
   ]
+  if ((suite.specInventoryVersion ?? 1) === 1) out.push('Nested tests and other JavaScript/TypeScript filenames were not included in this historical flat .spec.ts inventory.')
   if (suite.source !== 'run-start-snapshot') {
     out.push(`Which suite content the run executed. ${suite.reason} — the file hashes describe the suite as read, not necessarily as run.`)
   } else if (suite.runStartCheck === 'differs') {

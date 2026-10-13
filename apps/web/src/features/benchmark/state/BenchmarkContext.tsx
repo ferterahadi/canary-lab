@@ -2,8 +2,7 @@ import { createContext, useCallback, useContext, useMemo, type ReactNode } from 
 import * as benchmarkApi from '@/shared/api/benchmark'
 import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import { useRecordDetail, useRecordIndexStore } from '@/shared/state/record-index-store'
-import type { BenchmarkManifest } from '../api/benchmark-types'
-import type { BenchmarkIndexEntry, SabotageLevel } from '@shared/benchmark-index'
+import type { BenchmarkManifest, BenchmarkIndexEntry, SabotageLevel } from '@shared/benchmark-index'
 import { benchmarkIndex } from './benchmark-state'
 
 // Benchmark store mirrors RunsContext: a `/ws/benchmark`-fed reducer for the

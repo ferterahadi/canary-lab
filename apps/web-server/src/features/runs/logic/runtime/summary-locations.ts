@@ -1,3 +1,4 @@
+import { buildRunPaths } from './run-paths'
 import fs from 'fs'
 import path from 'path'
 import type { TestResult, TestStep } from '@playwright/test/reporter'
@@ -55,12 +56,12 @@ export function findHarAttachmentPath(
 }
 
 export function journalPathForSummary(): string {
-  return path.join(path.dirname(getSummaryPath()), 'diagnosis-journal.md')
+  return buildRunPaths(path.dirname(getSummaryPath())).diagnosisJournalPath
 }
 
 export function runIdForSummary(): string | undefined {
   const manifestPath = process.env.CANARY_LAB_MANIFEST_PATH
-    ?? path.join(path.dirname(getSummaryPath()), 'manifest.json')
+    ?? buildRunPaths(path.dirname(getSummaryPath())).manifestPath
   try {
     const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { runId?: unknown }
     return typeof parsed.runId === 'string' ? parsed.runId : undefined

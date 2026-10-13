@@ -3,19 +3,21 @@
 // show but cannot map back to a source line would invite a click that opens the
 // wrong file, or a file outside the snapshot entirely.
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { recordedTestList } from './recorded-test-list'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-recorded-list-')
 
 let logsDir: string
 let snapDir: string
 let runDir: string
 
 beforeEach(() => {
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-recorded-list-')))
+  const tmp = tempDir()
   logsDir = path.join(tmp, 'logs')
   snapDir = path.join(tmp, 'snap')
   fs.mkdirSync(path.join(snapDir, 'e2e'), { recursive: true })

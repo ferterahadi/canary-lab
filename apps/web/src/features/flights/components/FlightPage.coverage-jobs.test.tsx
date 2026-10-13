@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
 import type { CoverageJobManifest } from '@shared/coverage/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
-import { FlightPage } from './FlightPage'
+import { FlightPageHarness } from './__fixtures__/FlightPageHarness'
 
 const mocks = vi.hoisted(() => ({
   getFlight: vi.fn(),
@@ -49,7 +49,6 @@ vi.mock('@/features/runs/state/RunsContext', () => ({
   useRun: () => ({ detail: null }),
 }))
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const summary: CoverageJobManifest = {
   jobId: 'summary-1', feature: 'checkout', kind: 'summary', status: 'running',
   startedAt: '2026-09-11T09:00:00.000Z', log: '',
@@ -88,7 +87,7 @@ afterEach(() => {
 async function render(stage?: 'docs' | 'specs-coverage') {
   await act(async () => root.render(
     <InvalidationProvider>
-      <FlightPage flightId={flight.flightId} coverageJobs={jobs} onClose={vi.fn()} onSelectFlight={vi.fn()}
+      <FlightPageHarness flightId={flight.flightId} coverageJobs={jobs} onClose={vi.fn()} onSelectFlight={vi.fn()}
         {...(stage ? { stage, onSelectStage: vi.fn() } : {})} />
     </InvalidationProvider>,
   ))
@@ -103,7 +102,7 @@ describe('Flight generation Activity', () => {
     const selectStage = vi.fn()
     const renderRecovery = async (id: string) => {
       await act(async () => root.render(<InvalidationProvider>
-        <FlightPage flightId={id} liveFlight={{ ...flight, flightId: id }} coverageJobs={jobs}
+        <FlightPageHarness flightId={id} liveFlight={{ ...flight, flightId: id }} coverageJobs={jobs}
           stage="docs" onSelectStage={selectStage} onClose={vi.fn()} onSelectFlight={vi.fn()}
           recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'started' }} />
       </InvalidationProvider>))
@@ -120,7 +119,7 @@ describe('Flight generation Activity', () => {
   it('shows a launch failure with a retry on the destination', async () => {
     const retry = vi.fn()
     await act(async () => root.render(<InvalidationProvider>
-      <FlightPage flightId={flight.flightId} coverageJobs={[]} stage="docs" onSelectStage={vi.fn()}
+      <FlightPageHarness flightId={flight.flightId} coverageJobs={[]} stage="docs" onSelectStage={vi.fn()}
         onClose={vi.fn()} onSelectFlight={vi.fn()} onRetryRecalculation={retry}
         recalculation={{ feature: 'checkout', stage: 'prd-summary', request: 1, status: 'failed', error: 'Launch unavailable' }} />
     </InvalidationProvider>))

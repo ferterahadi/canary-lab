@@ -1,7 +1,8 @@
+import { isActiveFlightStatus } from '../../../../../../shared/flights/types'
 import type { FastifyInstance } from 'fastify'
 import type { FlightStore, FlightStoreEvent } from '../logic/store'
 import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
-import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/flights/types'
+import type { FlightsStreamFrame } from '../../../../../../shared/flights/index-entry'
 
 // `/ws/flights` — push channel for the flights list and the open flight detail,
 // mirroring ws/portify-stream.ts. On connect: one `snapshot` frame (the index,
@@ -19,18 +20,7 @@ import type { FlightIndexEntry, FlightManifest } from '../../../../../../shared/
 // tested there); this module only maps store events to frames.
 
 export interface FlightsStreamDeps {
-  store: FlightStore
-}
-
-export type FlightsStreamFrame =
-  | { type: 'snapshot'; flights: FlightIndexEntry[]; details: Record<string, FlightManifest> }
-  | { type: 'update'; flightId: string; manifest: FlightManifest }
-  | { type: 'removed'; flightId: string }
-
-/** Active = still moving, so its manifest is worth pushing up front. A settled
- *  flight's detail is one REST read away and most of them are never opened. */
-function isActive(status: FlightIndexEntry['status']): boolean {
-  return status === 'running' || status === 'waiting-for-approval'
+  store: Pick<FlightStore, 'list' | 'get' | 'onEvent' | 'offEvent'>
 }
 
 export async function flightsStreamRoutes(
@@ -42,7 +32,7 @@ export async function flightsStreamRoutes(
     store: deps.store,
     snapshot: () => {
       const flights = deps.store.list()
-      const details = activeDetails(flights, (entry) => isActive(entry.status), (entry) => entry.flightId, (id) => deps.store.get(id))
+      const details = activeDetails(flights, (entry) => isActiveFlightStatus(entry.status), (entry) => entry.flightId, (id) => deps.store.get(id))
       return { type: 'snapshot', flights, details }
     },
     frameFor: (event) => {

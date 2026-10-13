@@ -1,6 +1,7 @@
-import { useCallback, useState, type ReactNode } from 'react'
-import * as workspaceApi from '@/shared/api/workspace'
-import { BrandMark, clientTint, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import type { ReactNode } from 'react'
+import { useOpenAgentApp } from '@/shared/state/use-open-agent-app'
+import { BrandMark, clientTint, clientKindToDesktopAgent, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { AGENT_JOB_COLOR, type AgentJobStatus } from '@/shared/lib/agent-job-status'
 
 // The shared shell for every "an external MCP client is driving this in its own
 // window" surface — external heal, draft authoring, port-ification, and coverage
@@ -24,6 +25,12 @@ export function pillPalette(color: string): PillPalette {
     bg: `color-mix(in srgb, ${color} 12%, transparent)`,
     border: `color-mix(in srgb, ${color} 40%, transparent)`,
   }
+}
+
+/** The pill palette for an agent job's lifecycle — normalize the job's own
+ *  status with one of the `agent-job-status` mappers first. */
+export function agentJobTone(status: AgentJobStatus): PillPalette {
+  return pillPalette(AGENT_JOB_COLOR[status])
 }
 
 export function ExternalStatusPill({ label, palette }: { label: string; palette: PillPalette }) {
@@ -67,24 +74,21 @@ export function ExternalClientCta(
   )
 }
 
-// Launch the user's Claude/Codex desktop app. Shared by every external panel
-// whose CTA opens the client (heal, coverage) so the busy/error handling has one
-// home instead of a per-panel copy.
-export function useOpenAgentApp() {
-  const [opening, setOpening] = useState<'claude' | 'codex' | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const open = useCallback(async (agent: 'claude' | 'codex'): Promise<void> => {
-    setOpening(agent)
-    setError(null)
-    try {
-      await workspaceApi.openAgentApp(agent)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Could not open ${agent}`)
-    } finally {
-      setOpening(null)
-    }
-  }, [])
-  return { opening, error, open }
+export type ExternalClientAction =
+  | { kind: 'link'; href: string }
+  | { kind: 'app'; agent: 'claude' | 'codex'; open: () => Promise<void>; busy: boolean }
+  | null
+
+export function useExternalClientAction({ clientKind, sessionUrl }: {
+  clientKind: ExternalClientKind
+  sessionUrl?: string
+}): { action: ExternalClientAction; error: string | null } {
+  const { opening, error, open } = useOpenAgentApp()
+  const agent = clientKindToDesktopAgent(clientKind)
+  const action: ExternalClientAction = sessionUrl
+    ? { kind: 'link', href: sessionUrl }
+    : agent ? { kind: 'app', agent, open: () => open(agent), busy: opening !== null } : null
+  return { action, error }
 }
 
 interface ExternalAgentCardProps {
@@ -117,6 +121,21 @@ export function ExternalMetaFact({ label, children, title }: { label: string; ch
       <span className="cl-rubric">{label}</span>
       <span className="min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{children}</span>
     </span>
+  )
+}
+
+export function ExternalAgentError({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4"
+      style={{
+        color: 'var(--danger)',
+        background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
+      }}
+    >
+      {children}
+    </div>
   )
 }
 

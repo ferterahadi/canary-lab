@@ -1,3 +1,4 @@
+import { unwrapExpression } from '../unwrap-expression'
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
@@ -989,14 +990,7 @@ function readableObjectDetails(details: readonly string[]): string {
 }
 
 function expressionIsBoundIdentifier(node: ts.Expression, bindings: ExpressionBindings): boolean {
-  let expression = node
-  while (
-    ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-  ) expression = expression.expression
+  const expression = unwrapExpression(node, { unwrapAwait: false })
   return ts.isIdentifier(expression) && bindings.has(expression.text)
 }
 

@@ -1,13 +1,12 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { attributeUsage, assessPolicy } from './attribution'
 import { auditStudy } from './audit'
 import { json, write } from './files'
+import { trackTempDirs } from '../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('study-audit-test-')
 const line = (value: object): string => JSON.stringify(value)
 const tokens = (input: number, timestamp = '2026-01-01T00:01:00Z'): string => line({ timestamp, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: input, output_tokens: 10, cached_input_tokens: input / 2 } } } })
 const meta = (id: string, parent?: string): string => line({ timestamp: '2026-01-01T00:00:00Z', type: 'session_meta', payload: { id, thread_source: parent ? 'subagent' : 'user', ...(parent ? { parent_thread_id: parent } : {}) } })
@@ -56,7 +55,7 @@ it('deduplicates Claude message IDs across copied logs and uses native sidechain
 })
 
 it('audits and copies historical native evidence without rewriting receipts or requiring the source revision', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'study-audit-test-')); roots.push(root)
+  const root = tempDir()
   const study = path.join(root, 'historical'); const out = path.join(root, 'audit')
   json(path.join(study, 'study.json'), { schemaVersion: 1, results: [{ id: 'attempt', agent: 'codex', outcome: 'failed', usage: { input: 100, output: 10, cacheRead: 50, cacheWrite: null } }] })
   json(path.join(study, 'attempts/attempt/sessions/index.json'), [{ sessionId: 'parent', evidence: 'sessions/parent' }])

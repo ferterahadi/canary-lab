@@ -1,3 +1,5 @@
+import { atomicWriteJson } from '../lib/atomic-write'
+import { sameWorkspacePath } from './workspace-path'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -21,6 +23,14 @@ export interface CanaryLabWorkspaceRegistry {
 export function canaryLabHome(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.CANARY_LAB_HOME?.trim()
   return override ? override : os.homedir()
+}
+
+// The home whose agent configs (~/.claude, ~/.codex, Claude Desktop) Canary Lab
+// writes into. CANARY_LAB_AGENT_HOME redirects it so tests and smoke installs
+// never touch the real ones; unset stays undefined so each caller keeps its own
+// default.
+export function agentHomeOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.CANARY_LAB_AGENT_HOME
 }
 
 export function registryDir(homeDir: string = canaryLabHome()): string {
@@ -55,8 +65,7 @@ export function writeWorkspaceRegistry(
   homeDir?: string,
 ): void {
   const file = registryPath(homeDir)
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  atomicWriteJson(file, registry, undefined, { uniqueTemporary: true })
 }
 
 export function upsertWorkspace(
@@ -71,9 +80,9 @@ export function upsertWorkspace(
   // workspace being upserted is always kept, even on a transiently-missing
   // mount, because it is re-added below.
   registry.workspaces = registry.workspaces.filter(
-    (workspace) => samePath(workspace.path, resolved) || fs.existsSync(workspace.path),
+    (workspace) => sameWorkspacePath(workspace.path, resolved) || fs.existsSync(workspace.path),
   )
-  const existing = registry.workspaces.find((workspace) => samePath(workspace.path, resolved))
+  const existing = registry.workspaces.find((workspace) => sameWorkspacePath(workspace.path, resolved))
 
   if (existing) {
     existing.name = path.basename(resolved)
@@ -104,13 +113,6 @@ function realpathOrResolve(candidate: string): string {
   }
 }
 
-function samePath(left: string, right: string): boolean {
-  const a = path.normalize(left)
-  const b = path.normalize(right)
-  return process.platform === 'win32'
-    ? a.toLowerCase() === b.toLowerCase()
-    : a === b
-}
 
 function isWorkspaceEntry(value: unknown): value is CanaryLabWorkspace {
   if (!value || typeof value !== 'object') return false

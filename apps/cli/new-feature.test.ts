@@ -1,20 +1,20 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { canonicalScaffoldPaths } from '../../shared/feature-scaffold'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('new-feature-')
 let tmp: string
 
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'new-feature-'))
+  tmp = tempDir()
   fs.mkdirSync(path.join(tmp, 'features'), { recursive: true })
   vi.stubEnv('CANARY_LAB_PROJECT_ROOT', tmp)
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 describe('canary-lab new feature', () => {

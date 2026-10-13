@@ -4,6 +4,7 @@ import { DIAGNOSIS_JOURNAL_PATH, MANIFEST_PATH, ROOT, getSummaryPath } from './p
 import { FailedEntry, truncateOneLine } from './log-enrichment'
 import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { readJsonOr } from '../../../../../../../shared/lib/read-file-or'
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
 
@@ -19,6 +20,10 @@ export interface JournalEntry {
   run?: string
   feature?: string
   failingTests?: string
+  /** Run-wide repair-cycle ordinal. Absent on entries written before it was. */
+  cycle?: number
+  /** `RunExecutionRef.index` whose failures this repair started from. */
+  inputExecution?: number
 }
 
 // Hard cap on the size of the unified-diff content written per iteration.
@@ -105,6 +110,8 @@ export function parseJournalMarkdown(raw: string): JournalEntry[] {
     else if (key === 'run') current.run = value
     else if (key === 'feature') current.feature = value
     else if (key === 'failingTests') current.failingTests = value
+    else if (key === 'cycle' && /^\d+$/.test(value)) current.cycle = Number(value)
+    else if (key === 'inputExecution' && /^\d+$/.test(value)) current.inputExecution = Number(value)
     else if (key === 'fix.file') current.fix = { ...(current.fix ?? {}), file: value }
     else if (key === 'fix.description') current.fix = { ...(current.fix ?? {}), description: value }
   }
@@ -225,6 +232,10 @@ export interface JournalAppendInput {
   // structured fields; truncated to MAX_JOURNAL_DIFF_BYTES on write.
   diffContent?: string
   runId?: string
+  /** Run-wide repair-cycle ordinal and the execution it started from. The
+   *  iteration number is the journal's own counter and can drift from both. */
+  cycle?: number
+  inputExecution?: number
   // When provided, overrides the global manifest/summary lookup so the
   // orchestrator can append from a per-run dir without the runner-side
   // singletons getting in the way.
@@ -382,11 +393,7 @@ export interface ManifestForJournal {
 }
 
 export function readManifestFrom(file: string): ManifestForJournal {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ManifestForJournal
-  } catch {
-    return {}
-  }
+  return readJsonOr<ManifestForJournal>(file, {})
 }
 
 export function readFeatureNameFromManifest(file: string): string | undefined {
@@ -437,6 +444,8 @@ export function appendJournalIteration(input: JournalAppendInput): void {
   if (input.runId) section.push(`- run: ${input.runId}`)
   if (featureName) section.push(`- feature: ${featureName}`)
   if (failingTests) section.push(`- failingTests: ${failingTests}`)
+  if (input.cycle !== undefined) section.push(`- cycle: ${input.cycle}`)
+  if (input.inputExecution !== undefined) section.push(`- inputExecution: ${input.inputExecution}`)
   section.push(`- hypothesis: ${truncateOneLine(hypothesis, 400)}`)
   if (fixFile) section.push(`- fix.file: ${fixFile}`)
   if (input.fixDescription) {
@@ -457,13 +466,11 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     section.push('```diff')
     section.push(truncateDiffForJournal(diffContent))
     section.push('```')
-    // The journal block is capped for readability; when the diff overflows it,
-    // persist the full patch and point the agent at it so no edit context is
-    // lost across cycles.
-    if (Buffer.byteLength(diffContent, 'utf-8') > MAX_JOURNAL_DIFF_BYTES) {
-      const patchPath = writeFullDiffPatch(journalPath, iteration, diffContent)
-      if (patchPath) section.push(`Full diff: ${patchPath}`)
-    }
+    // Every cycle's full patch is persisted: it is the only immutable record
+    // of what ONE repair changed, since the run's fixes/ capture is cumulative.
+    // The agent is pointed at it only when the capped block lost content.
+    const patchPath = writeFullDiffPatch(journalPath, iteration, diffContent)
+    if (patchPath && Buffer.byteLength(diffContent, 'utf-8') > MAX_JOURNAL_DIFF_BYTES) section.push(`Full diff: ${patchPath}`)
     section.push('')
   }
 

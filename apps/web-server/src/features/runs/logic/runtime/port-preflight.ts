@@ -1,5 +1,5 @@
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { enabledForEnv, normalizeStartCommand } from '../../../../shared/launcher-startup'
+import { enabledRepoCommands } from '../../../../shared/launcher-startup'
 
 // Preflight check answering "are this feature's apps configured for dynamic,
 // injectable ports?" — the precondition for booting the same feature more than
@@ -32,21 +32,16 @@ export function computePortPreflight(feature: FeatureConfig, env?: string): Port
   let bootableCommands = 0
   let declaredSlots = 0
 
-  for (const repo of feature.repos ?? []) {
-    if (!enabledForEnv(repo.envs, env)) continue
-    const commands = repo.startCommands ?? []
+  for (const { repo, commands } of enabledRepoCommands(feature, env)) {
     const outCommands: PreflightCommand[] = []
-    for (let i = 0; i < commands.length; i++) {
-      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
-      if (!enabledForEnv(normalized.envs, env)) continue
+    for (const normalized of commands) {
       bootableCommands += 1
       const declaredPorts = (normalized.ports ?? []).map((p) => ({
         name: p.name,
         ...(p.env ? { env: p.env } : {}),
       }))
       declaredSlots += declaredPorts.length
-      // normalizeStartCommand always sets `name` (to the fallback when absent).
-      outCommands.push({ name: normalized.name!, declaredPorts })
+      outCommands.push({ name: normalized.name, declaredPorts })
     }
     if (outCommands.length > 0) repos.push({ name: repo.name, commands: outCommands })
   }

@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { buildServiceSpecs, buildQueuedServiceEntries, collectPortSlots } from './service-specs'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -13,7 +14,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -22,26 +23,9 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('buildServiceSpecs', () => {
   it('flattens repo startCommands into named specs', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [
         {
           name: 'r',
@@ -64,17 +48,17 @@ describe('buildServiceSpecs', () => {
   })
 
   it('handles repos without startCommands', () => {
-    const f = makeFeature({ repos: [{ name: 'r', localPath: tmpDir }] })
+    const f = demoFeature(tmpDir, { repos: [{ name: 'r', localPath: tmpDir }] })
     expect(buildServiceSpecs(f, runDir)).toEqual([])
   })
 
   it('handles features without repos', () => {
-    const f = makeFeature({ repos: undefined })
+    const f = demoFeature(tmpDir, { repos: undefined })
     expect(buildServiceSpecs(f, runDir)).toEqual([])
   })
 
   it('includes commands with no envs whitelist regardless of selected env', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -85,7 +69,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('skips commands whose envs whitelist excludes the selected env', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -103,7 +87,7 @@ describe('buildServiceSpecs', () => {
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api'), 'PORT=3030\nHOST=api.local\n')
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -121,7 +105,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('leaves unresolvable tokens literal so misconfig is visible at runtime', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -133,7 +117,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('injects allocated ports as env + resolves ${port.<slot>} in command and probe', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -153,7 +137,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('declares no port env when no port map is supplied (back-compat)', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -166,7 +150,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('redirects cwd to the worktree override for an isolated repo', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{ name: 'r', localPath: tmpDir, startCommands: [{ command: 'serve', name: 'svc' }] }],
     })
     const specs = buildServiceSpecs(f, runDir, 'local', { repoPathOverrides: { r: '/wt/r' } })
@@ -174,7 +158,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('buildQueuedServiceEntries lists feature services with queued status, no ports/url', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -202,12 +186,12 @@ describe('buildServiceSpecs', () => {
   })
 
   it('buildQueuedServiceEntries returns [] for a feature with no bootable services', () => {
-    const f = makeFeature({ repos: [{ name: 'r', localPath: tmpDir }] })
+    const f = demoFeature(tmpDir, { repos: [{ name: 'r', localPath: tmpDir }] })
     expect(buildQueuedServiceEntries(f, runDir, 'local')).toEqual([])
   })
 
   it('collectPortSlots gathers unique declared slots for the env', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [{
         name: 'r',
         localPath: tmpDir,
@@ -222,7 +206,7 @@ describe('buildServiceSpecs', () => {
   })
 
   it('skips an entire repo when its repo-level envs excludes the selected env', () => {
-    const f = makeFeature({
+    const f = demoFeature(tmpDir, {
       repos: [
         {
           name: 'localOnly',

@@ -1,15 +1,16 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { getRepoGitStatus, type GitRepoStatus } from '@/shared/api/workspace'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useRepoGitStatus } from './use-repo-git-status'
+import { advanceAct as advance } from '@/test-helpers/advance-act'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: vi.fn(),
 }))
 const status = (currentBranch: string): GitRepoStatus => ({ path: '/workspace/app', expectedBranch: null, isGitRepo: true, currentBranch, detached: false, dirty: false, dirtyFiles: [], localBranches: ['main', 'other'], remoteBranches: [] })
-let container: HTMLDivElement
 let root: Root
 let live: ReturnType<typeof useRepoGitStatus>
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']
@@ -19,13 +20,12 @@ function Reader({ feature = 'checkout', repo = 'app', opts }: { feature?: string
   return null
 }
 const render = (props: Parameters<typeof Reader>[0] = {}) => act(async () => { root.render(<InvalidationProvider><Reader {...props} /></InvalidationProvider>) })
-const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0)
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('main'))
-  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it('reads immediately, reconciles every thirty seconds, and does not refetch for unrelated renders', async () => {
   await render()

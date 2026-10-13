@@ -1,5 +1,5 @@
-import type { CleanupWorktree } from '@/shared/api/types-cleanup'
-import type { CleanupListing, PortifyCleanupEntry } from '@shared/cleanup-listing'
+import type { CleanupWorktree } from '@shared/cleanup-listing'
+import type { CleanupListing } from '@shared/cleanup-listing'
 import type { ExecutionType } from '@shared/verification'
 import type { RunStatus } from '@shared/run-state'
 
@@ -25,32 +25,11 @@ export const KIND_LABEL: Record<Row['kind'], string> = {
   orphan: 'ORPHAN',
 }
 
-export const STATUS_COLOR: Record<RunStatus, string> = {
-  running: 'var(--running)',
-  healing: 'var(--warning)',
-  queued: 'var(--text-secondary)',
-  passed: 'var(--success)',
-  failed: 'var(--danger)',
-  aborted: 'var(--text-muted)',
-}
-
 export const WORKTREE_OWNER_LABEL: Record<CleanupWorktree['ownerKind'], string> = {
   run: 'RUN',
   benchmark: 'BENCH',
   portify: 'PORTIFY',
   unknown: 'ORPHAN',
-}
-
-// Portify workflow statuses, coloured like the rest of the cleanup UI: greens
-// for the resolved overlay, rose for failures, muted for cancelled / in-flight.
-export const PORTIFY_STATUS_COLOR: Record<PortifyCleanupEntry['status'], string> = {
-  planning: 'var(--running)',
-  editing: 'var(--running)',
-  verifying: 'var(--running)',
-  'ready-to-save': 'var(--success)',
-  saved: 'var(--success)',
-  failed: 'var(--danger)',
-  aborted: 'var(--text-muted)',
 }
 
 export const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000

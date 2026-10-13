@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // The WIP hydration degrades rather than aborting: a patch that will not apply
 // (or a scratch file that cannot be written) is reported and the run continues
@@ -17,6 +17,7 @@ vi.mock('../../../../shared/git-repo', async (importOriginal) => ({
 const { hydrateWorkingTreeDiff } = await import('./repo-worktree')
 
 const WIP_DIFF = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n'
+const tempDir = trackTempDirs('cl-wip-')
 let handle: { sourceRoot: string; worktreeRoot: string }
 
 /** `git diff HEAD` yields a WIP patch; `git apply` reports `applyResult`. */
@@ -29,7 +30,7 @@ function gitWithApply(applyResult: { code: number; stdout: string; stderr: strin
 }
 
 beforeEach(() => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wip-')))
+  const root = tempDir()
   handle = { sourceRoot: path.join(root, 'src'), worktreeRoot: path.join(root, 'wt') }
   fs.mkdirSync(handle.sourceRoot, { recursive: true })
   fs.mkdirSync(handle.worktreeRoot, { recursive: true })

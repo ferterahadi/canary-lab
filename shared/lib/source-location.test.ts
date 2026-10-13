@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSourceLocation } from './source-location'
+import { parseSourceLocation, shortSourceLocation } from './source-location'
 
 describe('parseSourceLocation', () => {
   it.each([
@@ -14,5 +14,18 @@ describe('parseSourceLocation', () => {
     [':2:1', { file: '', line: '2', column: '1' }],
   ])('parses %s without resolving or rewriting the path', (input, expected) => {
     expect(parseSourceLocation(input)).toEqual(expected)
+  })
+})
+
+describe('shortSourceLocation', () => {
+  it.each([
+    ['', ''],
+    ['checkout.spec.ts:12', 'checkout.spec.ts:12'],
+    ['/repo/e2e/checkout.spec.ts:12:3', 'e2e/checkout.spec.ts:12:3'],
+    ['C:\\repo\\e2e\\checkout.spec.ts:12:3', 'e2e/checkout.spec.ts:12:3'],
+    ['C:\\repo/e2e\\checkout.spec.ts:002:00', 'e2e/checkout.spec.ts:002:00'],
+    ['\\\\server\\share\\e2e\\checkout.spec.ts', 'e2e/checkout.spec.ts'],
+  ])('shortens %s for display', (input, expected) => {
+    expect(shortSourceLocation(input)).toBe(expected)
   })
 })

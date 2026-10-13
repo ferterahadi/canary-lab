@@ -1,6 +1,5 @@
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -9,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBenchmarkRunner } from './runner'
 
 import { OFF_BY_ONE, feat, flatFixture, gitInit, makeDeps, nestedFixture, pollUntil, roots, waitForStatus } from './__fixtures__/runner-fixtures'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('bench-g-')
 
 // This runner wires the REAL (tested-elsewhere) BenchmarkOrchestrator/BenchmarkRace/
 // runSabotage control-flow modules to real git plumbing (worktrees, commits) against
@@ -130,7 +132,7 @@ afterEach(() => {
 describe('createBenchmarkRunner', () => {
   describe('start guards', () => {
     it('404s when the feature is unknown', async () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')), loadFeatures: () => [] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [] })
       const { startBenchmark } = createBenchmarkRunner(deps)
       await expect(startBenchmark({ feature: 'nope', iterations: 1, ...OFF_BY_ONE }))
         .rejects.toMatchObject({ statusCode: 404 })
@@ -138,7 +140,7 @@ describe('createBenchmarkRunner', () => {
 
     it('409s when no agent CLI is available, naming the requested agent', async () => {
       const { deps } = makeDeps({
-        logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')),
+        logsDir: tempDir(),
         loadFeatures: () => [feat()],
         pickAgent: () => null,
       })
@@ -149,7 +151,7 @@ describe('createBenchmarkRunner', () => {
 
     it('409s when no agent CLI is available, without naming an agent', async () => {
       const { deps } = makeDeps({
-        logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')),
+        logsDir: tempDir(),
         loadFeatures: () => [feat()],
         pickAgent: () => null,
       })
@@ -159,7 +161,7 @@ describe('createBenchmarkRunner', () => {
     })
 
     it('404s when the sabotage skill is unknown', async () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')), loadFeatures: () => [feat()] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [feat()] })
       const { startBenchmark } = createBenchmarkRunner(deps)
       await expect(startBenchmark({
         feature: 'bench-feat', iterations: 1, skill: 'not-a-real-skill', level: 'zzz' as never,
@@ -167,24 +169,23 @@ describe('createBenchmarkRunner', () => {
     })
 
     it('409s when the feature declares an empty repos array', async () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')), loadFeatures: () => [feat({ repos: [] })] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [feat({ repos: [] })] })
       const { startBenchmark } = createBenchmarkRunner(deps)
       await expect(startBenchmark({ feature: 'bench-feat', iterations: 1, ...OFF_BY_ONE }))
         .rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('409s when repos is undefined', async () => {
-      const { deps } = makeDeps({ logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')), loadFeatures: () => [feat({ repos: undefined })] })
+      const { deps } = makeDeps({ logsDir: tempDir(), loadFeatures: () => [feat({ repos: undefined })] })
       const { startBenchmark } = createBenchmarkRunner(deps)
       await expect(startBenchmark({ feature: 'bench-feat', iterations: 1, ...OFF_BY_ONE }))
         .rejects.toMatchObject({ statusCode: 409 })
     })
 
     it('409s when the sabotaged repo is not a git repository', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-nogit-'))
-      roots.push(dir)
+      const dir = tempDir('bench-nogit-')
       const { deps } = makeDeps({
-        logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')),
+        logsDir: tempDir(),
         loadFeatures: () => [feat({ repos: [{ name: 'app', localPath: dir }] })],
       })
       const { startBenchmark } = createBenchmarkRunner(deps)
@@ -204,13 +205,12 @@ describe('createBenchmarkRunner', () => {
     })
 
     it('409s when the sabotaged repo has uncommitted changes', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-dirty-'))
-      roots.push(dir)
+      const dir = tempDir('bench-dirty-')
       fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
       await gitInit(dir)
       fs.writeFileSync(path.join(dir, 'f.txt'), 'changed')
       const { deps } = makeDeps({
-        logsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'bench-g-')),
+        logsDir: tempDir(),
         loadFeatures: () => [feat({ repos: [{ name: 'app', localPath: dir }] })],
       })
       const { startBenchmark } = createBenchmarkRunner(deps)

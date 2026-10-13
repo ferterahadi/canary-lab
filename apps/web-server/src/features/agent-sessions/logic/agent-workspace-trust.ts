@@ -26,6 +26,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { atomicWriteJson } from '../../../../../../shared/lib/atomic-write'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 /**
  * Absolute path to the `claude` CLI's global config JSON.
@@ -135,15 +137,13 @@ export function ensureClaudeWorkspaceTrusted(
   projects[root] = { ...(projects[root] ?? {}), hasTrustDialogAccepted: true }
   const next = { ...config, projects }
 
-  // Same directory as the target so the rename stays on one filesystem (a
-  // rename across devices is not atomic and would fail outright).
-  const tmp = `${file}.canary-lab-${process.pid}.tmp`
+  // The user may keep this file as a symlink into a dotfiles repo: write
+  // through the link (staging beside its target, so the rename stays on one
+  // filesystem) and keep the file's mode, which `claude` creates private.
   try {
-    fs.writeFileSync(tmp, JSON.stringify(next, null, 2))
-    fs.renameSync(tmp, file)
+    atomicWriteJson(file, next, undefined, { uniqueTemporary: true, createParents: false, followSymlinks: true })
   } catch (err) {
-    try { fs.rmSync(tmp, { force: true }) } catch { /* nothing to clean up */ }
-    return { outcome: 'unavailable', reason: `could not update ${file}: ${(err as Error).message}` }
+    return { outcome: 'unavailable', reason: `could not update ${file}: ${errorMessage(err)}` }
   }
   return { outcome: 'granted', trustedPath: root }
 }

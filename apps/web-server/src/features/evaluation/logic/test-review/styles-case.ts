@@ -196,6 +196,31 @@ figcaption { margin-top: 6px; font-size: 12px; color: var(--ink-2); }
 .check-code code { display: inline-block; margin-top: 5px; }
 .helper-ref { margin-top: 4px; color: var(--ink-3); font-size: 12px; }
 
+/* --------------------------------------------------------------- english */
+
+/* The story the Tests column shows: a step number, the keyword, the sentence.
+   Steps inside a flow nest under a hairline and number on from their parent. */
+.story { margin: 0; padding: 0; list-style: none; }
+.drawer-body > .story {
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--surface-2); padding: 10px 12px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.65;
+}
+.story-nested { margin-left: 1.6em; border-left: 1px solid var(--rule); }
+.story-line { display: grid; grid-template-columns: 2.4ch 9ch minmax(0, 1fr); column-gap: 8px; padding: 0 6px; }
+.story-label { color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+.story-keyword { font-weight: 600; }
+.story-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.story-note .story-text, .story-where { color: var(--code-comment); }
+.story-fallback, .tone-attention { color: var(--code-attention); }
+.tone-keyword, .sp-keyword { color: var(--code-keyword); }
+.tone-cyan, .sp-operator { color: var(--code-cyan); }
+.tone-comment { color: var(--code-comment); }
+.sp-variable { color: var(--code-string); }
+.sp-literal { color: var(--code-literal); }
+.sp-number { color: var(--code-number); }
+.sp-verb { color: var(--code-function); }
+
 /* ------------------------------------------------------------------ code */
 
 .shiki, .fallback-code {

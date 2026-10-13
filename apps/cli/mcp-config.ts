@@ -1,9 +1,6 @@
 import fs from 'fs'
 import { atomicWriteJson } from '../../shared/lib/atomic-write'
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
+import { isRecord } from '../../shared/lib/is-record'
 
 export function readMcpConfig(file: string): Record<string, unknown> {
   let source: string

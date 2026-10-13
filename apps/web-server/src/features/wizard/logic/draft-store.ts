@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { validateFeatureTarget as validateScaffoldTarget } from '../../../../../../shared/feature-scaffold'
-import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
+import type { RunProducer } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -9,9 +9,7 @@ import type {
   DraftPrdDocument,
   DraftRecord,
   DraftRepo,
-  DraftSource,
   DraftStatus,
-  ExternalDraftStage,
 } from '../../../../../../shared/draft-types'
 
 // Draft storage for the Add Test wizard. Each draft lives at
@@ -139,19 +137,22 @@ export function reconcileInterruptedDrafts(logsDir: string, now: () => string): 
   draftStore(logsDir).reconcileInterrupted(now)
 }
 
-export interface CreateDraftInput {
+type DraftExternalMetadata = Pick<DraftRecord,
+  | 'producer'
+  | 'externalStage'
+  | 'externalClientKind'
+  | 'externalSessionId'
+  | 'externalConversationName'
+  | 'externalSessionUrl'
+>
+
+export interface CreateDraftInput extends DraftExternalMetadata {
   draftId: string
   prdText: string
   additionalNotes?: string
   prdDocuments?: DraftPrdDocument[]
   repos: DraftRepo[]
   featureName?: string
-  producer?: DraftSource
-  externalStage?: ExternalDraftStage
-  externalClientKind?: ClientKind
-  externalSessionId?: string
-  externalConversationName?: string
-  externalSessionUrl?: string
   now?: () => string
 }
 
@@ -214,18 +215,12 @@ export function canTransition(from: DraftStatus, to: DraftStatus): boolean {
   return ALLOWED_TRANSITIONS[from].includes(to)
 }
 
-export interface TransitionPatch {
+export interface TransitionPatch extends DraftExternalMetadata {
   plan?: unknown
   intentSummary?: string
   generatedFiles?: string[]
   devDependencies?: string[]
   featureName?: string
-  producer?: DraftSource
-  externalStage?: ExternalDraftStage
-  externalClientKind?: ClientKind
-  externalSessionId?: string
-  externalConversationName?: string
-  externalSessionUrl?: string
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'

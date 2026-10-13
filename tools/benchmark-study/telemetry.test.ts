@@ -1,8 +1,10 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { expect, it } from 'vitest'
 import { measurements, stageIntervals, startTelemetry, summarizeTelemetry, telemetryConfig } from './telemetry'
+import { trackTempDirs } from '../test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('study-telemetry-')
 
 it('accounts for exclusive stage intervals without adding overlapping agent or service spans', () => {
   const names = ['adapter-started', 'playwright-started', 'playwright-exit', 'heal-cycle-started', 'agent-started', 'signal-accepted', 'playwright-started', 'playwright-exit', 'run-complete', 'capture-complete']
@@ -33,20 +35,18 @@ it('keeps requests, stream waiting and tools separate; missing telemetry and ret
 })
 
 it('collects actual loopback HTTP exports, deduplicates retries and persists only measurement fields', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'study-telemetry-'))
+  const root = tempDir()
   const collector = await startTelemetry(root, 'claude')
-  try {
-    const endpoint = collector.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT!
-    const body = JSON.stringify(batch('api_request', 250, { prompt: 'private content', 'user.email': 'secret@example.invalid' }))
-    for (let i = 0; i < 2; i++) expect((await fetch(endpoint, { method: 'POST', body })).status).toBe(200)
-    expect((await fetch(endpoint, { method: 'POST', body: 'malformed' })).status).toBe(400)
-    const summary = await collector.close()
-    expect(summary.requestEvents).toBe(1)
-    expect(summary.requestDurationMs).toBe(250)
-    expect(summary.rejectedBatches).toBe(1)
-    const raw = fs.readFileSync(path.join(root, 'telemetry-events.jsonl'), 'utf8')
-    expect(raw).not.toContain('private content')
-    expect(raw).not.toContain('secret@example.invalid')
-    expect(telemetryConfig(endpoint).codexArgs.join(' ')).toContain('protocol="json"')
-  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+  const endpoint = collector.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT!
+  const body = JSON.stringify(batch('api_request', 250, { prompt: 'private content', 'user.email': 'secret@example.invalid' }))
+  for (let i = 0; i < 2; i++) expect((await fetch(endpoint, { method: 'POST', body })).status).toBe(200)
+  expect((await fetch(endpoint, { method: 'POST', body: 'malformed' })).status).toBe(400)
+  const summary = await collector.close()
+  expect(summary.requestEvents).toBe(1)
+  expect(summary.requestDurationMs).toBe(250)
+  expect(summary.rejectedBatches).toBe(1)
+  const raw = fs.readFileSync(path.join(root, 'telemetry-events.jsonl'), 'utf8')
+  expect(raw).not.toContain('private content')
+  expect(raw).not.toContain('secret@example.invalid')
+  expect(telemetryConfig(endpoint).codexArgs.join(' ')).toContain('protocol="json"')
 })

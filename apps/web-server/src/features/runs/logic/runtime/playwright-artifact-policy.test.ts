@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
@@ -11,6 +10,9 @@ import {
   artifactPolicyFromConfig,
   readPlaywrightArtifactPolicy,
 } from './playwright-artifact-policy'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pw-policy-')
 
 describe('artifactPolicyFromConfig', () => {
   it('uses base defaults when config does not specify use artifacts', () => {
@@ -85,15 +87,14 @@ describe('artifactPolicyFromConfig', () => {
 
 describe('readPlaywrightArtifactPolicy', () => {
   it('uses defaults when no Playwright config exists or parsing fails', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pw-policy-'))
+    const dir = tempDir()
     expect(readPlaywrightArtifactPolicy(dir)).toEqual(DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY)
     fs.writeFileSync(path.join(dir, 'playwright.config.js'), 'export default defineConfig({ use: ')
     expect(readPlaywrightArtifactPolicy(dir)).toEqual(DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY)
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('reads the policy from playwright.config.ts', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pw-policy-'))
+    const dir = tempDir()
     fs.writeFileSync(
       path.join(dir, 'playwright.config.ts'),
       `import { defineConfig } from '@playwright/test'
@@ -106,6 +107,5 @@ export default defineConfig({ use: { screenshot: 'off', video: 'retain-on-failur
       video: 'retain-on-failure',
       trace: 'on-first-retry',
     })
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 })

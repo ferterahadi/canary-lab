@@ -13,6 +13,7 @@
 // feature's live directory, or a checkout); without it the certificate's own
 // recorded directory is used. Exit 0 when every check holds, 1 otherwise, 2 for
 // a usage or read error. Output is plain text, one check per line.
+import { listSpecFiles, readSpecSource } from '../../../shared/spec-files.ts'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -65,7 +66,12 @@ function main(argv) {
   } else if (!fs.existsSync(suiteDir)) {
     check(false, `suite: directory not found: ${suiteDir}`)
   } else {
-    const onDisk = hashSpecs(suiteDir)
+    if (![1, 2].includes(cert.suite.specInventoryVersion ?? 1)) {
+      out('unsupported spec inventory version')
+      return 2
+    }
+    if ((cert.suite.specInventoryVersion ?? 1) === 1) out('note: historical inventory checks only top-level e2e/*.spec.ts files')
+    const onDisk = hashSpecs(suiteDir, cert.suite.specInventoryVersion ?? 1)
     for (const file of cert.suite.files) {
       const actual = onDisk.get(file.path)
       check(actual === file.sha256, `spec ${file.path}: ${actual ? (actual === file.sha256 ? 'sha256 matches' : `sha256 differs (${actual.slice(0, 12)}… vs certified ${file.sha256.slice(0, 12)}…)`) : 'missing on disk'}`)
@@ -110,16 +116,10 @@ function main(argv) {
   return failures.length === 0 ? 0 : 1
 }
 
-// A Canary Lab suite's specs are the `.spec.ts` files directly under its `e2e/`
-// directory — the same rule the server's spec lister applies when it takes the
-// run-start digest, so the two digests are comparable. Paths are `e2e/<name>`.
-function hashSpecs(dir) {
+function hashSpecs(dir, version) {
   const files = new Map()
-  const e2eDir = path.join(dir, 'e2e')
-  if (!fs.existsSync(e2eDir)) return files
-  for (const entry of fs.readdirSync(e2eDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.spec.ts')) continue
-    files.set(`e2e/${entry.name}`, createHash('sha256').update(fs.readFileSync(path.join(e2eDir, entry.name))).digest('hex'))
+  for (const file of listSpecFiles(dir, version)) {
+    files.set(path.relative(dir, file), createHash('sha256').update(readSpecSource(file)).digest('hex'))
   }
   return files
 }
@@ -133,7 +133,7 @@ function suiteDigest(files) {
 
 function readSpec(dir, rel) {
   try {
-    return fs.readFileSync(path.join(dir, rel), 'utf8')
+    return readSpecSource(path.join(dir, rel))
   } catch {
     return undefined
   }

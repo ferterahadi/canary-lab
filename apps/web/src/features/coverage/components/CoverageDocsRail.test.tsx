@@ -9,8 +9,6 @@ import * as flightsApi from '@/shared/api/flights'
 import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import { CoverageDocsRail } from './CoverageDocsRail'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 vi.mock('@/shared/api/coverage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/coverage')>()),
   listFeatureDocs: vi.fn(),

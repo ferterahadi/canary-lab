@@ -29,7 +29,7 @@ import {
 } from '../../../../../../shared/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { isAuxiliaryExecution } from '../../../../../../shared/verification'
+import { isSuiteVerdictRun } from '../../../../../../shared/run-index'
 
 // Flight REST surface — the same store/conductor the MCP flight tools
 // drive (dual-surface parity). Start is non-blocking: it validates input,
@@ -48,9 +48,7 @@ import { isAuxiliaryExecution } from '../../../../../../shared/verification'
 function standalonePassedRun(logsDir: string | undefined, feature: string) {
   if (!logsDir) return null
   try {
-    return listRuns(logsDir, { feature }).find(
-      (r) => r.status === 'passed' && !isAuxiliaryExecution(r.executionType) && r.executionType !== 'verify',
-    ) ?? null
+    return listRuns(logsDir, { feature }).find((r) => isSuiteVerdictRun(r, ['passed'])) ?? null
   } catch {
     return null
   }

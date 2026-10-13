@@ -1,5 +1,6 @@
+import type { AgentSessionEvent, AgentSessionMeta } from '../../../../../../shared/agent-session-types'
 import path from 'path'
-import type { AgentEvent, AgentKind, AgentSessionMeta } from './agent-session-log'
+import type { AgentKind } from './agent-session-log'
 
 // Fold a single JSONL line into the accumulating session metadata. Last write
 // wins, so the returned model/effort reflect the most recent record — a session
@@ -27,12 +28,12 @@ export function applyAgentSessionMetaLine(agent: AgentKind, line: string, meta: 
 
 // Parse a single JSONL line into 0..N normalized events. Shared by the batch
 // loader above and the live tailer used by the structured-event WebSocket.
-export function parseAgentSessionLine(agent: AgentKind, line: string): AgentEvent[] {
+export function parseAgentSessionLine(agent: AgentKind, line: string): AgentSessionEvent[] {
   if (!line.trim()) return []
   let parsed: unknown
   try { parsed = JSON.parse(line) } catch { return [] }
   if (!parsed || typeof parsed !== 'object') return []
-  const out: AgentEvent[] = []
+  const out: AgentSessionEvent[] = []
   if (agent === 'claude') {
     pushClaudeEvents(parsed as ClaudeLine, out)
   } else {
@@ -85,7 +86,7 @@ export function isInjectedClaudeUserText(text: string): boolean {
   return CLAUDE_INJECTED_TAGS.some((tag) => head.startsWith(`<${tag}>`))
 }
 
-export function pushClaudeEvents(line: ClaudeLine, out: AgentEvent[]): void {
+export function pushClaudeEvents(line: ClaudeLine, out: AgentSessionEvent[]): void {
   const ts = typeof line.timestamp === 'string' ? line.timestamp : ''
   if (line.type === 'user') {
     const content = line.message?.content
@@ -176,7 +177,7 @@ export interface CodexLine {
   payload?: CodexPayload
 }
 
-export function pushCodexEvents(line: CodexLine, out: AgentEvent[]): void {
+export function pushCodexEvents(line: CodexLine, out: AgentSessionEvent[]): void {
   if (line.type !== 'response_item' || !line.payload) return
   const ts = typeof line.timestamp === 'string' ? line.timestamp : ''
   const p = line.payload

@@ -1,3 +1,4 @@
+import { readSpecSource } from '../../../../../../../shared/spec-files'
 import fs from 'fs'
 import path from 'path'
 import { findFeature, listSpecFiles } from '../../../../shared/feature-loader'
@@ -7,7 +8,8 @@ import type { PrdSummary, VariantDimension } from '../../../../../../../shared/c
 import { type CoverageAgentSession } from './annotate-engine'
 import { stripCoverageTags } from './tag-writer'
 import { COVERAGE_STATE_JSON } from './run-state'
-import { docsDirFor, isGeneratedDoc, readDocsCollection } from './docs-collection'
+import { docsDirFor, isGeneratedDoc, documentCandidates, inspectDocumentFile } from './document-files'
+import { readDocsCollection } from './docs-collection'
 import { buildPrdSummaryPrompt, summarizePrd, type SummarizeAdapter } from './prd-summary'
 import { PRD_SUMMARY_JSON, PRD_SUMMARY_MD, readPrdSummary, writePrdSummary } from './prd-summary-render'
 import { assembleSummary, type ParsedRequirement } from './prd-summary-parse'
@@ -111,41 +113,34 @@ export function listFeatureDocs(featuresDir: string, feature: string): FeatureDo
   const featureDir = resolveFeatureDir(featuresDir, feature)
   const docsDir = docsDirFor(featureDir)
   const docs: FeatureDoc[] = []
-  if (fs.existsSync(docsDir)) {
-    for (const name of fs.readdirSync(docsDir).sort()) {
-      const full = path.join(docsDir, name)
-      if (!/\.(md|markdown|txt)$/i.test(name)) continue
-      // lstat first: a dangling symlink (its target moved) must be listed as
-      // broken, not crash the whole docs rail.
-      const lst = fs.lstatSync(full)
-      const isLink = lst.isSymbolicLink()
-      let stat: fs.Stats | null = null
-      try {
-        stat = fs.statSync(full)
-      } catch {
-        /* dangling symlink */
-      }
-      if (stat && !stat.isFile()) continue
-      docs.push({
-        relPath: name,
-        absPath: path.resolve(full),
-        generated: isGeneratedDoc(name),
-        sizeBytes: stat?.size ?? 0,
-        ...(isLink
-          ? {
-              linked: true,
-              linkTarget: (() => {
-                try {
-                  return fs.readlinkSync(full)
-                } catch {
-                  return undefined
-                }
-              })(),
-              ...(stat ? {} : { broken: true }),
-            }
-          : {}),
-      })
-    }
+  for (const name of documentCandidates(docsDir, { includeGenerated: true, order: 'sorted' })) {
+    const full = path.join(docsDir, name)
+    // lstat first: a dangling symlink (its target moved) must be listed as
+    // broken, not crash the whole docs rail.
+    const lst = fs.lstatSync(full)
+    const isLink = lst.isSymbolicLink()
+    const inspection = inspectDocumentFile(full, false)
+    if (inspection.kind === 'non-file') continue
+    const stat = inspection.kind === 'file' ? inspection.stat : null
+    docs.push({
+      relPath: name,
+      absPath: path.resolve(full),
+      generated: isGeneratedDoc(name),
+      sizeBytes: stat?.size ?? 0,
+      ...(isLink
+        ? {
+            linked: true,
+            linkTarget: (() => {
+              try {
+                return fs.readlinkSync(full)
+              } catch {
+                return undefined
+              }
+            })(),
+            ...(stat ? {} : { broken: true }),
+          }
+        : {}),
+    })
   }
   const summary = readPrdSummary(featureDir)
   const sourceDocCount = docs.filter((d) => !d.generated).length
@@ -257,8 +252,8 @@ export function clearPrdSummary(args: { featuresDir: string; feature: string }):
   const untagged: string[] = []
   for (const file of listSpecFiles(featureDir)) {
     let source = ''
-    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
-    const next = stripCoverageTags(source)
+    try { source = readSpecSource(file) } catch { continue }
+    const next = stripCoverageTags(source, file)
     if (next !== source) {
       fs.writeFileSync(file, next)
       untagged.push(path.relative(featureDir, file))

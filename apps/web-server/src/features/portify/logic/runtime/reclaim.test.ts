@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runGit } from '../../../../shared/git-repo'
@@ -7,8 +6,11 @@ import { PortifyRunStore } from './store'
 import { buildPortifyPaths, portifyDir } from './paths'
 import { createBranchAndWorktree } from './git-ops'
 import { reclaimOrphanedPortify } from './reclaim'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-reclaim-')
 
 const roots: string[] = []
 afterEach(() => {
@@ -17,8 +19,7 @@ afterEach(() => {
 })
 
 async function fixture(): Promise<{ logsDir: string; featureDir: string; appRepo: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-reclaim-'))
-  roots.push(root)
+  const root = tempDir()
   const logsDir = path.join(root, 'logs')
   const featureDir = path.join(root, 'features', 'myfeat')
   const appRepo = path.join(root, 'app')

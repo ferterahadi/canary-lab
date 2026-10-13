@@ -1,3 +1,6 @@
+import { isActiveFlightStatus } from '@shared/flights/types'
+import { isExternallyDriven } from '@shared/flights/ownership'
+import { flightNeedsAttention } from '@shared/flights/attention'
 import {
   FLIGHT_STAGE_KEYS,
   type FlightIndexEntry,
@@ -13,7 +16,7 @@ import { presentRunStatus } from '@/features/runs/utils/run-presentation'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 import { derivedFlightToken } from '../lib/derived-stages'
-import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
+import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark } from '../lib/external-work'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for
@@ -42,7 +45,7 @@ export function summarizeFlightActivity(
   activity: Map<string, FeatureActivity>,
 ): { activeFeatures: Set<string>; preFlightRows: PlanFeaturesTask[]; activeCount: number } {
   const activeFeatures = new Set([
-    ...flights.filter((flight) => flight.status === 'running' || flight.status === 'waiting-for-approval').map((flight) => flight.feature),
+    ...flights.filter((flight) => isActiveFlightStatus(flight.status)).map((flight) => flight.feature),
     ...activity.keys(),
   ])
   const preFlightRows = preFlights.filter((task) => task.status === 'running' || task.status === 'done')
@@ -199,7 +202,7 @@ export interface FeatureChipState {
  *  evidence payload) → "not flown".
  */
 export function featureChipState(
-  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason' | 'checkpointKind' | 'stageProducer'> | null,
+  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason' | 'checkpointKind' | 'stageProducer' | 'attention'> | null,
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
@@ -266,6 +269,9 @@ export function featureChipState(
   // R74: a pause the USER chose is a quiet resting state (shelving a flight is
   // now the normal way to park one) — only failure/restart pauses keep the
   // amber "you're the blocker" tone.
+  if (flight.attention?.state === 'resolved') {
+    return { label: 'paused', tone: 'var(--text-secondary)', live: false, rank: 5, title: flight.attention.title }
+  }
   if (flight.status === 'paused' && flight.pauseReason === 'user') {
     return { label: 'paused', tone: 'var(--text-secondary)', live: false, rank: 2, title: 'paused by you — Continue resumes it' }
   }
@@ -339,7 +345,7 @@ export function resolveFeatureFlightAction(
     // Read off the flight record rather than the chip's rank, so the "blocked on
     // the human" wash tracks the same condition featureChipState branches on —
     // a hand-off is busy, not blocked, so it takes the sky `live` wash instead.
-    attention: activity?.waiting?.kind === 'test-review' || flightAwaitsUser(flight),
+    attention: activity?.waiting?.kind === 'test-review' || Boolean(flight && flightNeedsAttention(flight)),
   }
 }
 

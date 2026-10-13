@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightEntryOptions } from '@shared/flights/types'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
@@ -46,8 +47,6 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 import { ApiError } from '@/shared/api/internal'
 import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 let container: HTMLDivElement
 
 let root: Root
@@ -55,15 +54,8 @@ let root: Root
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 const flush = async (): Promise<void> => {
   await act(async () => { await Promise.resolve() })

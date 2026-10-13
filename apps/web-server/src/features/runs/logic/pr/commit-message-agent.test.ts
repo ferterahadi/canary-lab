@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -12,6 +11,9 @@ import {
   runCommitMessageAgent,
   writeFixCommitMessage,
 } from './commit-message-agent'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-msg-')
 
 // The two I/O edges: which agent CLI is installed, and the subprocess itself.
 // Everything between them — argv shape, the codex output file, the idle clock,
@@ -61,19 +63,16 @@ vi.mock('../../../agent-sessions/logic/agent-process', async (importOriginal) =>
   }
 })
 
-const roots: string[] = []
 beforeEach(() => {
   hmock.agent = 'claude'
   Object.assign(amock, { calls: [], result: { code: 0, signal: null, stdout: '', stderr: '' }, hang: false, deferred: null, idle: false, rejectWith: null, stops: 0, outputFile: null })
 })
 afterEach(() => {
   vi.restoreAllMocks()
-  for (const r of roots.splice(0)) fs.rmSync(r, { recursive: true, force: true })
 })
 
 function tmpPatch(body: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-msg-'))
-  roots.push(root)
+  const root = tempDir()
   const p = path.join(root, 'repo.patch')
   fs.writeFileSync(p, body)
   return p

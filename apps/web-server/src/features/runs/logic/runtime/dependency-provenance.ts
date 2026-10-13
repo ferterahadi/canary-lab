@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -51,7 +52,7 @@ function fingerprint(base: string, relativePath: string): DependencyFingerprint 
 function nearestLockfile(start: string, boundary: string): DependencyFingerprint | null {
   let dir = path.resolve(start)
   const stop = path.resolve(boundary)
-  while (dir === stop || dir.startsWith(`${stop}${path.sep}`)) {
+  while (isPathUnder(dir, stop, true)) {
     for (const name of LOCKFILES) {
       const candidate = path.join(dir, name)
       if (fs.existsSync(candidate)) return { path: path.relative(stop, candidate), sha256: sha256File(candidate) }
@@ -213,7 +214,7 @@ export async function prepareWorktreeDependencies(
 
   // A repair can switch a previously shared run to isolated mode. Its old
   // symlink must never let an isolated prepare command mutate another checkout.
-  if (mode === 'isolated' && realDependencyPath && !realDependencyPath.startsWith(`${realWorktreeRoot}${path.sep}`)) {
+  if (mode === 'isolated' && realDependencyPath && !isPathUnder(realDependencyPath, realWorktreeRoot, false)) {
     return {
       ...base, verdict: 'incompatible', incompatibilityCause: 'isolated-dependencies-required',
       remediation: 'Replace this worktree\'s external node_modules link with worktree-local dependencies before running isolated preparation. Do not modify the linked checkout.',
@@ -278,7 +279,7 @@ export async function prepareWorktreeDependencies(
   Object.assign(base, currentEvidence())
   if (mode === 'isolated') {
     const isolatedRealPath = dependencyRealPath(dependencyPath)
-    if (!isolatedRealPath || !(isolatedRealPath === realWorktreeRoot || isolatedRealPath.startsWith(`${realWorktreeRoot}${path.sep}`))) {
+    if (!isolatedRealPath || !isPathUnder(isolatedRealPath, realWorktreeRoot, true)) {
       return {
         ...base,
         dependencyPath: fs.existsSync(dependencyPath) ? dependencyPath : null,

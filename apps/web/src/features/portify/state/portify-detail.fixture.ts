@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { createObservedReads } from '@/shared/state/observed-reads'
 import { createRecordIndexHydration } from '@/shared/state/record-index-store'
 import { portifyIndex } from './portify-state'

@@ -6,6 +6,7 @@ import { buildPrdSummaryPrompt } from '../../../coverage/logic/coverage/prd-summ
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary-render'
 import { parseSummarySubmission, type SummarySubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 /** The collector can draft the summary while its source reading is still in
  * context. Canary pins it to the accepted documents; the summary stage still
@@ -39,12 +40,11 @@ export function saveRequirementsDraft(featureDir: string, flightDir: string, out
     || previousSummary(featureDir) !== input.previousSummary) return false
   const answer = extractJsonCandidates(reply).map(parseSummarySubmission).find((parsed) => parsed.ok)
   if (!answer?.ok) return false
-  fs.mkdirSync(path.dirname(draftPath(flightDir)), { recursive: true })
-  fs.writeFileSync(draftPath(flightDir), JSON.stringify({
+  atomicWriteJson(draftPath(flightDir), {
     docsHash: collection.docsHash,
     previousSummary: input.previousSummary,
     submission: answer.submission,
-  }))
+  })
   return true
 }
 

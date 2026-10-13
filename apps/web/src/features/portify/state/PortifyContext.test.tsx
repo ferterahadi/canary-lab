@@ -4,8 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as portifyApi from '@/shared/api/portify'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry, PortifyManifest } from '@shared/portify-index'
 import {
   PortifyProvider,
   useActivePortify,
@@ -13,8 +12,7 @@ import {
   usePortifyWorkflow,
   usePortifyDetail,
 } from './PortifyContext'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { ClosingFakeWebSocket as FakeWebSocket } from '../../../../../../tools/test-helpers/fake-websocket'
 
 // The reducer, the frame mapper and `isActivePortify` are covered against the
 // real rules in portify-state.test.ts. This suite owns the provider: the socket
@@ -28,28 +26,6 @@ vi.mock('@/shared/api/portify', async (importOriginal) => ({
   cancelPortify: vi.fn(),
 }))
 
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: unknown }) => void) | null = null
-  onclose: (() => void) | null = null
-  closed = false
-  readyState = 0
-
-  constructor(public url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  close(): void {
-    this.closed = true
-    this.readyState = 3
-    this.onclose?.()
-  }
-
-  fire(frame: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(frame) })
-  }
-}
 
 function entry(over: Partial<PortifyIndexEntry> = {}): PortifyIndexEntry {
   return {

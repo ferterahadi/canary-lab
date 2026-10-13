@@ -1,9 +1,5 @@
-import {
-  computeBenchmarkReport,
-  type ArmIterationResult,
-  type BenchmarkReport,
-} from './report'
-import type { ArmMode } from './types'
+import { computeBenchmarkReport } from './report'
+import type { ArmIterationResult, ArmMode, BenchmarkReport } from '../../../../../../../shared/benchmark-index'
 
 // The race control loop: runs the two arms IN PARALLEL each iteration, barriers
 // on both finishing, resets both worktrees to the frozen sabotage SHA between

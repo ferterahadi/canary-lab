@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FastifyReply } from 'fastify'
-import { httpFailure, notFound } from './http-error'
+import { httpFailure, notFound, replyFailure, statusCodeOf } from './http-error'
 
 // One suite for the wrapper that every route-layer rethrow goes through. The
 // non-Error arm is the reason this module exists: it was previously re-typed at
@@ -58,5 +58,38 @@ describe('notFound', () => {
     expect(notFound(reply, 'run')).toEqual({ error: 'run not found' })
     expect(notFound(reply, 'evaluation export task')).toEqual({ error: 'evaluation export task not found' })
     expect(codes).toEqual([404, 404])
+  })
+})
+
+describe('statusCodeOf', () => {
+  it('passes through the status a producer stamped', () => {
+    expect(statusCodeOf(Object.assign(new Error('conflict'), { statusCode: 409 }))).toBe(409)
+    expect(statusCodeOf(httpFailure('busy', 429))).toBe(429)
+    expect(statusCodeOf({ statusCode: 100 })).toBe(100)
+    expect(statusCodeOf({ statusCode: 599 })).toBe(599)
+  })
+
+  it('answers 500 for anything that is not a real HTTP status', () => {
+    expect(statusCodeOf(new Error('plain'))).toBe(500)
+    expect(statusCodeOf(null)).toBe(500)
+    expect(statusCodeOf(undefined)).toBe(500)
+    expect(statusCodeOf('thrown string')).toBe(500)
+    expect(statusCodeOf({ statusCode: '404' })).toBe(500)
+    expect(statusCodeOf({ statusCode: Number.NaN })).toBe(500)
+    expect(statusCodeOf({ statusCode: 404.5 })).toBe(500)
+    expect(statusCodeOf({ statusCode: 99 })).toBe(500)
+    expect(statusCodeOf({ statusCode: 600 })).toBe(500)
+  })
+})
+
+describe('replyFailure', () => {
+  it('sets the caught status and returns the { error } body', () => {
+    const codes: number[] = []
+    const reply = { code: (status: number) => { codes.push(status); return reply } } as unknown as FastifyReply
+
+    expect(replyFailure(reply, Object.assign(new Error('flight not found'), { statusCode: 404 }))).toEqual({ error: 'flight not found' })
+    expect(replyFailure(reply, 'raw')).toEqual({ error: 'raw' })
+    expect(replyFailure(reply, { code: 'EBUSY' }, 'Save failed')).toEqual({ error: 'Save failed' })
+    expect(codes).toEqual([404, 500, 500])
   })
 })

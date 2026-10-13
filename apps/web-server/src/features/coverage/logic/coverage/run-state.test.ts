@@ -1,21 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { readCoverageRunState, writeCoverageRunState } from './run-state'
-import { docsDirFor } from './docs-collection'
+import { docsDirFor } from './document-files'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-runstate-')
 
 let tmpDir: string
 let featureDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-runstate-')))
+  tmpDir = tempDir()
   featureDir = path.join(tmpDir, 'checkout')
   fs.mkdirSync(featureDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function stateFilePath(): string {

@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FlightRunStore } from './store'
 import {
   startFlight,
@@ -13,20 +12,17 @@ import {
 import { abortFlight } from './flight-queue'
 import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
 import { FLIGHT_STAGE_KEYS, type FlightStageKey } from '../../../../../../shared/flights/types'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-overlap-')
 
 let root: string
 let store: FlightRunStore
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-overlap-'))
+  root = tempDir()
   store = new FlightRunStore(root)
 })
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
-}
 
 function setup(overrides: StageAdapters = {}) {
   const calls: FlightStageKey[] = []

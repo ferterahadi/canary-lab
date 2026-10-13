@@ -1,7 +1,6 @@
-import { isActiveBenchmarkStatus, type BenchmarkIndexEntry } from '../../../../../../shared/benchmark-index'
+import { isActiveBenchmarkStatus, type BenchmarkStreamFrame } from '../../../../../../shared/benchmark-index'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore, BenchmarkStoreEvent } from '../logic/runtime/store'
-import type { BenchmarkManifest } from '../logic/runtime/types'
 import { activeDetails, registerRecordStream } from '../../../shared/ws/record-stream'
 
 // `/ws/benchmark` — push channel for the benchmark window, mirroring
@@ -16,15 +15,6 @@ import { activeDetails, registerRecordStream } from '../../../shared/ws/record-s
 export interface BenchmarkStreamDeps {
   store: BenchmarkStore
 }
-
-export type BenchmarkStreamFrame =
-  | {
-      type: 'snapshot'
-      benchmarks: BenchmarkIndexEntry[]
-      details: Record<string, BenchmarkManifest>
-    }
-  | { type: 'update'; benchmarkId: string; manifest: BenchmarkManifest }
-  | { type: 'removed'; benchmarkId: string }
 
 export async function benchmarkStreamRoutes(
   app: FastifyInstance,

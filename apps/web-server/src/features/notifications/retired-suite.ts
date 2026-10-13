@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
@@ -19,7 +20,7 @@ export async function isCommittedSuiteRetirement(featuresDir: string, feature: s
       encoding: 'utf8', timeout: 1500,
     })).stdout.trim()
     const relative = path.relative(root, config).split(path.sep).join('/')
-    if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return false
+    if (!isPathUnder(config, root, false)) return false
     const inHead = (await git('git', ['ls-tree', '--name-only', 'HEAD', '--', relative], {
       cwd: root, encoding: 'utf8', timeout: 1500,
     })).stdout.trim()

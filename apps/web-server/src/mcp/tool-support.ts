@@ -1,5 +1,5 @@
 import { unifiedDiffLines } from '../../../../shared/lib/unified-diff'
-import { compareActiveRuns } from '../features/runs/logic/active-run-order'
+import { selectRunForFeature } from '../features/runs/logic/active-run-selection'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -15,9 +15,12 @@ import type { SummaryState } from '../../../../shared/coverage/types'
 import type { DraftRecord, ExternalDraftStage } from '../../../../shared/draft-types'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
+import { newTimedTaskId } from '../shared/task-id'
 import type { McpClientFacts } from './client-surface'
-import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
+import type { CanaryLabMcpDeps, GettingStartedBusyActive, McpStartRunOutcome } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
+import { errorMessage } from '../../../../shared/lib/error-message'
+import { SERVER_EXITED_MESSAGE } from '../features/runs/logic/run-store'
 
 /** The feature-authoring context an MCP tool passes to a shared writer. Built
  *  in one place because it carries `workspaceEvents` — the writers announce
@@ -103,16 +106,11 @@ export function findContinuingRunForFeature(
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
-  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
-  for (const entry of deps.store.list({ feature })) {
-    if (!isActiveRunStatus(entry.status)) continue
-    const detail = deps.store.get(entry.runId)
-    if (!detail || detail.manifest.executionType === 'boot') continue
-    if (env && detail.manifest.env !== env) continue
-    candidates.push({ detail, startedAt: entry.startedAt })
-  }
-  candidates.sort(compareActiveRuns)
-  return candidates[0]?.detail ?? null
+  return selectRunForFeature(
+    deps.store, feature, env,
+    (entry) => isActiveRunStatus(entry.status),
+    (detail) => detail.manifest.executionType !== 'boot',
+  )
 }
 
 export type RunRefResolution =
@@ -128,16 +126,36 @@ export function resolveRunRef(
 ): RunRefResolution {
   const matches: RunDetail[] = []
   for (const entry of deps.store.list({ feature })) {
+    if (entry.runId !== ref && !entry.runId.endsWith(ref)) continue
+    // A referenced run whose server is gone settles to `aborted` before it is
+    // read, so the caller restarts it in a fresh runner instead of
+    // "continuing" a run nothing drives.
+    deps.store.settleIfOrphaned(entry.runId)
     const detail = deps.store.get(entry.runId)
     if (!detail) continue
     if (env && detail.manifest.env !== env) continue
-    if (detail.manifest.runId === ref || detail.manifest.runId.endsWith(ref)) {
-      matches.push(detail)
-    }
+    matches.push(detail)
   }
   if (matches.length === 0) return { kind: 'missing' }
   if (matches.length > 1) return { kind: 'ambiguous', candidates: matches }
   return { kind: 'resolved', detail: matches[0] }
+}
+
+/** How an agent recovers a run whose server stopped mid-run. */
+export function serverExitedGuidance(runId: string): { message: string; nextSteps: string[] } {
+  return {
+    message: SERVER_EXITED_MESSAGE,
+    nextSteps: [`start_run with run_ref "${runId}" restarts it in a fresh runner with its recorded suite and journal`],
+  }
+}
+
+/** Settle a run whose server is gone and say so; null while something drives
+ *  it. Run-control tools call this when no orchestrator answers, because the
+ *  alternative was accepting a signal nothing would ever read. */
+export function settledOrphanError(deps: CanaryLabMcpDeps, runId: string): CallToolResult | null {
+  if (!deps.store.settleIfOrphaned(runId)) return null
+  const { message, nextSteps } = serverExitedGuidance(runId)
+  return errorResult(`server-exited: ${message} Next: ${nextSteps.join('; ')}.`)
 }
 
 export function runCandidate(detail: RunDetail): Record<string, unknown> {
@@ -205,7 +223,7 @@ export function externalDraftAuthoringNextSteps(feature: string): string[] {
 }
 
 export function newDraftId(): string {
-  return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  return newTimedTaskId('draft')
 }
 
 export function isToolErrorPayload(value: unknown): value is { error: string; statusCode?: number } {
@@ -274,15 +292,33 @@ export function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
 }
 
-/** The rejection every demo-starting tool returns when another Getting Started
- *  demo already holds the workspace. Same shape as start_run's busy arm so a
- *  client handles one contract. */
-export function gettingStartedBusyResult(busy: { active: GettingStartedBusyActive; message: string }): CallToolResult {
+type GettingStartedBusyResponse =
+  | { active: GettingStartedBusyActive; message: string; variant?: 'default' | 'run' }
+  | { active?: unknown; message?: string; variant: 'flight' }
+
+/** Keep the existing tool-specific steering fields while sharing the rejection. */
+export function gettingStartedBusyResult(busy: GettingStartedBusyResponse): CallToolResult {
   return asJsonResult({
     type: 'getting_started_busy',
     active: busy.active,
     message: busy.message,
-    nextSteps: ['follow the active demo in its current owner; do not start another Getting Started workflow'],
+    ...(busy.variant === 'flight'
+      ? { next: 'Follow the active demo in its current owner; do not start another run or Flight.' }
+      : { nextSteps: [busy.variant === 'run'
+        ? 'follow the active demo in its current owner; do not start another run or flight'
+        : 'follow the active demo in its current owner; do not start another Getting Started workflow'] }),
+  })
+}
+
+export function repoCollisionResult(outcome: Extract<McpStartRunOutcome, { kind: 'collision' }>): CallToolResult {
+  return asJsonResult({
+    type: 'repo_collision_requires_choice',
+    conflictingRunId: outcome.conflictingRunId,
+    conflictingFeature: outcome.conflictingFeature,
+    repoPaths: outcome.repoPaths,
+    options: outcome.options,
+    message: outcome.message,
+    nextSteps: ['ask_user_worktree_or_queue'],
   })
 }
 
@@ -297,7 +333,7 @@ export function gettingStartedBusyResult(busy: { active: GettingStartedBusyActiv
  * covered once instead of nowhere.
  */
 export function failureResult(err: unknown): CallToolResult {
-  return errorResult(err instanceof Error ? err.message : String(err))
+  return errorResult(errorMessage(err))
 }
 
 export function hasText(value: unknown): value is string {

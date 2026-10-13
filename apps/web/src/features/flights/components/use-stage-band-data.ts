@@ -1,6 +1,8 @@
 import * as runsApi from '@/shared/api/runs'
 import * as configApi from '@/shared/api/config'
 import * as coverageApi from '@/shared/api/coverage'
+import { ApiError } from '@/shared/api/internal'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { usePortifyDetail } from '@/features/portify/state/PortifyContext'
@@ -9,8 +11,8 @@ import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import type { CoverageLedger } from '@shared/coverage/types'
 import type { RunDetail } from '@shared/run-detail'
-import { asRecord } from './FeatureSetupPanel'
-import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
+import { asRecord } from '../lib/as-record'
+import { evidenceOf, portifyWorkflowId, progressOf, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
 
 // The band's data sources live outside the flight record: the coverage ledger,
@@ -45,13 +47,19 @@ export function useStageBandData(
   const stageKey = stage.key
   // The boot run id rides the env-capture companion's evidence (the folded half
   // of the Suite setup row), or the stage's own when rendered standalone.
+  const setupStage = companion ?? stage
   const bootRunId = stageKey === 'scaffold' || stageKey === 'env-capture'
-    ? str(evidenceOf(companion ?? stage), 'runId') ?? str(evidenceOf(stage), 'runId')
+    ? str(asRecord(evidenceOf(setupStage).boot) ?? {}, 'runId')
+      ?? str(evidenceOf(setupStage), 'runId')
+      ?? str(progressOf(setupStage), 'runId')
+      ?? str(evidenceOf(stage), 'runId')
     : null
   const portifyId = portifyWorkflowId(stage)
   const needsLedger = stageKey === 'specs-coverage' || stageKey === 'evaluation-export'
-  const needsConfig = stageKey === 'scout'
   const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
+  const needsConfig = stageKey === 'scout' || needsBoot
+  const configVersion = useInvalidationKey('configuration', feature)
+  const globalConfigVersion = useInvalidationKey('configuration')
   const needsDocs = stageKey === 'docs'
   // `coverage` is the live trigger: the specs↔coverage loop publishes
   // `coverage-changed` the moment each pass's mapping lands, and the stage stays
@@ -64,21 +72,24 @@ export function useStageBandData(
   // Keyed on the run id when the stage recorded one, else on the feature (the
   // probe path below). `repos` is the live trigger: a re-boot writes a new run,
   // and the same features refresh that carries it re-reads this proof.
-  const { value: boot, loading: bootLoading } = useLiveResource<RunDetail>(
+  const { value: boot, loading: bootLoading, error: bootError } = useLiveResource<RunDetail>(
     'repos',
     needsBoot ? (bootRunId ?? feature) : null,
     async () => {
-      // Recorded evidence is a CACHE; the workspace is truth. A stage whose
-      // evidence was probed at read time carries `{captured: N}` and no boot at
-      // all — the probe can only see the envset on disk, never a dry-run that
-      // happened days ago. So when no run id is recorded, find the feature's
-      // most recent boot run and read the proof off that. Without this the whole
-      // boot half of the stage is blank on every probed flight, which is most
-      // older records.
+      // Workspace evidence can pin an ordinary test run that proved readiness.
+      // Only legacy evidence without a reference needs the boot-only fallback;
+      // never replace a pinned historical proof with an unrelated later run.
       const runId = bootRunId ?? await latestBootRunId(feature)
-      return runId ? await runsApi.getRunDetail(runId) : null
+      if (!runId) return null
+      try {
+        return await runsApi.getRunDetail(runId)
+      } catch (error) {
+        // Cleanup may remove the run; recorded service evidence still survives.
+        if (error instanceof ApiError && error.status === 404) return null
+        throw error
+      }
     },
-    { cache: 'boot-proof' },
+    { cache: 'boot-proof', reconcileMs: 5000, pauseWhenHidden: true },
   )
 
   // The workflow id is pinned at stage START (the stage's first setProgress), so
@@ -94,11 +105,11 @@ export function useStageBandData(
 
   // `repos` is bumped on `features-changed`, which is what a config edit
   // publishes — so the digest re-reads itself instead of waiting for a remount.
-  const { value: config, loading: configLoading } = useLiveResource<StageBandData['config']>(
+  const { value: config, loading: configLoading, error: configError } = useLiveResource<StageBandData['config']>(
     'repos',
     needsConfig ? feature : null,
     async (f) => configCounts((await configApi.getFeatureConfigDoc(f)).parsed.value),
-    { cache: 'config-counts' },
+    { cache: 'config-counts', reconcileMs: 5000, pauseWhenHidden: true, refreshKey: `${configVersion}:${globalConfigVersion}` },
   )
 
   // `coverage` is the live trigger: the `_prd-summary` artifacts are written by
@@ -137,10 +148,11 @@ export function useStageBandData(
     evalTask,
     ledger,
     ledgerConfirmed,
-    boot,
+    boot: bootError ? null : boot,
+    setupError: needsBoot ? configError ?? bootError : null,
     portify: livePortify ?? null,
     portifyRecovery: { error: portifyError, missing: portifyMissing, retry: retryPortify },
-    config,
+    config: configError ? null : config,
     docsListing,
     // A zero total means "no docs". The frontend keeps the Source docs slot but
     // leaves it unfilled rather than presenting zero as a measured result.
@@ -169,7 +181,9 @@ async function latestBootRunId(feature: string): Promise<string | null> {
  *  START COMMANDS, which is what actually boots, rather than the repos. */
 function configCounts(config: unknown): StageBandData['config'] {
   const root = asRecord(config)
-  const repos = Array.isArray(root?.repos) ? root.repos : []
+  // A failed/unsupported parse is unknown, never proof of an empty service list.
+  if (!root || !Array.isArray(root.repos)) return null
+  const repos = root.repos
   let services = 0
   const slots = new Set<string>()
   for (const repo of repos) {

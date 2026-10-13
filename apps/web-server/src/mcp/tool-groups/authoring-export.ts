@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../shared/getting-started-claim'
 // MCP tools — the externally-authored evaluation export lifecycle.
 // Split out of authoring.ts.
 import fs from 'fs'
@@ -144,22 +145,24 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     // rejected start never needs releasing; task creation below is synchronous.
     const claim = deps.gettingStartedDemo?.claim('export', detail.manifest.feature) ?? null
     if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
-    // Record shape + persistence shared with the flight's export hand-off.
-    const task = createExternalEvaluationExportTask({
-      logsDir: deps.store.logsDir,
-      detail,
-      sessionId: session_id,
-      clientKind: client_kind,
-      ...(conversation_name ? { conversationName: conversation_name } : {}),
-      language,
-      ...(external_session_url ? { sessionUrl: external_session_url } : {}),
-    })
-    if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'export', id: task.taskId, feature: detail.manifest.feature })
-    return asJsonResult({
-      task: evaluationExportTaskView(task),
-      reportSchema: externalEvaluationReportSchema(detail),
-      runSnapshotVia: `get_run("${runId}")`,
-      nextSteps: ['call get_run(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
+    return withGettingStartedClaim(gettingStartedClaim(deps.gettingStartedDemo, claim?.sessionId ?? null), (attach) => {
+      // Record shape + persistence shared with the flight's export hand-off.
+      const task = createExternalEvaluationExportTask({
+        logsDir: deps.store.logsDir,
+        detail,
+        sessionId: session_id,
+        clientKind: client_kind,
+        ...(conversation_name ? { conversationName: conversation_name } : {}),
+        language,
+        ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+      })
+      attach({ kind: 'export', id: task.taskId, feature: detail.manifest.feature })
+      return asJsonResult({
+        task: evaluationExportTaskView(task),
+        reportSchema: externalEvaluationReportSchema(detail),
+        runSnapshotVia: `get_run("${runId}")`,
+        nextSteps: ['call get_run(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
+      })
     })
   })
 

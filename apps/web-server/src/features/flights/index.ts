@@ -20,6 +20,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     logsDir,
     projectRoot: projectRoot,
     flightStore,
+    flightAttention: ctx.flightAttention,
     planStore,
     workspaceEvents,
     gettingStarted: ctx.gettingStarted,
@@ -46,5 +47,5 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   // after them so the store is already bridged to the workspace bus — the two
   // are complements, not alternatives: the bus tells every surface "flights
   // moved", this one carries the manifest to whoever is watching.
-  await app.register(flightsStreamRoutes, { store: flightStore })
+  await app.register(flightsStreamRoutes, { store: ctx.flightAttention ?? flightStore })
 }

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { listRuns } from './run-store'
 import { createRegistry } from './run-registry'
@@ -9,11 +8,14 @@ import { listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-c
 import { readManifest, writeManifest, writeRunsIndex } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { HEARTBEAT_STALE_MS } from '../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('dirSizeBytes', () => {

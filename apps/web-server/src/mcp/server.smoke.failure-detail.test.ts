@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
 import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client } from '@modelcontextprotocol/client'
+import { connectSmokeClient, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-failure-')
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -20,28 +23,6 @@ const inertPtyFactory: PtyFactory = () => ({
   resize: () => { /* noop */ },
   kill: () => { /* noop */ },
 })
-
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -65,12 +46,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('get_failure_detail returns one failure slice and errors on an unknown failureId', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-failure-')))
+    const logsDir = tempDir()
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
 
       runStore.bootstrap({
         runId: 'failure-detail',
@@ -107,7 +88,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_failure_detail',
         arguments: { runId: 'failure-detail', failureId: 'test-2' },
       })
-      const okBody = JSON.parse(toolText(ok))
+      const okBody = JSON.parse(smokeToolText(ok))
       expect(okBody).toMatchObject({
         runId: 'failure-detail',
         failureId: 'test-2',
@@ -124,7 +105,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { runId: 'failure-detail', failureId: 'no-such-test' },
       })
       expect(missing.isError).toBe(true)
-      expect(toolText(missing)).toContain('failure not found')
+      expect(smokeToolText(missing)).toContain('failure not found')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -133,12 +114,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('signal_run writes canonical restart/rerun journal payloads', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-')))
+    const logsDir = tempDir('cl-mcp-signal-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
 
       runStore.bootstrap({
         runId: 'journal-run',
@@ -161,7 +142,7 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect(result.isError).not.toBe(true)
 
-      const signalBody = JSON.parse(toolText(result)) as { nextSteps?: string[]; runId?: string }
+      const signalBody = JSON.parse(smokeToolText(result)) as { nextSteps?: string[]; runId?: string }
       expect(signalBody.nextSteps).toContain('wait_for_heal_task')
       expect(signalBody.runId).toBe('journal-run')
 
@@ -178,12 +159,12 @@ describe('MCP HTTP server (smoke)', () => {
 
   it('rejects signal_run restart/rerun calls without journal fields', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
-    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-validation-')))
+    const logsDir = tempDir('cl-mcp-signal-validation-')
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address)
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle')
 
       runStore.bootstrap({
         runId: 'journal-run',
@@ -217,12 +198,12 @@ describe('MCP HTTP server (smoke)', () => {
     let authorClient: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      repairClient = await connectClient(address, '/mcp?profile=repair')
+      repairClient = await connectSmokeClient(address, '/mcp?profile=repair')
       const repairInstructions = repairClient.getInstructions() ?? ''
       expect(repairInstructions).toContain('wait_for_heal_task')
       expect(repairInstructions).toContain('signal_run')
 
-      authorClient = await connectClient(address, '/mcp?profile=author')
+      authorClient = await connectSmokeClient(address, '/mcp?profile=author')
       const authorInstructions = authorClient.getInstructions() ?? ''
       expect(authorInstructions).toContain('create_feature')
       expect(authorInstructions).toContain('call create_feature directly')

@@ -6,6 +6,7 @@ import { resolveRepoPath } from './repo-identity'
 import { describeRepoCheckout } from './git-upstream'
 import { repositoryWatchPaths, type RepositoryWatchPath } from './repository-watch-paths'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
+import { OBSERVATION_LEASE_MS, createCappedDebounce, type CappedDebounce } from './debounced-watch'
 
 export interface RepositoryObserver {
   readStatus(cwd: string, consumer: RepositoryConsumer): ReturnType<typeof getGitStatus>
@@ -34,14 +35,9 @@ interface Observation {
   retryAt: number
   preparing?: Promise<void>
   lease?: ReturnType<typeof setTimeout>
-  debounce?: ReturnType<typeof setTimeout>
-  firstChange?: number
+  debounce: CappedDebounce
   pending: Map<string, { started: number; promise: Promise<unknown> }>
 }
-
-const LEASE_MS = 90_000
-const DEBOUNCE_MS = 250
-const MAX_DEBOUNCE_MS = 1000
 
 /** Demand-driven filesystem hints and concurrent display reads. Mutation guards
  * deliberately use the uncached Git primitives instead of this observer. */
@@ -62,22 +58,17 @@ export function createRepositoryObserver(deps: ObserverDeps): RepositoryObserver
   const release = (key: string, entry: Observation) => {
     observations.delete(key)
     clearTimeout(entry.lease)
-    clearTimeout(entry.debounce)
+    entry.debounce.cancel()
     releaseWatches(entry)
   }
   const publish = (entry: Observation) => {
-    entry.debounce = undefined
-    entry.firstChange = undefined
     const consumers = [...entry.consumers.values()].filter((c) => c.expires > Date.now()).map((c) => c.value)
     if (consumers.length) publishWorkspaceEvent(deps.events, { type: 'repos-changed', consumers })
   }
   const changed = (entry: Observation, structural: boolean) => {
     entry.generation++
     entry.dirty ||= structural
-    entry.firstChange ??= Date.now()
-    clearTimeout(entry.debounce)
-    entry.debounce = setTimeout(() => publish(entry), Math.min(DEBOUNCE_MS, Math.max(0, MAX_DEBOUNCE_MS - (Date.now() - entry.firstChange!))))
-    entry.debounce.unref()
+    entry.debounce.schedule()
   }
   const attach = (entry: Observation, spec: RepositoryWatchPath) => {
     const key = JSON.stringify([spec.path, spec.recursive])
@@ -126,12 +117,13 @@ export function createRepositoryObserver(deps: ObserverDeps): RepositoryObserver
     const key = JSON.stringify([cwd, scope])
     let entry = observations.get(key)
     if (!entry) {
-      entry = { cwd, scope, generation: 0, consumers: new Map(), releases: [], dirty: true, retryAt: 0, pending: new Map() }
+      const created: Observation = { cwd, scope, generation: 0, consumers: new Map(), releases: [], dirty: true, retryAt: 0, pending: new Map(), debounce: createCappedDebounce(() => publish(created)) }
+      entry = created
       if (!disposed) observations.set(key, entry)
     }
     const current = entry
     if (disposed) return current
-    current.consumers.set(repositoryConsumerKey(consumer), { value: consumer, expires: Date.now() + LEASE_MS })
+    current.consumers.set(repositoryConsumerKey(consumer), { value: consumer, expires: Date.now() + OBSERVATION_LEASE_MS })
     renew(key, current)
     if (current.dirty && Date.now() >= current.retryAt && !current.preparing) {
       current.dirty = false

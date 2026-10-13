@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
 import { useMountedIdentity } from '../state/use-mounted-identity'
 import { connectReconnectingSocket, defaultWsBase } from '../api/reconnecting-socket'
+import { displayError } from '@/shared/api/error-message'
 
 export function useDiscoveryRepair(feature: string | null) {
   const [snapshot, setSnapshot] = useState<{ feature: string; repairs: DiscoveryRepairView[] } | null>(null)
@@ -48,7 +49,7 @@ export function useDiscoveryRepair(feature: string | null) {
         if (repairs.some((r) => r.id === repair.id && r.updatedAt >= repair.updatedAt)) return previous
         return { feature, repairs: [repair, ...repairs.filter((r) => r.id !== repair.id)] }
       })
-    } catch (err) { if (current()) setStartError(err instanceof Error ? err.message : String(err)) }
+    } catch (err) { if (current()) setStartError(displayError(err)) }
     finally {
       if (pending.current.get(feature) === operation) pending.current.delete(feature)
       if (mounted()) renderPending((version) => version + 1)

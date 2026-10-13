@@ -1,6 +1,7 @@
 import { command } from '../files'
 import { recoverCandidateResources, RecoveryOwnershipError, saveRecoveredState, saveRecovery,
   type ContainerRecoveryPlan, type ContainerRecoveryReceipt } from './container-recovery'
+import { sleep } from '../../../shared/lib/sleep'
 
 type Request = { operation: 'abort' } | { id: number; operation: 'finish' }
   | { id: number; operation: 'run'; args: string[]; timeoutMs?: number; log?: string }
@@ -64,7 +65,7 @@ export function superviseCandidate(plan: ContainerRecoveryPlan): void {
       if (cleaned()) return
       do {
         await cleanup()
-        if (!cleaned() && !ownershipFailure) await new Promise((resolve) => setTimeout(resolve, 5_000))
+        if (!cleaned() && !ownershipFailure) await sleep(5_000)
       } while (!cleaned() && !ownershipFailure)
     }).catch((error) => {
       receipt.status = 'failed'; receipt.errors = [String(error)]; saveRecovery(plan, receipt)

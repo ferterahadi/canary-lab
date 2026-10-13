@@ -1,3 +1,4 @@
+import { distinctRepoPaths } from '@shared/lib/repository-paths'
 import type { FlightStage, FlightStageStatus } from '@shared/flights/types'
 import { describe, expect, it } from 'vitest'
 import type { CoverageLedger } from '@shared/coverage/types'
@@ -7,7 +8,6 @@ import {
   CONFIG_GROUP,
   currentStageForPair,
   bootDurationMs,
-  distinctRepoPaths,
   estimateTokens,
   groupOverlayFiles,
   ledgerEvidence,

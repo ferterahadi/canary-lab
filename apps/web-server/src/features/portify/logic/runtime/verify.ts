@@ -5,7 +5,8 @@ import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime
 import { allocatePorts, releasePorts } from '../../../runs/logic/runtime/port-allocator'
 import { bootAndProbe, fileTee, type BootProbeResult } from '../../../runs/logic/runtime/boot-probe'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
-import type { PortifyBootInstance, PortifyVerification } from './types'
+import type { PortifyBootInstance, PortifyVerification } from '../../../../../../../shared/portify-index'
+import { sleep } from '../../../../../../../shared/lib/sleep'
 
 // Proof that a feature's ports are injectable: boot the whole stack TWICE
 // CONCURRENTLY on two disjoint port maps and require both to come up healthy.
@@ -30,10 +31,6 @@ export interface VerifyDeps {
   verifyLogDir: string
   /** Small stagger between the two boots to avoid npm/tsx cold-cache thrash. */
   staggerMs?: number
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /** Declaration is only permission to try verification without an edit. The
@@ -97,7 +94,7 @@ export async function verifyDoubleBoot(
         fullLogPathFor: (safeName) => path.join(deps.verifyLogDir, `a-${safeName}.log`),
       }),
       (async () => {
-        await delay(deps.staggerMs ?? 250)
+        await sleep(deps.staggerMs ?? 250)
         return bootAndProbe({
           ...bootOpts,
           specs: specsB,

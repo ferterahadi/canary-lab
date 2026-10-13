@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { createServer } from './server'
@@ -9,6 +8,9 @@ import { generateRunId } from './features/runs/logic/runtime/run-id'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import type { PaneMessage, PaneSubscriber } from './features/runs/logic/pane-broker'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './features/runs/logic/runtime/pty-spawner'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-srv-')
 
 // End-to-end check: POST /api/runs against a temporary broken feature, drive
 // the orchestrator with a fake ptyFactory so we don't need real Playwright,
@@ -69,7 +71,7 @@ let featuresDir: string
 beforeEach(() => {
   // Stand up a minimal fixture project (broken-style feature) in tmp so we
   // don't write into the repo's logs/ during tests.
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-srv-')))
+  const tmp = tempDir()
   projectRoot = tmp
   logsDir = path.join(tmp, 'logs')
   featuresDir = path.join(tmp, 'features')
@@ -90,10 +92,6 @@ beforeEach(() => {
        }],
      } }`,
   )
-})
-
-afterEach(() => {
-  try { fs.rmSync(projectRoot, { recursive: true, force: true }) } catch { /* ignore */ }
 })
 
 describe('createServer + RunOrchestrator.runFullCycle integration', () => {

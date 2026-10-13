@@ -1,11 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { computeFeatureCoverage } from './service'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from './feature-docs'
 import { runCoverageEngine as runCoverageEngineReal } from './coverage-engine'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-state-')
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
@@ -18,15 +21,11 @@ let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-state-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 const SPEC = `
@@ -35,16 +34,7 @@ const SPEC = `
 `
 
 function writeFeature(name: string, doc = '# Create todo\na user can create a new todo item'): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), doc)
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, { specs: { 'a.spec.ts': SPEC }, docs: { 'spec.md': doc } })
 }
 
 const cov = (feature: string) => computeFeatureCoverage({ featuresDir, logsDir, feature })

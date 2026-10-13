@@ -1,16 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { formatHistoricalPaneReplay, resolveLogPath, shouldPreferLogReplay, shouldReplayLogFile } from './pane-stream'
+import { formatHistoricalPaneReplay, replayLogFile, resolveLogPath, shouldPreferLogReplay, shouldReplayLogFile } from './pane-stream'
 import { writeManifest } from '../logic/runtime/manifest'
 import { runDirFor, buildRunPaths } from '../logic/runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pane-')
 
 let logsDir: string
 const runId = 'r-pane-test'
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pane-')))
+  logsDir = tempDir()
   const dir = runDirFor(logsDir, runId)
   fs.mkdirSync(dir, { recursive: true })
   writeManifest(path.join(dir, 'manifest.json'), {
@@ -91,5 +93,31 @@ describe('formatHistoricalPaneReplay', () => {
   it('returns the raw bytes unchanged for every paneId — historical agent view goes through the structured route', () => {
     expect(formatHistoricalPaneReplay('playwright', '\x1b[31mred\x1b[0m')).toBe('\x1b[31mred\x1b[0m')
     expect(formatHistoricalPaneReplay('service:api', '\x1b[31mred\x1b[0m')).toBe('\x1b[31mred\x1b[0m')
+  })
+})
+
+describe('replayLogFile', () => {
+  it('does not throw when the socket closed before the replay sends — the closed socket gets no retry send', () => {
+    fs.writeFileSync(buildRunPaths(runDirFor(logsDir, runId)).playwrightStdoutPath, 'line\n')
+    const attempts: string[] = []
+    let closed = 0
+    const socket = {
+      send: (message: string) => { attempts.push(message); throw new Error('socket closed') },
+      close: () => { closed += 1 },
+    }
+
+    expect(replayLogFile(socket, logsDir, runId, 'playwright')).toBe(true)
+    expect(attempts.map((m) => JSON.parse(m).type)).toEqual(['data', 'exit'])
+    expect(closed).toBe(1)
+  })
+
+  it('reports an unreadable log as an error frame', () => {
+    const logPath = buildRunPaths(runDirFor(logsDir, runId)).playwrightStdoutPath
+    fs.mkdirSync(logPath, { recursive: true })
+    const frames: unknown[] = []
+    const socket = { send: (message: string) => { frames.push(JSON.parse(message)) }, close: () => {} }
+
+    expect(replayLogFile(socket, logsDir, runId, 'playwright')).toBe(true)
+    expect(frames).toEqual([{ type: 'error', error: 'log not available' }])
   })
 })

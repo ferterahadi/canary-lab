@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { probeCliHealth } from './health-probe'
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
@@ -13,6 +14,7 @@ import {
   type CanaryLabWorkspaceRegistry,
 } from '../../shared/runtime/workspace-registry'
 import { McpCommandOptions, isDefaultLocalMcpUrl, stripProfile } from './mcp'
+import { sleep } from '../../shared/lib/sleep'
 
 export const DEFAULT_UI_STARTUP_TIMEOUT_MS = 15_000
 
@@ -79,9 +81,9 @@ export async function checkHealth(
   fetchFn: typeof fetch,
 ): Promise<{ ok: true; projectRoot?: string } | { ok: false; error: string }> {
   try {
-    const health = await fetchFn(healthUrlFor(url))
+    const health = await probeCliHealth(healthUrlFor(url), { fetchImpl: fetchFn, decode: 'optional' })
     if (!health.ok) return { ok: false, error: `/mcp/health returned ${health.status}` }
-    const body = await health.json().catch(() => null) as { projectRoot?: unknown } | null
+    const body = health.body as { projectRoot?: unknown } | null
     return {
       ok: true,
       ...(typeof body?.projectRoot === 'string' ? { projectRoot: body.projectRoot } : {}),
@@ -92,15 +94,24 @@ export async function checkHealth(
 }
 
 export function startUiInBackground(stderr: Writable, projectRoot: string): void {
-  const child = spawn(process.execPath, [resolveCliPath(), 'ui', '--no-open'], {
+  spawnDetachedUi(projectRoot, resolveCliPath(), stderr)
+}
+
+/** The one detached `canary-lab ui --no-open` spawn for a project. Callers keep
+ *  their own CLI-path precedence; `stderr`, when given, receives the child's
+ *  stderr prefixed, otherwise all output is discarded. */
+export function spawnDetachedUi(projectRoot: string, cliPath: string, stderr?: Writable): void {
+  const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
     cwd: projectRoot,
     detached: true,
     env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: stderr ? ['ignore', 'ignore', 'pipe'] : 'ignore',
   })
-  child.stderr?.on('data', (chunk: Buffer | string) => {
-    stderr.write(`[canary-lab ui] ${chunk.toString()}`)
-  })
+  if (stderr) {
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr.write(`[canary-lab ui] ${chunk.toString()}`)
+    })
+  }
   child.unref()
 }
 
@@ -164,10 +175,6 @@ export function resolveCliPath(): string {
   const siblingCli = path.join(__dirname, 'cli.js')
   if (fs.existsSync(siblingCli)) return siblingCli
   return process.argv[1] ?? siblingCli
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function healthUrlFor(url: string): string {

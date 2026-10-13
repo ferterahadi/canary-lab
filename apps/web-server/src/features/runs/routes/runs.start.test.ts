@@ -1,18 +1,8 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import Fastify from 'fastify'
-import { runsRoutes } from './runs'
 import type { ExternalHealAgentRequest } from './runs-route-support'
-import { RunStore } from '../logic/run-store'
-import {
-  createRegistry,
-  type OrchestratorLike,
-  type RestartHealResult,
-  type RestartRunResult,
-} from '../logic/run-registry'
+import type { OrchestratorLike } from '../logic/run-registry'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
@@ -20,8 +10,12 @@ import { launchEditorDir } from '../../../shared/editor-launch'
 
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildRunsApp, type RunsAppOptions } from './__fixtures__/runs-app'
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+const tempDir = trackTempDirs('cl-rroutes-')
+
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The PR routes are thin plumbing over these two — they're unit-tested in
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
@@ -39,7 +33,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
@@ -58,43 +52,10 @@ function makeStub(runId: string): OrchestratorLike & { stopped: boolean } {
 }
 
 function writeFeature(name: string): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: [] })
 }
 
-async function build(opts: {
-	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
-	  cancelQueuedRun?: (runId: string) => boolean
-	  broker?: Parameters<typeof runsRoutes>[1]['broker']
-	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-	  restartRun?: (runId: string) => Promise<RestartRunResult>
-  projectRoot?: string
-  events?: WorkspaceEvent[]
-  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
-  gettingStarted?: GettingStartedSessionStore
-} = {}) {
-  const registry = createRegistry()
-  const store = new RunStore(logsDir, registry)
-  const app = Fastify()
-  await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store,
-    broker: opts.broker,
-	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-	    cancelQueuedRun: opts.cancelQueuedRun,
-	    restartHeal: opts.restartHeal,
-    restartRun: opts.restartRun,
-    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
-	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-	    gettingStarted: opts.gettingStarted,
-	  })
-  return { app, registry, store }
-}
+const build = (opts: RunsAppOptions = {}) => buildRunsApp({ logsDir, featuresDir }, opts)
 
 describe('POST /api/runs', () => {
   it('400s when the request has no body', async () => {
@@ -213,6 +174,7 @@ describe('POST /api/runs', () => {
     })
     expect(res.statusCode).toBe(409)
     expect(res.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-live' } })
+    expect(res.json()).toEqual({ type: 'getting_started_busy', error: new GettingStartedBusyError(active).message, active })
     expect(startRun).not.toHaveBeenCalled()
   })
 
@@ -251,6 +213,7 @@ describe('POST /api/runs', () => {
     // holds a target-less claim, which the next boot reconciles away.
     expect(res.statusCode).toBe(202)
     expect(attach).toHaveBeenCalledWith('gs-q', { kind: 'run', id: 'q-demo' })
+    expect(gettingStarted.abandon).not.toHaveBeenCalled()
   })
 
   it('links a Getting Started claim to the active run it reused', async () => {
@@ -294,6 +257,23 @@ describe('POST /api/runs', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ runId: 'active-demo', reused: true })
     expect(attach).toHaveBeenCalledWith('gs-reuse', { kind: 'run', id: 'active-demo' })
+    expect(gettingStarted.abandon).not.toHaveBeenCalled()
+  })
+
+  it('releases an unattached demo claim when a collision requires a choice', async () => {
+    writeFeature('foo')
+    const gettingStarted = {
+      claim: vi.fn(() => ({ sessionId: 'gs-collision' })), attach: vi.fn(), abandon: vi.fn(),
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => ({ kind: 'collision', conflictingRunId: 'active', conflictingFeature: 'bar', repoPaths: ['/repo/app'] }),
+      gettingStarted,
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', gettingStartedSource: 'internal' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().type).toBe('repo_collision_requires_choice')
+    expect(gettingStarted.abandon).toHaveBeenCalledExactlyOnceWith('gs-collision')
+    expect(gettingStarted.attach).not.toHaveBeenCalled()
   })
 
   it('releases a Getting Started claim when the run fails to start', async () => {
@@ -759,3 +739,4 @@ describe('POST /api/runs', () => {
   })
 })
 import type { RunsRouteDeps } from './runs-route-deps'
+import { writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'

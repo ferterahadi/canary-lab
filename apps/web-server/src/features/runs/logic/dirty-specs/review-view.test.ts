@@ -1,19 +1,17 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { dirtySummaryView } from './review-view'
 import { testRequirementsOf, testRequirementsReader } from './test-requirements'
 import type { DirtySpec, SpecStrength } from '../../../../../../../shared/run-manifest'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-view-')
 
 let featureDir: string
 
 beforeEach(() => {
-  featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-view-'))
-})
-
-afterEach(() => {
-  fs.rmSync(featureDir, { recursive: true, force: true })
+  featureDir = tempDir()
 })
 
 const LIVE = `// @requirement checkout-1

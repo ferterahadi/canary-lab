@@ -1,9 +1,55 @@
 import { describe, it, expect, vi } from 'vitest'
-import { agentSessionAbsence, getAgentSession, isAgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { agentSessionAbsence, getAgentSession, isAgentSessionAbsence, requestAgentSession, type AgentSessionResponse } from './agent-sessions'
+import { getBenchmarkAgentSession } from './benchmark'
+import { getCoverageAgentSession, getEvaluationAgentSession } from './coverage'
+import { getFlightAgentSession, getFlightPlanAgentSession } from './flights'
+import { getPortifyAgentSession } from './portify'
 import { ApiError } from './internal'
 import { ok, fail } from './__fixtures__/response'
 
 describe('agent-sessions api', () => {
+  it.each([
+    [getAgentSession, '/api/runs/id%2F%3F/agent-session'],
+    [getBenchmarkAgentSession, '/api/benchmarks/id%2F%3F/agent-session'],
+    [getCoverageAgentSession, '/api/coverage/jobs/id%2F%3F/agent-session'],
+    [getEvaluationAgentSession, '/api/evaluation-exports/id%2F%3F/agent-session'],
+    [getFlightPlanAgentSession, '/api/flights/plan-features/id%2F%3F/agent-session'],
+    [getPortifyAgentSession, '/api/portify/id%2F%3F/agent-session'],
+  ] as const)('forwards the client and encodes the path for %s', async (getSession, pathname) => {
+    const session: AgentSessionResponse = { agent: 'codex', sessionId: 's', events: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(session))
+    await expect(getSession('id/?', { baseUrl: 'http://canary.test', fetchImpl })).resolves.toEqual(session)
+    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(`http://canary.test${pathname}`, { method: 'GET' })
+  })
+
+  it('encodes the flight stage independently of the flight ID', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ agent: 'claude', sessionId: 's', events: [] }))
+    await getFlightAgentSession('id/?', 'stage/&?', { baseUrl: 'http://canary.test', fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+      'http://canary.test/api/flights/id%2F%3F/agent-session?stage=stage%2F%26%3F', { method: 'GET' },
+    )
+  })
+
+  it.each([getBenchmarkAgentSession, getCoverageAgentSession])('preserves successful null responses for %s', async (getSession) => {
+    await expect(getSession('id', { fetchImpl: vi.fn().mockResolvedValue(ok(null)) })).resolves.toBeNull()
+  })
+
+  it('does not cache or coalesce identical session requests', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => ok(null))
+    const opts = { fetchImpl }
+    await expect(Promise.all([
+      requestAgentSession<AgentSessionResponse | null>('/session', opts),
+      requestAgentSession<AgentSessionResponse | null>('/session', opts),
+    ])).resolves.toEqual([null, null])
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([new TypeError('network unavailable'), new ApiError(503, { error: 'unavailable' })])(
+    'propagates the original non-404 error', async (error) => {
+      await expect(requestAgentSession('/session', { fetchImpl: vi.fn().mockRejectedValue(error) })).rejects.toBe(error)
+    },
+  )
+
   it('getAgentSession returns normalized events and maps 404 to an absence', async () => {
     const session = {
       agent: 'claude',

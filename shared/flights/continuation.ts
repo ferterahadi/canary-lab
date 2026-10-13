@@ -36,6 +36,9 @@ export function recommendFlightContinuation(
   }
 
   const coverage = evidence['specs-coverage']
+  if (coverage?.summaryState !== undefined && coverage.summaryState !== 'fresh') {
+    return { fromStage: 'prd-summary', reason: 'the requirement summary must be refreshed before coverage can count' }
+  }
   const coveragePct = finiteNumber(coverage?.coveragePct)
   const testsWritten = finiteNumber(coverage?.testsWritten)
   if (!coverage || testsWritten === null || testsWritten < 1 || coveragePct === null) {

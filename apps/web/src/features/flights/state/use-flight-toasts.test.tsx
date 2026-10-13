@@ -1,14 +1,13 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { FlightIndexEntry } from '@shared/flights/types'
 import type { ToastItem } from '@/shared/ui/Toasts'
 import { AGGREGATE_TOAST_ID } from './flight-toasts'
 import { useFlightToasts } from './use-flight-toasts'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The seed-vs-transition rules, the copy and the on-screen suppression are all
 // `diffFlightToasts`, covered in flight-toasts.test.ts against the real rules —
@@ -23,7 +22,6 @@ function flight(over: Partial<FlightIndexEntry>): FlightIndexEntry {
   } as FlightIndexEntry
 }
 
-let container: HTMLDivElement
 let root: Root
 let toasts: ToastItem[]
 let dismiss: (id: string) => void
@@ -65,18 +63,11 @@ async function render(props: {
   })
 }
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   toasts = []
   openedFlights = []
   openedViews = 0
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
 })
 
 describe('useFlightToasts', () => {

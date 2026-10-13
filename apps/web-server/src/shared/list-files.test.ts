@@ -1,13 +1,14 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { listFiles } from './list-files'
 import { listFiles as artifactFiles } from '../features/runs/logic/run-artifacts'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('file-walk-')
 
 let root: string
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'file-walk-')) })
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
 
 describe('listFiles', () => {
   it('walks in directory order, including hidden files but excluding every symlink', () => {

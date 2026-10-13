@@ -1,17 +1,15 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { command, sourceRoot } from './files'
 import { runTests } from './evaluator'
 import { writeRunbook } from './runtime'
+import { trackTempDirs } from '../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('study-output-')
 
 it('keeps runbook and evaluator artifacts inside their roots beneath an unrelated package', async () => {
-  const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'study-output-')))
-  roots.push(workspace)
+  const workspace = tempDir()
   fs.writeFileSync(path.join(workspace, 'package.json'), '{}')
   const ancestorOutput = path.join(workspace, 'test-results')
   fs.mkdirSync(ancestorOutput)

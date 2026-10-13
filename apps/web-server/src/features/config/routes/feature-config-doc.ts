@@ -1,4 +1,4 @@
-import { resolveConfigDocument, readConfigDocument } from './config-document'
+import { resolveConfigDocument, readConfigDocument, writeConfigDocument } from './config-document'
 // Feature-config REST — the feature.config.{cjs,js,ts} document itself, the
 // portify-overlay reset, the per-repo git surface, and feature deletion.
 // Split out of feature-config.ts; handler bodies are unchanged.
@@ -6,8 +6,9 @@ import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
 import os from 'os'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../shared/config-value'
+import { findFeature } from '../../../shared/feature-loader'
 import { getGitStatus } from '../../../shared/git-repo'
 import { resolveRepoPath } from '../../../shared/repo-identity'
 import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo } from '../logic/feature-repos'
@@ -34,7 +35,6 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
       const document = resolveConfigDocument(deps.featuresDir, req.params.name, FEATURE_CONFIG_NAMES, 'config file')
       if (!document.ok) return notFound(reply, document.missing)
       const { features, feature, cfg } = document
-      const source = fs.readFileSync(cfg.path, 'utf-8')
       // Always sync `envs:` to match the actual envset folders on disk —
       // the General tab no longer edits this list (Envsets tab is the
       // single source of truth). We override whatever the client sent.
@@ -62,15 +62,11 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
           return { error: blocked }
         }
       }
-      let next: string
-      try {
-        next = writeFeatureConfig(source, synced)
-      } catch (err) {
+      const written = writeConfigDocument(cfg, synced, writeFeatureConfig, readFeatureConfig)
+      if (!written.ok) {
         reply.code(400)
-        return { error: (err as Error).message }
+        return { error: written.error }
       }
-      fs.writeFileSync(cfg.path, next)
-      const parsed = readFeatureConfig(next)
       if (renaming) {
         // The suite's history follows its identity. NOTE: the feature DIRECTORY
         // deliberately stays put — `loadFeatures` never reads it (`featureDir`
@@ -88,7 +84,7 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
         }
       }
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-      return { path: cfg.path, format: cfg.format, content: next, parsed }
+      return written.document
     },
   )
 
@@ -163,8 +159,7 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.post<{ Params: { name: string } }>(
     '/api/features/:name/pin-current-branches',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
+      const feature = findFeature(deps.featuresDir, req.params.name)
       if (!feature?.featureDir) return notFound(reply, 'feature')
       const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
       if (!cfg) return notFound(reply, 'config file')

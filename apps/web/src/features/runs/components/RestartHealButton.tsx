@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import { ApiError } from '@/shared/api/internal'
+import { displayError } from '@/shared/api/error-message'
 
 // Shared terminal-run restart action. It keeps the same run id and asks the
 // server to retest failed, skipped, and pending tests before any full-suite
@@ -11,7 +12,7 @@ function formatRestartError(e: unknown): string {
     const reason = (e.body as { reason?: unknown })?.reason
     if (typeof reason === 'string') return `Restart failed: ${reason}`
   }
-  return e instanceof Error ? e.message : 'Retest failed'
+  return displayError(e, 'Retest failed')
 }
 
 interface Props {

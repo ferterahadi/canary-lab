@@ -1,3 +1,4 @@
+import type { AgentSessionEvent } from '../../../../../../shared/agent-session-types'
 // Locate, parse, and normalize the structured session log that the heal
 // agent's CLI persists by itself.
 //
@@ -22,7 +23,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { AgentEvent, AgentSessionRef, loadAgentSessionLog } from './agent-session-log'
+import { AgentSessionRef, loadAgentSessionLog } from './agent-session-log'
 
 export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_000): string {
   const events = loadAgentSessionLog(ref)
@@ -54,7 +55,7 @@ export function renderAgentSessionContext(ref: AgentSessionRef, maxChars = 12_00
  */
 export function buildFullSessionTranscript(
   ref: AgentSessionRef,
-  events: AgentEvent[] = loadAgentSessionLog(ref),
+  events: AgentSessionEvent[] = loadAgentSessionLog(ref),
 ): string {
   if (events.length === 0) return ''
   const lines = [`Previous ${ref.agent} session ${ref.sessionId} (full transcript):`]
@@ -68,7 +69,7 @@ export function buildFullSessionTranscript(
  */
 export function writeFullSessionTranscript(
   ref: AgentSessionRef,
-  events?: AgentEvent[],
+  events?: AgentSessionEvent[],
 ): string | null {
   const transcript = buildFullSessionTranscript(ref, events)
   if (!transcript) return null
@@ -84,7 +85,7 @@ export function writeFullSessionTranscript(
   }
 }
 
-export function renderAgentEventLine(event: AgentEvent, opts: { full?: boolean } = {}): string {
+export function renderAgentEventLine(event: AgentSessionEvent, opts: { full?: boolean } = {}): string {
   const prefix = event.timestamp ? `[${event.timestamp}] ` : ''
   const t = (s: string): string => compactText(s, opts.full)
   switch (event.kind) {

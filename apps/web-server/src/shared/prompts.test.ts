@@ -1,8 +1,10 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { PROMPTS_DIR, promptPath, loadPromptTemplate, renderPromptTemplate, renderPrompt } from './prompts'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-prompts-')
 
 describe('promptPath', () => {
   it('joins a template name onto the packaged prompts dir', () => {
@@ -14,11 +16,7 @@ describe('loadPromptTemplate', () => {
   let tmp: string
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prompts-'))
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true })
+    tmp = tempDir()
   })
 
   it('reads and trims a template file', () => {

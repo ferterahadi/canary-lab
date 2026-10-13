@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 
 export function readJsonLines<T>(file: string, accepts: (value: unknown) => value is T): T[] | undefined {
   let raw: string
@@ -22,4 +23,12 @@ export function readJsonLines<T>(file: string, accepts: (value: unknown) => valu
     if (accepts(parsed)) out.push(parsed)
   }
   return out
+}
+
+/** Append one JSON value as a line, creating the parent directory on first
+ *  use. The writer half of `readJsonLines`: one `appendFileSync` per entry, so
+ *  a crash mid-write tears at most the last line, which the reader skips. */
+export function appendJsonLine(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.appendFileSync(file, JSON.stringify(value) + '\n')
 }

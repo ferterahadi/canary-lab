@@ -1,21 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 // @ts-expect-error — plain .mjs helper, no type declarations by design.
 import { pruneDemoStateFromRealHome } from './demo-home-prune.mjs'
+import { trackTempDirs } from './test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-prune-')
 function mkDirs(): { registryDir: string; tempRoot: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prune-')))
-  tmpDirs.push(root)
+  const root = tempDir()
   const registryDir = path.join(root, 'home', '.canary-lab')
   fs.mkdirSync(registryDir, { recursive: true })
   return { registryDir, tempRoot: path.join(root, 'canary-lab-demo-x') }
 }
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
 
 function write(registryDir: string, file: string, body: unknown): void {
   fs.writeFileSync(path.join(registryDir, file), JSON.stringify(body))

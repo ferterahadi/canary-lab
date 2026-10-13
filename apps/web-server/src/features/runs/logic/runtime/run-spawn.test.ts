@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { defaultPlaywrightSpawner, killTree, scheduleSigkillFallback, writeRerunTestList } from './run-spawn'
 import type { PtyHandle } from './pty-spawner'
 import type { RunPaths } from './run-paths'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // killTree is the only thing standing between an aborted run and a heal agent
 // that outlives it, so both the process-group path and the per-pty fallback are
@@ -15,14 +15,10 @@ const fakePty = (overrides: Partial<PtyHandle> = {}): PtyHandle =>
   ({ pid: 4242, kill: vi.fn(), write: vi.fn(), resize: vi.fn(), ...overrides }) as unknown as PtyHandle
 
 describe('rerun test-list file', () => {
-  const tmpDirs: string[] = []
-  afterEach(() => {
-    while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-  })
+  const tempDir = trackTempDirs('cl-rs-')
 
   function mkPaths(): RunPaths {
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
-    tmpDirs.push(runDir)
+    const runDir = tempDir()
     return {
       runDir,
       rerunListPath: path.join(runDir, 'rerun-test-list.txt'),

@@ -7,6 +7,9 @@ import os from 'os'
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-pcfg-')
 
 const spawnMock = vi.fn((_command: string, _args: readonly string[], _options?: unknown) => ({
   unref: vi.fn(),
@@ -48,14 +51,13 @@ async function makeApp(
 }
 
 beforeEach(() => {
-  projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-pcfg-')))
+  projectRoot = tempDir()
   spawnMock.mockClear()
   spawnSyncMock.mockClear()
   spawnSyncMock.mockReturnValue({ status: 1 })
 })
 
 afterEach(() => {
-  fs.rmSync(projectRoot, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 

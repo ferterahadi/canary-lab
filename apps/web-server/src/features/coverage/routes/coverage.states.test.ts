@@ -3,11 +3,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
 import Fastify, { type FastifyInstance } from 'fastify'
+import { captureEvents } from '../../../shared/__fixtures__/workspace-events'
 
 // Coverage generation is LLM-only; the route drives the real service, so swap the
 // agent-backed summarizer/mapper for the test fakes at the module boundary.
@@ -43,6 +43,10 @@ import { FlightRunStore } from '../../flights/logic/store'
 import { coverageJobStore } from '../logic/coverage/jobs/store'
 
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-cov-route-')
 
 let tmpDir: string
 
@@ -55,37 +59,23 @@ let app: FastifyInstance
 let events: WorkspaceEvent[]
 
 beforeEach(async () => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-cov-route-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
   app = Fastify()
   events = []
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: { publish: (e) => events.push(e) } })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, workspaceEvents: captureEvents(events) })
   await app.ready()
 })
 
 afterEach(async () => {
   await app.close()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function writeFeature(name: string, spec: string, docs: Record<string, string> = {}): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), spec)
-  if (Object.keys(docs).length) {
-    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-    for (const [rel, content] of Object.entries(docs)) {
-      fs.writeFileSync(path.join(dir, 'docs', rel), content)
-    }
-  }
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, { specs: { 'a.spec.ts': spec }, docs })
 }
 
 const SPEC = `
@@ -190,6 +180,37 @@ describe('coverage routes', () => {
   it('404s for an unknown feature', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/features/nope/coverage' })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('rejects missing suites and invalid timeouts before waiting for coverage changes', async () => {
+    expect((await app.inject('/api/features/missing/coverage/changes')).statusCode).toBe(404)
+    writeFeature('checkout', SPEC)
+    for (const timeout of ['-1', '30001', 'NaN']) {
+      const response = await app.inject(`/api/features/checkout/coverage/changes?timeoutMs=${timeout}`)
+      expect(response.statusCode).toBe(400)
+      expect(response.json().message).toBe('timeoutMs must be between 0 and 30000')
+    }
+  })
+
+  it('bounds coverage waits when flight attention participates and returns that attention', async () => {
+    writeFeature('checkout', SPEC)
+    const attention = { kind: 'fixture-attention' }
+    const wait = vi.fn(async () => ({ changed: false, change: { feature: 'checkout' } }))
+    const monitored = Fastify()
+    await monitored.register(coverageRoutes, {
+      featuresDir, logsDir, projectRoot: tmpDir,
+      coverageMonitor: { wait } as never,
+      flightStore: { latestForFeature: () => ({ flightId: 'fixture-flight', status: 'paused' }) } as never,
+      flightAttention: { get: () => ({ attention }) } as never,
+    })
+    try {
+      const response = await monitored.inject('/api/features/checkout/coverage/changes?timeoutMs=30000')
+      expect(response.statusCode).toBe(200)
+      expect(wait).toHaveBeenCalledWith('checkout', undefined, 10000)
+      expect(response.json()).toEqual({ changed: false, change: {
+        feature: 'checkout', flightId: 'fixture-flight', flightStatus: 'paused', flightAttention: attention,
+      } })
+    } finally { await monitored.close() }
   })
 
   it('regenerate (deterministic) → a mapped test makes the requirement covered (run-free)', async () => {
@@ -387,7 +408,7 @@ describe('coverage-redo backflow into the flight record', () => {
     // publish inside `reopenStages`, so bridge this store the way the server
     // bridges its shared one (shared/store-event-bridge.ts). Uncoalesced here
     // so the assertion below reads the event synchronously.
-    bridgeStoreEvents(flightStore, { publish: (e) => events.push(e) }, () => ({ type: 'flights-changed' }))
+    bridgeStoreEvents(flightStore, captureEvents(events), () => ({ type: 'flights-changed' }))
     const doneStages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
     flightStore.save({
       flightId: 'fl-backflow',
@@ -408,7 +429,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {
@@ -441,7 +462,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {
@@ -477,7 +498,7 @@ describe('coverage-redo backflow into the flight record', () => {
       logsDir,
       projectRoot: tmpDir,
       flightStore,
-      workspaceEvents: { publish: (e) => events.push(e) },
+      workspaceEvents: captureEvents(events),
     })
     await backflowApp.ready()
     try {

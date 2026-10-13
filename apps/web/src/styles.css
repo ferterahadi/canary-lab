@@ -394,7 +394,9 @@ body {
 }
 .cl-numbered-code span.line {
   display: grid;
-  grid-template-columns: 2ch minmax(0, 1fr);
+  /* `--code-gutter` widens it for a frame numbered by source line (`ShikiCode`
+     `numberBySource`); every other viewer keeps the 2ch sequence gutter. */
+  grid-template-columns: var(--code-gutter, 2ch) minmax(0, 1fr);
   column-gap: 0.5rem;
   min-height: 1lh;
 }
@@ -1495,6 +1497,9 @@ body {
 .cl-lang-switch-btn:hover {
   color: var(--text-secondary);
 }
+/* Disabled buttons ignore the pointer, so the wrapper's reason shows as its tooltip. */
+.cl-lang-switch[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.cl-lang-switch-btn:disabled { pointer-events: none; }
 .cl-lang-switch-btn[data-active="true"] {
   color: var(--text-primary);
 }
@@ -2019,7 +2024,6 @@ body {
 .cl-review-toolbar { flex-shrink: 0; }
 .cl-review-file-heading { display: flex; align-items: center; gap: 8px; height: 48px; }
 .cl-review-table-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; }
-.cl-review-table-controls .cl-comparison-legend > :last-child { display: none; }
 .cl-comparison-review { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; overflow-anchor: none; }
 .cl-comparison-review .cl-comparison { min-width: 780px; }
 .cl-comparison-review .cl-comparison .cl-comparison-label { width: auto; }
@@ -2094,6 +2098,14 @@ body {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
+}
+
+/* A code block that fills a card band edge to edge: the band's hairlines
+   frame it, so its own border and corners go. */
+.cl-band-code .cl-code-shell,
+.cl-band-code .shiki-block pre {
+  border: 0;
+  border-radius: 0;
 }
 
 /* Status dot atom — kept compatible with existing React StatusDot. */
@@ -2238,6 +2250,9 @@ body {
 .cl-review-source-canvas { display: flex; flex: 1; min-width: 0; overflow: hidden; }
 .cl-context-table .cl-comparison-wrap { flex: 1; min-width: 0; background: transparent; overflow: auto; border: 0; border-radius: 0; scrollbar-gutter: stable; overflow-anchor: none; }
 .cl-context-table .cl-comparison { min-width: 720px; table-layout: fixed; background: transparent; }
+/* Code changes sits in the run panel, far narrower than the review dialog: both
+   sides stay in view and long lines wrap, as the patch view did. */
+.cl-cycle-review .cl-context-table .cl-comparison { min-width: 0; }
 .cl-context-table .cl-comparison th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); width: 50%; padding-block: 8px; }
 .cl-context-table .cl-comparison td { position: relative; padding: 2px 10px 2px calc(var(--review-gutter-width, 2ch) + 16px); vertical-align: top; }
 .cl-context-table .cl-comparison tbody tr { border-top: 0; }
@@ -2247,6 +2262,15 @@ body {
 .cl-review-source-line { min-height: 1.65em; font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cl-review-source-line > del, .cl-review-source-line > ins { display: block; margin-inline: -6px; padding-inline: 6px; text-decoration: none; border-radius: 0; color: inherit; }
 .cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: calc(var(--review-gutter-width, 2ch) + 8px); }
+/* The edit tint fills the whole cell, padding and gutter included, so a run of
+   edited lines reads as one block. Painted on the line instead, each cell's
+   vertical padding showed through as a stripe between rows. */
+.cl-context-table td:has(> .cl-review-source-line > del) { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cl-context-table td:has(> .cl-review-source-line > ins) { background: color-mix(in srgb, var(--success) 12%, transparent); }
+.cl-context-table .cl-review-source-line > del, .cl-context-table .cl-review-source-line > ins { background: transparent; }
+/* Word marks inside an edited line: a stronger tint of the line's own hue. */
+.cl-review-source-line mark.cl-review-word { color: inherit; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; background: color-mix(in srgb, var(--danger) 32%, transparent); }
+.cl-review-source-line[data-side="after"] mark.cl-review-word { background: color-mix(in srgb, var(--success) 32%, transparent); }
 .cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
 .cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }

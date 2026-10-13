@@ -1,22 +1,20 @@
-import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import Fastify from 'fastify'
-import { runsRoutes } from './runs'
 import type { ExternalHealAgentRequest } from './runs-route-support'
-import { RunStore } from '../logic/run-store'
-import {
-  createRegistry,
-  type OrchestratorLike,
-  type RestartHealResult,
-  type RestartRunResult,
-} from '../logic/run-registry'
+import type { OrchestratorLike } from '../logic/run-registry'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { buildRunsApp, type RunsAppOptions } from './__fixtures__/runs-app'
+import { SERVER_EXITED_MESSAGE } from '../logic/run-store'
+import { writeManifest, writeRunsIndex } from '../logic/runtime/manifest'
+import { runDirFor } from '../logic/runtime/run-paths'
+import { HEARTBEAT_STALE_MS } from '../../../../../../shared/run-state'
+
+const tempDir = trackTempDirs('cl-rroutes-')
 
 
-vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+vi.mock('../../../shared/editor-launch', async () => (await import('../../../shared/__fixtures__/editor-launch')).editorLaunchMock())
 
 // The PR routes are thin plumbing over these two — they're unit-tested in
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
@@ -34,39 +32,26 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
-async function build(opts: {
-	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
-	  cancelQueuedRun?: (runId: string) => boolean
-	  broker?: Parameters<typeof runsRoutes>[1]['broker']
-	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
-	  restartRun?: (runId: string) => Promise<RestartRunResult>
-  projectRoot?: string
-  events?: WorkspaceEvent[]
-  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
-} = {}) {
-  const registry = createRegistry()
-  const store = new RunStore(logsDir, registry)
-  const app = Fastify()
-  await app.register(runsRoutes, {
-    featuresDir,
-    projectRoot: opts.projectRoot,
-    store,
-    broker: opts.broker,
-	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
-	    cancelQueuedRun: opts.cancelQueuedRun,
-	    restartHeal: opts.restartHeal,
-    restartRun: opts.restartRun,
-    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
-	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
-	  })
-  return { app, registry, store }
+const build = (opts: RunsAppOptions = {}) => buildRunsApp({ logsDir, featuresDir }, opts)
+
+/** A healing run whose server stopped long enough ago that its heartbeat is stale:
+ *  persisted, unregistered, and driven by nothing. */
+function seedOrphanedHealingRun(runId: string): void {
+  const dir = runDirFor(logsDir, runId)
+  fs.mkdirSync(dir, { recursive: true })
+  const startedAt = '2026-10-09T05:59:00.000Z'
+  writeManifest(path.join(dir, 'manifest.json'), {
+    runId, feature: 'storefront-journey', startedAt, status: 'healing', healCycles: 1, services: [],
+    heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1_000).toISOString(),
+  })
+  writeRunsIndex(logsDir, [{ runId, feature: 'storefront-journey', startedAt, status: 'healing' }])
 }
 
 describe('POST /api/runs/:runId/pause-heal', () => {
@@ -74,6 +59,15 @@ describe('POST /api/runs/:runId/pause-heal', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/pause-heal' })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('settles a run whose server exited and refuses to pause it, saying why', async () => {
+    seedOrphanedHealingRun('orphan')
+    const { app, store } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/orphan/pause-heal' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'server-exited', status: 'aborted', error: SERVER_EXITED_MESSAGE })
+    expect(store.get('orphan')?.manifest.status).toBe('aborted')
   })
 
   it('202s with failureCount on success', async () => {
@@ -114,6 +108,17 @@ describe('POST /api/runs/:runId/cancel-heal', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs/ghost/cancel-heal' })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('Stop Heal on a run whose server exited settles it aborted instead of 404ing', async () => {
+    // The live report: Stop Heal answered `run not active` while the run stayed healing.
+    seedOrphanedHealingRun('orphan')
+    const { app, store } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/orphan/cancel-heal' })
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ status: 'aborted', reason: 'server-exited' })
+    expect(store.get('orphan')?.manifest).toMatchObject({ status: 'aborted', lifecycle: { abortReason: { reason: 'server-exited' } } })
+    expect(store.list()[0].status).toBe('aborted')
   })
 
   it('202s with status=cancelled on success', async () => {

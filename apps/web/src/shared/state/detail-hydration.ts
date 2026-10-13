@@ -1,5 +1,6 @@
 import { ApiError } from '@/shared/api/internal'
 import type { createObservedReads } from '@/shared/state/observed-reads'
+import { displayError } from '@/shared/api/error-message'
 
 type Hydration = { status: 'idle' | 'loading' | 'ready' | 'missing' | 'error'; error: string | null }
 const idle: Hydration = { status: 'idle', error: null }
@@ -51,7 +52,7 @@ export function createDetailHydration<Manifest>({ reads, read, apply, missing, h
         missing(id)
         settle(id, 'missing')
       } else {
-        set(id, 'error', error instanceof Error ? error.message : errorMessage)
+        set(id, 'error', displayError(error, errorMessage))
         recover(id)
       }
     } finally { reads.finish(id, token) }

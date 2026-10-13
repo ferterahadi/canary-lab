@@ -1,64 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
-import Fastify from 'fastify'
-import { registerMcpRoutes } from './server'
-import { RunStore } from '../features/runs/logic/run-store'
-import { createRegistry } from '../features/runs/logic/run-registry'
-import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client } from '@modelcontextprotocol/client'
+import { connectSmokeClient, createMcpHarness, smokeToolText } from './__fixtures__/smoke-harness'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
-// The SDK's callTool() return type is a union of the normal tool-result shape
-// and a legacy/task shape that only carries an index signature; TS collapses
-// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
-// as unindexable `{}` at every call site. Centralize the one cast here instead
-// of repeating it ~40 times.
-type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
-
-function toolText(result: ToolCallResult): string {
-  const content = (result as { content?: unknown }).content
-  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
-  return first?.text ?? ''
-}
-
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
-  const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
-  )
-  await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
-  return client
-}
-
-async function createMcpHarness(opts: {
-  logsDir: string
-  projectRoot: string
-  featuresDir: string
-  startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
-  restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
-  startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
-}) {
-  const app = Fastify()
-  const runStore = new RunStore(opts.logsDir, createRegistry())
-  const broker = new ExternalHealBroker({
-    now: () => Date.now(),
-    emit: (event) => runStore.emit('event', event),
-    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
-    audit: () => {},
-  })
-  await app.register(registerMcpRoutes, {
-    store: runStore,
-    broker,
-    featuresDir: opts.featuresDir,
-    projectRoot: opts.projectRoot,
-    startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
-    restartExternalRun: opts.restartExternalRun,
-    startVerification: opts.startVerification,
-  })
-  return { app, runStore }
-}
+const tempDir = trackTempDirs('cl-mcp-author-')
 
 describe('MCP HTTP server (smoke)', () => {
   // These E2E tests exercise claim flows across interactive client kinds
@@ -81,7 +29,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('drives external feature authoring, env capture, drafts, and evaluation export without local agent spawns', async () => {
-    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-author-')))
+    const projectRoot = tempDir()
     const featuresDir = path.join(projectRoot, 'features')
     const logsDir = path.join(projectRoot, 'logs')
     const repoDir = path.join(projectRoot, 'repo-api')
@@ -95,7 +43,7 @@ describe('MCP HTTP server (smoke)', () => {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       // The flow spans authoring + coverage + export tools, which live in three
       // leaf profiles since the repartition — lifecycle is their union.
-      client = await connectClient(address, '/mcp?profile=lifecycle&client_kind=codex')
+      client = await connectSmokeClient(address, '/mcp?profile=lifecycle&client_kind=codex')
 
       const created = await client.callTool({
         name: 'create_feature',
@@ -106,7 +54,7 @@ describe('MCP HTTP server (smoke)', () => {
           repos: [{ name: 'api', localPath: repoDir, branch: 'main' }],
         },
       })
-      const createdBody = JSON.parse(toolText(created))
+      const createdBody = JSON.parse(smokeToolText(created))
       expect(createdBody).toMatchObject({
         feature: 'checkout_flow',
         nextSteps: expect.arrayContaining(['capture_feature_env_files', 'start_external_draft', 'apply_external_draft']),
@@ -121,7 +69,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_feature_coverage',
         arguments: { feature: 'checkout_flow' },
       })
-      const blockedBody = JSON.parse(toolText(blockedCoverage))
+      const blockedBody = JSON.parse(smokeToolText(blockedCoverage))
       expect(blockedBody.state.coverage).toBe('blocked')
       expect(blockedBody.next).toMatch(/attach or paste the PRD/i)
       expect(blockedBody.next).toContain('checkout_flow')
@@ -136,7 +84,7 @@ describe('MCP HTTP server (smoke)', () => {
           ],
         },
       })
-      const capturedBody = JSON.parse(toolText(captured))
+      const capturedBody = JSON.parse(smokeToolText(captured))
       expect(capturedBody.captured).toHaveLength(2)
       expect(capturedBody.captured[0].preview).toContainEqual({ key: 'API_KEY', value: '********' })
       expect(fs.readFileSync(path.join(featureDir, 'envsets', 'local', 'api.env.dev'), 'utf8')).toContain('API_KEY=secret')
@@ -145,7 +93,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_feature_envset_summary',
         arguments: { feature: 'checkout_flow' },
       })
-      const summaryBody = JSON.parse(toolText(summary))
+      const summaryBody = JSON.parse(smokeToolText(summary))
       expect(summaryBody.envs.map((env: { name: string }) => env.name)).toEqual(['local', 'staging'])
       expect(JSON.stringify(summaryBody)).not.toContain('secret')
 
@@ -159,7 +107,7 @@ describe('MCP HTTP server (smoke)', () => {
           external_session_url: 'codex://session/sess-author-1',
         },
       })
-      const draftBody = JSON.parse(toolText(draft))
+      const draftBody = JSON.parse(smokeToolText(draft))
       expect(draftBody).toMatchObject({
         feature: 'checkout_flow',
         producer: 'external',
@@ -186,7 +134,7 @@ describe('MCP HTTP server (smoke)', () => {
           }],
         },
       })
-      expect(JSON.parse(toolText(applied))).toMatchObject({
+      expect(JSON.parse(smokeToolText(applied))).toMatchObject({
         status: 'applied',
         feature: 'checkout_flow',
       })
@@ -235,7 +183,7 @@ describe('MCP HTTP server (smoke)', () => {
           conversation_name: 'Export this into evaluation',
         },
       })
-      const exportBody = JSON.parse(toolText(exportTask))
+      const exportBody = JSON.parse(smokeToolText(exportTask))
       expect(exportBody).toMatchObject({
         task: { producer: 'external', status: 'running', language: 'English' },
         reportSchema: {
@@ -261,7 +209,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
       expect(rejectedMarkdown.isError).toBe(true)
-      expect(toolText(rejectedMarkdown)).toBe('submit textSlots[] or rewrite')
+      expect(smokeToolText(rejectedMarkdown)).toBe('submit textSlots[] or rewrite')
 
       const submittedExport = await client.callTool({
         name: 'submit_external_evaluation_export',
@@ -274,7 +222,7 @@ describe('MCP HTTP server (smoke)', () => {
           ),
         },
       })
-      const submittedBody = JSON.parse(toolText(submittedExport))
+      const submittedBody = JSON.parse(smokeToolText(submittedExport))
       const expectedArchivePath = path.join(
         logsDir,
         'evaluation-exports',
@@ -301,7 +249,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },
       })
-      expect(JSON.parse(toolText(fetchedExport))).toMatchObject({
+      expect(JSON.parse(smokeToolText(fetchedExport))).toMatchObject({
         producer: 'external',
         status: 'completed',
         downloadReady: true,
@@ -312,7 +260,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'download_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },
       })
-      const downloadBody = JSON.parse(toolText(download))
+      const downloadBody = JSON.parse(smokeToolText(download))
       expect(downloadBody.filename).toMatch(/checkout_flow-author-eval-run\.zip$/)
       expect(downloadBody).toMatchObject({
         archivePath: expectedArchivePath,
@@ -327,7 +275,6 @@ describe('MCP HTTP server (smoke)', () => {
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
-      fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
 })

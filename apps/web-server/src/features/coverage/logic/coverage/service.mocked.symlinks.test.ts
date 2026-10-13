@@ -1,9 +1,8 @@
 // Tests that require vi.mock to reach branches inside collectTests (service.ts lines
 // 86, 90-91) that are unreachable with real spec files, since the AST extractor never
 // sets sourceFile and only sets requirements/pathTypes via Playwright tags.
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { vi, describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
@@ -18,6 +17,10 @@ import { runCoverageEngine as runCoverageEngineReal } from './coverage-engine'
 import { regeneratePrdSummary as regeneratePrdSummaryReal, listFeatureDocs } from './feature-docs'
 import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+import { SELF_REPO_CONFIG, writeFeatureFixture } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-service-mocked-')
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
@@ -33,7 +36,7 @@ let featuresDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-service-mocked-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
@@ -41,22 +44,12 @@ beforeEach(() => {
   vi.mocked(extractCoverageTestsFromSource).mockReset()
 })
 
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
-})
-
 function writeFeature(name: string): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
-  )
-  // Write a real spec file so listSpecFiles picks it up.
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item')
-  return dir
+  return writeFeatureFixture(featuresDir, name, SELF_REPO_CONFIG, {
+    // A real spec file so listSpecFiles picks it up.
+    specs: { 'a.spec.ts': `import { test } from '@playwright/test'\ntest('shared', async () => {})\n` },
+    docs: { 'spec.md': '# Create todo\na user can create a new todo item' },
+  })
 }
 
 describe('listFeatureDocs — symlink edge cases (service.ts lines 637, 650)', () => {

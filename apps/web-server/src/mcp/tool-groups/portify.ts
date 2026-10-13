@@ -1,3 +1,4 @@
+import { gettingStartedClaim, withGettingStartedClaim } from '../../shared/getting-started-claim'
 // MCP tools — port-ification (make a feature's apps take injectable ports) plus
 // the two external heal-context reads. Split out of authoring.ts; bodies unchanged.
 import { z } from 'zod'
@@ -28,35 +29,37 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
       external_session_url: z.string().optional(),
     },
   }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
-    if (!deps.startExternalPortify) return errorResult('startExternalPortify dependency is not configured')
+    const startExternalPortify = deps.startExternalPortify
+    if (!startExternalPortify) return errorResult('startExternalPortify dependency is not configured')
     // Getting Started demo tracking: claim before the workflow exists, attach
     // its workflowId after, release on any start failure.
     const claim = deps.gettingStartedDemo?.claim('portify', feature) ?? null
     if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
     try {
-      const result = await deps.startExternalPortify({
-        feature,
-        clientKind: client_kind,
-        sessionId: session_id,
-        ...(conversation_name ? { conversationName: conversation_name } : {}),
-        ...(external_session_url ? { sessionUrl: external_session_url } : {}),
-      })
-      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'portify', id: result.workflowId, feature })
-      const verifying = result.status === 'verifying'
-      return asJsonResult({
-        ...result,
-        status: result.status ?? 'editing',
-        canaryLabBehavior: 'tracking-only',
-        statusMeaning: verifying
-          ? 'Canary Lab is verifying declared port injection with two concurrent boots; no local agent is running.'
-          : 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
-        nextSteps: [verifying ? 'get_portify' : 'submit_external_portify'],
-        next: verifying
-          ? `Poll get_portify with workflowId "${result.workflowId}". Do not edit or submit during verification. On "ready-to-save", save_portify; on "editing", read verification.failureDetail, fix the worktree, then submit_external_portify.`
-          : `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStartedDemo, claim?.sessionId ?? null), async (attach) => {
+        const result = await startExternalPortify({
+          feature,
+          clientKind: client_kind,
+          sessionId: session_id,
+          ...(conversation_name ? { conversationName: conversation_name } : {}),
+          ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+        })
+        attach({ kind: 'portify', id: result.workflowId, feature })
+        const verifying = result.status === 'verifying'
+        return asJsonResult({
+          ...result,
+          status: result.status ?? 'editing',
+          canaryLabBehavior: 'tracking-only',
+          statusMeaning: verifying
+            ? 'Canary Lab is verifying declared port injection with two concurrent boots; no local agent is running.'
+            : 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
+          nextSteps: [verifying ? 'get_portify' : 'submit_external_portify'],
+          next: verifying
+            ? `Poll get_portify with workflowId "${result.workflowId}". Do not edit or submit during verification. On "ready-to-save", save_portify; on "editing", read verification.failureDetail, fix the worktree, then submit_external_portify.`
+            : `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
+        })
       })
     } catch (err) {
-      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
       return failureResult(err)
     }
   })

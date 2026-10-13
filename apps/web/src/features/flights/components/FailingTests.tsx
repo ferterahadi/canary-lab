@@ -1,5 +1,12 @@
+import { tokenizeTestAnnotations } from '@shared/test-annotations'
+import { findSummaryTest } from '@shared/summary-test-identity'
+import { playbackCaseKey } from '@shared/playback-identity'
+import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
+import { shortSourceLocation } from '@shared/lib/source-location'
+import { formatMs } from '@shared/lib/format-units'
 import type { RunSummary, RunSummaryFailedEntry } from '@shared/run-detail'
 import { HERO_ROW } from './stage-meta'
+import { PATH_DESC } from '@/features/coverage/components/CoverageCards'
 
 // The failing tests, rendered as evidence instead of a list of truncated slugs.
 //
@@ -40,8 +47,6 @@ interface ParsedFailure {
   fullLoc?: string
 }
 
-const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
-
 /** How many failures the summary shows before handing off. A run with 12
  *  failures rendered 12 two-line rows, which made this band four times taller
  *  than everything else on the stage put together — the summary became the
@@ -61,10 +66,8 @@ export function FailingTests({
   /** The run's known tests — carries each test's REAL title, which the failed
    *  entry only has in slug form. Matched by id, then by name. */
   knownTests?: RunSummary['knownTests']
-  /** Open this failure on the run detail (R82). Receives the failed entry's
-   *  `name` — the same key the run detail's Playwright tab matches playback
-   *  tests on, so it lands on this exact test. Omitted → rows are inert text. */
-  onOpenTest?: (testName: string) => void
+  /** The name keeps legacy links readable; qualifiers identify the exact case. */
+  onOpenTest?: (testName: string, identity: Pick<RunOpenTarget, 'testId' | 'testLocation'>) => void
   /** Open the run detail on the whole list — the destination for the failures
    *  past `VISIBLE_FAILURES`. Omitted → the remainder is stated, not offered. */
   onOpenAll?: () => void
@@ -86,14 +89,14 @@ export function FailingTests({
       <ul className="m-0 flex list-none flex-col p-0">
         {shown.map((f, i) => (
           <FailureRow
-            key={`${f.entry.id ?? f.entry.name}-${i}`}
+            key={f.entry.id ?? `${playbackCaseKey(f.entry)}:${i}`}
             failure={f}
-            {...(onOpenTest ? { onOpen: () => onOpenTest(f.entry.name) } : {})}
+            {...(onOpenTest ? { onOpen: () => onOpenTest(f.entry.name, { testId: f.entry.id, testLocation: f.fullLoc }) } : {})}
           />
         ))}
       </ul>
       {hidden > 0 && (
-        <div className="mt-2" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+        <div className="mt-2">
           {onOpenAll ? (
             <button
               type="button"
@@ -209,7 +212,7 @@ export function parseFailure(
   entry: RunSummaryFailedEntry,
   knownTests?: RunSummary['knownTests'],
 ): ParsedFailure {
-  const known = knownTests?.find((k) => (entry.id && k.id === entry.id) || k.name === entry.name)
+  const known = findSummaryTest(knownTests ?? [], { ...entry, location: entry.location ?? entry.locations?.[0] })
   const raw = known?.title ?? (entry.name.startsWith('test-case-') ? deslug(entry.name) : entry.name)
   const { title, tags } = splitTags(raw)
   const loc = entry.location ?? entry.locations?.[0] ?? known?.location
@@ -217,22 +220,15 @@ export function parseFailure(
     entry,
     title: title || entry.name,
     tags,
-    shortLoc: shortLocation(loc),
+    shortLoc: shortSourceLocation(loc ?? ''),
     ...(loc ? { fullLoc: loc } : {}),
   }
 }
 
 /** Lift `@req-R4 @path-sad …` off the front (or anywhere) of a title. */
 function splitTags(raw: string): { title: string; tags: TestTag[] } {
-  const tags: TestTag[] = []
-  const title = raw
-    .replace(/@(req|path|variant)-([A-Za-z0-9_.]+)/g, (_m, kind: string, value: string) => {
-      tags.push({ kind: kind as TestTag['kind'], value })
-      return ''
-    })
-    .replace(/\s+/g, ' ')
-    .trim()
-  return { title, tags }
+  const parsed = tokenizeTestAnnotations(raw, ['req', 'path', 'variant'])
+  return { title: parsed.title, tags: parsed.tokens.map(({ kind, value }) => ({ kind: kind as TestTag['kind'], value })) }
 }
 
 /** `test-case-req-r4-path-sad-a-request-is-refused` →
@@ -250,15 +246,4 @@ function deslug(name: string): string {
     rest = rest.slice(m[0].length)
   }
   return [...tags, rest.replace(/-/g, ' ')].join(' ').trim()
-}
-
-/** The readable tail of a test location — the last two path segments plus any
- *  `:line[:col]` suffix (`/Users/…/e2e/foo.spec.ts:199` → `e2e/foo.spec.ts:199`). */
-export function shortLocation(loc: string | undefined): string {
-  if (!loc) return ''
-  return loc.split('/').slice(-2).join('/')
-}
-
-function formatMs(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }

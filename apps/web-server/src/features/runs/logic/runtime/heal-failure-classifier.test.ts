@@ -124,6 +124,36 @@ describe('classifyHealFailure', () => {
       .toBe('approval-prompt')
   })
 
+  // From run 2026-10-09T0458-zk6u's heal-agent-tail.txt, shortened only where a
+  // box-drawing rule ran across the screen. The agent's turn had ended (on an
+  // expired login, visible only in the session log) and this dialog then held
+  // the pane until the idle watchdog fired. The title arrives with real spaces;
+  // the body is cursor-positioned word by word.
+  const REAL_AUTO_MODE_DIALOG_TAIL =
+    'Read \x1b[1mheal-prompt.md\x1b[22m (46 lines)\x1b[39m\x1b[24;1H\x1b[22;3H\x1b[?25h\x1b[?25l\x1b[H\r\x1b[18B' +
+    '\x1b[38;5;174m✢\x1b[39m\x1b[24;1H\x1b[22;3H\x1b[?25h\x1b[?25l\x1b[H\r\x1b[9B\x1b[K\r\x1b[1B\x1b[38;5;153m─────\r\x1b[1B' +
+    '\x1b[39m  \x1b[38;5;153m\x1b[1mTeach auto mode about your environment?\x1b[22m\x1b[39m\x1b[K\r\x1b[1B\x1b[K\r\x1b[2C\x1b[1B' +
+    'Auto\x1b[8Gmode\x1b[13Gworks\x1b[19Gbetter\x1b[26Gwhen\x1b[31Git\x1b[34Gknows\x1b[40Gyour\x1b[45Genvironment.' +
+    '\x1b[58GTakes\x1b[64Gabout\x1b[70Ga\x1b[72Gminute.\r\x1b[2C\x1b[2B\x1b[38;5;153m❯\x1b[5G\x1b[38;5;246m1. \x1b[38;5;153mYes\r' +
+    "\x1b[4C\x1b[1B\x1b[38;5;246m2. \x1b[39mNot\x1b[12Gnow\r\x1b[4C\x1b[1B\x1b[38;5;246m3. \x1b[39mDon't\x1b[14Gshow\x1b[19Gagain\r" +
+    '\x1b[1B\x1b[K\r\x1b[2C\x1b[1B\x1b[38;5;246m\x1b[3mEnter to confirm · Esc to cancel'
+
+  it('classifies the auto-mode setup dialog from a real captured tail', () => {
+    expect(classifyHealFailure(REAL_AUTO_MODE_DIALOG_TAIL, 'claude')).toBe('cli-dialog')
+  })
+
+  it('lets a visible hard blocker outrank the dialog — the dialog only says a turn ended', () => {
+    // The zk6u turn ended on "Login expired · Please run /login". Had that line
+    // reached the pane, it — not the dialog — is the cause to report.
+    expect(classifyHealFailure(`Login expired · Please run /login\n${REAL_AUTO_MODE_DIALOG_TAIL}`, 'claude'))
+      .toBe('auth')
+  })
+
+  it('classifies the dialog ahead of approval-prompt — a pending approval keeps the turn open', () => {
+    expect(classifyHealFailure(`Do you want to proceed?\n❯ 1. Yes\n${REAL_AUTO_MODE_DIALOG_TAIL}`, 'claude'))
+      .toBe('cli-dialog')
+  })
+
   it('still classifies spaced fingerprints after the squeeze pass', () => {
     // The squeeze is additive: everything that matched before must still match.
     expect(classifyHealFailure('You have reached your usage limit')).toBe('usage-limit')

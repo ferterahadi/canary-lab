@@ -5,8 +5,6 @@ import { expect, it } from 'vitest'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
 import type { DiscoveryRepairView } from '../api/discovery-repair'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 it('retains discovery task identity and updates its external outcome in the open viewer', async () => {
   const host = document.createElement('div')
   const root = createRoot(host)

@@ -14,7 +14,6 @@ import { ApiError } from '@/shared/api/internal'
 import { multilineImportReview, testFileReview } from '@/shared/api/__fixtures__/test-review'
 import { DirtyReviewDialog } from './DirtyReviewDialog'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/features', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/features')>()),
   getTestFileReview: vi.fn(),
@@ -85,6 +84,15 @@ it('shows a readable fixture in English and Code with visible edits, not an empt
   expect(document.body.textContent).toContain('export const ready = true')
   expect(document.body.textContent).not.toContain('No title or test-content changes in this file')
   expect(document.querySelector('.cl-review-file[data-changed="true"]')?.getAttribute('title')).toBe(fixture)
+})
+it('counts the recorded-run comparison before the run store has hydrated its manifest', async () => {
+  // A hidden tab never reads run detail, so the dialog has no manifest yet.
+  const fixture = 'e2e/fixture.ts'
+  const declared = { file: 'e2e/a.spec.ts', line: 3, endLine: 5, name: 'a' }
+  vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture, declared.file], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [declared], removed: [] } })
+  await render({ focusFeature: 'alpha', focusRunId: 'run-1', pendingRuns: [{ ...run, status: 'passed' }], focus: { file: fixture, baseline: 'run', mode: 'code' } })
+  expect(featuresApi.getTestSourceComparison).toHaveBeenCalledWith('alpha', 'run-1')
+  expect(document.querySelector('.cl-review-change-status')?.textContent).toBe('— / 1')
 })
 it('returns from a deep-linked import continuation to its English range and highlights that range in Code', async () => {
   const review = multilineImportReview()
@@ -803,6 +811,10 @@ it('never highlights a different test if the source changes after the declaratio
   expect(testNavigation().textContent).toContain('1 / 1')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('gone')
   expect(document.body.textContent).toContain('matching declaration is unavailable in this source snapshot')
+  // Read before the listing it qualifies: right after the toolbar, ahead of the table.
+  const notice = [...document.querySelectorAll('p[role="status"]')].find((p) => p.textContent?.includes('matching declaration is unavailable'))!
+  expect(notice.previousElementSibling?.classList.contains('cl-context-toolbar')).toBe(true)
+  expect(notice.nextElementSibling?.classList.contains('cl-context-table')).toBe(true)
   expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
 })
 

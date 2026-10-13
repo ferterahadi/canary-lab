@@ -8,23 +8,15 @@
 // the same pattern used by `pty-spawner.ts`.
 
 import { defaultOpenBrowserSpawner } from './open-browser-spawner'
+import { launchDetached, resolveSystemCommand, type DetachedSpawner, type OpenCommand } from './system-launch'
 
 export type Platform = NodeJS.Platform | string
 
-export interface OpenBrowserSpawner {
-  (command: string, args: string[], options: { detached: boolean; stdio: 'ignore' }): {
-    unref(): void
-  }
-}
+export type OpenBrowserSpawner = DetachedSpawner
 
 export interface OpenBrowserOptions {
   platform?: Platform
   spawner?: OpenBrowserSpawner
-}
-
-export interface OpenCommand {
-  command: string
-  args: string[]
 }
 
 /**
@@ -35,13 +27,7 @@ export interface OpenCommand {
  * anything else → `xdg-open <url>` (Linux/BSD/etc.)
  */
 export function resolveOpenCommand(url: string, platform: Platform): OpenCommand {
-  if (platform === 'darwin') {
-    return { command: 'open', args: [url] }
-  }
-  if (platform === 'win32') {
-    return { command: 'cmd', args: ['/c', 'start', '""', url] }
-  }
-  return { command: 'xdg-open', args: [url] }
+  return resolveSystemCommand({ kind: 'url', url }, platform)
 }
 
 /**
@@ -56,10 +42,9 @@ export function openBrowser(url: string, opts: OpenBrowserOptions = {}): boolean
   if (!url) return false
   const platform = opts.platform ?? process.platform
   const spawner = opts.spawner ?? defaultOpenBrowserSpawner
-  const { command, args } = resolveOpenCommand(url, platform)
+  const command = resolveOpenCommand(url, platform)
   try {
-    const child = spawner(command, args, { detached: true, stdio: 'ignore' })
-    child.unref()
+    launchDetached(command, spawner)
     return true
   } catch {
     return false

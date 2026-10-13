@@ -14,6 +14,9 @@ import {
   resolveUiProjectRootForMcpAutostart,
 } from './mcp-reachability'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../shared/mcp-protocol'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-')
 
 const inertPtyFactory: PtyFactory = () => ({
   pid: 0,
@@ -256,7 +259,7 @@ describe('canary-lab mcp', () => {
     // The checkout's package.json is named `canary-lab`, which used to be enough
     // to qualify it as a UI root — but it has no features/, so the UI booted
     // there served an empty workspace and `list_features` answered `[]`.
-    const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-checkout-')))
+    const checkout = tempDir('cl-checkout-')
     fs.writeFileSync(path.join(checkout, 'package.json'), JSON.stringify({ name: 'canary-lab' }))
     const stderr = new BufferWritable()
     let started = false
@@ -266,29 +269,25 @@ describe('canary-lab mcp', () => {
         headers: { 'content-type': 'application/json' },
       })
 
-    try {
-      expect(isUsableUiProjectRoot(checkout)).toBe(false)
-      // Not chosen to boot…
-      expect(resolveUiProjectRootForMcpAutostart({
-        cwd: checkout,
-        registry: {
-          version: 1,
-          workspaces: [{ name: 'repo', path: checkout, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
-        },
-      })).toBeNull()
-      // …and not attached to if one is already serving it.
-      await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
-        stderr,
-        fetch: servingCheckout,
-        startUi: async () => { started = true },
-      })).resolves.toBe(false)
-      expect(started).toBe(false)
-      expect(stderr.text()).toContain('Stop that server')
-      // The real checkout this session runs in is the case it protects.
-      expect(isUsableUiProjectRoot(path.resolve(__dirname, '..', '..'))).toBe(false)
-    } finally {
-      fs.rmSync(checkout, { recursive: true, force: true })
-    }
+    expect(isUsableUiProjectRoot(checkout)).toBe(false)
+    // Not chosen to boot…
+    expect(resolveUiProjectRootForMcpAutostart({
+      cwd: checkout,
+      registry: {
+        version: 1,
+        workspaces: [{ name: 'repo', path: checkout, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      },
+    })).toBeNull()
+    // …and not attached to if one is already serving it.
+    await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
+      stderr,
+      fetch: servingCheckout,
+      startUi: async () => { started = true },
+    })).resolves.toBe(false)
+    expect(started).toBe(false)
+    expect(stderr.text()).toContain('Stop that server')
+    // The real checkout this session runs in is the case it protects.
+    expect(isUsableUiProjectRoot(path.resolve(__dirname, '..', '..'))).toBe(false)
   })
 
   it('does not auto-start the UI when the URL was explicitly provided (autoStartEligible: false)', async () => {
@@ -411,38 +410,24 @@ describe('isDefaultLocalMcpUrl', () => {
 })
 
 describe('resolveDefaultMcpUrl', () => {
-  const tmpDirs: string[] = []
   function mkWorkspace(port?: number): string {
-    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-default-')))
-    tmpDirs.push(dir)
+    const dir = tempDir('cl-mcp-default-')
     fs.mkdirSync(path.join(dir, 'features'))
     if (port !== undefined) {
       fs.writeFileSync(path.join(dir, 'canary-lab.config.json'), JSON.stringify({ port }))
     }
     return dir
   }
-  function cleanup() {
-    while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-  }
-
   it('builds the url from the active project config port', () => {
     const projectRoot = mkWorkspace(8500)
     const registry = { workspaces: [{ name: 'a', path: projectRoot, createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' }] }
-    try {
-      expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry, activeServers: [] })).toBe('http://127.0.0.1:8500/mcp')
-    } finally {
-      cleanup()
-    }
+    expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry, activeServers: [] })).toBe('http://127.0.0.1:8500/mcp')
   })
 
   it('falls back to the default port when the active project pins none', () => {
     const projectRoot = mkWorkspace()
     const registry = { workspaces: [{ name: 'a', path: projectRoot, createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' }] }
-    try {
-      expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry, activeServers: [] })).toBe('http://127.0.0.1:7421/mcp')
-    } finally {
-      cleanup()
-    }
+    expect(resolveDefaultMcpUrl({ cwd: os.tmpdir(), registry, activeServers: [] })).toBe('http://127.0.0.1:7421/mcp')
   })
 
   it('falls back to the default port when no project resolves', () => {

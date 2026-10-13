@@ -7,6 +7,9 @@ import {
   claudeTrustedPath,
   ensureClaudeWorkspaceTrusted,
 } from './agent-workspace-trust'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-trust-')
 
 // The trust file is the user's real claude config, so every test here points
 // the module at a temp copy via `configFile` and never touches `~`.
@@ -19,14 +22,13 @@ const write = (config: unknown) => fs.writeFileSync(configFile, JSON.stringify(c
 const read = () => JSON.parse(fs.readFileSync(configFile, 'utf-8'))
 
 beforeEach(() => {
-  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-trust-')))
+  dir = tempDir()
   configFile = path.join(dir, '.claude.json')
   workspace = path.join(dir, 'workspace')
   fs.mkdirSync(path.join(workspace, 'logs', 'runs', 'r1'), { recursive: true })
 })
 
 afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true })
   delete process.env.CLAUDE_CONFIG_DIR
 })
 
@@ -133,6 +135,7 @@ describe('ensureClaudeWorkspaceTrusted', () => {
         [workspace]: { hasTrustDialogAccepted: true },
       },
     })
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(JSON.stringify(read(), null, 2) + '\n')
   })
 
   it('merges into an existing declined entry rather than replacing it', () => {
@@ -151,6 +154,24 @@ describe('ensureClaudeWorkspaceTrusted', () => {
     write({ projects: {} })
     ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir })
     expect(fs.readdirSync(dir).filter((f) => f.includes('.tmp'))).toEqual([])
+  })
+
+  it('keeps the config file mode — claude creates it private', () => {
+    write({ projects: {} })
+    fs.chmodSync(configFile, 0o600)
+    ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir })
+    expect(fs.statSync(configFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('writes through a symlinked config — the link survives and its target gets the entry', () => {
+    const target = path.join(dir, 'dotfiles', 'claude.json')
+    fs.mkdirSync(path.dirname(target))
+    fs.writeFileSync(target, JSON.stringify({ projects: {} }))
+    fs.symlinkSync(target, configFile)
+
+    expect(ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir }).outcome).toBe('granted')
+    expect(fs.lstatSync(configFile).isSymbolicLink()).toBe(true)
+    expect(JSON.parse(fs.readFileSync(target, 'utf8')).projects[workspace]).toEqual({ hasTrustDialogAccepted: true })
   })
 
   it('refuses the filesystem root — too broad to claim on the user behalf', () => {
@@ -181,9 +202,15 @@ describe('ensureClaudeWorkspaceTrusted', () => {
 
   it('reports unavailable — and does not damage the config — when the write fails', () => {
     write({ projects: {} })
-    // Occupy the exact temp path with a directory so writeFileSync gets EISDIR.
-    fs.mkdirSync(`${configFile}.canary-lab-${process.pid}.tmp`)
-    const result = ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir })
+    // A read-only directory still lets the config be read but refuses the
+    // staged temp file beside it.
+    fs.chmodSync(dir, 0o500)
+    let result: ReturnType<typeof ensureClaudeWorkspaceTrusted>
+    try {
+      result = ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir })
+    } finally {
+      fs.chmodSync(dir, 0o700)
+    }
     expect(result.outcome).toBe('unavailable')
     expect(result.reason).toMatch(/could not update/)
     expect(read()).toEqual({ projects: {} })

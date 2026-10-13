@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   describeFastForward,
@@ -10,22 +9,13 @@ import {
   type FastForwardOutcome,
 } from './git-upstream'
 import { git } from '../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
 // Real git against a bare "origin" and a clone of it: the fast-forward's whole
 // contract is what it refuses to do to a working tree, and only git itself can
 // say whether a merge would have discarded anything.
 
-const made: string[] = []
-
-afterEach(() => {
-  for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
-
-function tmp(prefix: string): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
-  made.push(dir)
-  return dir
-}
+const tmp = trackTempDirs('cl-upstream-')
 
 function commit(cwd: string, file: string, contents: string, message = `add ${file}`): string {
   fs.writeFileSync(path.join(cwd, file), contents)

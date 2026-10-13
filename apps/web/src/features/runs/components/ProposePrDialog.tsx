@@ -5,6 +5,7 @@ import { Modal } from '@/shared/ui/Overlays'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useMountedIdentity } from '@/shared/state/use-mounted-identity'
 import { BLOCKED_HELP } from '../utils/pr-blocked-copy'
+import { displayError } from '@/shared/api/error-message'
 
 // R80 — the PR confirm dialog. Pushing to origin is teammate-visible, so a PR is
 // never automatic: this is the explicit gate. It re-runs the preflight on open
@@ -47,7 +48,7 @@ export function ProposePrDialog({
     setError(null)
     runsApi.proposeRunPr(runId)
       .then((r) => { if (session()) { setResults(r.results); onProposed?.() } })
-      .catch((e: unknown) => { if (session()) setError(e instanceof Error ? e.message : String(e)) })
+      .catch((e: unknown) => { if (session()) setError(displayError(e)) })
       .finally(() => {
         pending.current.delete(runId)
         if (mounted()) renderPending((version) => version + 1)

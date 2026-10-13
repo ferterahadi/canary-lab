@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -11,13 +9,16 @@ import { pendingRunReview } from './features/runs/logic/runtime/run-review-gate'
 import { digestOfSpecHashes } from './features/runs/logic/runtime/run-suite-snapshot'
 import { hashFeatureSpecs } from './features/runs/logic/dirty-specs/detect'
 import type { WorkspaceNotification } from '../../../shared/notifications/types'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+import { initGitRepo, git } from '../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('canary-review-server-')
 
 const cleanups: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
 it('preserves exact review identity, refusal, persisted acceptance and agent catch-up through production wiring', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-server-'))
-  cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }))
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'shop')
   const logsDir = path.join(root, 'logs')
@@ -27,12 +28,7 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "exports.config = { name: 'shop', description: 'Review fixture', featureDir: __dirname, repos: [] }")
   const file = path.join(featureDir, 'e2e/contract.spec.ts')
   fs.writeFileSync(file, "test('contract', () => expect(1).toBe(1))\n")
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' }).toString().trim()
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'original suite')
+  initGitRepo(featureDir)
   fs.cpSync(featureDir, snapshot, { recursive: true, filter: (source) => path.basename(source) !== '.git' })
   new FileRunStateSink(logsDir).bootstrap({
     runId, feature: 'shop', featureDir, status: 'aborted', startedAt: '2026-01-01T00:00:00Z',
@@ -88,7 +84,7 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   expect(accepted.json()).toMatchObject({ decision: 'accepted', review_revision: current.review_revision, git: { status: 'committed' }, execution: { status: 'new-run-required' } })
   expect(await waiting).toMatchObject({ result: { status: 'approved-for-new-run', review_revision: current.review_revision } })
   expect(pendingRunReview(runStore, 'shop', featureDir)).toBeUndefined()
-  expect(git('show', 'HEAD:e2e/contract.spec.ts')).toContain('second candidate')
+  expect(git(featureDir, 'show', 'HEAD:e2e/contract.spec.ts')).toContain('second candidate')
   const saved = JSON.parse(fs.readFileSync(path.join(runDirFor(logsDir, runId), 'manifest.json'), 'utf8'))
   expect(saved.specEdits.reviewDecisions).toContainEqual(expect.objectContaining({ revision: current.review_revision, receipt: accepted.json() }))
   await expect.poll(() => notifications().filter((item) => !item.resolvedAt)).toEqual([])

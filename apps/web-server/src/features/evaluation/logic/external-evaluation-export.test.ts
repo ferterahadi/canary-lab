@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask, newEvaluationTaskId } from './external-evaluation-export'
 import { evaluationArchiveBase, safeFilename } from '../../../../../../shared/evaluation-archive-naming'
 import { readEvaluationExportCertificate, readEvaluationExportTask } from './evaluation-export-store'
 import { detail } from './__fixtures__/test-review-fixtures'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-ext-eval-')
 
 // The shared task-lifecycle helpers behind BOTH external-export surfaces (the
 // MCP tool pair and the flight's hand-off). The completion path is exercised
@@ -17,12 +19,10 @@ let tmpDir: string
 let logsDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ext-eval-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('safeFilename / archive base', () => {
   it('collapses unsafe characters and never yields an empty name', () => {

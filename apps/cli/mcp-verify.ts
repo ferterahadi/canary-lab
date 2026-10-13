@@ -1,3 +1,5 @@
+import { probeCoverageCommandDiscovery } from './mcp-command-probe'
+import { probeCliHealth } from './health-probe'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -104,23 +106,23 @@ export async function verifySavedMcpRegistration(
   try {
     const healthUrl = new URL(url)
     healthUrl.pathname = `${healthUrl.pathname.replace(/\/$/, '')}/health`
-    const response = await (opts.fetch ?? fetch)(healthUrl, { signal: AbortSignal.timeout(timeout) })
+    const response = await probeCliHealth(healthUrl, { fetchImpl: opts.fetch, decode: 'required', signal: AbortSignal.timeout(timeout) })
     if (!response.ok) throw new Error(`MCP health returned ${response.status}`)
-    const health = await response.json() as { projectRoot?: string }
+    const health = response.body as { projectRoot?: string }
     if (!health.projectRoot || realPath(health.projectRoot) !== realPath(opts.workspace)) {
       throw new Error(`MCP serves ${health.projectRoot ?? 'an unknown workspace'}, expected ${opts.workspace}`)
     }
     await client.connect(transport, { timeout })
     const result = await client.listTools({}, { timeout })
     if (result.tools.length !== 1 || result.tools[0].name !== 'exec') throw new Error('Expected the compact profile with only exec')
-    const discovery = await client.callTool({ name: 'exec', arguments: {
-      command: 'search_tools', arguments: { query: 'get_feature_coverage' },
-    } }, { timeout })
-    const content = (discovery as { content?: Array<{ type: string; text?: string }> }).content ?? []
-    const parsed = JSON.parse(content.filter((item) => item.type === 'text').map((item) => item.text).join('\n')) as {
-      matches?: Array<{ command: string }>
-    }
-    if (!parsed.matches?.some((match) => match.command === 'get_feature_coverage')) throw new Error('exec command discovery failed')
+    const discovered = await probeCoverageCommandDiscovery(
+      (request) => client.callTool(request, { timeout }),
+      (result) => {
+        const content = (result as { content?: Array<{ type: string; text?: string }> }).content ?? []
+        return content.filter((item) => item.type === 'text').map((item) => item.text).join('\n')
+      },
+    )
+    if (!discovered) throw new Error('exec command discovery failed')
     return { status: 'verified', message: `compact MCP connected to ${opts.workspace}` }
   } catch (error) {
     return { status: 'broken', message: (error as Error).message }

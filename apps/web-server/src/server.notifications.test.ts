@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -7,6 +6,9 @@ import { createServer } from './server'
 import { FlightRunStore } from './features/flights/logic/store'
 import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 import type { WorkspaceNotification } from '../../../shared/notifications/types'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-notifications-server-')
 
 let dir: string
 let logsDir: string
@@ -34,7 +36,7 @@ const persisted = (): WorkspaceNotification[] => JSON.parse(fs.readFileSync(path
 
 beforeEach(async () => {
   ptyFactory.mockClear()
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-notifications-server-'))
+  dir = tempDir()
   const projectRoot = path.join(dir, 'workspace')
   const featuresDir = path.join(projectRoot, 'features')
   logsDir = path.join(dir, 'logs')
@@ -56,7 +58,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close()
   await app?.close()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
 
 it('persists store-event transitions, broadcasts them to an open socket, and catches a connected agent up', async () => {

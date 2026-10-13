@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider } from '../state/invalidation'
 import { ApiError } from '../api/internal'
@@ -9,6 +9,7 @@ import { getFeatureTests } from '../api/config'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
 import { connectReconnectingSocket } from '../api/reconnecting-socket'
 import { readableTest } from '../api/__fixtures__/readable-test'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('../api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/config')>()),
@@ -39,11 +40,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listDiscoveryRepairs).mockResolvedValue([])
   vi.mocked(getFeatureTests).mockResolvedValue(failedSpecs)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 async function render(isAuthoringTests = false) {
   await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} /></InvalidationProvider>))
 }

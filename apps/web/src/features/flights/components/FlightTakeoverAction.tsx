@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as flightsApi from '@/shared/api/flights'
 import { ConfirmModal } from '@/shared/ui/Overlays'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
+import { displayError } from '@/shared/api/error-message'
 
 /** The one web-owned action while an external agent holds a Flight step.
  *  The external agent owns the checkpoint answer; this control only requests
@@ -26,7 +27,7 @@ export function FlightTakeoverAction({
     const call = requested ? flightsApi.forceFlightTakeover(flightId) : flightsApi.requestFlightTakeover(flightId)
     call
       .then(() => onResponded())
-      .catch((err: unknown) => onError(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => onError(displayError(err)))
       .finally(() => setBusy(false))
   }
 

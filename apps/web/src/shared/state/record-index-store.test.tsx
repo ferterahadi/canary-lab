@@ -1,27 +1,17 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { expect, it, vi } from 'vitest'
 import { useRecordDetail } from './record-index-store'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The provider-backed path (an id, a hydration with demand) is driven through
 // PortifyContext and BenchmarkContext; this pins the no-selection case every
 // detail view passes before a record is chosen.
 
-let container: HTMLDivElement
 let root: Root
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it('asks nothing of the hydration and reports no detail when no record is selected', () => {
   // One snapshot object, as the real hydration keeps: useSyncExternalStore

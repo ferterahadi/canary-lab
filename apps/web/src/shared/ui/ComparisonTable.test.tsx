@@ -1,19 +1,14 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import { ComparisonTable } from './ComparisonTable'
 import { DiffView } from './DiffView'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 let container: HTMLDivElement
 let root: Root
-beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => { act(() => root.unmount()); container.remove() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe('comparison surfaces', () => {
   it('uses real table columns and highlights only changed text', () => {

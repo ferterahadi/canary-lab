@@ -1,16 +1,15 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { json, write } from '../files'
 import type { Attempt, StudyManifest } from '../types'
 import { startRepositoryCheckBroker } from './check-broker'
 import { verifyCandidateSource, type CandidateReceipt, evaluateRepositoryCandidate } from './candidate'
+import { trackTempDirs } from '../../test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('repository-broker-')
 function fixture() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repository-broker-'))); roots.push(root)
+  const root = tempDir()
   const attempt: Attempt = { id: 'codex-overlap-1-canary', agent: 'codex', workflow: 'canary', scenario: 'overlap', repetition: 1 }
   const work = path.join(root, 'attempts', attempt.id)
   const baseline = path.join(root, 'attempts/overlap/source')

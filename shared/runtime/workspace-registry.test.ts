@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  agentHomeOverride,
   canaryLabHome,
   readWorkspaceRegistry,
   registryPath,
@@ -24,6 +25,14 @@ describe('canaryLabHome', () => {
   it('falls back to the home dir when the override is unset or blank', () => {
     expect(canaryLabHome({})).toBe(os.homedir())
     expect(canaryLabHome({ CANARY_LAB_HOME: '   ' })).toBe(os.homedir())
+  })
+})
+
+describe('agentHomeOverride', () => {
+  it('returns CANARY_LAB_AGENT_HOME verbatim, and nothing when it is unset', () => {
+    // Undefined (not the home dir) so each caller keeps its own default.
+    expect(agentHomeOverride({ CANARY_LAB_AGENT_HOME: '/tmp/agents' })).toBe('/tmp/agents')
+    expect(agentHomeOverride({})).toBeUndefined()
   })
 })
 

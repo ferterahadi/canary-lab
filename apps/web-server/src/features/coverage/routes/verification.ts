@@ -1,3 +1,5 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import { findFeature } from '../../../shared/feature-loader'
@@ -14,7 +16,7 @@ import {
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
-import { notFound } from '../../../shared/http-error'
+import { notFound, replyFailure } from '../../../shared/http-error'
 
 export interface VerificationRouteDeps {
   featuresDir: string
@@ -75,8 +77,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(201)
         return created
       } catch (err) {
-        reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -96,8 +97,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         if (!config) return notFound(reply, 'verification config')
         return config
       } catch (err) {
-        reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -134,24 +134,21 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
           gettingStartedSession = deps.gettingStarted.claim('verify', gettingStartedSource).sessionId
         } catch (err) {
           if (!(err instanceof GettingStartedBusyError)) throw err
-          reply.code(409)
-          return { type: err.type, error: err.message, active: err.active }
+          return gettingStartedBusyReply(reply, err)
         }
       }
       try {
-        const orch = bootRunId
-          ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
-          : await deps.startVerification(feature.name, input)
-        deps.store.registry.set(orch.runId, orch)
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: orch.runId })
-        }
-        reply.code(201)
-        return { runId: orch.runId, executionType: 'verify' }
+        return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), async (attach) => {
+          const orch = bootRunId
+            ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
+            : await deps.startVerification(feature.name, input)
+          deps.store.registry.set(orch.runId, orch)
+          attach({ kind: 'run', id: orch.runId })
+          reply.code(201)
+          return { runId: orch.runId, executionType: 'verify' }
+        })
       } catch (err) {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
-        reply.code(statusCodeOf(err))
-        return { error: errorMessageOf(err) }
+        return replyFailure(reply, err)
       }
     },
   )
@@ -218,12 +215,3 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return Object.values(value).every((entry) => typeof entry === 'string')
 }
 
-function statusCodeOf(err: unknown): number {
-  return typeof (err as { statusCode?: unknown })?.statusCode === 'number'
-    ? (err as { statusCode: number }).statusCode
-    : 500
-}
-
-function errorMessageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}

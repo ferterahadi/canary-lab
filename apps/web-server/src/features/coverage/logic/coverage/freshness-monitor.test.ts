@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +7,9 @@ import { WorkspaceEventBus } from '../../../../shared/workspace-events'
 import { computeFeatureCoverage } from './service'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('coverage-watch-')
 
 vi.mock('./service', () => ({ computeFeatureCoverage: vi.fn() }))
 vi.mock('../../../../shared/feature-loader', () => {
@@ -28,7 +30,7 @@ const ledger = (revision = 'v1'): CoverageLedger => ({ feature: 'shop', coverage
 
 beforeEach(() => {
   vi.clearAllMocks()
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-watch-'))
+  root = tempDir()
   fs.mkdirSync(path.join(root, 'features'))
   fs.mkdirSync(path.join(root, 'logs'))
   fs.mkdirSync(path.join(root, 'features', 'shop', 'docs'), { recursive: true })
@@ -44,7 +46,7 @@ beforeEach(() => {
   }) as unknown as typeof fs.watch)
   monitor = new CoverageFreshnessMonitor({ featuresDir: path.join(root, 'features'), logsDir: path.join(root, 'logs') }, bus, warn)
 })
-afterEach(() => { monitor.close(); vi.restoreAllMocks(); vi.useRealTimers(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { monitor.close(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('observer recovery and lifetime', () => {
   it('removes disappeared suites and coalesces repeated/concurrent scans', async () => {
@@ -118,6 +120,16 @@ describe('observer recovery and lifetime', () => {
       return first
     })
     expect(await monitor.wait('shop', 'v1', 1000)).toMatchObject({ changed: true, change: { freshness: { revision: 'v2' } } })
+  })
+
+  it('still publishes the workspace event when a change listener throws', () => {
+    const events: unknown[] = []; bus.subscribe((event) => events.push(event))
+    const { listeners } = monitor as unknown as { listeners: { add(fn: () => void): void } }
+    listeners.add(() => { throw new Error('listener failed') })
+
+    monitor.observe(ledger('v2'))
+
+    expect(events).toEqual([{ type: 'coverage-changed', feature: 'shop', revision: 'v2' }])
   })
 
   it('ignores another suite while waiting for the selected suite revision', async () => {

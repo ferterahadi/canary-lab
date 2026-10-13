@@ -1,13 +1,12 @@
 import path from 'path'
-
-export const ANNOTATION_TAG = /@[A-Za-z][\w]*-[\w.-]+/g
+import { tokenizeTestAnnotations } from '../../../../../../../shared/test-annotations'
 
 /** Playwright titles carry the coverage annotations inline (`@req-R3 @path-sad …`).
  *  They are metadata, not prose — the report shows them as tags beside the case
  *  and keeps the headline readable. */
 export function splitAnnotations(title: string): { text: string; tags: string[] } {
-  const tags = dedupe(title.match(ANNOTATION_TAG) ?? [])
-  return { text: title.replace(ANNOTATION_TAG, '').replace(/\s+/g, ' ').trim(), tags }
+  const parsed = tokenizeTestAnnotations(title)
+  return { text: parsed.title, tags: dedupe(parsed.tokens.map((token) => token.raw)) }
 }
 
 export function comparableTitle(title: string): string {
@@ -73,9 +72,4 @@ export function titleCaseFeatureName(input: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/\b[a-zA-Z]/g, (char) => char.toUpperCase())
-}
-
-export function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
 }

@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ExternalDraftAgentPanel } from './ExternalDraftAgentPanel'
@@ -25,6 +28,30 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
 }
 
 describe('ExternalDraftAgentPanel', () => {
+  it('updates and removes an error without replacing the mounted card or session link', () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const show = (over: Partial<DraftRecord>) => act(() => root.render(<ExternalDraftAgentPanel draft={draft(over)} stageView="generating" />))
+    try {
+      show({})
+      const card = container.querySelector('.cl-card')
+      const link = container.querySelector('a')
+      show({ externalStage: 'error', errorMessage: 'First failure' })
+      const error = Array.from(container.querySelectorAll('div')).find((el) => el.textContent === 'First failure')!
+      expect(error.className).toBe('mt-3 rounded-md px-3 py-2 text-[11px] @[320px]:mt-4')
+      expect(error.getAttribute('style')).toContain('var(--danger)')
+      // happy-dom drops color-mix declarations; assert their authored markup.
+      const html = renderToStaticMarkup(<ExternalDraftAgentPanel draft={draft({ externalStage: 'error', errorMessage: 'First failure' })} stageView="generating" />)
+      expect(html).toContain('color-mix(in srgb, var(--danger) 10%, transparent)')
+      expect(html).toContain('1px solid color-mix(in srgb, var(--danger) 30%, transparent)')
+      show({ externalStage: 'error', errorMessage: 'Next failure' })
+      expect(error.textContent).toBe('Next failure')
+      show({ externalStage: 'ready', errorMessage: 'Next failure' })
+      expect(container.textContent).not.toContain('Next failure')
+      expect(container.querySelector('.cl-card')).toBe(card)
+      expect(container.querySelector('a')).toBe(link)
+    } finally { act(() => root.unmount()) }
+  })
   it('renders the client brand, stage, and conversation name', () => {
     const html = renderToStaticMarkup(
       <ExternalDraftAgentPanel draft={draft()} stageView="generating" />,

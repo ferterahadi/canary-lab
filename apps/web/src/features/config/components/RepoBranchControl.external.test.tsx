@@ -1,6 +1,6 @@
 import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { act, useRef } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as workspaceApi from '@/shared/api/workspace'
 import * as featuresApi from '@/shared/api/features'
@@ -9,6 +9,7 @@ import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useWorkspaceData } from '@/shared/state/use-workspace-data'
 import { BranchControl } from './RepoBranchControl'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
@@ -48,9 +49,9 @@ beforeEach(() => {
   vi.mocked(workspaceApi.getVersionStatus).mockResolvedValue({ current: '1', latest: null, updateAvailable: false, packageName: null, update: null })
   vi.mocked(workspaceApi.getRepoGitStatus).mockResolvedValue(status('main'))
   vi.mocked(connectWorkspaceEvents).mockReturnValue({ close: vi.fn() })
-  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 it.each(['features-changed', 'connected'] as const)('updates the mounted branch reader through %s without reconnecting its workspace socket', async (type) => {
   await act(async () => { root.render(<InvalidationProvider><Workspace /></InvalidationProvider>) })

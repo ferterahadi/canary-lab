@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
@@ -10,16 +9,16 @@ import { computeDocsHash, readDocsCollection } from '../../features/coverage/log
 import { documentHash, documentResolutionInput, readDocumentSelection, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
 import { inputFingerprint } from '../elicitation'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-discovery-')
 
 const facts = { surface: 'codex' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: true } }
 const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'discovery-tests', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
 const json = (result: CallToolResult | InputRequiredResult) => JSON.parse((result.content as Array<{ text: string }>)[0].text)
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
 
 function fixture() {
-  const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-discovery-')))
-  roots.push(projectRoot)
+  const projectRoot = tempDir()
   const featuresDir = path.join(projectRoot, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
   const repo = path.join(projectRoot, 'product')
@@ -69,7 +68,7 @@ describe('document discovery before MCP 2.0 elicitation', () => {
     try {
       const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
       expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('requirements.md') } })
-      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('Previous path: unknown') } })
+      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('Where is the file now?') } })
       expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
     } finally {
       readlink.mockRestore()

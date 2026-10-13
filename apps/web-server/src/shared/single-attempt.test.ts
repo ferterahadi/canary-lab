@@ -1,18 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { claimedSingleAttempt, policyForRunManifest, validateSingleAttempt } from './single-attempt'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
 
-const dirs: string[] = []
-afterEach(() => {
-  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('cl-legacy-attempt-')
 
 describe('suite single-attempt receipt', () => {
   it('selects and reloads legacy policies by existence, without falling back past invalid configuration', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-legacy-order-'))
-    dirs.push(root)
+    const root = tempDir('cl-legacy-order-')
     const featureDir = path.join(root, 'demo')
     fs.mkdirSync(featureDir)
     const manifest = { feature: 'demo', featureDir }
@@ -33,8 +29,7 @@ describe('suite single-attempt receipt', () => {
   })
 
   it('accepts a run-relative receipt and observes the suite claim', () => {
-    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-attempt-'))
-    dirs.push(runDir)
+    const runDir = tempDir('cl-attempt-')
     const policy = { receipt: 'runtime/effect-attempt/attempt.json' }
     expect(claimedSingleAttempt(runDir, policy)).toBe(false)
     const receipt = path.join(runDir, policy.receipt)
@@ -49,8 +44,7 @@ describe('suite single-attempt receipt', () => {
   )
 
   it('uses the named suite config for runs created before the policy field existed', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-legacy-attempt-'))
-    dirs.push(root)
+    const root = tempDir()
     const featureDir = path.join(root, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'),
@@ -63,8 +57,7 @@ describe('suite single-attempt receipt', () => {
   })
 
   it('does not infer a legacy policy from a missing or malformed suite config', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-legacy-attempt-'))
-    dirs.push(root)
+    const root = tempDir()
     const featureDir = path.join(root, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     expect(policyForRunManifest({ feature: 'demo' })).toBeUndefined()

@@ -1,15 +1,8 @@
+import { unwrapExpression } from '../unwrap-expression'
 import ts from 'typescript'
 
 export function unwrapCallExpression(expression: ts.Expression): ts.Expression {
-  while (
-    ts.isAwaitExpression(expression)
-    || ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-  ) expression = expression.expression
-  return expression
+  return unwrapExpression(expression, { unwrapAwait: true })
 }
 
 export function callFromExpression(expression: ts.Expression): ts.CallExpression | undefined {

@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
@@ -10,6 +9,9 @@ import type { FlightInject, FlightStageDeps } from './context'
 import { stageContextStub } from './__fixtures__/stage-context'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../../shared/flights/types'
 import { buildFlightStageAdapters } from './index'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-stagejobs-')
 
 // The four job factories, tested at the level that matters: what each one asks
 // its subsystem to do, and — crucially — the states in which it deliberately asks
@@ -127,11 +129,10 @@ describe('agentSpawnJob', () => {
   let flightDir: string
 
   beforeEach(() => {
-    flightDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-stagejobs-')))
+    flightDir = tempDir()
   })
 
   afterEach(() => {
-    fs.rmSync(flightDir, { recursive: true, force: true })
     mockNodeSpawn.mockReset()
   })
 

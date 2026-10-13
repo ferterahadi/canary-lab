@@ -11,8 +11,8 @@ import type {
   CoverageJobManifest,
   PrdSummary,
 } from '@shared/coverage/types'
-import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
-import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
+import { requestJson, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
+import { requestAgentSession, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
   return requestSnapshot(`/api/features/${encodeURIComponent(feature)}/coverage`, opts)
@@ -33,12 +33,7 @@ export function writeFeatureDoc(
   content: string,
   opts?: ClientOptions,
 ): Promise<{ written: boolean; relativePath: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ relPath, content }) },
-    fetchImpl,
-  )
+  return requestJson(`/api/features/${encodeURIComponent(feature)}/docs`, 'POST', { relPath, content }, opts)
 }
 
 /** Upload a source doc file (.md/.txt/.pdf/.docx); the server extracts text and
@@ -48,12 +43,7 @@ export function importFeatureDoc(
   file: { filename: string; contentType?: string; base64: string },
   opts?: ClientOptions,
 ): Promise<{ written: boolean; relativePath: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/import`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(file) },
-    fetchImpl,
-  )
+  return requestJson(`/api/features/${encodeURIComponent(feature)}/docs/import`, 'POST', file, opts)
 }
 
 export function deleteFeatureDoc(feature: string, relPath: string, opts?: ClientOptions): Promise<{ deleted: boolean }> {
@@ -84,12 +74,7 @@ export function regeneratePrdSummary(
   adapter?: 'auto' | 'claude' | 'codex' | 'deterministic',
   opts?: ClientOptions,
 ): Promise<{ feature: string; summary: PrdSummary; written: string[] }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/prd-summary/regenerate`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(adapter ? { adapter } : {}) },
-    fetchImpl,
-  )
+  return requestJson(`/api/features/${encodeURIComponent(feature)}/prd-summary/regenerate`, 'POST', adapter ? { adapter } : {}, opts)
 }
 
 // ─── Requirement Coverage — async jobs (R4). Summary + Coverage are one exercise:
@@ -108,16 +93,11 @@ export function startCoverageJob(
     models?: { prd?: StageModelChoice; mapping?: StageModelChoice }
   },
 ): Promise<CoverageJobManifest> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { kind }
   if (opts?.adapter) body.adapter = opts.adapter
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   if (opts?.models) body.models = opts.models
-  return request<CoverageJobManifest>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    fetchImpl,
-  )
+  return requestJson<CoverageJobManifest>(`/api/features/${encodeURIComponent(feature)}/coverage/jobs`, 'POST', body, opts)
 }
 
 export function listCoverageJobs(feature: string, opts?: ClientOptions): Promise<CoverageJobIndexEntry[]> {
@@ -149,17 +129,10 @@ export async function getCoverageAgentSession(
   jobId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence | null> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse | null>(
-      `${baseUrl}/api/coverage/jobs/${encodeURIComponent(jobId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession<AgentSessionResponse | null>(
+    `/api/coverage/jobs/${encodeURIComponent(jobId)}/agent-session`,
+    opts,
+  )
 }
 
 /** 404 → an `AgentSessionAbsence` with the server's reason (a raw export has
@@ -168,17 +141,10 @@ export async function getEvaluationAgentSession(
   taskId: string,
   opts?: ClientOptions,
 ): Promise<AgentSessionResponse | AgentSessionAbsence> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  try {
-    return await request<AgentSessionResponse>(
-      `${baseUrl}/api/evaluation-exports/${encodeURIComponent(taskId)}/agent-session`,
-      { method: 'GET' },
-      fetchImpl,
-    )
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
-    throw err
-  }
+  return requestAgentSession(
+    `/api/evaluation-exports/${encodeURIComponent(taskId)}/agent-session`,
+    opts,
+  )
 }
 
 export function clearPrdSummary(feature: string, opts?: ClientOptions): Promise<{ feature: string; removed: string[]; untagged: string[] }> {

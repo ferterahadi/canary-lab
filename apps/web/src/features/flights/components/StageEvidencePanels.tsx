@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/portify'
+import type { PortifyBootInstance, PortifyManifest } from '@shared/portify-index'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@shared/coverage/types'
 import type { RunDetail } from '@shared/run-detail'

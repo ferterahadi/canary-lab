@@ -1,12 +1,15 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { summaryEntryName } from '../../../../../shared/test-names'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
 import { readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
 import { documentHash, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-authcov-')
 
 // The offloaded coverage surface: the calling client does the reading and the
 // inference, Canary hands out context and writes the answer through its own
@@ -44,15 +47,10 @@ function harness(over: Record<string, unknown> = {}) {
 /** A feature with one reviewed source doc (so a summary pass has something to read) and
  *  one untagged spec (so a mapping pass has something to map). */
 function writeFeature(name = 'checkout', specBody = CREATE_TEST): string {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: ['local'], repos: [], featureDir: __dirname } }`,
-  )
-  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC_HEADER + specBody)
-  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Todos\na user can create a todo\n')
+  const dir = writeFeatureFixture(featuresDir, name, { envs: ['local'], repos: [] }, {
+    specs: { 'a.spec.ts': SPEC_HEADER + specBody },
+    docs: { 'spec.md': '# Todos\na user can create a todo\n' },
+  })
   // These tests exercise summary authoring after discovery. The discovery suite
   // separately proves that an unreviewed document cannot start a summary job.
   const docs = readDocsCollection(dir)
@@ -101,14 +99,12 @@ function recordPassingRun(feature: string, testTitles: string[]): void {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-authcov-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('start_external_summary', () => {
   it('requests discovery before elicitation instead of minting an ungrounded job', async () => {

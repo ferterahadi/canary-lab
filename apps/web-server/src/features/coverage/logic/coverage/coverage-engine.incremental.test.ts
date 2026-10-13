@@ -1,11 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Requirement } from '../../../../../../../shared/coverage/types'
 import { applyExternalCoverageMappings, buildCoverageMappingContext, runCoverageEngine, type RunCoverageEngineDeps } from './coverage-engine'
 import { requirementsSetHash } from './fingerprints'
 import { readCoverageRunState } from './run-state'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mapping-cache-')
 
 let root: string
 let featureDir: string
@@ -27,7 +29,7 @@ function writeSummary(): void {
 const args = () => ({ featuresDir: path.join(root, 'features'), logsDir: path.join(root, 'logs'), feature, incremental: true })
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mapping-cache-')))
+  root = tempDir()
   featureDir = path.join(root, 'features', feature)
   spec = path.join(featureDir, 'e2e', 'checkout.spec.ts')
   fs.mkdirSync(path.dirname(spec), { recursive: true })
@@ -40,7 +42,6 @@ beforeEach(() => {
   writeSummary()
 })
 
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('incremental mapping with real source inputs', () => {
   it('reuses examined negative answers, then examines only an edited or added test', async () => {

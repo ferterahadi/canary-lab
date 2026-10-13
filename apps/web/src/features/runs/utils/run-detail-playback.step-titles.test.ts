@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PlaywrightPlaybackEvent } from '@shared/run-detail'
-import { playbackTests } from './run-detail-playback'
+import { compactPlaybackSteps, playbackTests, type CompactStep } from './run-detail-playback'
 
 // Step-title compaction, reached through `playbackTests` because that is the only
 // way in — `compactStepTitle`, `harnessStepLabel` and `matcherPhrase` are module
@@ -119,5 +119,69 @@ describe('step-title compaction', () => {
     // finds no element. The row is kept and generic rather than dropped: the
     // reader still learns an assertion ran at this point in the trace.
     expect(stepsFor([{ title: 'Expect "toBe"', category: 'expect' }])).toEqual(['Verified 1 assertion'])
+  })
+})
+
+describe('step rows', () => {
+  const spec = '/repo/e2e/ledger.spec.ts'
+  const check = (title: string, line: number, over: Partial<CompactStep> = {}): CompactStep => ({ title, category: 'expect', ended: true, location: `${spec}:${line}`, ...over })
+
+  it('folds a loop’s labelled checks from one line into one row that keeps each label', () => {
+    const rows = compactPlaybackSteps([check('run-a', 77), check('run-b', 77), check('run-c', 77, { ended: false }), check('after', 84)])
+    expect(rows).toEqual([
+      { title: 'Verified the same check 3 times', category: 'expect', ended: false, location: `${spec}:77`, count: 3, labels: ['run-a', 'run-b', 'run-c'] },
+      { title: 'after', category: 'expect', ended: true, location: `${spec}:84` },
+    ])
+  })
+
+  it('keeps the title of a repeat whose passes all read the same, and names a repeated action', () => {
+    const click = (title: string): CompactStep => ({ title, category: 'pw:api', ended: true, location: `${spec}:9` })
+    expect(compactPlaybackSteps([click('Click "Next"'), click('Click "Next"')])).toEqual([{ title: 'Clicked Next', category: 'pw:api', ended: true, location: `${spec}:9`, count: 2 }])
+    expect(compactPlaybackSteps([click('Click "A"'), click('Click "B"')])[0]).toMatchObject({ title: 'Ran the same step 2 times', labels: ['Clicked A', 'Clicked B'] })
+  })
+
+  it('never folds steps from different lines, or steps with no recorded line', () => {
+    expect(compactPlaybackSteps([check('a', 1), check('b', 2)]).map((r) => r.title)).toEqual(['a', 'b'])
+    const bare = (title: string): CompactStep => ({ title, category: 'expect', ended: true })
+    expect(compactPlaybackSteps([bare('a'), bare('b')]).map((r) => r.count)).toEqual([undefined, undefined])
+  })
+
+  it('folds a loop whose body runs several lines into one row per body line', () => {
+    const rows = compactPlaybackSteps([
+      check('before', 90),
+      check('hour 1 count', 94), check('hour 1 minute', 98),
+      check('hour 2 count', 94), check('hour 2 minute', 98, { ended: false }),
+      check('hour 3 count', 94),
+      check('after', 112),
+    ])
+    expect(rows.map(({ title, location, count, labels, ended }) => ({ title, line: location?.split(':').at(-1), count, labels, ended }))).toEqual([
+      { title: 'before', line: '90', count: undefined, labels: undefined, ended: true },
+      { title: 'Verified the same check 2 times', line: '94', count: 2, labels: ['hour 1 count', 'hour 2 count'], ended: true },
+      { title: 'Verified the same check 2 times', line: '98', count: 2, labels: ['hour 1 minute', 'hour 2 minute'], ended: false },
+      // A pass the run cut short stays as its own row rather than half-folding.
+      { title: 'hour 3 count', line: '94', count: undefined, labels: undefined, ended: true },
+      { title: 'after', line: '112', count: undefined, labels: undefined, ended: true },
+    ])
+  })
+
+  it('folds no loop from a single pass, a body that repeats a line, or a body with a tally in it', () => {
+    expect(compactPlaybackSteps([check('a', 1), check('b', 2)]).map((r) => r.title)).toEqual(['a', 'b'])
+    expect(compactPlaybackSteps([check('a', 1), check('b', 2), check('c', 1), check('d', 3)]).map((r) => r.title)).toEqual(['a', 'b', 'c', 'd'])
+    const bare = check('Expect "toBe"', 2)
+    expect(compactPlaybackSteps([check('a', 1), bare, check('b', 1), bare]).map((r) => r.title)).toEqual(['a', 'Verified 1 assertion', 'b', 'Verified 1 assertion'])
+  })
+
+  it('spans a tally from its first assertion to its last in the same file', () => {
+    const bare = (line: number, file = spec): CompactStep => ({ title: 'Expect "toBe"', category: 'expect', ended: true, location: `${file}:${line}` })
+    expect(compactPlaybackSteps([bare(50), bare(99, '/repo/e2e/support/helper.ts'), bare(65)])).toEqual([
+      { title: 'Verified 3 assertions', category: 'expect', ended: true, location: `${spec}:50`, toLine: 65 },
+    ])
+    expect(compactPlaybackSteps([bare(50)])[0]).toEqual({ title: 'Verified 1 assertion', category: 'expect', ended: true, location: `${spec}:50` })
+    expect(compactPlaybackSteps([{ title: 'Expect "toBe"', category: 'expect', ended: true }])[0].location).toBeUndefined()
+    expect(compactPlaybackSteps([{ title: 'Expect "toBe"', category: 'expect', ended: true, location: spec }])[0]).toEqual({ title: 'Verified 1 assertion', category: 'expect', ended: true, location: spec })
+    // An assertion the reporter gave no location widens nothing either.
+    expect(compactPlaybackSteps([bare(50), { title: 'Expect "toBe"', category: 'expect', ended: true }, bare(65)])).toEqual([
+      { title: 'Verified 3 assertions', category: 'expect', ended: true, location: `${spec}:50`, toLine: 65 },
+    ])
   })
 })

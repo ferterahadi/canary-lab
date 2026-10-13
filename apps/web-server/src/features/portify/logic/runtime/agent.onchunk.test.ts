@@ -6,8 +6,8 @@
 import { vi, describe, it, expect, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // ── mock setup ──────────────────────────────────────────────────────────────
 
@@ -15,6 +15,8 @@ const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }))
 vi.mock('child_process', () => ({ spawn: mockSpawn, default: { spawn: mockSpawn } }))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+const tempDir = trackTempDirs('portify-onchunk-')
 
 interface FakeChildOpts {
   stdout?: string | Buffer
@@ -39,27 +41,18 @@ function makeFakeChild(opts: FakeChildOpts = {}) {
   return child
 }
 
-const roots: string[] = []
-function tmp(): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-onchunk-'))
-  roots.push(d)
-  return d
-}
 afterEach(() => {
   mockSpawn.mockReset()
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
 })
 
 // Import AFTER vi.mock so the hoisted mock is in place.
 import { runPortifyAgent, isAgentSessionLimited } from './agent'
-
 // ── tests ────────────────────────────────────────────────────────────────────
 
 describe('runPortifyAgent — onChunk coverage', () => {
   it('writes stdout chunk to log file when logPath is provided (out !== null TRUE branch)', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: 'hello from agent\n' }))
-    const dir = tmp()
+    const dir = tempDir()
     const logPath = path.join(dir, 'portify-out.log')
     await runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir, logPath })
     const written = fs.readFileSync(logPath, 'utf-8')
@@ -68,7 +61,7 @@ describe('runPortifyAgent — onChunk coverage', () => {
 
   it('skips writeSync when no logPath — out is null (out !== null FALSE branch)', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: 'output no log\n', stderr: 'err no log\n' }))
-    const dir = tmp()
+    const dir = tempDir()
     // No logPath → out stays null → onChunk skips writeSync, no throw
     await expect(runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir })).resolves.toBeUndefined()
   })
@@ -76,7 +69,7 @@ describe('runPortifyAgent — onChunk coverage', () => {
   it('swallows writeSync errors in onChunk (catch block)', async () => {
     mockSpawn.mockReturnValue(makeFakeChild({ stdout: 'chunk\n' }))
     const writeSyncSpy = vi.spyOn(fs, 'writeSync').mockImplementationOnce(() => { throw new Error('disk full') })
-    const dir = tmp()
+    const dir = tempDir()
     const logPath = path.join(dir, 'portify-err.log')
     await expect(runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir, logPath })).resolves.toBeUndefined()
     writeSyncSpy.mockRestore()
@@ -87,7 +80,7 @@ describe('runPortifyAgent — onChunk coverage', () => {
       stdout: '{"type":"assistant","message":{"content":[{"type":"text","text":"You\'ve hit your session limit · resets 6:30pm"}]}}\n',
       exitCode: 0,
     }))
-    const dir = tmp()
+    const dir = tempDir()
     await expect(runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir }))
       .rejects.toThrow(/session\/usage limit/i)
   })
@@ -96,7 +89,7 @@ describe('runPortifyAgent — onChunk coverage', () => {
     const child = makeFakeChild()
     // Emit the phrase in two pieces so the tail-carry boundary is exercised.
     mockSpawn.mockReturnValue(child)
-    const dir = tmp()
+    const dir = tempDir()
     const p = runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir })
     child.stdout.emit('data', Buffer.from('…some output, then you have '))
     child.stdout.emit('data', Buffer.from('hit your session limit now'))
@@ -107,7 +100,7 @@ describe('runPortifyAgent — onChunk coverage', () => {
   it('skips sessionLimited block on a chunk after limit was already detected (if-false branch)', async () => {
     const child = makeFakeChild()
     mockSpawn.mockReturnValue(child)
-    const dir = tmp()
+    const dir = tempDir()
     const p = runPortifyAgent({ agent: 'claude', prompt: 'go', cwd: dir })
     // First chunk matches the sentinel → sessionLimited = true
     child.stdout.emit('data', Buffer.from('you have hit your session limit'))

@@ -1,4 +1,4 @@
-import type { ConfigValue } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */

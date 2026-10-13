@@ -1,11 +1,16 @@
+import { RunStore } from '../../features/runs/logic/run-store'
+import { createRegistry } from '../../features/runs/logic/run-registry'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decode } from '@toon-format/toon'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerReadTools } from './reads'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { writeFeatureFixture } from '../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-reads-')
 
 // The read tools: the feature/run listings, the three run reads, and the Verify
 // config CRUD.
@@ -21,13 +26,7 @@ let featuresDir: string
 let logsDir: string
 
 function writeFeature(name: string, extra: Record<string, unknown> = {}): void {
-  const dir = path.join(featuresDir, name)
-  fs.mkdirSync(dir, { recursive: true })
-  const cfg = { name, description: 'd', envs: ['local'], repos: [], ...extra }
-  fs.writeFileSync(
-    path.join(dir, 'feature.config.cjs'),
-    `module.exports = { config: { ...${JSON.stringify(cfg)}, featureDir: __dirname } }`,
-  )
+  writeFeatureFixture(featuresDir, name, { envs: ['local'], repos: [], ...extra })
 }
 
 function runDetail(over: Record<string, unknown> = {}, manifest: Record<string, unknown> = {}): RunDetail {
@@ -43,6 +42,8 @@ function runDetail(over: Record<string, unknown> = {}, manifest: Record<string, 
     lifecycleEvents: [{ phase: 'booting' }],
     playwrightArtifacts: [{ name: 'trace.zip' }],
     playbackEvents: [{ test: 'pays' }],
+    attemptArtifacts: { '0': [{ name: 'test-failed-1.png' }] },
+    unassignedArtifacts: [{ name: 'trace.zip', execution: 1 }],
     ...over,
   } as unknown as RunDetail
 }
@@ -61,14 +62,12 @@ function harness(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-reads-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('list_features', () => {
   it('packs envs and repos into one flat row per feature', async () => {
@@ -151,9 +150,12 @@ describe('get_run', () => {
     expect(out).not.toHaveProperty('lifecycleEvents')
     expect(out).not.toHaveProperty('playwrightArtifacts')
     expect(out).not.toHaveProperty('playbackEvents')
+    // Per-execution media grows with every rerun: an agent asks for it.
+    expect(out).not.toHaveProperty('attemptArtifacts')
+    expect(out).not.toHaveProperty('unassignedArtifacts')
     expect(out).toMatchObject({
       artifactsBase: '/api/runs/run-1/artifacts/',
-      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'] },
+      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents', 'attemptArtifacts', 'unassignedArtifacts'] },
     })
     // A running run has no next step to recommend yet.
     expect(out).not.toHaveProperty('next')
@@ -454,4 +456,21 @@ describe('get_verification_result', () => {
     expect(await call('get_verification_result', { executionId: 'run-1' }))
       .toMatchObject({ executionId: 'run-1' })
   })
+})
+
+it('reads current persisted completed-run evidence after direct external writes', async () => {
+  const store = new RunStore(logsDir, createRegistry())
+  const manifest = runDetail({}, { status: 'passed' }).manifest
+  store.bootstrap(manifest)
+  const { call } = harness({ store })
+  expect(await call('get_run', { runId: 'run-1', includeRaw: true })).toMatchObject({ manifest: { status: 'passed' } })
+  const dir = path.join(logsDir, 'runs', 'run-1')
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ ...manifest, status: 'failed' }))
+  const event = { id: 'external', phase: 'completed', headline: 'Direct file evidence', updatedAt: '2026-01-01T00:00:00Z' }
+  fs.writeFileSync(path.join(dir, 'lifecycle-events.jsonl'), JSON.stringify(event) + '\npartial')
+  fs.writeFileSync(path.join(dir, 'diagnosis-journal.md'), 'external journal')
+  expect(await call('get_run', { runId: 'run-1', includeRaw: true })).toMatchObject({ manifest: { status: 'failed' }, lifecycleEvents: [event] })
+  const snapshot = await call('get_run_snapshot', { runId: 'run-1' })
+  expect(snapshot).toMatchObject({ runId: 'run-1', status: 'failed' })
+  expect(JSON.stringify(snapshot)).toContain('diagnosis-journal.md')
 })

@@ -1,20 +1,16 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { FlightManifest } from '../../../../../../shared/flights/types'
 import { applyFlightStageRemedy, flightStageRemedy } from './stage-remedy'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterAll(() => {
-  for (const r of roots) fs.rmSync(r, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('remedy-')
 
 function makeRepo(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
-  roots.push(dir)
+  const dir = tempDir(prefix)
   fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
   initGitRepo(dir)
   return dir
@@ -70,8 +66,7 @@ describe('flightStageRemedy', () => {
   })
 
   it('skips paths that are not git repos instead of failing', async () => {
-    const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'remedy-plain-'))
-    roots.push(plain)
+    const plain = tempDir('remedy-plain-')
     const remedy = await flightStageRemedy(manifestWith([plain], DIRTY_ERROR))
     expect(remedy!.repos).toEqual([])
   })
@@ -132,8 +127,7 @@ describe('applyFlightStageRemedy', () => {
   }
 
   const siblingState = (root: string): string =>
-    execFileSync('git', ['status', '--porcelain', '--', 'sibling.txt', 'sibling-new.txt'], { cwd: root })
-      .toString().trim()
+    git(root, 'status', '--porcelain', '--', 'sibling.txt', 'sibling-new.txt')
 
   it('stash touches only the feature repo, not the rest of its git root', async () => {
     const { root, service } = nestedRepo('remedy-nested-stash-')

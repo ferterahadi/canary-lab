@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   evaluationExportsDir,
@@ -24,6 +23,9 @@ import {
 } from './evaluation-export-store'
 import type { EvaluationExportTaskRecord } from '../../../../../../shared/evaluation-export-types'
 import type { BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('eval-export-')
 
 let tmpDir: string
 const ID = 'eval-task-abc'
@@ -45,7 +47,7 @@ function makeRecord(overrides: Partial<EvaluationExportTaskRecord> = {}): Evalua
 }
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-export-'))
+  tmpDir = tempDir()
 })
 
 describe('evaluation-export-store', () => {

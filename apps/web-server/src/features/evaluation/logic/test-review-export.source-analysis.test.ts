@@ -1,21 +1,20 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { createAssertionHtml } from './test-review-export'
 import { loadSourceTests } from './test-review/source-analysis'
 import { buildTestReviewPacket } from './test-review/packet'
 import { detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import type { ReadableNode } from '../../../../../../shared/readable-tests/types'
+
+const tempDir = trackTempDirs('cl-review-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-')))
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 describe('test review export', () => {
@@ -437,4 +436,69 @@ it('associates supported declarations with source without treating hooks or chai
   const packet = buildTestReviewPacket(detail({ featureDir: tmpDir, eventLocation: `${spec}:3`, title: 'case 1' }))
   expect(packet.tests).toHaveLength(1)
   expect(packet.tests[0].testBody).toContain('toHaveURL')
+})
+
+
+describe('source title display', () => {
+  it('preserves interpolated titles and keeps empty and unresolved titles excluded', () => {
+    const featureDir = path.join(tmpDir, 'feature')
+    fs.mkdirSync(featureDir)
+    fs.writeFileSync(path.join(featureDir, 'fixture.spec.ts'), [
+      "test(`hello ${name}`, async () => { expect(true).toBe(true) })",
+      "test('', async () => {})",
+      "test(dynamicTitle, async () => {})",
+    ].join('\n'))
+    expect([...loadSourceTests(featureDir).values()].map((test) => test.title)).toEqual(['hello ${name}'])
+  })
+})
+
+describe('the extracted test the report shares with the Tests column', () => {
+  const specSource = `import { test, expect } from '@playwright/test'
+import api from '@company/api-client'
+
+test('loads the cart', async ({ page }) => {
+  await page.goto('/cart')
+  for (const id of [1, 2]) {
+    await api.get(\`/items/\${id}\`)
+  }
+  await expect(page.getByText('Cart')).toBeVisible()
+})
+`
+
+  function writeSpec(): string {
+    const featureDir = path.join(tmpDir, 'feature')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'cart.spec.ts')
+    fs.writeFileSync(spec, specSource)
+    return spec
+  }
+
+  it('attaches the extracted test, with a Code-mode listing that numbers the same rows as the report body', () => {
+    const spec = writeSpec()
+    const line = lineOf(specSource, "test('loads the cart'")
+    const source = loadSourceTests(path.dirname(path.dirname(spec))).get(`${spec}:${line}`)!
+    expect(source.extracted).toMatchObject({ name: 'loads the cart', line })
+    expect(source.extracted!.readable.story!.steps.map((step) => step.source.startLine)).toEqual([line + 1, line + 2, line + 5])
+    expect(source.extracted!.codeDisplay!.code.split('\n')).toHaveLength(source.bodySource.split('\n').length)
+    expect(source.extracted!.codeDisplay!.lineMap[1].sourceLine).toBe(line + 1)
+  })
+
+  it('reads the suite with its semantic rules', () => {
+    const spec = writeSpec()
+    const key = `${spec}:${lineOf(specSource, "test('loads the cart'")}`
+    const flat = (nodes: ReadableNode[]): ReadableNode[] => nodes.flatMap((node) => [node, ...flat('children' in node ? node.children : [])])
+    const categories = (rules?: { apiClients: string[] }) => flat(loadSourceTests(path.dirname(path.dirname(spec)), rules).get(key)!
+      .extracted!.readable.nodes).flatMap((node) => node.english?.semanticCategories ?? [])
+    expect(categories({ apiClients: ['@company/api-client'] })).toContain('external-api')
+    expect(categories()).not.toContain('external-api')
+  })
+
+  it('carries it onto the report case, and leaves a case without source without one', () => {
+    const spec = writeSpec()
+    const featureDir = path.dirname(path.dirname(spec))
+    const withSource = buildTestReviewPacket(detail({ featureDir, eventLocation: `${spec}:${lineOf(specSource, "test('loads the cart'")}`, title: 'loads the cart' }))
+    expect(withSource.tests[0].extracted).toMatchObject({ test: { name: 'loads the cart' }, file: spec })
+    const without = buildTestReviewPacket(detail({ featureDir, title: 'loads the cart' }))
+    expect(without.tests[0]).not.toHaveProperty('extracted')
+  })
 })

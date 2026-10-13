@@ -18,11 +18,11 @@
 //
 // Run: node tools/check-import-cycles.mjs
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { REPO, walk } from './lib/fs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
 const ROOTS = ['apps/web/src', 'apps/web-server/src', 'apps/cli', 'shared']
 
 // Current measured state. Raise ONLY with a note saying why the tangle is
@@ -39,8 +39,11 @@ const CEILING = {
    *  deleted: a barrel joins every file behind it into one import node, so
    *  pointing callers at the declaring file dissolved five knots outright.
    *  26 → 25 when the wire types moved to root `shared/`: the run manifest
-   *  types no longer sit in the module that also reads and writes manifests. */
-  components: 25,
+   *  types no longer sit in the module that also reads and writes manifests.
+   *  25 → 23 during the duplicate-helper consolidation (error text, storage,
+   *  time formatting, the elapsed clock), which gave those helpers one shared
+   *  home each instead of a copy inside a feature module. */
+  components: 23,
   /** Modules inside the single largest knot — the real "how much must I read
    *  at once" number, and the one that hurts when it grows.
    *
@@ -70,18 +73,7 @@ const CEILING = {
   largest: 7,
 }
 
-function walk(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    const p = path.join(dir, name)
-    if (statSync(p).isDirectory()) {
-      if (name === 'node_modules' || name === 'dist') continue
-      walk(p, out)
-    } else if (/\.tsx?$/.test(name)) out.push(p)
-  }
-  return out
-}
-
-const files = ROOTS.flatMap((r) => walk(path.join(REPO, r)))
+const files = ROOTS.flatMap((r) => walk(path.join(REPO, r), { ext: /\.tsx?$/, skip: ['node_modules', 'dist'] }))
 const known = new Set(files)
 
 /** Resolve a relative specifier to a file we are tracking, trying the

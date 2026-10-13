@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 
@@ -17,6 +16,9 @@ import {
   UpdateJobConflictError,
   type InstallRunner,
 } from './update-job'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-update-job-')
 
 /** Minimal stand-in for a spawned child: stdout/stderr are their own emitters. */
 class FakeChild extends EventEmitter {
@@ -39,11 +41,8 @@ function writeInstalledCli(root: string, packageName = 'canary-lab'): string {
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-update-job-'))
+  logsDir = tempDir()
   spawnMock.mockReset()
-})
-afterEach(() => {
-  fs.rmSync(logsDir, { recursive: true, force: true })
 })
 
 const collectEvents = () => {

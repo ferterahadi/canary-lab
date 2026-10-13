@@ -1,13 +1,15 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { capturedEnvsetCount } from './envset-evidence'
 import { hasCapturedEnvset } from './stage-evidence'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('env-evidence-')
 
 let root: string
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'env-evidence-')) })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
+afterEach(() => { vi.restoreAllMocks() })
 
 function env(name: string): string {
   const dir = path.join(root, 'envsets', name)

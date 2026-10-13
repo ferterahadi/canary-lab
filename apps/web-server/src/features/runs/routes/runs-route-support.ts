@@ -1,4 +1,4 @@
-import { compareActiveRuns } from '../logic/active-run-order'
+import { selectRunForFeature } from '../logic/active-run-selection'
 import path from 'path'
 import type { RunDetail } from '../../../../../../shared/run-detail'
 import type { RunStore } from '../logic/run-store'
@@ -75,14 +75,9 @@ export function findActiveRunForFeature(
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
-  const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
-  for (const entry of store.list({ feature })) {
-    if (entry.status !== 'healing') continue
-    const detail = store.get(entry.runId)
-    if (!detail) continue
-    if (env && detail.manifest.env !== env) continue
-    candidates.push({ detail, startedAt: entry.startedAt })
-  }
-  candidates.sort(compareActiveRuns)
-  return candidates[0]?.detail ?? null
+  return selectRunForFeature(
+    store, feature, env,
+    (entry) => entry.status === 'healing',
+    () => true,
+  )
 }

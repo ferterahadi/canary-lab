@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../../shared/path-containment'
 // What the heal agent actually edited during its turn.
 //
 // Snapshot every git-tracked edit surface in the feature before the agent has
@@ -27,8 +28,7 @@ export interface FeatureRepoSnapshot {
 }
 
 function isPathInside(child: string, parent: string): boolean {
-  const rel = path.relative(parent, child)
-  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel)
+  return isPathUnder(child, parent, false)
 }
 
 // Snapshot every git-tracked edit surface in the feature just before the agent

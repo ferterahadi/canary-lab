@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tmpDir = trackTempDirs('cl-git-mock-')
 
 const execFileMock = vi.hoisted(() => vi.fn())
 
@@ -215,10 +216,6 @@ describe('git-repo subprocess edge cases', () => {
 
 function successfulStatus(): Array<{ code?: number; stdout?: string; stderr?: string }> {
   return [{ stdout: 'true\n' }, { stdout: 'main\n' }, { stdout: `${'a'.repeat(40)}\n` }, {}, { stdout: 'main\n' }, {}]
-}
-
-function tmpDir(): string {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-mock-')))
 }
 
 function mockGitSequence(results: Array<{ code?: number; stdout?: string; stderr?: string }>): void {

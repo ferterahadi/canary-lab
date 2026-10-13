@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import { DisabledControlTooltip, Tooltip, TOOLTIP_ANCHOR_ATTR } from './Tooltip'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 /** happy-dom reports every rect as zero, so a positioning test has to supply its
  *  own. Returns a rect whose `bottom`/`left` are what the assertions read. */
@@ -14,20 +15,10 @@ function stubRect(el: Element, rect: { top: number; bottom: number; left: number
   }) as DOMRect
 }
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 describe('Tooltip', () => {
   it('shows the label on hover (portaled) and hides on leave, without wrapping the child', () => {
@@ -95,6 +86,30 @@ describe('Tooltip', () => {
     const tip = document.body.querySelector<HTMLDivElement>('[role="tooltip"]')!
     // …but the tip hangs off the MARK's bottom (116 + 6 gap), not the child's 200.
     expect(tip.style.top).toBe('122px')
+  })
+
+  // A mark hugging the right edge left the tip a few pixels to shrink into when it
+  // was measured at the anchor, so the label wrapped a word per line.
+  it('measures the tip at the viewport edge, then clamps the anchored position', () => {
+    const measuredAt: string[] = []
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tooltip') measuredAt.push(this.style.left)
+      return { top: 0, bottom: 0, left: 0, right: 0, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+    act(() => {
+      root.render(
+        <Tooltip label="Failed first · passed after repair cycle 2">
+          <span data-testid="trigger">!</span>
+        </Tooltip>,
+      )
+    })
+    const trigger = container.querySelector<HTMLElement>('[data-testid="trigger"]')!
+    stubRect(trigger, { top: 100, bottom: 112, left: window.innerWidth - 20, width: 12 })
+    act(() => { trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    rect.mockRestore()
+    expect(measuredAt[0]).toBe('0px')
+    // Clamped back inside: the 200px tip ends 8px short of the right edge.
+    expect(document.body.querySelector<HTMLDivElement>('[role="tooltip"]')!.style.left).toBe(`${window.innerWidth - 208}px`)
   })
 
   it("preserves the child's own onClick", () => {

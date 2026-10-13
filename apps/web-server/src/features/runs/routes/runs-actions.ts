@@ -1,3 +1,7 @@
+import { gettingStartedBusyReply } from '../../config/routes/getting-started-response'
+import { projectExternalHealMetadata } from '../logic/heal/external-heal-session'
+import { runCleanupFailure } from './run-cleanup-response'
+import { gettingStartedClaim, withGettingStartedClaim } from '../../../shared/getting-started-claim'
 import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 // Runs REST — start/heal/lifecycle actions: start a run, pause/cancel heal, write
 // to the agent, restart, abort, delete. Split out of runs.ts; bodies unchanged.
@@ -5,8 +9,8 @@ import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
-import type { RunStore } from '../logic/run-store'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { SERVER_EXITED_MESSAGE, type RunStore } from '../logic/run-store'
+import { findFeature } from '../../../shared/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
 import type { RepoUpdateRefusal } from '../logic/runtime/repo-upstream-update'
@@ -14,7 +18,7 @@ import { type SpecSelectionViolation } from '../../../shared/playwright-config'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
-import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
+import type { GettingStartedRunWorkflow } from '../../../../../../shared/getting-started'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'
 import { suiteReviewFiles } from '../logic/runtime/suite-review'
@@ -23,7 +27,8 @@ import { commitReviewedFiles } from '../logic/test-review-acceptance'
 import type { TestReviewDecision, TestReviewReceipt, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { withRunReviewLock } from '../logic/test-review-lock'
-import { notFound } from '../../../shared/http-error'
+import { notFound, statusCodeOf } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.post<{
@@ -59,8 +64,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       reply.code(400)
       return { error: 'feature required' }
     }
-    const features = loadFeatures(deps.featuresDir)
-    const featureCfg = features.find((f) => f.name === feature)
+    const featureCfg = findFeature(deps.featuresDir, feature)
     if (!featureCfg) return notFound(reply, 'feature')
     // env is optional only when the feature didn't declare any. Otherwise it
     // must be one of feature.envs (default: first entry).
@@ -100,111 +104,97 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
           .claim(requestedDemoWorkflow ?? 'run', req.body.gettingStartedSource).sessionId
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
-        reply.code(409)
-        return { type: err.type, error: err.message, active: err.active }
+        return gettingStartedBusyReply(reply, err)
       }
     }
-    if (healAgent) {
-      const active = findActiveRunForFeature(deps.store, feature, env)
-      if (active) {
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: active.manifest.runId })
+    let reservedRunId: string | undefined
+    try {
+      return await withGettingStartedClaim(gettingStartedClaim(deps.gettingStarted, gettingStartedSession), async (attach) => {
+        if (healAgent) {
+          const active = findActiveRunForFeature(deps.store, feature, env)
+          if (active) {
+            attach({ kind: 'run', id: active.manifest.runId })
+            // A caller that explicitly declined the claim must not grab the reuse
+            // claim either — the whole point of claimable:false is leaving the loop
+            // for a real client. Policy suppression (a PTY kind) still funnels
+            // through broker.claim, which rejects with its own reason.
+            const claim = healAgent.claimable !== false
+              ? deps.broker?.claim(active.manifest.runId, projectExternalHealMetadata(healAgent, 'nonempty')) ?? null
+              : null
+            reply.code(200)
+            return {
+              runId: active.manifest.runId,
+              reused: true,
+              status: active.manifest.status,
+              claimed: claim ? claim.accepted : false,
+              claim,
+              ...(claimSuppressed
+                ? {
+                    claimSuppressed: true,
+                    message:
+                      'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
+                  }
+                : {}),
+              ...(req.body?.forceNew
+                ? {
+                    ignoredForceNew: true,
+                    warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
+                  }
+                : {}),
+            }
+          }
         }
-        // A caller that explicitly declined the claim must not grab the reuse
-        // claim either — the whole point of claimable:false is leaving the loop
-        // for a real client. Policy suppression (a PTY kind) still funnels
-        // through broker.claim, which rejects with its own reason.
-        const claim = healAgent.claimable !== false
-          ? deps.broker?.claim(active.manifest.runId, {
-              sessionId: healAgent.sessionId,
-              clientKind: healAgent.clientKind,
-              ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
-              ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
-            }) ?? null
-          : null
-        reply.code(200)
+        const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
+          ? req.body.isolation
+          : undefined
+        const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
+        const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
+        reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
+        const outcome = await deps.startRun(
+          feature, env, externalRunReq, isolation, executionType, req.body?.models,
+          updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
+        )
+        if (outcome.kind === 'collision') {
+          // Same-repo collision and the caller didn't choose how to handle it.
+          // Nothing started — surface the choice so the UI / MCP client can ask.
+          reply.code(409)
+          return {
+            type: 'repo_collision_requires_choice',
+            conflictingRunId: outcome.conflictingRunId,
+            conflictingFeature: outcome.conflictingFeature,
+            repoPaths: outcome.repoPaths,
+            options: ['worktree', 'queue'] as const,
+            // `error` is what the GUI shows (the client only lifts `error` into
+            // Error.message, so without it this 409 rendered as literally
+            // "HTTP 409"); `message` keeps the agent-facing re-send instructions.
+            error: `Another run (${outcome.conflictingFeature}) is using the same app. Wait for it to finish, then try again.`,
+            message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
+          }
+        }
+        if (outcome.kind === 'queued') {
+          attach({ kind: 'run', id: outcome.runId })
+          reply.code(202)
+          return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
+        }
+        // started — the factory registers the orchestrator; set here too so the
+        // registration is guaranteed regardless of factory implementation.
+        deps.store.registry.set(outcome.orch.runId, outcome.orch)
+        attach({ kind: 'run', id: outcome.orch.runId })
+        reply.code(201)
         return {
-          runId: active.manifest.runId,
-          reused: true,
-          status: active.manifest.status,
-          claimed: claim ? claim.accepted : false,
-          claim,
+          runId: outcome.orch.runId,
           ...(claimSuppressed
             ? {
                 claimSuppressed: true,
                 message:
-                  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
-              }
-            : {}),
-          ...(req.body?.forceNew
-            ? {
-                ignoredForceNew: true,
-                warning: 'An active run already exists for this feature. Continue it with signal_run and wait_for_heal_task instead of starting a fresh run.',
+                  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run started without a heal claim. Drive heal from an interactive Claude/Codex client or the web UI.',
               }
             : {}),
         }
-      }
-    }
-    const isolation = req.body?.isolation === 'worktree' || req.body?.isolation === 'queue'
-      ? req.body.isolation
-      : undefined
-    const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
-    const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
-    const reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
-    try {
-      const outcome = await deps.startRun(
-        feature, env, externalRunReq, isolation, executionType, req.body?.models,
-        updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
-      )
-      if (outcome.kind === 'collision') {
-        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
-        // Same-repo collision and the caller didn't choose how to handle it.
-        // Nothing started — surface the choice so the UI / MCP client can ask.
-        reply.code(409)
-        return {
-          type: 'repo_collision_requires_choice',
-          conflictingRunId: outcome.conflictingRunId,
-          conflictingFeature: outcome.conflictingFeature,
-          repoPaths: outcome.repoPaths,
-          options: ['worktree', 'queue'] as const,
-          // `error` is what the GUI shows (the client only lifts `error` into
-          // Error.message, so without it this 409 rendered as literally
-          // "HTTP 409"); `message` keeps the agent-facing re-send instructions.
-          error: `Another run (${outcome.conflictingFeature}) is using the same app. Wait for it to finish, then try again.`,
-          message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
-        }
-      }
-      if (outcome.kind === 'queued') {
-        if (gettingStartedSession) {
-          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.runId })
-        }
-        reply.code(202)
-        return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
-      }
-      // started — the factory registers the orchestrator; set here too so the
-      // registration is guaranteed regardless of factory implementation.
-      deps.store.registry.set(outcome.orch.runId, outcome.orch)
-      if (gettingStartedSession) {
-        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.orch.runId })
-      }
-      reply.code(201)
-      return {
-        runId: outcome.orch.runId,
-        ...(claimSuppressed
-          ? {
-              claimSuppressed: true,
-              message:
-                'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run started without a heal claim. Drive heal from an interactive Claude/Codex client or the web UI.',
-            }
-          : {}),
-      }
+      })
     } catch (err) {
-      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
-      const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500
-      reply.code(code)
-      const message = err instanceof Error ? err.message : String(err)
+      reply.code(statusCodeOf(err))
+      const message = errorMessage(err)
       const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
       if (review) {
         const request = reservedRunId ? undefined : deps.runRequests?.remember(review, {
@@ -244,6 +234,10 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/pause-heal', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
+      if (deps.store.settleIfOrphaned(req.params.runId)) {
+        reply.code(409)
+        return { reason: 'server-exited', status: 'aborted', error: SERVER_EXITED_MESSAGE }
+      }
       reply.code(404)
       return { error: 'run not active' }
     }
@@ -258,10 +252,16 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
 
   // Cancel an in-flight heal cycle. SIGTERMs the agent pty, breaks the heal
   // loop, appends a journal entry. 404 when unknown, 409 with a reason when
-  // there's nothing to cancel, 202 on success.
+  // there's nothing to cancel, 202 on success. A heal whose server exited has
+  // already stopped: settling it records that and is the success the user asked
+  // for, so it answers 202 with the status the run actually reached.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/cancel-heal', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch) {
+      if (deps.store.settleIfOrphaned(req.params.runId)) {
+        reply.code(202)
+        return { status: 'aborted', reason: 'server-exited' }
+      }
       reply.code(404)
       return { error: 'run not active' }
     }
@@ -543,15 +543,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // status codes.
   app.delete<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const result = deps.store.delete(req.params.runId)
-    if (!result.ok) {
-      if (result.reason === 'not-found') return notFound(reply, 'run')
-      reply.code(409)
-      return {
-        error: result.reason === 'active'
-          ? 'run is still active; abort it first'
-          : 'run is still active; reap or abort first',
-      }
-    }
+    if (!result.ok) return runCleanupFailure(reply, result)
     reply.code(204)
     return ''
   })

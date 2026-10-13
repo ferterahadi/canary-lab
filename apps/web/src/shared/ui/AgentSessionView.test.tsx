@@ -1,9 +1,10 @@
+import type { AgentSessionEvent } from '@shared/agent-session-types'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionEvent } from '@/shared/api/agent-sessions'
+
 import { AgentSessionView, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
 import { Markdown } from './AgentSessionRows'
 
@@ -12,7 +13,6 @@ vi.mock('@/shared/api/flights', async (original) => ({
   ...(await original<typeof import('@/shared/api/flights')>()), getFlightAgentSession: mocks.get,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('Markdown (agent session prose)', () => {
   let container: HTMLDivElement
@@ -117,6 +117,30 @@ describe('System rows (flight conductor lines on the agent rail)', () => {
     expect(row.querySelector('button')).toBeNull()
     expect(row.querySelector('.agentts-log')?.getAttribute('data-whole')).toBe('true')
     expect(row.querySelector('.agentts-chev')).toBeNull()
+  })
+
+  it('keeps a dated multiline failure in one Activity entry without an agent transcript', () => {
+    const error = "agent exited with code 2\nUsage: codex exec [OPTIONS]\nMore diagnostic detail"
+    render(`[failure@2026-01-01T00:01:00Z] Earlier failure\n${error}`)
+    expect(rows()).toHaveLength(1)
+    expect(part(rows()[0], 'sum')).toBe('Earlier failure')
+    expect(rows()[0].querySelector('.agentts-time')?.getAttribute('title')).toBe('2026-01-01T00:01:00Z')
+    expect(container.textContent).not.toContain('Usage:')
+    act(() => rows()[0].querySelector('button')!.click())
+    const modal = document.querySelector('[data-testid="activity-log-modal"]')!
+    for (const line of error.split('\n')) expect(modal.textContent).toContain(line)
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+  })
+
+  it('opens a historical system entry directly from its routed ID without a transcript', async () => {
+    const { systemLogId } = await import('./activity-log')
+    const line = '[failure@2026-01-01T00:01:00Z] Earlier failure\nLaunch failed before a session existed'
+    const close = vi.fn()
+    act(() => root.render(<AgentSessionView systemRows={{ pre: [line], post: [] }}
+      openLogId={systemLogId(line)} onOpenLogChange={close} />))
+    expect(document.querySelector('[data-testid="activity-log-modal"]')?.textContent).toContain('Launch failed before a session existed')
+    act(() => (document.querySelector('[aria-label="Close"]') as HTMLButtonElement).click())
+    expect(close).toHaveBeenCalledWith(null)
   })
 
   it('cuts a line too long for its row to one line, and opens it pretty-printed', () => {
@@ -363,7 +387,7 @@ describe('AgentSessionView external session', () => {
     const header = container.querySelector('[data-testid="external-session-header"]')
     expect(header?.textContent).toContain('External agent session')
     expect(container.querySelector('[data-testid="external-session-client"]')?.textContent).toBe('Claude')
-    expect(container.querySelector('[data-testid="external-session-id"]')?.textContent).toBe('649945f5')
+    expect(container.querySelector('[data-testid="external-session-id"]')?.textContent).toBe('649945…1e88')
     expect(container.querySelector('[data-testid="external-session-id"]')?.getAttribute('title'))
       .toBe('649945f5-79b7-43ae-81c9-be02b0911e88')
     expect(status()).toBe('Live · 1m 42s')

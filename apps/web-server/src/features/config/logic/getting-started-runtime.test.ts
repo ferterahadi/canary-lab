@@ -1,7 +1,6 @@
 import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import type { GettingStartedSessionState, GettingStartedTarget } from '../../../../../../shared/getting-started'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RunStore } from '../../runs/logic/run-store'
@@ -15,7 +14,9 @@ import { createDraft, readDraft, writeDraft, bridgeDraftEvents, deleteDraft } fr
 import { readEvaluationExportTask, writeEvaluationExportTask, bridgeEvaluationExportEvents } from '../../evaluation/logic/evaluation-export-store'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
 import { createGettingStartedRuntime } from './getting-started-runtime'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-onboarding-runtime-')
 
 let logsDir: string
 let runs: RunStore
@@ -54,7 +55,7 @@ function claim(kind: GettingStartedTarget['kind']) {
   return session
 }
 beforeEach(() => {
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-onboarding-runtime-'))
+  logsDir = tempDir()
   runs = new RunStore(logsDir, createRegistry())
   flights = new FlightRunStore(logsDir)
   portify = new PortifyRunStore(logsDir)
@@ -67,7 +68,7 @@ beforeEach(() => {
     portifyStore: portify, coverageJobStore: coverage, workspaceEvents: events,
     readDraft: (id) => readDraft(logsDir, id), readExport: (id) => readEvaluationExportTask(logsDir, id) })
 })
-afterEach(() => { runtime.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); fs.rmSync(logsDir, { recursive: true, force: true }) })
+afterEach(() => { runtime.dispose(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('Getting Started runtime', () => {
   it.each(['queued', 'running', 'healing'] as const)('keeps %s runs claimed and settles from run events', (status) => {

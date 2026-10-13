@@ -1,64 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { PtyFactory } from './pty-spawner'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -66,7 +17,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -75,32 +26,15 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.pauseAndHeal', () => {
   function bootForPause(): {
     factory: PtyFactory
-    spawned: ReturnType<typeof makeFakeFactory>['spawned']
+    spawned: ReturnType<typeof makeFakePtyFactory>['spawned']
     orch: RunOrchestrator
   } {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -206,11 +140,11 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     // flip back to 'failed' so the heal loop is entered. Without that
     // override, the user's Pause & Heal click would silently auto-complete
     // the run as passed.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -274,11 +208,11 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     // records the failures the user reacted to. The safety net at
     // runFullCycle flips back to 'failed' when summary disagrees with the
     // exit code, so the heal loop is entered as the user expected.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,

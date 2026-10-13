@@ -1,3 +1,4 @@
+import { FlightAttentionReader } from './features/flights/logic/attention'
 import { bridgeCleanupEvents } from './shared/cleanup-events'
 import { createRepositoryObserver } from './shared/repository-observer'
 import path from 'path'
@@ -14,7 +15,7 @@ import { registerMcpRoutes } from './mcp/server'
 import { createMcpRestAdapters } from './mcp/rest-adapters'
 import { register as registerAgentSessions } from './features/agent-sessions/index'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
-import { RunStore } from './features/runs/logic/run-store'
+import { ORPHANED_RUN_SWEEP_MS, RunStore } from './features/runs/logic/run-store'
 import { createRegistry, type OrchestratorRegistry } from './features/runs/logic/run-registry'
 import { bridgeDirtySpecsToActiveRuns } from './features/runs/logic/runtime/run-spec-edits-bridge'
 import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
@@ -175,6 +176,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   runStore.onEvent(refreshRunCoverage)
   app.addHook('onListen', () => coverageMonitor.start())
   app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
+  const flightAttention = new FlightAttentionReader(flightStore, { featuresDir, logsDir }, workspaceEvents)
+  flightAttention.start()
+  app.addHook('onClose', async () => flightAttention.close())
   const gettingStartedRuntime = createGettingStartedRuntime({
     logsDir, runStore, flightStore, portifyStore, coverageJobStore, workspaceEvents,
     readDraft: (id) => readDraft(logsDir, id),
@@ -242,6 +246,15 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
+  // Boot reconcile spares a run a live peer server drives. If that peer dies
+  // later, or an unsigned pre-upgrade row goes stale, nothing acts on the run
+  // again — so keep settling orphans while this server runs. Every settle goes
+  // through the store, whose events reach the open UI and waiting agents.
+  const orphanSweep = setInterval(() => {
+    try { runStore.settleOrphanedRuns() } catch (err) { app.log.warn({ err }, 'Orphaned run sweep failed; the next sweep retries') }
+  }, ORPHANED_RUN_SWEEP_MS)
+  orphanSweep.unref()
+  app.addHook('onClose', async () => clearInterval(orphanSweep))
   gettingStartedRuntime.start()
   app.addHook('onClose', async () => gettingStartedRuntime.dispose())
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
@@ -288,6 +301,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     portifyStore,
     coverageJobStore,
     coverageMonitor,
+    flightAttention,
     flightStore,
     planStore,
     dirtySpecStore,

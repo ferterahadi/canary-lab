@@ -1,7 +1,5 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { afterEach, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
@@ -10,6 +8,10 @@ import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 import { writeManifest } from './features/runs/logic/runtime/manifest'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+import { initGitRepo } from '../../../tools/test-helpers/git-repo'
+
+const tempDir = trackTempDirs('cl-path-wiring-')
 
 let root: string
 let app: Awaited<ReturnType<typeof createServer>>['app']
@@ -18,21 +20,18 @@ afterEach(async () => {
   await app?.inject({ method: 'POST', url: '/api/flights/path-fixture/pause' })
   await client?.close()
   await app?.close()
-  if (root) fs.rmSync(root, { recursive: true, force: true })
 })
 
 it('publishes repeated quoted-path edits through the real Flight wiring and exposes decoded fix preflight', async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-path-wiring-'))
+  root = tempDir()
   const repo = path.join(root, 'repo')
   const featureDir = path.join(root, 'features', 'paths')
   const logsDir = path.join(root, 'logs')
   fs.mkdirSync(repo); fs.mkdirSync(featureDir, { recursive: true })
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' })
-  git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.test')
   const fileName = 'café -> "port".ts'
   const file = path.join(repo, fileName)
   fs.writeFileSync(file, 'original')
-  git('add', '.'); git('commit', '-qm', 'fixture')
+  initGitRepo(repo, { branch: 'main' })
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports={config:{name:'paths',featureDir:__dirname,envs:[],repos:[{name:'app',localPath:${JSON.stringify(repo)}}]}}`)
   new FlightRunStore(logsDir).save({
     flightId: 'path-fixture', feature: 'paths', description: 'Git path fixture', repoPaths: [repo],

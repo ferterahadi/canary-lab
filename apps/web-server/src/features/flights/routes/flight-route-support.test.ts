@@ -1,24 +1,22 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { resolveFlightModels } from './flight-route-support'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-flight-models-')
 
 describe('resolveFlightModels', () => {
   let projectRoot: string
 
   beforeEach(() => {
-    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-flight-models-'))
+    projectRoot = tempDir()
     fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({
       agentModels: {
         claude: { heal: { model: 'opus', effort: 'high' }, report: { model: 'haiku', effort: null } },
         codex: {},
       },
     }))
-  })
-
-  afterEach(() => {
-    fs.rmSync(projectRoot, { recursive: true, force: true })
   })
 
   it('takes the saved plan when the launch sends no override', () => {

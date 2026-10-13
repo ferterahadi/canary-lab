@@ -8,8 +8,7 @@ import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { DraftRecord } from '@shared/draft-types'
 import type { FlightIndexEntry } from '@shared/flights/types'
-import type { PortifyIndexEntry } from '@shared/portify-index'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyIndexEntry, PortifyManifest } from '@shared/portify-index'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useWorkspaceFlights } from './use-workspace-flights'
 
@@ -96,7 +95,6 @@ beforeEach(async () => {
   stores.workflows = []; stores.portifyDetails = {}; stores.drafts = []; stores.tasks = []
   api.listAllCoverageJobs.mockResolvedValue([])
   api.listFeatures.mockResolvedValue(initialFeatures)
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   // Settle the shared remount cache through its public reader before each case.
   await render()

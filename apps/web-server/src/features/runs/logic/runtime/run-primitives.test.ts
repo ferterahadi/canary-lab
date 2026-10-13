@@ -1,28 +1,25 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { allocateRunPorts, applyFeatureEnvset } from './run-primitives'
 import { restore } from './env-switcher/switch'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
 // applyFeatureEnvset drives the real env-switcher against a throwaway feature
 // dir. Nothing here is stubbed: the point is that the run path actually writes
 // the slot file to its target and honours the reserved `${port.<slot>}`
 // namespace, which a mocked switch layer would not prove.
 
-const tmpDirs: string[] = []
-afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('cl-rp-')
 
 /** A feature dir with one `api-env` slot whose set content carries a port token. */
 function makeEnvsetFeature(opts: { setContent?: string; existingTarget?: string } = {}): {
   featureDir: string
   targetPath: string
 } {
-  const featureDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rp-')))
-  tmpDirs.push(featureDir)
+  const featureDir = tempDir()
   const appRoot = path.join(featureDir, 'app')
   const targetPath = path.join(appRoot, '.env')
   fs.mkdirSync(appRoot, { recursive: true })
@@ -86,8 +83,7 @@ describe('allocateRunPorts', () => {
 
 describe('applyFeatureEnvset', () => {
   it('returns null when the feature declares no envsets', () => {
-    const featureDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rp-')))
-    tmpDirs.push(featureDir)
+    const featureDir = tempDir()
 
     expect(applyFeatureEnvset(featureDir, 'local')).toBeNull()
   })

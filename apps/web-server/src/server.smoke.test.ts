@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { createServer } from './server'
 import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
@@ -8,6 +7,9 @@ import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './fe
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-boot-reap-')
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the
@@ -86,11 +88,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
   let logsDir: string
 
   beforeEach(() => {
-    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-boot-reap-')))
-  })
-
-  afterEach(() => {
-    fs.rmSync(logsDir, { recursive: true, force: true })
+    logsDir = tempDir()
   })
 
   it('reaps a stale running entry from a previous process at startup', async () => {

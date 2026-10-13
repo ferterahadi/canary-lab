@@ -1,66 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
 import { RunnerLog } from './runner-log'
 import { REPO_PATH_OVERRIDES_ENV } from '../../../../../../../shared/e2e-runner/repo-path-overrides'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -68,7 +18,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -77,28 +27,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.runPlaywright', () => {
   it('emits started + output + exit and tees to playwright.log', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -134,9 +67,9 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('exposes per-run allocated ports to Playwright under shell-safe CANARY_PORT keys', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ repos: [] }),
+      feature: demoFeature(tmpDir, { repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -162,9 +95,9 @@ describe('RunOrchestrator.runPlaywright', () => {
     const worktreeRoot = path.join(tmpDir, 'worktree')
     fs.mkdirSync(sourceRoot, { recursive: true })
     fs.mkdirSync(worktreeRoot, { recursive: true })
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({
+      feature: demoFeature(tmpDir, {
         repos: [{ name: 'api', localPath: sourceRoot, startCommands: [] }],
       }),
       runId: RUN_ID,
@@ -186,9 +119,9 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('marks targeted reruns so the summary reporter can merge previous statuses', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -232,9 +165,9 @@ describe('RunOrchestrator.runPlaywright', () => {
       '}',
       '',
     ].join('\n'))
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ featureDir, repos: [], healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { featureDir, repos: [], healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -268,9 +201,9 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('mirrors per-test artifact dirs into playwright-artifacts-keep on Playwright exit', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -298,9 +231,9 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('overwrites the keep copy for the same pw-slug and preserves untouched tests', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -335,9 +268,9 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('leaves the keep dir untouched when the live artifacts path is unreadable (readdirSync throws)', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,
@@ -361,10 +294,10 @@ describe('RunOrchestrator.runPlaywright', () => {
   })
 
   it('warns via runnerLog and continues persisting other tests when one artifact dir cannot be copied', async () => {
-    const { factory, spawned } = makeFakeFactory()
+    const { factory, spawned } = makeFakePtyFactory()
     const runnerLog = new RunnerLog(path.join(tmpDir, 'runner.log'))
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: factory,

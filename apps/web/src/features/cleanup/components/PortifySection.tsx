@@ -1,3 +1,4 @@
+import { CleanupInventoryFrame } from './CleanupInventoryFrame'
 import { useCleanupInventory } from '../state/use-cleanup-inventory'
 import { useCleanupSelection } from '../state/use-cleanup-selection'
 import { useCleanupAction } from '../state/use-cleanup-action'
@@ -8,18 +9,20 @@ import * as portifyApi from '@/shared/api/portify'
 import type { PortifyCleanupEntry } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
-import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, FolderGlyph, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
-import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
+import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph } from './CleanupTableParts'
+import { SEVEN_DAYS_MS } from './cleanup-rows'
+import { AGENT_JOB_COLOR, portifyTraceStatus } from '@/shared/lib/agent-job-status'
+import { pluralSuffix } from '@shared/lib/plural'
+import { useWorkspaceActions } from '@/shared/state/workspace-actions'
 
 // Self-contained port-ification record inventory: every workflow under
 // <logs>/portify/<id> with its disk size. This is the home for pruning stale
 // portify records (the × that used to live in the Ports-tab history) — Open
 // opens its feature at Flight → Parallel setup; Delete drops it from history. The scratch
 // worktrees these spawned are reclaimed on the Worktrees tab (PORTIFY owner).
-export function PortifySection({ now, onNavigateToPortify }: {
-  now: number
-  onNavigateToPortify?: (feature: string) => void
-}) {
+// Open is present only when the workspace provides that destination.
+export function PortifySection({ now }: { now: number }) {
+  const { openPortifyStage: onNavigateToPortify } = useWorkspaceActions()
   const inventory = useCleanupInventory('portify', cleanupApi.cleanupPortify)
   const workflows = inventory.value?.workflows ?? []
   const { initialLoading: loading, error: err, refresh: load } = inventory
@@ -50,33 +53,37 @@ export function PortifySection({ now, onNavigateToPortify }: {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <CleanupToolbar presets={sorted.length > 0 ? presets : []} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={bulkBusy} loading={inventory.loading} onRefresh={load}>
-        {sorted.length > 0 && <>
-          <span>Records: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
-          <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
-        </>}
-      </CleanupToolbar>
-      {inventory.value !== null && err && <CleanupRefreshError error={err} />}
-      {actionError && (
-        <div role="alert" data-testid="portify-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
-      )}
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
-      {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Loading Portify records…" />}
-      {!loading && err && inventory.value === null && (
-        <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load Portify records" hint={err} action={{ label: 'Retry', onClick: () => void load() }} />
-      )}
-      {!loading && !err && sorted.length === 0 && (
-        <CleanupEmptyState
-          icon={<FolderGlyph />}
-          title="No Portify records"
-          hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open returns to Parallel setup in Flight."
-        />
-      )}
-      {sorted.length > 0 && (
+    <>
+      <CleanupInventoryFrame
+        initialLoading={loading}
+        hasSnapshot={inventory.value !== null}
+        error={err}
+        itemCount={sorted.length}
+        onRetry={load}
+        loadingTitle="Loading Portify records…"
+        errorTitle="Couldn't load Portify records"
+        emptyState={
+          <CleanupEmptyState
+            icon={<FolderGlyph />}
+            title="No Portify records"
+            hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open returns to Parallel setup in Flight."
+          />
+        }
+        toolbar={
+          <CleanupToolbar presets={sorted.length > 0 ? presets : []} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={bulkBusy} loading={inventory.loading} onRefresh={load}>
+            {sorted.length > 0 && <>
+              <span>Records: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
+              <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
+            </>}
+          </CleanupToolbar>
+        }
+        actionError={actionError && (
+          <div role="alert" data-testid="portify-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+        )}
+      >
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <tr className="cl-rubric" style={{ textAlign: 'left' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Suite</th>
               <th className="py-1 pr-3">Status</th>
@@ -99,7 +106,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                   />
                 </td>
                 <td className="py-1 pr-3" style={{ color: 'var(--text-primary)' }}>{w.feature}</td>
-                <td className="py-1 pr-3"><span style={{ color: PORTIFY_STATUS_COLOR[w.status] }}>{w.status}</span></td>
+                <td className="py-1 pr-3"><span style={{ color: AGENT_JOB_COLOR[portifyTraceStatus(w.status)] }}>{w.status}</span></td>
                 <td className="py-1 pr-3">{timeAgo(w.startedAt, now)}</td>
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
                 <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -120,8 +127,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
             ))}
           </tbody>
         </table>
-      )}
-      </div>
+      </CleanupInventoryFrame>
 
       {selected.size > 0 && (
         <CleanupActionBar selectedCount={selected.size}>
@@ -139,14 +145,14 @@ export function PortifySection({ now, onNavigateToPortify }: {
           action bar. */}
       <ConfirmModal
         open={confirmTargets !== null}
-        title={`Delete Portify record${confirmTargets?.length === 1 ? '' : 's'}`}
+        title={`Delete Portify record${pluralSuffix(confirmTargets?.length ?? 0)}`}
         variant="danger"
         busy={bulkBusy}
         confirmLabel="Delete"
         onCancel={() => setConfirmTargets(null)}
         onConfirm={() => { if (confirmTargets) void doRemove(confirmTargets) }}
-        message={<>Remove <strong>{confirmTargets?.length ?? 0}</strong> port-ification record{confirmTargets?.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes((confirmTargets ?? []).reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.</>}
+        message={<>Remove <strong>{confirmTargets?.length ?? 0}</strong> port-ification record{pluralSuffix(confirmTargets?.length ?? 0)} from history, reclaiming about <strong>{formatBytes((confirmTargets ?? []).reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.</>}
       />
-    </div>
+    </>
   )
 }

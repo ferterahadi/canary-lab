@@ -1,7 +1,9 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-git-mock-')
 
 const git = vi.hoisted(() => ({ getGitRoot: vi.fn(), runGit: vi.fn() }))
 
@@ -12,15 +14,13 @@ const { buildGitReview, commitReviewedFiles, restoreGitReview } = await import('
 let root: string
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-git-mock-')))
+  root = tempDir()
   fs.mkdirSync(path.join(root, 'e2e'))
   fs.writeFileSync(path.join(root, 'e2e', 'a.spec.ts'), 'current\n')
   git.getGitRoot.mockReset()
   git.runGit.mockReset()
   git.getGitRoot.mockResolvedValue(root)
 })
-
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 it('returns actionable Git review failures without attempting a partial commit', async () => {
   git.getGitRoot.mockResolvedValueOnce(null)

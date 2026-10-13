@@ -1,4 +1,7 @@
+import { useMouseDrag } from '@/shared/state/use-mouse-drag'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { readStoredJson, writeStoredJson } from '@/shared/state/browser-storage'
+import { isRecord } from '@shared/lib/is-record'
 
 export interface PanelConfig {
   id: string
@@ -14,25 +17,17 @@ const STORAGE_KEY = 'canary-lab.panel-widths'
 const HANDLE_WIDTH = 4
 
 function loadWidths(panels: readonly PanelConfig[]): number[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const saved = JSON.parse(raw) as Record<string, number>
-      return panels.map((p) => {
-        const w = saved[p.id]
-        return typeof w === 'number' && w >= p.minWidth ? w : p.defaultWidth
-      })
-    }
-  } catch { /* ignore */ }
-  return panels.map((p) => p.defaultWidth)
+  const saved = readStoredJson(STORAGE_KEY)
+  return panels.map((p) => {
+    const w = isRecord(saved) ? saved[p.id] : undefined
+    return typeof w === 'number' && w >= p.minWidth ? w : p.defaultWidth
+  })
 }
 
 function saveWidths(panels: readonly PanelConfig[], widths: number[]): void {
-  try {
-    const obj: Record<string, number> = {}
-    panels.forEach((p, i) => { obj[p.id] = widths[i] })
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj))
-  } catch { /* ignore */ }
+  const obj: Record<string, number> = {}
+  panels.forEach((p, i) => { obj[p.id] = widths[i] })
+  writeStoredJson(STORAGE_KEY, obj)
 }
 
 export function ResizablePanels({ panels, contentByPanel }: {
@@ -43,10 +38,41 @@ export function ResizablePanels({ panels, contentByPanel }: {
   const [collapsed, setCollapsed] = useState<boolean[]>(() => panels.map(() => false))
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ index: number; startX: number; startWidths: number[] } | null>(null)
   const resizedRef = useRef(false)
-  const [dragging, setDragging] = useState<number | null>(null)
   const displayWidths = computePanelWidths(panels, widths, collapsed, containerWidth)
+
+  const { origin: drag, start } = useMouseDrag<{ index: number; startX: number; startWidths: number[] }>((origin, e) => {
+    const { index, startX, startWidths } = origin
+    const delta = e.clientX - startX
+    const leftIdx = index
+    const rightIdx = index + 1
+
+    let newLeft = startWidths[leftIdx] + delta
+    let newRight = startWidths[rightIdx] - delta
+
+    const leftMin = panels[leftIdx].minWidth
+    const rightMin = panels[rightIdx].minWidth
+
+    if (newLeft < leftMin) {
+      newRight += newLeft - leftMin
+      newLeft = leftMin
+    }
+    if (newRight < rightMin) {
+      newLeft += newRight - rightMin
+      newRight = rightMin
+    }
+
+    if (newLeft < leftMin || newRight < rightMin) return
+
+    resizedRef.current = true
+    setWidths((prev) => {
+      const next = [...prev]
+      next[leftIdx] = newLeft
+      next[rightIdx] = newRight
+      return next
+    })
+  })
+  const dragging = drag?.index ?? null
 
   // Storage writes block the drag path, so persist only after release.
   useEffect(() => {
@@ -71,60 +97,8 @@ export function ResizablePanels({ panels, contentByPanel }: {
 
   const onMouseDown = useCallback((handleIndex: number, e: React.MouseEvent) => {
     e.preventDefault()
-    dragRef.current = {
-      index: handleIndex,
-      startX: e.clientX,
-      startWidths: [...displayWidths],
-    }
-    setDragging(handleIndex)
-  }, [displayWidths])
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent): void => {
-      if (!dragRef.current) return
-      const { index, startX, startWidths } = dragRef.current
-      const delta = e.clientX - startX
-      const leftIdx = index
-      const rightIdx = index + 1
-
-      let newLeft = startWidths[leftIdx] + delta
-      let newRight = startWidths[rightIdx] - delta
-
-      const leftMin = panels[leftIdx].minWidth
-      const rightMin = panels[rightIdx].minWidth
-
-      if (newLeft < leftMin) {
-        newRight += newLeft - leftMin
-        newLeft = leftMin
-      }
-      if (newRight < rightMin) {
-        newLeft += newRight - rightMin
-        newRight = rightMin
-      }
-
-      if (newLeft < leftMin || newRight < rightMin) return
-
-      resizedRef.current = true
-      setWidths((prev) => {
-        const next = [...prev]
-        next[leftIdx] = newLeft
-        next[rightIdx] = newRight
-        return next
-      })
-    }
-
-    const onMouseUp = (): void => {
-      dragRef.current = null
-      setDragging(null)
-    }
-
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [panels])
+    start({ index: handleIndex, startX: e.clientX, startWidths: [...displayWidths] })
+  }, [displayWidths, start])
 
   const toggleCollapse = useCallback((index: number) => {
     setCollapsed((prev) => {

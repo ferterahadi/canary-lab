@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { listRuns, renameRunFeature, RunStore, type RunStoreEvent } from './run-store'
 import { reapStaleRuns } from './run-cleanup'
@@ -10,11 +9,14 @@ import { createRegistry } from './run-registry'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { HEARTBEAT_STALE_MS } from '../../../../../../shared/run-state'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('listRuns', () => {
@@ -349,7 +351,10 @@ describe('RunStore', () => {
     const indexed = readRunsIndex(tmpDir).find((e) => e.runId === 'orphan')!
     expect(indexed.status).toBe('aborted')
     expect(indexed.endedAt).toBe(manifest.endedAt)
-    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }])
+    // The dead runner never wrote its ending, so the settle writes it: without
+    // that last lifecycle record the run read `aborted` under its live headline.
+    expect(manifest.lifecycle).toMatchObject({ phase: 'aborted', abortReason: { reason: 'server-exited' } })
+    expect(events).toEqual([{ kind: 'finalized', runId: 'orphan' }, { kind: 'changed', runId: 'orphan' }])
   })
 
   it('abort finalizes a persisted running entry that has no manifest', async () => {

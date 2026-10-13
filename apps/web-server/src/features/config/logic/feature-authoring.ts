@@ -1,3 +1,4 @@
+import { listSpecFiles, readSpecSource, isSpecFile } from '../../../../../../shared/spec-files'
 import { normalizeEnvironmentName, normalizeEnvironmentNames } from '../../../../../../shared/lib/environment-names'
 import fs from 'fs'
 import path from 'path'
@@ -272,7 +273,7 @@ export async function applyExternalDraftFiles(input: {
   // Validate the whole batch before writing any normalized source. An unsafe
   // expression or syntax error must not leave a partially applied draft.
   for (const file of files) {
-    if (!file.path.endsWith('.spec.ts')) {
+    if (!isSpecFile(file.path)) {
       normalized.push(file)
       continue
     }
@@ -300,7 +301,7 @@ export async function applyExternalDraftFiles(input: {
 
 export function externalTestFileRules(): Record<string, unknown> {
   return {
-    specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
+    specs: 'Place Playwright .spec or .test JavaScript/TypeScript files under e2e/; nested folders are supported.',
     requiredImport: 'canary-lab/feature-support/log-marker-fixture',
     specSelection: SPEC_SELECTION_RULE,
     readability: loadPromptTemplate(promptPath('test-readability.md')),
@@ -346,14 +347,10 @@ function listSlotFiles(envDir: string): string[] {
 }
 
 function readExistingSpecFiles(featureDir: string): GeneratedFeatureFile[] {
-  const e2eDir = path.join(featureDir, 'e2e')
-  if (!fs.existsSync(e2eDir)) return []
-  return fs.readdirSync(e2eDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.spec.ts'))
-    .map((entry) => ({
-      path: `e2e/${entry.name}`,
-      content: fs.readFileSync(path.join(e2eDir, entry.name), 'utf8'),
-    }))
+  return listSpecFiles(featureDir).map((file) => ({
+    path: path.relative(featureDir, file).split(path.sep).join('/'),
+    content: readSpecSource(file),
+  }))
 }
 
 function sanitizeSlotName(slot: string): string {

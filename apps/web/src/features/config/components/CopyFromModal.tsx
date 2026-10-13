@@ -7,7 +7,8 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useFilesystemBrowser } from './use-filesystem-browser'
 import { FileBrowserList } from './FolderPicker'
 import { inlineSelectStyle } from './AddSlotModal'
-import { KvEntry, diffKvEntries } from './envset-diff'
+import type { KvEntry } from '@shared/lib/dotenv-edit'
+import { diffKvEntries } from './envset-diff'
 
 export function CopyFromModal(props: Parameters<typeof CopyFromSession>[0]) {
   return <CopyFromSession key={JSON.stringify([props.feature, props.targetEnv, props.slot])} {...props} />

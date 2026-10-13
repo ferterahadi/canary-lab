@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as configApi from '@/shared/api/config'
 import { recommendedChoice } from '@shared/agent-models'
 import { defaultsByChoice, ModelLaunchGate, savedModelsSummary } from './ModelLaunchGate'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/config')>()),
@@ -13,13 +14,10 @@ vi.mock('@/shared/api/config', async (importOriginal) => ({
   putProjectConfig: vi.fn(),
 }))
 
-let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   // The gate defers this cached read until Customize is opened.
   vi.mocked(configApi.getAgentProbe).mockReset().mockResolvedValue({
     probedAt: 'now',
@@ -34,11 +32,6 @@ beforeEach(() => {
     },
   })
   vi.mocked(configApi.putProjectConfig).mockReset().mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 const CONFIG = {

@@ -1,6 +1,6 @@
+import { buildRunActionsResponse } from '../logic/run-actions'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
-import path from 'path'
 import type { RunStore } from '../logic/run-store'
 import {
   ExternalHealBroker,
@@ -10,13 +10,13 @@ import {
 import type { ExternalHealSessionStatus } from '../../../../../../shared/run-manifest'
 import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
 import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../logic/heal/external-heal-surface'
-import { runDirFor } from '../logic/runtime/run-paths'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { appendJsonLine } from '../../../shared/json-lines'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../shared/single-attempt'
 import {
   isActiveRunStatus,
   isRestartableRunStatus,
   isTerminalRunStatus,
-  deriveRunActionAvailability,
   type HealSignalKind,
 } from '../../../../../../shared/run-state'
 import { notFound } from '../../../shared/http-error'
@@ -330,8 +330,7 @@ export async function externalHealRoutes(
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
       if (!detail) return notFound(reply, 'run')
-      const runDir = runDirFor(deps.store.logsDir, req.params.runId)
-      const auditPath = path.join(runDir, 'external-commands.jsonl')
+      const auditPath = buildRunPaths(runDirFor(deps.store.logsDir, req.params.runId)).externalCommandsPath
       if (!fs.existsSync(auditPath)) return { entries: [] }
       const raw = fs.readFileSync(auditPath, 'utf-8')
       const entries: ExternalHealAuditEntry[] = []
@@ -345,27 +344,13 @@ export async function externalHealRoutes(
 
   // GET /api/runs/:runId/actions — which actions are valid right now. Lets
   // the external client reason about what to do without re-deriving server
-  // logic. Mirrors `deriveRunActionAvailability` for the run's current status.
+  // logic. Includes execution type and historical spent-attempt receipts.
   app.get<{ Params: { runId: string } }>(
     '/api/runs/:runId/actions',
     async (req, reply) => {
       const detail = deps.store.get(req.params.runId)
       if (!detail) return notFound(reply, 'run')
-      const availability = deriveRunActionAvailability(detail.manifest.status, null)
-      const isActive = isActiveRunStatus(detail.manifest.status)
-      const isTerminal = isTerminalRunStatus(detail.manifest.status)
-      const externalSession = deps.broker.getSession(req.params.runId)
-      return {
-        status: detail.manifest.status,
-        availability,
-        signal: {
-          rerun: isActive,
-          restart: isActive,
-          heal: isActive,
-        },
-        evaluationExport: { available: isTerminal },
-        externalClaim: externalSession,
-      }
+      return buildRunActionsResponse(detail, deps.store.logsDir, deps.broker.getSession(req.params.runId))
     },
   )
 }
@@ -396,12 +381,7 @@ function hasText(value: unknown): value is string {
 export function makeExternalHealAuditLogger(logsDir: string) {
   return (runId: string, entry: ExternalHealAuditEntry): void => {
     try {
-      const runDir = runDirFor(logsDir, runId)
-      fs.mkdirSync(runDir, { recursive: true })
-      fs.appendFileSync(
-        path.join(runDir, 'external-commands.jsonl'),
-        JSON.stringify(entry) + '\n',
-      )
+      appendJsonLine(buildRunPaths(runDirFor(logsDir, runId)).externalCommandsPath, entry)
     } catch {
       // Best-effort; never let audit failures break the request.
     }

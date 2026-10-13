@@ -1,19 +1,17 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { featuresRoutes } from './features'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import legacy from '../../../../../web/src/features/runs/utils/__fixtures__/run-legacy-roster.json'
 import { saveSuiteTestRoster } from '../../runs/logic/suite-test-roster'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('recorded-tests-')
 
 it('lists the full saved suite for different envsets and preserves the filtered result records', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'full-recorded-suite-')))
-  roots.push(root)
+  const root = tempDir('full-recorded-suite-')
   const featureDir = path.join(root, 'features/merchant')
   fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'merchant', featureDir: __dirname, repos: [], envs: ['local', 'meta'] } }")
@@ -49,8 +47,7 @@ it('lists the full saved suite for different envsets and preserves the filtered 
 })
 
 it('serves every recorded legacy test without reading current workspace source', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-tests-')))
-  roots.push(root)
+  const root = tempDir('legacy-tests-')
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, legacy.manifest.feature)
   const runDir = path.join(root, 'logs/runs', legacy.manifest.runId)
@@ -76,8 +73,7 @@ it('serves every recorded legacy test without reading current workspace source',
 })
 
 it('reads historical names and bodies without executing specs or including new workspace tests', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'recorded-tests-')))
-  roots.push(root)
+  const root = tempDir('recorded-tests-')
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'merchant')
   const runDir = path.join(root, 'logs/runs/run1')
@@ -131,8 +127,7 @@ it('reads historical names and bodies without executing specs or including new w
 // both, so a recorded listing has to AST-extract the helper too — the body and
 // steps a reader sees live there, not in the spec.
 function helperDeclaredRun(): { featuresDir: string; logsDir: string; snapshot: string; spec: string } {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'recorded-helper-')))
-  roots.push(root)
+  const root = tempDir('recorded-helper-')
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'merchant')
   fs.mkdirSync(featureDir, { recursive: true })

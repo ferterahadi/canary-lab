@@ -1,6 +1,9 @@
+import type { CoverageRecoveryStage } from '../coverage/freshness'
+import type { FlightStageKey } from '../flights/types'
+
 export type NotificationTarget =
-  | { kind: 'flight'; flightId: string }
-  | { kind: 'coverage'; feature: string; stage: import('../coverage/freshness').CoverageRecoveryStage; flightId?: string }
+  | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
+  | { kind: 'coverage'; feature: string; stage: CoverageRecoveryStage; flightId?: string }
   | { kind: 'feature'; feature: string }
   | { kind: 'test-review'; feature: string; runId?: string }
   | { kind: 'run'; feature: string; runId: string }

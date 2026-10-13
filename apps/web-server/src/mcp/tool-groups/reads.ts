@@ -1,3 +1,4 @@
+import { buildRunActionsResponse } from '../../features/runs/logic/run-actions'
 // MCP tools — reads.
 //
 // Registration bodies are unchanged from the pre-split tools.ts; only the
@@ -9,12 +10,13 @@ import { buildExternalRunSnapshotSlim, buildSpecEditsWarning } from '../../featu
 import { findFeature, loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
 import {
-  isActiveRunStatus,
   isTerminalRunStatus,
-  deriveRunActionAvailability,
 } from '../../../../../shared/run-state'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, failureResult, verificationResult } from '../tool-support'
+
+/** RunDetail fields get_run leaves out unless asked: each grows with the run. */
+const RAW_RUN_DETAIL_FIELDS = ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents', 'attemptArtifacts', 'unassignedArtifacts'] as const
 
 export function registerReadTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -50,10 +52,10 @@ export function registerReadTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('get_run', {
-    description: 'Fetch one run\'s core detail: manifest + summary + artifact base URL. The bulky raw arrays (lifecycleEvents, playwrightArtifacts, playbackEvents) are OMITTED by default to protect context — pass includeRaw:true to inline them when you need them. Never poll this to wait for a result; block on wait_for_heal_task.',
+    description: 'Fetch one run\'s core detail: manifest + summary + artifact base URL. The bulky raw fields (lifecycleEvents, playwrightArtifacts, playbackEvents, and the per-execution attemptArtifacts/unassignedArtifacts) are OMITTED by default to protect context — pass includeRaw:true to inline them when you need them. Never poll this to wait for a result; block on wait_for_heal_task.',
     inputSchema: {
       runId: z.string(),
-      includeRaw: z.boolean().default(false).describe('Inline the full lifecycleEvents[] + playwrightArtifacts[] + playbackEvents[]. Off by default (they can be large); call again with includeRaw:true when you need the raw timeline/artifacts.'),
+      includeRaw: z.boolean().default(false).describe('Inline the full lifecycleEvents[] + playwrightArtifacts[] + playbackEvents[] + attemptArtifacts + unassignedArtifacts. Off by default (they can be large); call again with includeRaw:true when you need the raw timeline/artifacts.'),
     },
   }, async ({ runId, includeRaw }) => {
     const detail = deps.store.get(runId)
@@ -68,11 +70,14 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     // wait_for_heal_task and get_run_snapshot hand out.
     const specEdits = buildSpecEditsWarning(detail.manifest)
     if (includeRaw) return asJsonResult({ ...detail, ...(specEdits ? { specEdits } : {}), ...next })
-    const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
+    const {
+      lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents,
+      attemptArtifacts: _attemptArtifacts, unassignedArtifacts: _unassignedArtifacts, ...core
+    } = detail
     return asJsonResult({
       ...core,
       artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
-      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+      raw: { omitted: [...RAW_RUN_DETAIL_FIELDS], hint: 'call get_run with includeRaw:true to inline them' },
       ...(specEdits ? { specEdits } : {}),
       ...next,
     })
@@ -97,14 +102,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
   }, async ({ runId }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    const status = detail.manifest.status
-    return asJsonResult({
-      status,
-      availability: deriveRunActionAvailability(status, null),
-      signal: { rerun: isActiveRunStatus(status), restart: isActiveRunStatus(status), heal: isActiveRunStatus(status) },
-      evaluationExport: { available: isTerminalRunStatus(status) },
-      externalClaim: deps.broker.getSession(runId),
-    })
+    return asJsonResult(buildRunActionsResponse(detail, deps.store.logsDir, deps.broker.getSession(runId)))
   })
 
   registerTool('list_verification_configs', {

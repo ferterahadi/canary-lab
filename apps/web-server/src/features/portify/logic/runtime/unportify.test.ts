@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { stripPortSlots, revertPortification } from './unportify'
 import { writeOverlay, overlayDir } from './overlay'
-import { readFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
+import { readFeatureConfig } from '../../../../shared/config-ast'
+import type { ConfigValue } from '../../../../../../../shared/config-value'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('unportify-')
 
 let tmpDir: string
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unportify-')))
-})
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  tmpDir = tempDir()
 })
 
 // ─── stripPortSlots ──────────────────────────────────────────────────────────

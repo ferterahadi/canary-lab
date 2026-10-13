@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { BenchmarkOrchestrator, type BenchmarkOrchestratorDeps } from './orchestrator'
 import { SabotageNoopError } from './race'
-import type { BenchmarkManifest } from './types'
-import type { BenchmarkReport } from './report'
+import type { BenchmarkManifest } from '../../../../../../../shared/benchmark-index'
+import type { BenchmarkReport } from '../../../../../../../shared/benchmark-index'
 
 function makeManifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {

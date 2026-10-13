@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
@@ -12,8 +11,12 @@ import { reclaimOrphanedPortify } from './reclaim'
 import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, overlayDir } from './overlay'
-import type { PortifyManifest } from './types'
+import type { PortifyManifest } from '../../../../../../../shared/portify-index'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { waitForStatus } from './__fixtures__/runner.part4-fixtures'
+
+const tempDir = trackTempDirs('portify-it-')
 
 // Mock the agent so no real claude/codex spawns: simulate a source edit at the
 // worktree cwd (gives the commit something to commit). The fixture config
@@ -39,7 +42,7 @@ vi.mock('./agent', () => ({
 // would populate, so abort()'s child-kill loop is exercised on cancel. Tests
 // can override per-case (e.g. the retry case).
 async function defaultAgentEdit(opts: { cwd: string; children?: Set<unknown> }): Promise<void> {
-  opts.children?.add({ kill: () => {} })
+  opts.children?.add({ stop: () => {} })
   try {
     fs.mkdirSync(path.join(opts.cwd, 'src'), { recursive: true })
     fs.appendFileSync(path.join(opts.cwd, 'src', 'server.js'), '\n// port made injectable by agent\n')
@@ -63,13 +66,6 @@ const fakePtyFactory: PtyFactory = (): PtyHandle => ({
   write: () => {},
   resize: () => {},
   kill: () => {},
-})
-
-const roots: string[] = []
-
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
 })
 
 function repoStartCommand(name: string, slot: string, env: string, withPorts: boolean): string {
@@ -143,22 +139,11 @@ function makeRunner(
   return { store, runner }
 }
 
-async function waitForStatus(store: PortifyRunStore, id: string, until: string[], timeoutMs = 8000): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const m = store.get(id)
-    if (m && until.includes(m.status)) return m.status
-    await new Promise((r) => setTimeout(r, 25))
-  }
-  return store.get(id)?.status ?? 'missing'
-}
-
 const TERMINAL = ['ready-to-save', 'failed', 'aborted']
 
 // Single-repo fixture (the common case).
 async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; appRepo: string }> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-it-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'myfeat')
   const appRepo = path.join(root, 'app')

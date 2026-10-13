@@ -1,36 +1,27 @@
-import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RunOrchestrator } from './orchestrator'
 import { addWorktree } from './repo-worktree'
 import { readManifest } from './manifest'
 import { writeHealSignal } from '../heal/external-heal-surface'
 import type { PtyHandle } from './pty-spawner'
 import type { DependencyPreparation, FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-dependency-recovery-')
 let root: string
 let source: string
 
-function git(...args: string[]): void {
-  execFileSync('git', args, { cwd: source, stdio: 'ignore' })
-}
-
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-dependency-recovery-')))
+  root = tempDir()
   source = path.join(root, 'source')
   fs.mkdirSync(source)
   fs.writeFileSync(path.join(source, 'package-lock.json'), '{"version":1}')
   fs.writeFileSync(path.join(source, '.gitignore'), 'node_modules/\n')
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Test')
-  git('add', '-A')
-  git('commit', '-qm', 'init')
+  initGitRepo(source)
 })
-
-afterEach(() => { fs.rmSync(root, { recursive: true, force: true }) })
 
 function fakePty(playwright = false): PtyHandle {
   return {

@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vitest'
 import type { CoverageLedger } from '@shared/coverage/types'
 import { CoverageHeader } from './CoverageHeader'
 import { LEDGER } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The stat bar reads as a sentence, then two labelled groups. Headline block:
 // a small ring, the big mapped percentage, and the requirement count; the ratio line waits in
@@ -15,16 +16,7 @@ import { LEDGER } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function render(ledger: CoverageLedger, extra: Partial<Parameters<typeof CoverageHeader>[0]> = {}): void {
   act(() => {

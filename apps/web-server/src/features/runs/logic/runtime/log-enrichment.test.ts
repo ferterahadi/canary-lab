@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   capSlice,
@@ -14,11 +13,13 @@ import {
 } from './log-enrichment'
 import { writeHealIndex } from './heal-index'
 import { LOGS_DIR as REAL_LOGS, MANIFEST_PATH as REAL_MANIFEST, SUMMARY_PATH as REAL_SUMMARY } from './paths'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-le-')
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-')))
+  tmpDir = tempDir()
 })
 
 describe('writeErrorFile', () => {

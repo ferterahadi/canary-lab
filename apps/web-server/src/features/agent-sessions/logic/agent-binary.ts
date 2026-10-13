@@ -12,7 +12,7 @@ import { execFileSync } from 'child_process'
 
 export type HealAgent = 'claude' | 'codex'
 
-export function isAgentKind(command: string): command is HealAgent {
+export function isAgentKind(command: unknown): command is HealAgent {
   return command === 'claude' || command === 'codex'
 }
 

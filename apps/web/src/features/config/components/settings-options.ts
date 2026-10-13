@@ -1,4 +1,4 @@
-import type { EditorChoice, HealAgentChoice } from '@/shared/api/config'
+import type { EditorChoice, HealAgentChoice } from '@shared/project-config'
 import {
   MODEL_STAGE_KEYS,
   pinnedPlanEntries,

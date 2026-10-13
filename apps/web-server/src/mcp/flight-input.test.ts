@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { captureTools } from './tool-groups/__fixtures__/tool-group-harness'
 import { registerFlightTools } from './tool-groups/flight'
@@ -9,6 +8,9 @@ import { computeDocsHash } from '../features/coverage/logic/coverage/docs-collec
 import { documentHash, documentResolutionInput, writeDocumentSelection } from '../features/coverage/logic/coverage/document-resolution'
 import { inputFingerprint } from './elicitation'
 import type { McpClientFacts } from './client-surface'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-flight-input-')
 
 // `respond_flight_checkpoint` with no choice/values/data is the human-question
 // path, and every branch below is a shape of question (or non-question) the
@@ -22,14 +24,10 @@ const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'flight-inp
 const text = (result: CallToolResult | InputRequiredResult) => (result.content as Array<{ text: string }>)[0].text
 const json = (result: CallToolResult | InputRequiredResult) => JSON.parse(text(result)) as Record<string, unknown>
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
-
 function workspace() {
   // realpath: the resolved-source check compares real paths, and macOS reports
   // the temp dir through /var → /private/var.
-  const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canary-flight-input-')))
-  roots.push(projectRoot)
+  const projectRoot = tempDir()
   const featuresDir = path.join(projectRoot, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
   const repoDir = path.join(projectRoot, 'repo')

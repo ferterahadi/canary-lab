@@ -1,7 +1,5 @@
-import { afterEach, describe, it, expect, vi } from 'vitest'
-import { execFileSync } from 'child_process'
+import { describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 // Only the two `gh` probes are faked; `parseGitHubRemote` stays real because
@@ -20,6 +18,10 @@ const { buildPrPreflight } = await import('./pr-preflight')
 type PrPreflightDeps = import('./pr-preflight').PrPreflightDeps
 import type { RunFixCapture } from '../../../../../../../shared/run-state'
 import type { GhStatus } from '../../../../shared/gh-cli'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-preflight-')
 
 const fixCapture: RunFixCapture = {
   capturedAt: 'now',
@@ -93,22 +95,11 @@ describe('buildPrPreflight', () => {
 // The origin/base probes run against a real repo when the caller injects
 // nothing — that's what the PR dialog does, so the defaults get real git.
 describe('buildPrPreflight — uninjected git probes', () => {
-  const roots: string[] = []
-  afterEach(() => {
-    for (const r of roots.splice(0)) fs.rmSync(r, { recursive: true, force: true })
-  })
-
   function tmpRepo(originUrl?: string): string {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-preflight-')))
-    roots.push(root)
-    const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' })
-    execFileSync('git', ['init', '-q', '-b', 'main', root], { stdio: 'pipe' })
-    git(['config', 'user.email', 't@t.dev'])
-    git(['config', 'user.name', 'test'])
+    const root = tempDir()
     fs.writeFileSync(path.join(root, 'README.md'), '# x\n')
-    git(['add', '-A'])
-    git(['commit', '-qm', 'init'])
-    if (originUrl !== undefined) git(['remote', 'add', 'origin', originUrl])
+    initGitRepo(root, { branch: 'main' })
+    if (originUrl !== undefined) git(root, 'remote', 'add', 'origin', originUrl)
     return root
   }
 

@@ -1,23 +1,18 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   registerClaudeDesktopMcp,
   registeredDesktopCliPath,
   claudeDesktopConfigPath,
   claudeDesktopInstalled,
 } from './desktop-registration'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-desktop-')
 function tmpConfig(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-desktop-'))
-  tmpDirs.push(dir)
-  return path.join(dir, 'Claude', 'claude_desktop_config.json')
+  return path.join(tempDir(), 'Claude', 'claude_desktop_config.json')
 }
-afterEach(() => {
-  for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
 
 const EXEC = '/usr/bin/node'
 const CLI = '/opt/canary-lab/dist/scripts/cli.js'

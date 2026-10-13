@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Feature } from '@/shared/api/types'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { FeatureExternalHistory } from '../state/feature-activity'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The two stores this hook reads own a WebSocket and a fetch loop apiece, which
 // is the one edge a unit test can't reproduce. Everything the hook itself does
@@ -33,22 +34,13 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
 
 const { useDerivedFeatureStages } = await import('./derived-stages')
 
-let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   runsValue.runs = []
   exportsValue.tasks = []
   portifyValue.workflows = []
-})
-
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
 })
 
 const feature = (over: Partial<Feature> = {}): Feature => ({

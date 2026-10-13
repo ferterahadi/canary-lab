@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,13 +8,15 @@ import { RunStore } from '../features/runs/logic/run-store'
 import { createRegistry } from '../features/runs/logic/run-registry'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { documentHash } from '../features/coverage/logic/coverage/document-resolution'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('canary-elicit-')
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
 async function harness(reply: (params: Record<string, unknown>) => Promise<unknown>, legacy = false) {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-elicit-'))
-  cleanups.push(async () => fs.rmSync(projectRoot, { force: true, recursive: true }))
+  const projectRoot = tempDir()
   const featuresDir = path.join(projectRoot, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
   fs.mkdirSync(featureDir, { recursive: true })

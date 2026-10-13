@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore, type FlightStore } from './store'
 import {
@@ -29,11 +28,11 @@ import {
 } from './flight-errors'
 import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightOptions,
-  type FlightStageKey,
-} from '../../../../../../shared/flights/types'
+import { type FlightOptions } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from './__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-')
 
 let tmpDir: string
 
@@ -42,30 +41,16 @@ let store: FlightRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 
 const now = () => '2026-01-01T00:00:00Z'
 
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
-
-const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
-  teardown: () => null,
-  run: async (ctx) => {
-    calls?.push(ctx.manifest().currentStage as FlightStageKey)
-    return { kind: 'done' }
-  },
-})
-
-function allDone(calls?: FlightStageKey[]): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((k) => [k, doneAdapter(calls)])) as StageAdapters
-}
 
 function deps(adapters: StageAdapters): FlightConductorDeps {
   return { store, adapters, now, newFlightId: ids }
@@ -77,7 +62,7 @@ function args(repo = '/repo/a') {
 
 describe('external-work timing', () => {
   it.each(['authoring', 'mapping'] as const)('keeps the live %s timer running while the client owns the checkpoint', async (phase) => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async (ctx) => {
@@ -121,7 +106,7 @@ describe('autopilot (R71/W4)', () => {
 
   it.each(AUTO)('auto-answers %s with "%s", records + logs it, and the flight completes', async (kind, choice) => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone(kind, [choice, 'other'], responses)
     const { manifest, completion } = startFlight(args(`/repo/auto-${kind}`), deps(adapters))
     await completion
@@ -139,7 +124,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('export-mode defaults to "localized" for an EXTERNAL producer — the rewrite is the thinking being handed off', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone('export-mode', ['raw', 'localized'], responses)
     const { manifest, completion } = startFlight(
       { ...args('/repo/auto-export-external'), opts: { ...OPTS, stageProducer: 'external' } },
@@ -159,7 +144,7 @@ describe('autopilot (R71/W4)', () => {
       ['missing-env', ['retry', 'waive']],
     ]
     for (const [kind, options] of cases) {
-      const adapters = allDone()
+      const adapters = allDoneAdapters()
       adapters.docs = {
         teardown: () => null,
         run: async () => ({ kind: 'checkpoint', checkpoint: { kind, message: 'q?', options } }),
@@ -177,7 +162,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('prd-source with NO docs falls through to "collect-repo-docs" — the fork is not a stop under autopilot', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone('prd-source', ['collect-repo-docs', 'infer-from-diff'], responses)
     const { manifest, completion } = startFlight(args('/repo/no-docs'), deps(adapters))
     await completion
@@ -186,7 +171,7 @@ describe('autopilot (R71/W4)', () => {
   })
 
   it('prd-source parks when no mapped choice is offered at all', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({
@@ -201,7 +186,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('a checkpoint carrying a failed prior attempt parks — autopilot never re-runs the collector that came back empty', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({
@@ -226,7 +211,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('opts.autopilot === false parks every checkpoint (opt-out)', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone('config-approval', ['approve', 'redraft'], responses)
     const { manifest, completion } = startFlight(
       { ...args('/repo/opt-out'), opts: { ...OPTS, autopilot: false } },
@@ -239,7 +224,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('R78: a step the user explicitly re-entered parks its FIRST checkpoint even under autopilot', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone('prd-source', ['continue', 'collect-repo-docs'], responses)
     // First pass: autopilot answers prd-source and the flight completes.
     const { manifest, completion } = startFlight(args('/repo/re-entry'), deps(adapters))
@@ -265,7 +250,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('R78: setFlightAutopilot flips the preference on an existing flight, and the next checkpoint honours it', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = parkThenDone('config-approval', ['approve', 'redraft'], responses)
     const { manifest, completion } = startFlight(
       { ...args('/repo/toggle'), opts: { ...OPTS, autopilot: false } },
@@ -286,7 +271,7 @@ describe('autopilot (R71/W4)', () => {
   })
 
   it('yolo flights are exempt — a checkpoint an adapter parks under yolo reaches the human', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({
@@ -304,7 +289,7 @@ describe('autopilot (R71/W4)', () => {
 
   it('a RE-parked checkpoint reaches the human — never auto-answered twice', async () => {
     const responses: unknown[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => ({
@@ -337,7 +322,7 @@ describe('live stage context', () => {
     // drive this call must reach the record, because it is the ONLY thing that
     // distinguishes a long-thinking agent from a hung one in the stage panel
     // (a stage gains a transcript row only per completed block — 3cde98f).
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scout = {
       teardown: () => null,
       run: async (ctx) => {
@@ -359,7 +344,7 @@ describe('flight agent stickiness (R79: once codex, always codex)', () => {
     ({ ...OPTS, ...(agent ? { agent } : {}) })
 
   it('jump keeps the stored agent even when the caller passes a different one', async () => {
-    const d: FlightConductorDeps = { ...deps(allDone()), validateStageEntry: () => null }
+    const d: FlightConductorDeps = { ...deps(allDoneAdapters()), validateStageEntry: () => null }
     const first = startFlight({ ...args(), opts: withAgent('codex') }, d)
     await first.completion
 
@@ -369,7 +354,7 @@ describe('flight agent stickiness (R79: once codex, always codex)', () => {
   })
 
   it('redo accepts a new agent; omitting it keeps the stored one', async () => {
-    const d = deps(allDone())
+    const d = deps(allDoneAdapters())
     const first = startFlight({ ...args(), opts: withAgent('codex') }, d)
     await first.completion
 

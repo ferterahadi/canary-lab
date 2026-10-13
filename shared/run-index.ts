@@ -1,5 +1,5 @@
 import type { RunStatus } from './run-state'
-import type { ExecutionType, VerificationRunMetadata } from './verification'
+import { isAuxiliaryExecution, type ExecutionType, type VerificationRunMetadata } from './verification'
 
 export interface RunIndexEntry {
   runId: string
@@ -68,4 +68,18 @@ export function runIndexEntry(manifest: RunIndexSource): RunIndexEntry {
     ...(manifest.specEdits?.pending.length ? { pendingSpecEdits: manifest.specEdits.pending.length } : {}),
     ...(manifest.integrity?.hints.length ? { integrityHints: manifest.integrity.hints.length } : {}),
   }
+}
+
+/** A run that can stand as the suite's verdict: a normal test run (not an
+ *  auxiliary boot/benchmark/historical cell, and not an observational
+ *  `verify` against a deployment) whose status is one of `statuses`. Every
+ *  "latest settled / passed run" lookup filters through this one rule; each
+ *  caller keeps its own ordering and tie-break. */
+export function isSuiteVerdictRun(
+  run: Pick<RunIndexEntry, 'executionType' | 'status'>,
+  statuses: readonly RunStatus[],
+): boolean {
+  return !isAuxiliaryExecution(run.executionType)
+    && run.executionType !== 'verify'
+    && statuses.includes(run.status)
 }

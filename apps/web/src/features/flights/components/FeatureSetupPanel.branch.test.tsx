@@ -1,9 +1,10 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { getRepoGitStatus, type GitRepoStatus } from '@/shared/api/workspace'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { BranchRow } from './FeatureSetupPanel'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: vi.fn(),
@@ -20,9 +21,9 @@ function Editor() {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('main'))
-  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 it('refreshes Flight suggestions after events and missed events without changing its draft or saving', async () => {
   await act(async () => { root.render(<InvalidationProvider><Editor /></InvalidationProvider>) })
   const input = container.querySelector('input')!

@@ -12,16 +12,21 @@ import {
   findRepo,
   getGitRoot,
   getGitStatus,
+  readGitBlob,
   parsePorcelainStatus,
   parseRefList,
   snapshotWorkingTree,
   validateConfiguredRepoBranches,
 } from './git-repo'
+import { gitBlobSha1 } from './git-blob'
 import { resolveRepoPath } from './repo-identity'
 import { git, initGitRepo } from '../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-git-')
 
 function tmpRepo(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-')))
+  const dir = tempDir()
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n')
   initGitRepo(dir, { branch: 'main' })
   git(dir, 'branch', 'feature/demo')
@@ -49,9 +54,9 @@ describe('git-repo helpers', () => {
 
   it('reports empty status for missing, file, and non-git paths', async () => {
     const missing = path.join(os.tmpdir(), 'cl-missing-repo-path')
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-file-')), 'not-dir')
+    const file = path.join(tempDir('cl-file-'), 'not-dir')
     fs.writeFileSync(file, 'x')
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
 
     expect(await getGitStatus(missing)).toMatchObject({ isGitRepo: false })
     expect(await getGitStatus(file)).toMatchObject({ isGitRepo: false })
@@ -74,7 +79,7 @@ describe('git-repo helpers', () => {
   })
 
   it('reports a null HEAD sha on an unborn branch', async () => {
-    const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-unborn-')))
+    const repo = tempDir('cl-git-unborn-')
     execFileSync('git', ['init', '-b', 'main'], { cwd: repo, stdio: 'ignore' })
 
     const status = await getGitStatus(repo)
@@ -105,7 +110,7 @@ describe('git-repo helpers', () => {
   )
 
   it('refuses checkout for non-git paths', async () => {
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
     await expect(checkoutBranch(plainDir, 'main')).rejects.toThrow('path is not a git repository')
   })
 
@@ -182,7 +187,7 @@ describe('git-repo helpers', () => {
 
   it('collects branch snapshots for valid configured repos only', async () => {
     const repo = tmpRepo()
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
 
     await expect(collectRepoBranchSnapshots({
       name: 'demo',
@@ -245,7 +250,7 @@ describe('git-repo helpers', () => {
 
   it('reports non-git and detached configured repo failures', async () => {
     const repo = tmpRepo()
-    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))
+    const plainDir = tempDir('cl-plain-')
     execFileSync('git', ['checkout', '--detach', 'HEAD'], { cwd: repo, stdio: 'ignore' })
 
     await expect(validateConfiguredRepoBranches({
@@ -275,7 +280,7 @@ describe('git-repo helpers', () => {
 
   describe('snapshotWorkingTree + diffNamesSinceSnapshot', () => {
     it('returns null for non-git and missing paths', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-snap-'))
+      const plainDir = tempDir('cl-plain-snap-')
       expect(await snapshotWorkingTree(plainDir)).toBeNull()
       expect(await snapshotWorkingTree(path.join(os.tmpdir(), 'cl-missing-snap-xyz'))).toBeNull()
     })
@@ -283,7 +288,7 @@ describe('git-repo helpers', () => {
     it('returns null when git stash create fails (e.g. zero-commit repo with no HEAD)', async () => {
       // Exercises the `if (stash.code !== 0) return null` arm — stash create
       // needs a HEAD ref, which doesn't exist in a brand-new repo.
-      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-empty-')))
+      const dir = tempDir('cl-git-empty-')
       execFileSync('git', ['init', '-b', 'main'], { cwd: dir, stdio: 'ignore' })
       expect(await snapshotWorkingTree(dir)).toBeNull()
     })
@@ -352,7 +357,7 @@ describe('git-repo helpers', () => {
     })
 
     it('diffNamesSinceSnapshot returns [] on a non-git path', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-'))
+      const plainDir = tempDir('cl-plain-diff-')
       expect(await diffNamesSinceSnapshot(plainDir, 'HEAD')).toEqual([])
     })
   })
@@ -375,7 +380,7 @@ describe('git-repo helpers', () => {
     })
 
     it('returns empty string on a non-git path', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-diff-content-'))
+      const plainDir = tempDir('cl-plain-diff-content-')
       expect(await diffContentSinceSnapshot(plainDir, 'HEAD')).toBe('')
     })
   })
@@ -487,12 +492,65 @@ describe('git-repo helpers', () => {
     })
 
     it('returns null for a non-git directory', async () => {
-      const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-root-'))
+      const plainDir = tempDir('cl-plain-root-')
       expect(await getGitRoot(plainDir)).toBeNull()
     })
 
     it('returns null for a missing path', async () => {
       expect(await getGitRoot(path.join(os.tmpdir(), 'cl-missing-root-xyz'))).toBeNull()
+    })
+  })
+
+  describe('readGitBlob', () => {
+    function writeBlob(repo: string, content: string): string {
+      const file = path.join(repo, `blob-${gitBlobSha1(content)}`)
+      fs.writeFileSync(file, content)
+      return git(repo, 'hash-object', '-w', '--no-filters', file)
+    }
+
+    it('returns the content untrimmed, trailing newline included, by a full or abbreviated id', async () => {
+      const repo = tmpRepo()
+      const sha = writeBlob(repo, '  indented\nlast\n\n')
+      expect(await readGitBlob(repo, sha)).toBe('  indented\nlast\n\n')
+      expect(await readGitBlob(repo, sha.slice(0, 7))).toBe('  indented\nlast\n\n')
+    })
+
+    it('reads a blob larger than the default one-megabyte output buffer', async () => {
+      const repo = tmpRepo()
+      const content = 'x'.repeat(99) + '\n'
+      const large = content.repeat(20_000)
+      expect(await readGitBlob(repo, writeBlob(repo, large))).toBe(large)
+    })
+
+    it('returns null for an id the repository does not hold', async () => {
+      const repo = tmpRepo()
+      expect(await readGitBlob(repo, gitBlobSha1('never written\n'))).toBeNull()
+    })
+
+    it('returns null for an abbreviation that names two objects', async () => {
+      const repo = tmpRepo()
+      // Two contents whose ids share their first four characters, found in
+      // process so only those two reach the repository.
+      const seen = new Map<string, string>()
+      let pair: [string, string] | undefined
+      for (let i = 0; !pair; i++) {
+        const content = `content ${i}\n`
+        const prefix = gitBlobSha1(content).slice(0, 4)
+        const earlier = seen.get(prefix)
+        if (earlier) pair = [earlier, content]
+        else seen.set(prefix, content)
+      }
+      const sha = writeBlob(repo, pair[0])
+      writeBlob(repo, pair[1])
+      expect(await readGitBlob(repo, sha.slice(0, 4))).toBeNull()
+      expect(await readGitBlob(repo, sha)).toBe(pair[0])
+    })
+
+    it('returns null for an object that is not a blob, and for text that is not an id', async () => {
+      const repo = tmpRepo()
+      expect(await readGitBlob(repo, git(repo, 'rev-parse', 'HEAD'))).toBeNull()
+      expect(await readGitBlob(repo, '--batch')).toBeNull()
+      expect(await readGitBlob(repo, 'HEAD')).toBeNull()
     })
   })
 })

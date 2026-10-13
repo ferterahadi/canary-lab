@@ -1,12 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createConfigDocStore } from './config-doc-store'
-
-function deferred() {
-  let resolve!: (value: unknown) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<unknown>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 it('shares reads and retains identity for identical snapshots, then releases listeners', async () => {
   const cache = createConfigDocStore()

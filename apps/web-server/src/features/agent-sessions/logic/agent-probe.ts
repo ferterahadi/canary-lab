@@ -1,4 +1,5 @@
-import { execFile } from 'child_process'
+import type { AgentProbe, AgentProbeSnapshot } from '../../../../../../shared/agent-probe'
+import { commandResult } from '../../../shared/command-result'
 import type { KnownModelOption } from '../../../../../../shared/agent-models'
 import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './agent-binary'
 
@@ -13,41 +14,17 @@ import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './age
  * aliases remain curated fallback data in agent-models.ts.
  */
 
-export type AgentProbeState = 'ok' | 'auth' | 'missing'
-
-export interface AgentProbe {
-  agent: HealAgent
-  state: AgentProbeState
-  binaryPath: string | null
-  version: string | null
-  /** Models this installed CLI currently exposes to users. Empty when the CLI
-   *  has no discovery command or discovery fails; configuring remains usable
-   *  through Agent default and Custom id. */
-  models: readonly KnownModelOption[]
-  /** One-line fix for the warning strip; null when state is `ok`. */
-  remedy: string | null
-}
-
-export interface AgentProbeSnapshot {
-  probedAt: string
-  claude: AgentProbe
-  codex: AgentProbe
-}
-
 /** Runs one CLI invocation; `ok` mirrors exit 0. Failure text is irrelevant —
  *  every caller decides from `ok` + stdout. */
 export type ProbeExec = (binary: string, args: string[]) => Promise<{ ok: boolean; stdout: string }>
 
 const EXEC_TIMEOUT_MS = 15_000
 
-function defaultExec(binary: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
-  return new Promise((resolve) => {
-    // With `encoding: 'utf-8'` the callback's stdout is always a string —
-    // Node passes '' on spawn failure — so no null-guard is needed.
-    execFile(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
-      resolve({ ok: !err, stdout })
-    })
-  })
+async function defaultExec(binary: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
+  // Any failure (spawn error, non-zero exit, timeout, overflow) maps to a
+  // non-zero code, so exit 0 is exactly "no error".
+  const result = await commandResult(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS, maxBuffer: 5 * 1024 * 1024 }, 1)
+  return { ok: result.code === 0, stdout: result.stdout }
 }
 
 export interface AgentProbeDeps {

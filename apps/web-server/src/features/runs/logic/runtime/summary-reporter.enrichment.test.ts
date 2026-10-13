@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { mkResult, mkTest, summaryReaders } from './__fixtures__/summary-reporter'
 
 const tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-sr-')))
 
@@ -40,17 +41,7 @@ afterEach(() => {
   delete process.env.CANARY_LAB_TARGETED_RERUN
 })
 
-function mkTest(title: string, file = '/spec.ts', line = 1): any {
-  return { title, location: { file, line } }
-}
-
-function mkResult(overrides: Partial<any> = {}): any {
-  return { status: 'passed', duration: 42, retry: 0, ...overrides }
-}
-
-function readSummary(): any {
-  return JSON.parse(fs.readFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), 'utf-8'))
-}
+const { readSummary } = summaryReaders(LOGS_DIR)
 
 describe('SummaryReporter', () => {
   it('updates the latest pending journal outcome on a successful targeted rerun end', () => {

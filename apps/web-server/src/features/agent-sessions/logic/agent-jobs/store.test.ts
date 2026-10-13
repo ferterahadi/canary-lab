@@ -1,11 +1,11 @@
 import type { WorkspaceEvent } from '../../../../../../../shared/workspace-events'
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { AgentJobRunStore, agentJobStore, bridgeAgentJobEvents } from './store'
 import type { AgentJobManifest } from './types'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+import { captureEvents } from '../../../../shared/__fixtures__/workspace-events'
 
+const tempDir = trackTempDirs('cl-agentjobs-')
 
 // The record half of "an agent is a first-class thing". The interesting behaviour
 // is not save/get — the shared store owns that — but what a record says after the
@@ -14,10 +14,8 @@ import type { AgentJobManifest } from './types'
 let logsDir: string
 
 beforeEach(() => {
-  logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentjobs-')))
+  logsDir = tempDir()
 })
-
-afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
 
 const job = (over: Partial<AgentJobManifest> = {}): AgentJobManifest => ({
   jobId: 'fl-1:scout',
@@ -138,7 +136,7 @@ describe('AgentJobRunStore', () => {
   it('announces every change so a viewer updates without a refresh', () => {
     const events: WorkspaceEvent[] = []
     const store = new AgentJobRunStore(logsDir)
-    bridgeAgentJobEvents(store, { publish: (e) => events.push(e) })
+    bridgeAgentJobEvents(store, captureEvents(events))
     store.save(job())
     expect(events).toContainEqual({ type: 'agent-jobs-changed', jobId: 'fl-1:scout' })
   })

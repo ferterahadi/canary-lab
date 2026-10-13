@@ -1,21 +1,22 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { detectRepoCollision, normalizeRepoPaths } from './repo-collision'
 import { RunScheduler } from './run-scheduler'
 import { updateReposToUpstream } from './repo-upstream-update'
 import * as git from '../../../../shared/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-collision-identity-')
 let root: string
 let repo: string
 let alias: string
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-collision-identity-')))
+  root = tempDir()
   repo = path.join(root, 'repo'); alias = path.join(root, 'alias')
   fs.mkdirSync(repo); fs.symlinkSync(repo, alias, 'dir')
 })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('deduplicates aliases in supplied order and reports the first conflicting run', () => {
   expect(normalizeRepoPaths([alias, root, repo, '', null as unknown as string])).toEqual([repo, root])

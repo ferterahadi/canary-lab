@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { linkFeatureDocPath } from '@/shared/api/flights'
+import { displayError } from '@/shared/api/error-message'
 
 /** Both document surfaces preserve the source name and refresh through their
  * existing loader; the server also broadcasts coverage-changed to other views. */
@@ -36,7 +37,7 @@ export function DocRelink({ relPath, linkTarget, busy, onRelink }: {
             await onRelink(targetPath.trim())
             setEditing(false)
           } catch (cause) {
-            setError(cause instanceof Error ? cause.message : String(cause))
+            setError(displayError(cause))
           } finally {
             setSaving(false)
           }

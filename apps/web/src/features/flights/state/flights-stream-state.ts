@@ -1,5 +1,7 @@
+import { createRecordIndex } from '@/shared/state/record-index-store'
+import { parseRecordFrame } from '@/shared/state/record-stream'
 import type { FlightIndexEntry, FlightManifest } from '@shared/flights/types'
-import { flightIndexEntry } from '@shared/flights/index-entry'
+import { flightIndexEntry, type FlightsStreamFrame } from '@shared/flights/index-entry'
 
 // Pure reducer behind the `/ws/flights` push channel. Mirrors
 // portify-state.ts / runs-state.ts so it unit-tests in the node vitest config
@@ -10,11 +12,6 @@ import { flightIndexEntry } from '@shared/flights/index-entry'
 // never arrived. The server now pushes the full manifest on every store write,
 // so a driving flight's rail advances from the push itself — no round trip, no
 // poll, and no window where the list is stale because one frame was lost.
-
-export type FlightsStreamFrame =
-  | { type: 'snapshot'; flights: FlightIndexEntry[]; details: Record<string, FlightManifest> }
-  | { type: 'update'; flightId: string; manifest: FlightManifest }
-  | { type: 'removed'; flightId: string }
 
 export interface FlightsStreamState {
   /** The index, newest-first — exactly what `GET /api/flights` returns, so
@@ -34,52 +31,21 @@ export const EMPTY_FLIGHTS_STREAM: FlightsStreamState = {
   hydrated: false,
 }
 
-function byCreatedDesc(a: FlightIndexEntry, b: FlightIndexEntry): number {
-  return a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+export const flightIndex = createRecordIndex<FlightIndexEntry, FlightManifest, 'flights', 'flightId'>({
+  keys: { list: 'flights', id: 'flightId' },
+  entryOf: flightIndexEntry,
+  compareEntries: (a, b) => a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+})
+
+export function flightsStreamReducer(state: FlightsStreamState, frame: FlightsStreamFrame): FlightsStreamState {
+  const next = flightIndex.reducer({ ...state, connection: 'connecting' }, frame)
+  return { flights: next.flights, details: next.details, hydrated: state.hydrated || frame.type === 'snapshot' }
 }
 
-export function flightsStreamReducer(
-  state: FlightsStreamState,
-  frame: FlightsStreamFrame,
-): FlightsStreamState {
-  switch (frame.type) {
-    case 'snapshot':
-      return { flights: frame.flights, details: frame.details, hydrated: true }
-    case 'update': {
-      const entry = flightIndexEntry(frame.manifest)
-      const others = state.flights.filter((f) => f.flightId !== frame.flightId)
-      return {
-        ...state,
-        flights: [entry, ...others].sort(byCreatedDesc),
-        details: { ...state.details, [frame.flightId]: frame.manifest },
-      }
-    }
-    case 'removed': {
-      const { [frame.flightId]: _dropped, ...details } = state.details
-      return {
-        ...state,
-        flights: state.flights.filter((f) => f.flightId !== frame.flightId),
-        details,
-      }
-    }
-  }
+export function decodeFlightsFrame(frame: unknown): FlightsStreamFrame | null {
+  return flightIndex.frameToAction(frame) as FlightsStreamFrame | null
 }
 
-/** Parse a raw frame; anything unrecognised is dropped rather than thrown, so
- *  one malformed payload can't tear down the socket. */
 export function parseFlightsFrame(data: string): FlightsStreamFrame | null {
-  let frame: unknown
-  try {
-    frame = JSON.parse(data)
-  } catch {
-    return null
-  }
-  // `JSON.parse('null')` succeeds and yields null, so the shape check has to
-  // come before the property read.
-  if (!frame || typeof frame !== 'object') return null
-  const type = (frame as { type?: unknown }).type
-  if (type === 'snapshot' || type === 'update' || type === 'removed') {
-    return frame as FlightsStreamFrame
-  }
-  return null
+  return parseRecordFrame(data, decodeFlightsFrame)
 }

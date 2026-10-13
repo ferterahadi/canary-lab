@@ -1,3 +1,4 @@
+import { isPathUnder } from '../../../shared/path-containment'
 import fs from 'fs'
 import path from 'path'
 import type { TestReviewGitReceipt } from '../../../../../../shared/test-review'
@@ -135,7 +136,7 @@ export async function restoreGitReview(featureDir: string, plan: GitReviewPlan):
   }
   for (const change of plan.files) {
     const target = path.resolve(realDir, change.file)
-    if (!target.startsWith(`${realDir}${path.sep}`)) throw Object.assign(new Error('Reviewed file is outside the suite.'), { statusCode: 400 })
+    if (!isPathUnder(target, realDir, false)) throw Object.assign(new Error('Reviewed file is outside the suite.'), { statusCode: 400 })
     if (!plan.before.has(change.file)) {
       await runGit(root, ['rm', '--cached', '--ignore-unmatch', '--', path.relative(root, target)])
       fs.rmSync(target, { force: true })

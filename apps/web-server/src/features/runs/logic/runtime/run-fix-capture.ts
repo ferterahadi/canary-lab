@@ -18,7 +18,7 @@ runGit,
 snapshotWorkingTree,
 } from '../../../../shared/git-repo'
 import { listUntracked, sanitizeRepoFileName } from './repo-worktree'
-import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import { atomicWrite, atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 /** Stash-create a baseline ref for every per-run worktree so teardown can diff
  *  the agent's edits out. Best-effort: a repo we can't snapshot simply won't
@@ -80,9 +80,7 @@ export async function captureFixes(ctx: RunContext, provisional = false): Promis
     try {
       fs.mkdirSync(ctx.paths.fixesDir, { recursive: true })
       if (!fs.existsSync(patchPath) || fs.readFileSync(patchPath, 'utf8') !== patch) {
-        const pendingPath = `${patchPath}.tmp`
-        fs.writeFileSync(pendingPath, patch)
-        fs.renameSync(pendingPath, patchPath)
+        atomicWrite(patchPath, patch)
         patchChanged = true
       }
     } catch (err) {

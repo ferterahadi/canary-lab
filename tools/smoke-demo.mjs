@@ -7,6 +7,7 @@ import { renderInteractiveGuide } from './smoke-demo-output.mjs'
 import { pruneDemoStateFromRealHome } from './demo-home-prune.mjs'
 import { createDemoRoot } from './demo-workspace.mjs'
 import { repairSteps } from './storefront-repairs.mjs'
+import { REPO as repoRoot } from './lib/fs.mjs'
 
 // The developer's `npx canary-lab init`.
 //
@@ -27,7 +28,6 @@ import { repairSteps } from './storefront-repairs.mjs'
 // suppressed below, because they write outside the isolated demo state. Those
 // keep unit coverage; `smoke:pack` suppresses them for the same reason.
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const argv = process.argv.slice(2)
 const interactive = argv.includes('--interactive')
 const noBuild = argv.includes('--no-build')

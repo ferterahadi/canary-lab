@@ -26,7 +26,7 @@ export async function requestDocuments(
   upload: boolean,
   fallback: () => CallToolResult,
   ready: (paths: string[]) => Promise<CallToolResult | InputRequiredResult>,
-  options: { revision?: unknown; message?: string; command: string; beforeWrite?: () => CallToolResult | undefined | Promise<CallToolResult | undefined> },
+  options: { revision?: unknown; reason?: string; command: string; beforeWrite?: () => CallToolResult | undefined | Promise<CallToolResult | undefined> },
 ): Promise<CallToolResult | InputRequiredResult> {
   const url = featureInputUrl(ctx, feature)
   if (upload) {
@@ -36,7 +36,7 @@ export async function requestDocuments(
     const facts = ctx.clientFacts()
     return requestUserInput(request, facts, {
       scope, mode: 'url', url,
-      message: `Import the requirements documents for ${feature} in Canary Lab, then return here.`,
+      message: `Upload the requirements for ${feature} in Canary, then return here.`,
       fallback: () => asJsonResult({ status: 'needs-docs', feature, url, next: `${elicitationAdviceFor(facts, 'url')} Open the document import URL, add the requirements, then retry ${options.command}. Do not invent a document.` }),
     }, async () => {
       const check = options.beforeWrite?.()
@@ -48,13 +48,13 @@ export async function requestDocuments(
     })
   }
   const schema = z.object({
-    source: z.enum(['paste', 'local-file', 'upload']).describe('Paste requirements, link a local Markdown file on the Canary server, or import attachments in Canary Lab.'),
-    content: z.string().max(32_000).optional().describe('Requirements text when source is paste. Never include passwords or API keys.'),
-    local_path: z.string().max(4096).optional().describe('Markdown file path on the machine running Canary Lab, only for local-file.'),
+    source: z.enum(['paste', 'local-file', 'upload']).describe('Paste text, link a Markdown file, or upload documents.'),
+    content: z.string().max(32_000).optional().describe('For paste: enter requirements, without passwords or API keys.'),
+    local_path: z.string().max(4096).optional().describe('For local-file: a Markdown file path on the computer running Canary.'),
   }).refine((v) => v.source === 'upload' || (v.source === 'paste' ? !!v.content?.trim() : !!v.local_path?.trim()))
   return requestUserInput(request, ctx.clientFacts(), {
     scope, revision: options.revision, mode: 'form', schema,
-    message: options.message ?? `Requirements for ${feature} need your input. Provide the document or choose upload for attachments.`,
+    message: `${options.reason ? `${options.reason}\n\n` : ''}Add requirements for ${feature}: paste text, link a file, or upload documents.`,
     fallback,
   }, async (value) => {
     if (value.source === 'upload') return asJsonResult({

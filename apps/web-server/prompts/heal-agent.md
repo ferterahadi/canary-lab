@@ -17,7 +17,7 @@ Useful only when needed:
 {{traceExtractHint}}
 - `{{failedDir}}/<slug>/<svc>.log` — pre-sliced service logs referenced by `heal-index.md`.
 {{playwrightMcpHint}}
-- `{{runDir}}/svc-<safeName>.log` — full service log. Use only if a slice is missing or too short.
+- `{{runDir}}/svc-<safeName>.log` — full service log for the latest execution. Use only if a slice is missing or too short. Earlier executions' output is kept in `{{runDir}}/service-logs/<safeName>/execution-<n>.log`.
 - `{{journalPath}}` — prior heal attempts. Use only when the current prompt or index says prior iterations exist.
 
 {{featureDocsMap}}

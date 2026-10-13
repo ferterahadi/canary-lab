@@ -1,11 +1,13 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../../../../shared/run-detail'
 import { registerPortifyTools } from './portify'
 import { inputFingerprint } from '../elicitation'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-heal-')
 
 // The six port-ification tools, plus the two heal reads' not-found arms.
 //
@@ -410,11 +412,10 @@ describe('the two heal reads', () => {
   let tmpDir: string
 
   beforeEach(() => {
-    tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-heal-')))
+    tmpDir = tempDir()
     logsDir = path.join(tmpDir, 'logs')
     fs.mkdirSync(logsDir, { recursive: true })
   })
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
   const detail = (): RunDetail => ({
     runId: 'run-1',

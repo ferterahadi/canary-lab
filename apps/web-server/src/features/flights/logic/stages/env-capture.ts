@@ -185,7 +185,7 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
           kind: 'checkpoint',
           checkpoint: {
             kind: 'missing-env',
-            message: `${plural(missing.length, 'settings file')} the app needs ${missing.length === 1 ? 'is' : 'are'} missing. Paste the values below (Canary writes the file and saves a copy), skip them, or create the files yourself and re-check. Canary never guesses secrets.`,
+            message: `${plural(missing.length, 'settings file')} the app needs ${missing.length === 1 ? 'is' : 'are'} missing. Add and save the values in Canary, create the files yourself and retry, or skip for now. Keep secrets out of chat.`,
             options: [...CHECKPOINT_OPTIONS['missing-env']],
             data: { missing },
           },

@@ -1,64 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -66,7 +16,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -75,28 +25,11 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator misc branches', () => {
   it('records the Playwright process signal in the exit lifecycle detail', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -115,9 +48,9 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('runPlaywright with an empty rerun target array is treated as a full run', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -136,13 +69,13 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('adoptSpecEdits adopts a live spec edit into the run-start copy as a human adopt', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'a.spec.ts')
     fs.writeFileSync(spec, "test('a', async () => { expect(1).toBe(1) })\n")
     const orch = new RunOrchestrator({
-      feature: makeFeature({ featureDir, repos: [] }),
+      feature: demoFeature(tmpDir, { featureDir, repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -161,14 +94,14 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('restoreSpecEdits puts the run-start copy back over a mid-run edit', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'a.spec.ts')
     const original = "test('a', async () => { expect(1).toBe(1) })\n"
     fs.writeFileSync(spec, original)
     const orch = new RunOrchestrator({
-      feature: makeFeature({ featureDir, repos: [] }),
+      feature: demoFeature(tmpDir, { featureDir, repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -187,13 +120,13 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('refreshSpecEdits re-measures the pending edits for its own feature without moving the boundary', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'a.spec.ts')
     fs.writeFileSync(spec, "test('a', async () => { expect(1).toBe(1) })\n")
     const orch = new RunOrchestrator({
-      feature: makeFeature({ featureDir, repos: [] }),
+      feature: demoFeature(tmpDir, { featureDir, repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -213,11 +146,11 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('auto-heal finishes passed from the pending branch when the summary already shows all tests passed', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     const orch = new RunOrchestrator({
-      feature: makeFeature({ featureDir, repos: [] }),
+      feature: demoFeature(tmpDir, { featureDir, repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -251,10 +184,10 @@ describe('RunOrchestrator misc branches', () => {
   })
 
   it('auto-heal warns when the signal body carries non-string hypothesis/fixDescription fields', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -289,7 +222,7 @@ describe('RunOrchestrator misc branches', () => {
   }, 15000)
 
   it('honours a relocated signals dir and writes the external heal session into the manifest', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const signalsDir = path.join(tmpDir, 'custom-signals')
     const externalHealSession = {
       clientKind: 'claude' as const,
@@ -301,7 +234,7 @@ describe('RunOrchestrator misc branches', () => {
       cycleCount: 0,
     }
     const orch = new RunOrchestrator({
-      feature: makeFeature({ repos: [] }),
+      feature: demoFeature(tmpDir, { repos: [] }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,

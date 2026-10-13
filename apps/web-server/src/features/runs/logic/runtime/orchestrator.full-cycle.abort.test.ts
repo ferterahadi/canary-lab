@@ -1,66 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { PtyFactory } from './pty-spawner'
 import { runDirFor } from './run-paths'
 import { readManifest, readRunsIndex } from './manifest'
 import type { RunLifecycleEvent } from '../../../../../../../shared/run-state'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -68,7 +19,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -77,26 +28,9 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.runFullCycle', () => {
   function bootForFullCycle(opts: {
-    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakeFactory>['spawned'] }
+    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakePtyFactory>['spawned'] }
     pwExitCodes: number[]
     autoHeal?: boolean
     manualHeal?: boolean
@@ -105,7 +39,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: opts.spawned.factory,
@@ -146,7 +80,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     // because the manifest already said 'aborted' and the UI's Stop
     // button was gone. Guards inside runFullCycle now bail out as soon as
     // `this.stopped` is true.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 5))
@@ -169,7 +103,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     // had already written 'aborted', overwriting the terminal status. The
     // setStatus guard (`if (this.stopped) return`) makes that branch a
     // no-op so the persisted manifest stays 'aborted'.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0] })
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 5))
@@ -183,10 +117,10 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('abort during service startup does not launch Playwright afterward', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let resolveHealth!: (ok: boolean) => void
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -213,11 +147,11 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('abort during service restart does not launch the post-restart Playwright rerun', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let healthChecks = 0
     let resolveRestartHealth!: (ok: boolean) => void
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -255,7 +189,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   }, 15000)
 
   it('skips heal loop when autoHeal disabled and tests fail', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1] })
     const promise = orch.runFullCycle()
     await new Promise((r) => setTimeout(r, 5))
@@ -266,7 +200,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('manual heal mode: waits for signal, restarts services, reruns Playwright', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({
       spawned: f,
       pwExitCodes: [1, 0],
@@ -323,7 +257,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     execFileSync('git', ['add', 'handler.ts'], { cwd: tmpDir })
     execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmpDir })
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({
       spawned: f,
       pwExitCodes: [1, 0],
@@ -379,7 +313,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   }, 15000)
 
   it('manual heal mode: gives up if user cancels via cancelHeal()', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({
       spawned: f,
       pwExitCodes: [1],
@@ -403,7 +337,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   }, 15000)
 
   it('writes signalPaths and healMode to the manifest in manual mode', () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0], manualHeal: true })
     // Trigger initial manifest write by booting a run.
     return (async () => {
@@ -420,7 +354,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('writes the resolved auto-heal agent to the manifest', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0], autoHeal: true })
 
     const promise = orch.runFullCycle()
@@ -435,7 +369,7 @@ describe('RunOrchestrator.runFullCycle', () => {
   })
 
   it('runs heal cycle on failure and recovers via .restart signal', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1, 0], autoHeal: true })
     // Seed e2e-summary.json so failedSlugs is non-empty.
     fs.mkdirSync(runDir, { recursive: true })

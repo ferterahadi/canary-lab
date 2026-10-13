@@ -14,10 +14,12 @@ import type { PendingSpecEdit } from '../../../../../../../shared/run-manifest'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
 import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
-import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
+import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from '../../../../../../../shared/run-counts'
 import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
 import { loadPromptTemplate, promptPath } from '../../../../shared/prompts'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../../shared/single-attempt'
+import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { readTextOrNull } from '../../../../../../../shared/lib/read-file-or'
 
 export interface ExternalHealFailedTest {
   /** Stable per-failure id — equals the on-disk `failed/<failureId>/` dir name
@@ -472,8 +474,8 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     ...(detail.manifest.bootFailure ? { bootFailure: detail.manifest.bootFailure } : {}),
     ...(detail.manifest.serviceFailure ? { serviceFailure: detail.manifest.serviceFailure } : {}),
     ...(specEdits ? { specEdits } : {}),
-    healIndexMarkdown: safeRead(paths.healIndexPath),
-    journalMarkdown: safeRead(paths.diagnosisJournalPath),
+    healIndexMarkdown: readTextOrNull(paths.healIndexPath),
+    journalMarkdown: readTextOrNull(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
   }
   if (projectRoot) {
@@ -576,8 +578,9 @@ export interface WriteHealSignalInput {
 export function writeHealSignal(input: WriteHealSignalInput): { kind: HealSignalKind; path: string } {
   const paths = buildRunPaths(runDirFor(input.logsDir, input.runId))
   const target = healSignalPath(paths, input.kind)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, JSON.stringify(input.body))
+  // Atomic so the signal poller never reads a half-written body; compact, because
+  // the signal files' bytes are pinned as the canonical journal payload.
+  atomicWrite(target, JSON.stringify(input.body))
   return { kind: input.kind, path: target }
 }
 
@@ -592,19 +595,11 @@ function healSignalPath(paths: ReturnType<typeof buildRunPaths>, kind: HealSigna
   return paths.healSignal
 }
 
-function safeRead(file: string): string | null {
-  try {
-    return fs.readFileSync(file, 'utf-8')
-  } catch {
-    return null
-  }
-}
-
 // Inline the full file content when it fits the inline budget; otherwise return
 // its path so the agent `Read`s the complete file in chunks (offset/limit).
 // Never cuts the text mid-stream.
 function inlineOrPointer(file: string): { text: string } | { path: string } | null {
-  const content = safeRead(file)
+  const content = readTextOrNull(file)
   if (content === null) return null
   if (Buffer.byteLength(content, 'utf8') <= FAILURE_DETAIL_INLINE_MAX_BYTES) return { text: content }
   return { path: file }

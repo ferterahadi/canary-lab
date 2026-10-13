@@ -5,8 +5,8 @@ import type {
   BenchmarkManifest,
   BenchmarkReport,
   SabotageSkillSummary,
-} from '../api/benchmark-types'
-import type { SabotageLevel } from '@shared/benchmark-index'
+  SabotageLevel,
+} from '@shared/benchmark-index'
 import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
 import { ConfigScreen } from './BenchmarkConfigScreen'
 

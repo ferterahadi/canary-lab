@@ -6,14 +6,18 @@ import { Tooltip } from './Tooltip'
  * the saved measurement, but must qualify it wherever that measurement appears. */
 export function coverageWarning(freshness: CoverageFreshness | undefined, confirmed: boolean, error?: string | null): string | undefined {
   if (confirmed && freshness?.state === 'current' && !freshness.latestRunFailed) return undefined
-  const title = !confirmed || !freshness ? 'Coverage freshness unconfirmed.'
+  const title = coverageWarningTitle(freshness, confirmed)
+  return [title, error ?? (confirmed ? freshness?.reasons.join(' ') : 'Checking current inputs.'),
+    !confirmed || freshness?.state !== 'current' ? 'Showing results from the last calculation.' : undefined,
+  ].filter(Boolean).join(' ')
+}
+
+export function coverageWarningTitle(freshness: CoverageFreshness | undefined, confirmed: boolean): string {
+  return !confirmed || !freshness ? 'Coverage freshness unconfirmed.'
     : freshness.state === 'current' ? 'Latest run has failures.'
       : freshness.state === 'updating' ? 'Coverage update in progress.'
         : freshness.state === 'not-measured' ? 'Coverage not measured.'
           : freshness.state === 'unavailable' ? 'Coverage inputs unavailable.' : 'Coverage out of date.'
-  return [title, error ?? (confirmed ? freshness?.reasons.join(' ') : 'Checking current inputs.'),
-    !confirmed || freshness?.state !== 'current' ? 'Showing results from the last calculation.' : undefined,
-  ].filter(Boolean).join(' ')
 }
 
 export function CoverageFreshnessIndicator({ message }: { message?: string }) {

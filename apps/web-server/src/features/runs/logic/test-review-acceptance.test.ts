@@ -1,38 +1,28 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { buildGitReview, commitReviewedFiles, restoreGitReview } from './test-review-acceptance'
 import { suiteReviewFiles } from './runtime/suite-review'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
-const cleanups: string[] = []
-
-afterEach(() => {
-  for (const dir of cleanups.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
+const tempDir = trackTempDirs('canary-review-git-')
 
 function fixture(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-git-'))
-  cleanups.push(root)
+  const root = tempDir()
   fs.mkdirSync(path.join(root, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'before\n')
   fs.writeFileSync(path.join(root, 'e2e/fixture.ts'), 'fixture before\n')
   fs.writeFileSync(path.join(root, 'unrelated.txt'), 'unrelated before\n')
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' })
-  git('init', '-q')
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'Canary Test')
-  git('add', '.')
-  git('commit', '-qm', 'initial')
+  initGitRepo(root)
   return root
 }
 
 describe('revision-bound Git test review', () => {
   it('matches snapshot comparison for the same bytes and deduplicates disclosed paths', async () => {
     const root = fixture()
-    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-baseline-'))
-    cleanups.push(snapshot)
+    const snapshot = tempDir('canary-review-baseline-')
     fs.cpSync(root, snapshot, { recursive: true })
     fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after without newline')
     fs.rmSync(path.join(root, 'e2e/fixture.ts'))
@@ -51,8 +41,7 @@ describe('revision-bound Git test review', () => {
   })
 
   it('rejects an uncommitted suite and does not hide filesystem read failures', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-no-git-'))
-    cleanups.push(root)
+    const root = tempDir('canary-review-no-git-')
     fs.mkdirSync(path.join(root, 'e2e', 'directory.spec.ts'), { recursive: true })
 
     await expect(buildGitReview(root, ['e2e/a.spec.ts'])).rejects.toMatchObject({ statusCode: 409 })
@@ -98,25 +87,24 @@ describe('revision-bound Git test review', () => {
 
   it('accepts a committed move without passing its removed path to Git', async () => {
     const root = fixture()
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
     fs.writeFileSync(path.join(root, 'e2e/subscription.cjs'), 'original\n')
-    git('add', 'e2e/subscription.cjs')
-    git('commit', '-qm', 'record subscription helper')
+    git(root, 'add', 'e2e/subscription.cjs')
+    git(root, 'commit', '-qm', 'record subscription helper')
 
     fs.mkdirSync(path.join(root, 'scripts'))
     fs.renameSync(path.join(root, 'e2e/subscription.cjs'), path.join(root, 'scripts/subscription.cjs'))
-    git('add', '-A')
-    git('commit', '-qm', 'move subscription helper')
+    git(root, 'add', '-A')
+    git(root, 'commit', '-qm', 'move subscription helper')
     fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after\n')
     fs.writeFileSync(path.join(root, 'unrelated.txt'), 'unrelated staged\n')
-    git('add', 'unrelated.txt')
+    git(root, 'add', 'unrelated.txt')
 
     const receipt = await commitReviewedFiles('checkout', root, ['e2e/a.spec.ts', 'e2e/subscription.cjs'])
     expect(receipt.status).toBe('committed')
-    expect(git('show', 'HEAD:e2e/a.spec.ts')).toBe('after')
-    expect(git('show', 'HEAD:scripts/subscription.cjs')).toBe('original')
-    expect(git('ls-files', 'e2e/subscription.cjs')).toBe('')
-    expect(git('diff', '--cached', '--name-only')).toBe('unrelated.txt')
+    expect(git(root, 'show', 'HEAD:e2e/a.spec.ts')).toBe('after')
+    expect(git(root, 'show', 'HEAD:scripts/subscription.cjs')).toBe('original')
+    expect(git(root, 'ls-files', 'e2e/subscription.cjs')).toBe('')
+    expect(git(root, 'diff', '--cached', '--name-only')).toBe('unrelated.txt')
     expect(await commitReviewedFiles('checkout', root, ['e2e/a.spec.ts', 'e2e/subscription.cjs'])).toEqual({
       status: 'already-committed', commit: receipt.commit,
     })
@@ -127,23 +115,21 @@ describe('revision-bound Git test review', () => {
 
   it('commits a reviewed deletion that is still tracked by Git', async () => {
     const root = fixture()
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
     fs.rmSync(path.join(root, 'e2e/fixture.ts'))
 
     const receipt = await commitReviewedFiles('checkout', root, ['e2e/fixture.ts'])
     expect(receipt.status).toBe('committed')
-    expect(git('ls-files', 'e2e/fixture.ts')).toBe('')
-    expect(git('show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
+    expect(git(root, 'ls-files', 'e2e/fixture.ts')).toBe('')
+    expect(git(root, 'show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
   })
 
   it('commits a reviewed deletion already staged with git rm', async () => {
     const root = fixture()
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
-    git('rm', 'e2e/fixture.ts')
+    git(root, 'rm', 'e2e/fixture.ts')
 
     const receipt = await commitReviewedFiles('checkout', root, ['e2e/fixture.ts'])
     expect(receipt.status).toBe('committed')
-    expect(git('show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
+    expect(git(root, 'show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
   })
 
   it('restores the exact reviewed revision, including removing a newly added supporting file', async () => {

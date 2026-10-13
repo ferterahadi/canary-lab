@@ -1,3 +1,5 @@
+import { runCleanupFailure } from './run-cleanup-response'
+import type { CleanupWorktree } from '../../../../../../shared/cleanup-listing'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 // Runs REST — the cleanup surface: run/worktree listings, worktree open+delete,
 // and per-run artifact trimming. Split out of runs.ts; bodies unchanged.
@@ -13,6 +15,7 @@ import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { ExternalHealAgentRequest } from './runs-route-support'
 import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import { notFound } from '../../../shared/http-error'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get('/api/cleanup/runs', async () => {
@@ -27,7 +30,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
     const sourceRoots = await featureRepoRoots(deps.featuresDir)
     const entries = await listWorktrees({ logsDir: deps.store.logsDir, sourceRoots, now: Date.now() })
     return {
-      worktrees: entries.map((e) => ({
+      worktrees: entries.map<CleanupWorktree>((e) => ({
         ...e,
         active:
           (e.ownerKind === 'run' || e.ownerKind === 'benchmark') && e.ownerId
@@ -56,7 +59,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
       return { opened: true, path: target, editor: usedEditor }
     } catch (err) {
       reply.code(200)
-      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+      return { opened: false, path: target, error: errorMessage(err) }
     }
   })
 
@@ -95,15 +98,7 @@ export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsR
   // HTTP codes here.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/trim', async (req, reply) => {
     const result = deps.store.trimArtifacts(req.params.runId)
-    if (!result.ok) {
-      if (result.reason === 'not-found') return notFound(reply, 'run')
-      reply.code(409)
-      return {
-        error: result.reason === 'active'
-          ? 'run is still active; abort it first'
-          : 'run is still active; reap or abort first',
-      }
-    }
+    if (!result.ok) return runCleanupFailure(reply, result)
     return { freedBytes: result.freedBytes ?? 0 }
   })
 }

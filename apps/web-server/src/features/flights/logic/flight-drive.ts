@@ -13,6 +13,7 @@ import { FlightConductorDeps, pauseFlight, resumeFlight } from './conductor'
 import { abortFlight, drainQueuedFlights } from './flight-queue'
 import { stampSystemLine } from './flight-errors'
 import { StageContext, StageOutcome, type BackgroundEnvJob, backgroundEnvJobs, bankAllStageTimings, bankStageActivity, bankStageTiming, buildStageContext, driveControllers, firstOpenStageIndex, startStageTiming } from './flight-stages'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 /** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
  *  that is actually among the checkpoint's options wins, so a kind whose option
@@ -127,7 +128,7 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
     try {
       return response && adapter.onCheckpointResponse ? await adapter.onCheckpointResponse(ctx, response) : await adapter.run(ctx)
     } catch (err) {
-      return { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
+      return { kind: 'failed', error: errorMessage(err) }
     }
   }
 
@@ -165,7 +166,7 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
     }).catch((err: unknown) => {
       // Persistence can fail after the adapter resolves, including while the
       // foreground is parked externally. Keep that failure joinable too.
-      const outcome: StageOutcome = { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
+      const outcome: StageOutcome = { kind: 'failed', error: errorMessage(err) }
       job.outcome = outcome
       return outcome
     })
@@ -405,7 +406,7 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         status: 'failed',
         updatedAt: now(),
         endedAt: now(),
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       })
     }
     drainQueuedFlights(deps)

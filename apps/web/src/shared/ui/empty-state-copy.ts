@@ -48,8 +48,8 @@ export const EMPTY_COPY = {
   },
   changesNoEdits: {
     reason: 'not-captured',
-    title: 'Nothing was changed in your code',
-    body: 'A repair agent ran on this run, but no file edits were captured from it. What the agent was reasoning about is still in the Heal agent tab.',
+    title: 'No code changes were captured',
+    body: 'A repair agent ran on this run, but no file edits were captured from it. What the agent was reasoning about is still in the Heal Agent tab.',
   },
   changesWaiting: {
     reason: 'not-yet',
@@ -64,7 +64,7 @@ export const EMPTY_COPY = {
   journalNoEntries: {
     reason: 'not-captured',
     title: 'No journal entries were written',
-    body: 'A repair agent ran on this run, but it closed without writing an entry. What each cycle concluded is still readable in the Heal agent tab.',
+    body: 'A repair agent ran on this run, but it closed without writing an entry. What each cycle concluded is still readable in the Heal Agent tab.',
   },
   journalLoading: {
     reason: 'not-yet',

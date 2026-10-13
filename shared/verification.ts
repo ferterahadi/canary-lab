@@ -30,6 +30,13 @@ export interface VerificationTargetSnapshot extends VerificationTarget {
   url: string
 }
 
+/** A suite's verification targets plus the URL each currently resolves to
+ *  (GET /api/features/:name/verification-targets). */
+export interface VerificationTargetIndex {
+  targets: VerificationTarget[]
+  targetUrls: Record<string, string>
+}
+
 export interface VerificationConfig {
   id: string
   featureId: string

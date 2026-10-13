@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   FLIGHT_STAGE_KEYS,
   type FlightCheckpointKind,
@@ -11,6 +10,9 @@ import {
 import type { StageAdapter, StageContext, StageOutcome } from '../flight-stages'
 import { EXTERNAL_WORK_OPTIONS, externalizable } from './externalizable'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-externalizable-')
 
 // The wrapper needs no repo and no agent spawn, but it DOES write the task prompt
 // into the flight dir (so an oversized hand-off degrades to a path), so each test
@@ -18,8 +20,7 @@ import { stageContextStub } from './__fixtures__/stage-context'
 
 let tmpDir: string
 
-beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-externalizable-')) })
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
+beforeEach(() => { tmpDir = tempDir() })
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   return {

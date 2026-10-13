@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   locateMostRecentAgentSessionRef,
@@ -38,15 +37,14 @@ import {
   subagentDirFor,
 } from './agent-session-subagents'
 import { parseAgentSessionLine } from './agent-session-parse'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-asl-home-')
 
 let homeDir: string
 
 beforeEach(() => {
-  homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-home-')))
-})
-
-afterEach(() => {
-  try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+  homeDir = tempDir()
 })
 
 describe('claudeSessionLogPath', () => {
@@ -95,25 +93,21 @@ describe('config-dir resolution (env overrides)', () => {
   })
 
   it('finds a claude log under CLAUDE_CONFIG_DIR when the home dotdir is empty', () => {
-    const relocated = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-cfg-')))
+    const relocated = tempDir('cl-asl-cfg-')
     process.env.CLAUDE_CONFIG_DIR = relocated
     const sessionId = 'relocated-sid'
     const projectDir = path.join(relocated, 'projects', '-some-proj')
     fs.mkdirSync(projectDir, { recursive: true })
     const jsonl = path.join(projectDir, `${sessionId}.jsonl`)
     fs.writeFileSync(jsonl, '')
-    try {
-      // homeDir has no `.claude` at all — the only way this resolves is via the override.
-      expect(findClaudeLogBySessionId(sessionId, homeDir)).toBe(jsonl)
-    } finally {
-      fs.rmSync(relocated, { recursive: true, force: true })
-    }
+    // homeDir has no `.claude` at all — the only way this resolves is via the override.
+    expect(findClaudeLogBySessionId(sessionId, homeDir)).toBe(jsonl)
   })
 
   it('discovers a codex log under CODEX_HOME', () => {
-    const relocated = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-cdx-')))
+    const relocated = tempDir('cl-asl-cdx-')
     process.env.CODEX_HOME = relocated
-    const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))
+    const runDir = tempDir('cl-asl-run-')
     const dir = path.join(relocated, 'sessions', '2026', '05', '11')
     fs.mkdirSync(dir, { recursive: true })
     const jsonl = path.join(dir, 'rollout-2026-05-11T01-23-00-abc.jsonl')
@@ -121,16 +115,11 @@ describe('config-dir resolution (env overrides)', () => {
       jsonl,
       JSON.stringify({ type: 'session_meta', timestamp: '2026-05-11T01:23:00.000Z', payload: { id: 'cdx-1', cwd: runDir, timestamp: '2026-05-11T01:23:00.000Z' } }) + '\n',
     )
-    try {
-      expect(locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)).toEqual({
-        agent: 'codex',
-        sessionId: 'cdx-1',
-        logPath: jsonl,
-      })
-    } finally {
-      fs.rmSync(relocated, { recursive: true, force: true })
-      fs.rmSync(runDir, { recursive: true, force: true })
-    }
+    expect(locateCodexSessionLog(runDir, '2026-05-11T01:23:00.000Z', homeDir)).toEqual({
+      agent: 'codex',
+      sessionId: 'cdx-1',
+      logPath: jsonl,
+    })
   })
 })
 

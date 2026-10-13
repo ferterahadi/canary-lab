@@ -11,6 +11,7 @@
 // computed by canary from the tags/annotations — never an agent's opinion (see
 // docs/PRD.md).
 import type { StageModelChoice } from '../agent-models'
+import type { CoverageFreshness } from './freshness'
 
 /** Path types a requirement implies / a test exercises. */
 export type PathType = 'happy' | 'sad' | 'edge'
@@ -376,7 +377,7 @@ export interface ProposedMapping {
 
 export interface CoverageLedger {
   /** Present on authoritative suite reads; absent on the pure math result. */
-  freshness?: import('./freshness').CoverageFreshness
+  freshness?: CoverageFreshness
   feature: string
   requirements: RequirementCoverage[]
   tests: TestCoverage[]

@@ -1,7 +1,8 @@
 import fs from 'fs'
 import path from 'path'
+import { build } from 'vite'
+import { REPO as repoRoot } from './lib/fs.mjs'
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const sourceTemplates = path.join(repoRoot, 'templates')
 const distTemplates = path.join(repoRoot, 'dist', 'templates')
 const sourcePrompts = path.join(repoRoot, 'apps', 'web-server', 'prompts')
@@ -50,6 +51,20 @@ copyDir(sourcePrompts, distPrompts, SKIP_PROMPT_PATHS)
 
 fs.rmSync(distAssets, { recursive: true, force: true })
 copyDir(sourceAssets, distAssets)
+
+// The offline checker ships as one Node-only file, but its inventory policy is
+// authored in the same module as the server's. Never maintain a copied scanner.
+await build({
+  configFile: false,
+  logLevel: 'warn',
+  build: {
+    outDir: distAssets,
+    emptyOutDir: false,
+    minify: false,
+    lib: { entry: path.join(sourceAssets, 'verify-certificate.mjs'), formats: ['es'], fileName: () => 'verify-certificate.mjs' },
+    rollupOptions: { external: (id) => id.startsWith('node:') },
+  },
+})
 
 fs.rmSync(distAgentIntegrations, { recursive: true, force: true })
 copyDir(sourceAgentIntegrations, distAgentIntegrations)

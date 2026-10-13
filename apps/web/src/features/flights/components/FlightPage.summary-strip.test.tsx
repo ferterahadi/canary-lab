@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -89,11 +90,7 @@ vi.mock('@/shared/api/workspace', () => ({
   getRepoGitStatus: mocks.getRepoGitStatus,
   openEditor: mocks.openEditor,
 }))
-vi.mock('@/shared/api/internal', () => ({
-  ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
-  },
-}))
+vi.mock('@/shared/api/internal', async () => (await import('./__fixtures__/flight-page-mocks')).apiInternalMock())
 
 // The agent timeline is its own tested component with live transports — stub it.
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
@@ -158,6 +155,8 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
       }, [])
       return {
         runs,
+        indexLoaded: true,
+        indexError: null,
         connection: 'live',
         transients: {},
         errors: {},
@@ -174,12 +173,11 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
   }
 })
 
-import { FlightPage } from './FlightPage'
+import { FlightPageHarness } from './__fixtures__/FlightPageHarness'
+import { manifest } from './__fixtures__/flight-page-part7-fixtures'
 import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
 
@@ -219,31 +217,8 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
-})
-
-function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl_1',
-    feature: 'checkout',
-    repoPaths: ['/repo/shop'],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'scout',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
-}
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 // FlightPage reads its refetch keys from the invalidation bus now, not a prop.
 // The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
@@ -264,7 +239,7 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
     root.render(
       <InvalidationProvider>
         <InvalidationTap />
-        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
+        <FlightPageHarness key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
       </InvalidationProvider>,
     )
   })
@@ -453,25 +428,28 @@ describe('detail redesign (R53–R68)', () => {
     const onOpenRun = vi.fn()
     await render('fl_1', { activity, onOpenRun })
     const runRail = container.querySelector('[data-testid="stage-rail-run"]')
-    expect(runRail?.textContent).toContain('▸')
+    expect(runRail?.querySelector('.cl-status-dot')).not.toBeNull()
+    expect(runRail?.getAttribute('aria-label')).toBe('Test run — Run in progress')
     expect(runRail?.textContent).not.toContain('✓')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
-    // The flight's run is the hero (run-9, 8/8 — stated once, by the tile).
-    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('8/8')
+    // The new standalone run is the hero; it must never borrow run-9's result.
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Run live')
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).not.toContain('8/8')
     // The feature's other real runs list below — boot sessions stay hidden. Each
-    // row is labelled by its run REF and ordinal, not by the feature name every
-    // row shares (R82).
+    // row is labelled by its run REF, not by the feature name every row shares
+    // (R82), and carries no ordinal: position is the list order.
     const previous = container.querySelector('[data-testid="previous-runs"]')
     expect(previous).toBeTruthy()
     expect(previous?.textContent).toContain('Previous runs')
-    expect(previous?.textContent).toContain('run 2 of 2')
+    expect(previous?.textContent).toContain('Run run-9')
+    expect(previous?.textContent).not.toMatch(/run \d of \d/)
     expect(previous?.textContent).not.toContain('checkout')
     const previousButtons = previous!.querySelectorAll('button')
     expect(previousButtons.length).toBe(1)
     await act(async () => { previousButtons[0]?.click() })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-live')
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
   })
 
   it('R61: the summary strip shows elapsed, coverage, run verdict, docs and report readiness', async () => {

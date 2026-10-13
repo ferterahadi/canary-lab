@@ -4,6 +4,7 @@ import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import type { AgentStagePlans, ModelAgentKind } from '@shared/agent-models'
 import * as coverageApi from '@/shared/api/coverage'
 import { ApiError } from '@/shared/api/internal'
+import { displayError } from '@/shared/api/error-message'
 
 /** What the models gate confirmed for a coverage launch: the override and the
  *  agent it was chosen for, so the server reads it in that agent's vocabulary. */
@@ -60,7 +61,7 @@ export function useCoverageRecalculation({ jobs, hasActiveFlight, openRequiremen
         setLaunch((current) => current?.request === request ? { ...current, status: 'started' } : current)
       } catch (error) {
         setLaunch((current) => current?.request === request
-          ? { ...current, status: 'failed', error: error instanceof Error ? error.message : String(error) } : current)
+          ? { ...current, status: 'failed', error: displayError(error) } : current)
       } finally {
         pending.current.delete(feature)
       }

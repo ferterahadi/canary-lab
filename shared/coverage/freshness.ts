@@ -1,3 +1,5 @@
+import type { FlightAttention } from '../flights/attention'
+
 export const COVERAGE_RECONCILE_MS = 5_000
 export const COVERAGE_FRESHNESS_LEASE_MS = 15_000
 
@@ -32,6 +34,7 @@ export interface FeatureCoverageChange {
   activeJobId?: string
   activeJobOwner?: string
   flightStatus?: string
+  flightAttention?: FlightAttention
   measurement?: { coveragePct: number; covered: number; total: number; tests: number }
   delivery: 'tool-response-and-wait'
 }

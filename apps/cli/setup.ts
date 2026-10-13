@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { commandAvailable } from './command-available'
+import { commandAvailable } from '../../shared/lib/command-available'
 
 import fs from 'fs'
 import os from 'os'
@@ -24,6 +24,7 @@ import { readMcpConfig } from './mcp-config'
 import { runAsScript } from './run-as-script'
 import { getProjectRoot, looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import {
+  agentHomeOverride,
   registryPath,
   upsertWorkspace,
 } from '../../shared/runtime/workspace-registry'
@@ -81,7 +82,7 @@ export async function main(
 
 export async function setup(args: ParsedArgs, opts: SetupOptions = {}): Promise<void> {
   const log = opts.log ?? console.log
-  const homeDir = opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME ?? os.homedir()
+  const homeDir = opts.homeDir ?? agentHomeOverride() ?? os.homedir()
   const workspace = path.resolve(args.workspace ?? getProjectRoot())
 
   if (!looksLikeProjectRoot(workspace)) {

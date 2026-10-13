@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { listWorkspaceDirs, type WorkspaceDirsResponse } from '@/shared/api/workspace'
 import { RepoMultiPicker } from './RepoMultiPicker'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('@/shared/api/workspace', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/api/workspace')>()),
@@ -22,17 +23,9 @@ const dirs = (absolute: string): WorkspaceDirsResponse => ({
 let container: HTMLDivElement
 let root: Root
 
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 beforeEach(() => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   vi.mocked(listWorkspaceDirs).mockReset().mockResolvedValue(dirs('/Users/dev/picked-repo'))
-})
-
-afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
 })
 
 const q = (sel: string) => container.querySelector<HTMLElement>(sel)

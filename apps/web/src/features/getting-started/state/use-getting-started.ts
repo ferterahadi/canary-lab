@@ -5,9 +5,8 @@ import * as flightsApi from '@/shared/api/flights'
 import * as coverageApi from '@/shared/api/coverage'
 import * as internalApi from '@/shared/api/internal'
 
-import type { RunIndexEntry } from '@shared/run-index'
+import { isSuiteVerdictRun, type RunIndexEntry } from '@shared/run-index'
 import type { FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
-import { isAuxiliaryExecution } from '@shared/verification'
 import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './demo-launcher'
 
 interface GettingStartedInput {
@@ -47,11 +46,7 @@ export function useGettingStarted({
     if (!feature || feature.kind !== 'export') return null
     // Mirrors the server's standalonePassedRun gate exactly. A boot, benchmark,
     // or observational verification is not the normal run Export requires.
-    return allRuns.find((run) =>
-      run.feature === feature.feature
-      && !isAuxiliaryExecution(run.executionType)
-      && run.executionType !== 'verify'
-      && run.status === 'passed') ?? null
+    return allRuns.find((run) => run.feature === feature.feature && isSuiteVerdictRun(run, ['passed'])) ?? null
   }, [allRuns, demo.workflows])
 
   const launchDemo = useCallback(async (action: OnboardingWorkflowAction): Promise<void> => {

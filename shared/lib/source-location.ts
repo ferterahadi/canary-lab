@@ -4,3 +4,8 @@ export function parseSourceLocation(location: string): { file: string; line?: st
   if (!match) return { file: location }
   return { file: match[1], line: match[2], ...(match[3] !== undefined ? { column: match[3] } : {}) }
 }
+
+/** Display only: retain the last two path segments and the authored line/column suffix. */
+export function shortSourceLocation(location: string): string {
+  return location.split(/[\\/]/).slice(-2).join('/')
+}

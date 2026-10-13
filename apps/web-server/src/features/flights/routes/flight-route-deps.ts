@@ -1,3 +1,4 @@
+import type { FlightAttentionReader } from '../logic/attention'
 import type { RepositoryObserver } from '../../../shared/repository-observer'
 // The dependency surface every flights route module is constructed with.
 import fs from 'fs'
@@ -11,6 +12,7 @@ import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface FlightRouteDeps {
+  flightAttention?: FlightAttentionReader
   repositoryObserver?: RepositoryObserver
   featuresDir: string
   logsDir: string

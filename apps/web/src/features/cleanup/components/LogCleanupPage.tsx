@@ -1,3 +1,4 @@
+import { CleanupInventoryFrame } from './CleanupInventoryFrame'
 import { useCleanupInventory } from '../state/use-cleanup-inventory'
 import { useCleanupSelection } from '../state/use-cleanup-selection'
 import { useCleanupAction } from '../state/use-cleanup-action'
@@ -5,34 +6,29 @@ import { useMemo, useState } from 'react'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as runsApi from '@/shared/api/runs'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
-import { PageHeader } from '@/shared/ui/PageHeader'
-import { ConfirmModal, useEscapeToClose } from '@/shared/ui/Overlays'
-import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, FolderGlyph, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
+import { FullScreenPage, PageHeader } from '@/shared/ui/PageHeader'
+import { ConfirmModal } from '@/shared/ui/Overlays'
+import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, FolderGlyph, SortHeader } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
-import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
+import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
+import { pluralSuffix } from '@shared/lib/plural'
+import { presentRunStatus } from '@/features/runs/utils/run-presentation'
 
 interface Props {
   onClose: () => void
   // Opens a run in the workspace (selects its feature + run, leaves cleanup).
   // Absent for orphans, which have no manifest/feature to open.
   onNavigateToRun?: (feature: string, runId: string) => void
-  // Opens the workflow's feature at Flight → Parallel setup (leaves cleanup).
-  onNavigateToPortify?: (feature: string) => void
 }
 
-export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }: Props) {
+export function LogCleanupPage({ onClose, onNavigateToRun }: Props) {
   const [view, setView] = useState<CleanupTab>('runs')
   const inventory = useCleanupInventory('runs', cleanupApi.cleanupRuns, view === 'runs')
   const { value: listing, initialLoading: loading, error, refresh } = inventory
   const { busy, error: actionError, execute } = useCleanupAction(refresh)
   const [confirm, setConfirm] = useState<{ action: 'trim' | 'delete'; ids: string[]; bytes: number } | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'folder', dir: 'desc' })
-  // The shared layered stack, not a second document listener: `ConfirmModal`
-  // pushes its own layer, so the innermost surface takes Escape and the page
-  // beneath stays put. A private listener here raced that — the reason the
-  // old one had to test `!confirm` by hand.
-  useEscapeToClose(onClose, !confirm)
 
   const rows = useMemo(() => (listing ? listingToRows(listing) : []), [listing])
   const { selected, clear, toggle, selectPreset } = useCleanupSelection(rows, (row) => row.runId, (row) => !row.active, inventory.confirmed)
@@ -96,7 +92,11 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
   const totals = listing?.totals
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
+    // The shared layered stack, not a second document listener: `ConfirmModal`
+    // pushes its own layer, so the innermost surface takes Escape and the page
+    // beneath stays put. A private listener here raced that — the reason the
+    // old one had to test `!confirm` by hand.
+    <FullScreenPage onClose={onClose} closeOnEscape={!confirm}>
       {/* The screen says what it is before it says which slice of it you are
           looking at. The tab strip used to sit alone where the name belongs,
           so cleanup was the one full-screen view with no title — the segmented
@@ -119,40 +119,40 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         </div>
       </PageHeader>
 
-      {view === 'runs' && (
-        <CleanupToolbar presets={presets} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={busy} loading={inventory.loading} onRefresh={refresh}>
-          {totals && <>
-            <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
-            <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
-            <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
-          </>}
-        </CleanupToolbar>
-      )}
-
-      {view === 'runs' && listing !== null && error && <CleanupRefreshError error={error} />}
-      {view === 'runs' && actionError && (
-        <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
-      )}
-
       {/* Body */}
       {view === 'portify' ? (
-        <PortifySection now={now} onNavigateToPortify={onNavigateToPortify} />
+        <PortifySection now={now} />
       ) : view === 'worktrees' ? (
         <WorktreesSection now={now} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
-        {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Computing folder sizes…" />}
-        {!loading && error && listing === null && (
-          <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load cleanup data" hint={error} action={{ label: 'Retry', onClick: () => void refresh() }} />
-        )}
-        {!loading && !error && rows.length === 0 && (
-          <CleanupEmptyState icon={<FolderGlyph />} title="No runs on disk" hint="Test, verify, boot and benchmark runs show up here with their disk usage once you record them." />
-        )}
-        {rows.length > 0 && (
+        <CleanupInventoryFrame
+          initialLoading={loading}
+          hasSnapshot={listing !== null}
+          error={error}
+          itemCount={rows.length}
+          onRetry={refresh}
+          loadingTitle="Computing folder sizes…"
+          errorTitle="Couldn't load cleanup data"
+          emptyState={
+            <CleanupEmptyState icon={<FolderGlyph />} title="No runs on disk" hint="Test, verify, boot and benchmark runs show up here with their disk usage once you record them." />
+          }
+          toolbar={
+            <CleanupToolbar presets={presets} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={busy} loading={inventory.loading} onRefresh={refresh}>
+              {totals && <>
+                <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
+                <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
+                <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
+              </>}
+            </CleanupToolbar>
+          }
+          actionError={actionError && (
+            <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+          )}
+        >
           <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
             <thead>
               {/* Column headers speak the system's rubric voice (mono caps). */}
-              <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <tr className="cl-rubric" style={{ textAlign: 'left' }}>
                 <th className="py-1 pr-2" style={{ width: 28 }} />
                 <SortHeader sortKey="runId" label="Run" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="kind" label="Kind" sort={sort} onSort={toggleSort} />
@@ -196,11 +196,11 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                       : r.runId}
                   </td>
                   <td className="py-1 pr-3">
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{KIND_LABEL[r.kind]}</span>
+                    <span className="cl-rubric">{KIND_LABEL[r.kind]}</span>
                   </td>
                   <td className="py-1 pr-3">
                     {r.status
-                      ? <span style={{ color: STATUS_COLOR[r.status] }}>{r.active ? `${r.status} ·active` : r.status}</span>
+                      ? <span style={{ color: presentRunStatus({ status: r.status }).tone }}>{r.active ? `${r.status} ·active` : r.status}</span>
                       : <span style={{ color: 'var(--text-muted)' }}>no manifest</span>}
                   </td>
                   <td className="py-1 pr-3">{r.feature}</td>
@@ -229,8 +229,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
               ))}
             </tbody>
           </table>
-        )}
-        </div>
+        </CleanupInventoryFrame>
       )}
 
       {view === 'runs' && selected.size > 0 && (
@@ -268,9 +267,9 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         onCancel={() => setConfirm(null)}
         onConfirm={() => { const c = confirm; setConfirm(null); if (c) void runAction(c.action, c.ids) }}
         message={confirm?.action === 'trim'
-          ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{confirm.ids.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
-          : <>Permanently delete <strong>{confirm?.ids.length}</strong> run{confirm?.ids.length === 1 ? '' : 's'} and their folders, reclaiming about <strong>{formatBytes(confirm?.bytes ?? 0)}</strong>. This cannot be undone.</>}
+          ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{pluralSuffix(confirm.ids.length)}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
+          : <>Permanently delete <strong>{confirm?.ids.length}</strong> run{pluralSuffix(confirm?.ids.length ?? 0)} and their folders, reclaiming about <strong>{formatBytes(confirm?.bytes ?? 0)}</strong>. This cannot be undone.</>}
       />
-    </div>
+    </FullScreenPage>
   )
 }

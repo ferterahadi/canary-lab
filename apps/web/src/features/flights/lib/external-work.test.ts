@@ -1,6 +1,7 @@
+import { isExternallyDriven } from '@shared/flights/ownership'
 import { describe, expect, it } from 'vitest'
 import type { FlightIndexEntry } from '@shared/flights/types'
-import { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from './external-work'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, presentedIndexStages } from './external-work'
 
 const entry = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({
   id: 'fl_1',

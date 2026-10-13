@@ -37,7 +37,7 @@ describe('benchmark api', () => {
     await expect(startBenchmark(input, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ benchmarkId: 'bench-1' })
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     })
   })

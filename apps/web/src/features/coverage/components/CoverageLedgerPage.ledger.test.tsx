@@ -13,8 +13,6 @@ import { CoverageLedgerPage } from './CoverageLedgerPage'
 ;
 import { ABSENT_LEDGER, LEDGER, fire } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 // TestCard expands to the shared ShikiCode block, which lazily imports Shiki.
 // Mock the modules (same as TestCasesColumn.test) so the highlighter resolves
 // deterministically with line spans instead of loading the real wasm.

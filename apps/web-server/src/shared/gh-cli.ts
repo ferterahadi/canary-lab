@@ -1,3 +1,5 @@
+import type { GhStatus } from '../../../../shared/run-pr'
+export type { GhStatus } from '../../../../shared/run-pr'
 import { commandResult } from './command-result'
 
 // Detect-and-instruct wrapper around the GitHub CLI (`gh`). Canary NEVER runs
@@ -19,17 +21,6 @@ export function runGh(args: string[]): Promise<GhResult> {
   return commandResult('gh', args, { timeout: 15_000 }, 127)
 }
 
-export interface GhStatus {
-  /** `gh` is on PATH. */
-  installed: boolean
-  /** A stored credential exists for the host (from `gh auth status`, local — no
-   *  network call, and the token itself is masked and never captured). */
-  authenticated: boolean
-  /** The signed-in GitHub login, when it could be parsed. */
-  account?: string
-  /** The host the account is on (github.com or an enterprise host). */
-  host?: string
-}
 
 /**
  * Read gh's local auth status. No network call, no token handling. Shapes:

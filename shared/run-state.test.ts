@@ -12,6 +12,7 @@ import {
   isTerminalRunStatus,
   isUnsettledRunStatus,
   reduceRunLifecycleSnapshot,
+  runBootPhase,
   type RunLifecycleSnapshot,
 } from './run-state'
 
@@ -123,6 +124,23 @@ describe('run lifecycle reducer', () => {
       targetedRerun: previous.targetedRerun,
     })
   })
+
+  it('records execution and repair-cycle identity on the event that carries it only', () => {
+    const started = createRunLifecycleEvent('rerunning-tests', 'Rerunning Playwright tests', {
+      updatedAt: '2026-05-12T00:00:00.000Z',
+      execution: { index: 2, afterCycle: 1 },
+    })
+    const cycle = createRunLifecycleEvent('agent-healing', 'Heal cycle 1 started', {
+      updatedAt: '2026-05-12T00:00:01.000Z',
+      activeCycle: 1,
+      repairCycle: 3,
+    })
+    expect(started.execution).toEqual({ index: 2, afterCycle: 1 })
+    expect(cycle).toMatchObject({ activeCycle: 1, repairCycle: 3 })
+    // Unlike a targeted-rerun plan, an execution is a moment, not a mode: the
+    // next record must not inherit it or it would date later events wrongly.
+    expect(reduceRunLifecycleSnapshot(started, cycle).execution).toBeUndefined()
+  })
 })
 
 describe('HealSignalGate', () => {
@@ -194,4 +212,27 @@ describe('HealSignalGate', () => {
     expect(gate.isReadyForSignal()).toBe(false)
     expect(gate.consume()).toBeNull()
   })
+})
+
+it('retains lifecycle recovery metadata and supplies a timestamp when omitted', () => {
+  const opts = {
+    detail: 'Service failed', activeCycle: 0,
+    lastSignal: { kind: 'restart' as const, status: 'accepted' as const },
+    restartPlan: { restarted: ['app'], kept: [] },
+    targetedRerun: { selected: 1, total: 2, mode: 'failed-only' as const, reason: 'retry' },
+    abortReason: { reason: 'failed readiness', service: 'app' }, id: 'event',
+  }
+  const before = Date.now()
+  const event = createRunLifecycleEvent('restarting-services', 'Restarting', opts)
+  expect(event).toMatchObject({ ...opts, phase: 'restarting-services', headline: 'Restarting' })
+  expect(Date.parse(event.updatedAt)).toBeGreaterThanOrEqual(before)
+  expect(Date.parse(event.updatedAt)).toBeLessThanOrEqual(Date.now())
+  expect(event).not.toHaveProperty('severity')
+})
+
+it.each([
+  ['spawn-failed', 'spawn'], ['process-exited', 'process-exit'], ['health-timeout', 'readiness'],
+  ['dependency-incompatible', 'configuration'], ['compiler-failed', 'compilation'],
+] as const)('classifies %s as a %s failure', (reason, phase) => {
+  expect(runBootPhase(reason)).toBe(phase)
 })

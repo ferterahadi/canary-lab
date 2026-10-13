@@ -1,4 +1,4 @@
-import type { GettingStartedSessionState, OnboardingWorkflowAction, OnboardingWorkflow, OnboardingSamples } from '../../../../../../shared/getting-started'
+import type { GettingStartedRunWorkflow, GettingStartedSessionState, OnboardingWorkflowAction, OnboardingWorkflow, OnboardingSamples } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -43,8 +43,6 @@ export const SAMPLE_SUITE_REPO_DIR = 'demo-app'
 export const SAMPLE_FLIGHT_REPO_DIR = 'flight-app'
 export const WORKBENCH_SUITE = 'workflow-workbench'
 export const WORKBENCH_REPO_DIR = 'workflow-app'
-
-export type GettingStartedRunWorkflow = 'run' | 'heal'
 
 /** A normal run started through MCP has no card id in its tool arguments, so
  *  the shipped fixture names are the stable attribution boundary. Storefront

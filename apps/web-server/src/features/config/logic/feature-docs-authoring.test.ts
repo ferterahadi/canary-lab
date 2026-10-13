@@ -15,20 +15,22 @@ import {
   parseRedactedEntries,
 } from './feature-authoring'
 import { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-feature-authoring-')
 
 let tmpDir: string
 
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-feature-authoring-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
 function ctx() {
@@ -55,6 +57,14 @@ module.exports = { config }
 }
 
 describe('writeFeatureDoc', () => {
+  it('accepts a dot-prefixed descendant without admitting traversal', () => {
+    const dir = writeFeatureConfig('checkout')
+    expect(writeFeatureDoc(ctx(), { feature: 'checkout', relPath: '..cache/notes.md', content: '# Notes' }).ok).toBe(true)
+    expect(fs.readFileSync(path.join(dir, 'docs/..cache/notes.md'), 'utf8')).toBe('# Notes')
+    expect(writeFeatureDoc(ctx(), { feature: 'checkout', relPath: '../outside.md', content: 'outside' }).ok).toBe(false)
+    expect(fs.existsSync(path.join(dir, 'outside.md'))).toBe(false)
+  })
+
   it('writes a markdown doc into the feature docs/ dir and reports the relative path', () => {
     const featureDir = writeFeatureConfig('line_integration')
     const res = writeFeatureDoc(ctx(), {
@@ -365,4 +375,8 @@ describe('symlink-aware doc write/delete', () => {
     expect(res).toMatchObject({ ok: true })
     expect(fs.lstatSync(path.join(featureDir, 'docs'), { throwIfNoEntry: false })).toBeTruthy()
   })
+})
+
+it('refuses linking a document into a missing feature before resolving its source', () => {
+  expect(linkFeatureDoc(ctx(), { feature: 'missing', targetPath: '~' })).toEqual({ ok: false, error: 'feature not found' })
 })

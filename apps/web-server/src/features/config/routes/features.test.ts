@@ -4,7 +4,6 @@ import { execFileSync } from 'child_process'
 
 import fs from 'fs'
 
-import os from 'os'
 
 import path from 'path'
 
@@ -24,14 +23,17 @@ vi.mock('../../../shared/git-repo', async (importOriginal) => {
 })
 
 import { runGit } from '../../../shared/git-repo'
-import { git } from '../../../../../../tools/test-helpers/git-repo'
+import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-froutes-')
 
 let tmpDir: string
 
 let featuresDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-froutes-')))
+  tmpDir = tempDir()
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
   clearPlaywrightListCache()
@@ -80,16 +82,8 @@ async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: D
 // Real DirtySpecStore backed by a tmp logs dir — no mocking, matching this
 // file's convention of exercising real fs/git rather than stubbing collaborators.
 function makeDirtySpecStore(): DirtySpecStore {
-  const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-froutes-dirty-'))
+  const logsDir = tempDir('cl-froutes-dirty-')
   return new DirtySpecStore(logsDir)
-}
-
-function initGitFeature(dir: string): void {
-  git(dir, 'init', '-q')
-  git(dir, 'config', 'user.email', 't@t.dev')
-  git(dir, 'config', 'user.name', 'test')
-  git(dir, 'add', '-A')
-  git(dir, 'commit', '-q', '-m', 'baseline')
 }
 
 describe('GET /api/features', () => {
@@ -325,7 +319,7 @@ describe('dirty summary on GET /api/features', () => {
 
   it('reports status "dirty" with mapped specs when the record is dirty', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     // Edit after commit so computeDirty (HEAD baseline) marks the spec dirty.
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
@@ -347,7 +341,7 @@ describe('dirty summary on GET /api/features', () => {
 
   it('ships the strength verdict whole, with the live @requirement ids on each changed test', async () => {
     const dir = writeFeature('alpha', { spec: "// @requirement checkout-1\ntest('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     // exact → existential: the differential reads this as weaker.
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "// @requirement checkout-1\ntest('one', async () => { expect(1).toBeTruthy() })\n")
 
@@ -388,7 +382,7 @@ describe('POST /api/features/:name/approve-dirty', () => {
 
   it('approves the current content as the baseline and clears the dirty status', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -453,7 +447,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('500s with the git stderr when `git add` fails', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -472,7 +466,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it.each(['reverted', 'committed'])('quietly clears stale edits that were already %s, preserving unrelated staged work', async (action) => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -503,7 +497,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('commits the dirty specs and clears the dirty status on success', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -525,7 +519,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('falls back to "git add failed" when git exits nonzero with no output', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -550,7 +544,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
   // would treat "I could not tell" as "there is something to accept".
   it('refuses to commit when the staged-change check itself fails', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -574,7 +568,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('falls back to "git commit failed" when git exits nonzero with no output', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
 
     const store = makeDirtySpecStore()
@@ -596,7 +590,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('surfaces a failed Git comparison instead of treating it as a clean suite', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
     const store = makeDirtySpecStore()
     await store.recompute('alpha', dir)
@@ -617,7 +611,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
 
   it('commits an untracked spec with a run baseline rather than mistaking it for a no-op', async () => {
     const dir = writeFeature('alpha')
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.mkdirSync(path.join(dir, 'e2e'))
     const file = path.join(dir, 'e2e', 'new.spec.ts')
     fs.writeFileSync(file, "test('one', async () => { expect(1).toBe(1) })\n")
@@ -663,7 +657,7 @@ describe('feature test review decisions', () => {
 
   it('commits the exact reviewed revision and returns the same durable receipt on retry', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
     const store = makeDirtySpecStore()
     await store.recompute('alpha', dir)
@@ -683,7 +677,7 @@ describe('feature test review decisions', () => {
 
   it('refuses a stale revision and restores the current reviewed files', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
     const store = makeDirtySpecStore()
     await store.recompute('alpha', dir)
@@ -703,7 +697,7 @@ describe('feature test review decisions', () => {
 
   it('rejects malformed, stale, and empty review decisions without recording a receipt', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
-    initGitFeature(dir)
+    initGitRepo(dir)
     const store = makeDirtySpecStore()
     const app = await build({ dirtySpecStore: store })
 

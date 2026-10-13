@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as workspaceApi from '@/shared/api/workspace'
 import { IconButton } from '@/shared/ui/atoms'
-import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { DisclosureCaret, TrashIcon } from '@/shared/ui/Icons'
 import { ComplexValueBadge, FieldRow, TextInput } from '@/shared/ui/FormFields'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
@@ -12,6 +12,7 @@ import type { RepoEdit } from './repo-editor-rows'
 import { BranchControl } from './RepoBranchControl'
 import { HealthEditor } from './RepoProbeEditors'
 import { CommandSlice, Health, Probe, RepoSlice, deriveRepoName, nextRepoName, summarizeRepo } from './repo-slice'
+import { displayError } from '@/shared/api/error-message'
 
 // ─── layout primitives ─────────────────────────────────────────────────────
 
@@ -38,12 +39,7 @@ export function Disclosure({
         className="flex w-full items-center gap-1.5 py-1 text-left"
         aria-expanded={open}
       >
-        <span
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
-        >
-          <ChevronRightIcon />
-        </span>
+        <DisclosureCaret open={open} className="inline-flex h-4 w-4 shrink-0 items-center justify-center" />
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           {title}
         </span>
@@ -148,7 +144,7 @@ export function RepoCard({
       probe.existence.refresh()
       setCloneTargetOpen(false)
     } catch (e) {
-      if (current()) setCloneError(e instanceof Error ? e.message : 'clone failed')
+      if (current()) setCloneError(displayError(e, 'clone failed'))
     } finally {
       pendingClone.current = false
       if (mounted()) setCloning(false)
@@ -165,10 +161,10 @@ export function RepoCard({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? 'Collapse' : 'Expand'}
-          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-transform duration-150"
-          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded"
+          style={{ color: 'var(--text-muted)' }}
         >
-          <ChevronRightIcon />
+          <DisclosureCaret open={open} />
         </button>
         <button
           type="button"

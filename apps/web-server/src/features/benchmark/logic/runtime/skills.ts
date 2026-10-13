@@ -1,3 +1,4 @@
+import { normalizeSabotageLevel } from '../sabotage-level'
 import fs from 'fs'
 import path from 'path'
 import type { SabotageLevel } from '../../../../../../../shared/benchmark-index'
@@ -25,10 +26,6 @@ export interface SabotageSkill {
 }
 
 const LEVEL_ORDER: Record<SabotageLevel, number> = { min: 0, med: 1, max: 2 }
-
-function normalizeLevel(value: unknown): SabotageLevel {
-  return value === 'min' || value === 'max' ? value : 'med'
-}
 
 /** Body of a `## <heading>` section, up to the next `## ` heading or EOF. */
 function section(md: string, heading: string): string {
@@ -80,7 +77,7 @@ export function loadSabotageSkills(rootDir: string): SabotageSkill[] {
     skills.push({
       name: typeof meta.name === 'string' ? meta.name : entry.name,
       title: typeof meta.title === 'string' ? meta.title : String(meta.name ?? entry.name),
-      level: normalizeLevel(meta.level),
+      level: normalizeSabotageLevel(meta.level),
       summary: typeof meta.summary === 'string' ? meta.summary : '',
       appliesTo: Array.isArray(meta.appliesTo) ? (meta.appliesTo as string[]) : [],
       description: section(md, 'Description'),

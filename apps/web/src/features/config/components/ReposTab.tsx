@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { Section } from '@/shared/ui/atoms'
 import { PlusIcon } from '@/shared/ui/Icons'
 import { SaveBar } from './SaveBar'
@@ -11,6 +13,7 @@ import { isActiveRunStatus } from '@shared/run-state'
 import { createRepoEditorRows } from './repo-editor-rows'
 import { RepoCard } from './RepoCard'
 import { PortSlotSlice, RepoSlice, Slice, parseRepo, sameProbePath, serializeRepo } from './repo-slice'
+import { ConfigLoadGuard } from './ConfigLoadGuard'
 
 export function ReposTab({ feature }: { feature: string }) {
   const rowIds = useMemo(createRepoEditorRows, [feature])
@@ -40,10 +43,10 @@ export function ReposTab({ feature }: { feature: string }) {
   })
 
   if (ed.error && !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{ed.error}</div>
+    return <ConfigLoadGuard error={ed.error} />
   }
   if (ed.loading || !ed.draft) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <ConfigLoadGuard />
   }
 
   const { repos, rootEnvs } = ed.draft
@@ -177,27 +180,18 @@ export function PortSlotTable({
 // run and only exists while a run is active — settings shows the reference,
 // not a concrete number. Click copies the token for pasting where it's needed.
 function PortSlotToken({ name, env }: { name: string; env?: string }) {
-  const [copied, setCopied] = useState(false)
+  const { copy, copiedKey } = useClipboardCopy({ resetAfterMs: 1200 })
   const ready = name.trim().length > 0
   const token = ready ? `\${port.${name.trim()}}` : '${port.…}'
   const label = env ? `Injected as ${env}; reference with ${token}` : `Reference with ${token}`
-  const copy = (): void => {
-    if (!ready) return
-    void navigator.clipboard
-      ?.writeText(token)
-      .then(() => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1200)
-      })
-      .catch(() => {})
-  }
+  const copied = copiedKey === token
   // Box-less: in an otherwise plain-text row a bordered box reads as an
   // editable field — a false affordance now that nothing here is editable. The
   // token is the only interactive thing; cursor + hover underline carry that.
   return (
     <button
       type="button"
-      onClick={copy}
+      onClick={() => { if (ready) void copy(token) }}
       disabled={!ready}
       className="flex-1 truncate px-0.5 py-1 text-left text-[11px] transition-colors hover:underline"
       title={ready ? `${label} — click to copy` : label}

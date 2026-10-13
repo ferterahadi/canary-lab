@@ -5,9 +5,13 @@ import { stripTerminalEscapes } from '../../../../shared/terminal-text'
 // tried and couldn't" and "the agent never really ran" (usage limit, auth).
 //
 // No I/O — the orchestrator captures the output tail (a ring buffer of the
-// PTY bytes) and hands it here. Deliberately conservative: an unmatched but
-// non-empty tail returns 'unknown' (the agent said something we don't
-// recognize), and an empty tail returns undefined (nothing to go on).
+// PTY bytes), appends the agent's final logged text when it has one (a TUI can
+// repaint over the message that explains the stop), and hands it here.
+// Deliberately conservative: an unmatched but non-empty tail returns 'unknown'
+// (the agent said something we don't recognize), and an empty tail returns
+// undefined (nothing to go on). Matching is over the whole text and the first
+// cause in table order wins, so where a line sits in the input never changes
+// precedence.
 
 import type { HealEnd } from '../../../../../../../shared/run-state'
 import type { LocalHealAgent } from '../../../../../../../shared/run-manifest'
@@ -86,6 +90,20 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
     ],
   },
   {
+    // A CLI dialog that ends a TURN and then waits: Claude Code's "Teach auto
+    // mode about your environment?" offer. The unattended-dialog policy in
+    // agent-context-policy.ts normally keeps it off, so reaching here means
+    // that policy stopped applying. Its presence says the turn finished — not
+    // that it succeeded (run 2026-10-09T0458-zk6u's turn had failed on an
+    // expired login the dialog then painted over) — so the hard blockers above
+    // win when their text is visible. Ahead of `approval-prompt`: a pending
+    // approval keeps a turn open, so approval text beside this dialog is history.
+    cause: 'cli-dialog',
+    needles: [
+      'teach auto mode about your environment',
+    ],
+  },
+  {
     // A tool-approval prompt the agent is still sitting on. Distinct from
     // `trust-prompt`: that one fires before any work, this one can fire *after*
     // a complete repair is already on disk, which is how a working fix gets
@@ -123,7 +141,8 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
 /**
  * Classify the agent's terminal-output tail into a `HealEnd.agentCause`.
  *
- * @param tail   the last N bytes of the heal agent's PTY output (may be '')
+ * @param tail   the last N bytes of the heal agent's PTY output, plus any
+ *               final text from its session log (may be '')
  * @param _agent which CLI produced it — reserved for agent-specific tie-breaks
  *               (both agents share the fingerprint table today)
  * @returns the matched cause, `'unknown'` when the tail is non-empty but

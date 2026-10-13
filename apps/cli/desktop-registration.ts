@@ -1,12 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { resolveMcpInvocation, resolveCliPath, LEGACY_SERVER_NAMES, parseSavedMcpEntry, savedMcpMatches, type ResolvedMcpInvocation, type SavedMcpEntry } from './mcp-registration'
+import { resolveMcpInvocation, resolveCliPath, LEGACY_SERVER_NAMES, SERVER_NAME, parseSavedMcpEntry, savedMcpMatches, type ResolvedMcpInvocation, type SavedMcpEntry } from './mcp-registration'
 import { readMcpConfig, writeMcpConfig } from './mcp-config'
-
-// Claude Desktop shows this mcpServers key verbatim; keep it aligned with the
-// CLI registration display key (mcp-registration.ts SERVER_NAME).
-const SERVER_NAME = 'Canary_Lab'
 
 export interface DesktopRegistrationOptions {
   dryRun?: boolean

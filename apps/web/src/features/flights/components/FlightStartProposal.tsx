@@ -4,6 +4,8 @@ import type { PlanFeaturesTask, PlannedFeature } from '@shared/flights/types'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { Textarea } from '@/shared/ui/FormFields'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
+import { plural } from '@shared/lib/plural'
+import { PlaneIcon } from '@/shared/ui/Icons'
 
 /** R54: the breakdown agent owns the dialog while it thinks — its timeline is
  *  the content. Closing (the modal's ✕) doesn't stop the agent: the plan runs
@@ -59,10 +61,7 @@ export function PlanningView({
       ) : (
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-1.5 text-[11px]" data-testid="flight-plan-background-hint" style={{ color: 'var(--text-muted)' }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-              <path d="M22 2 11 13" />
-              <path d="M22 2 15 22l-4-9-9-4Z" />
-            </svg>
+            <PlaneIcon size={12} className="shrink-0" />
             <span>Close anytime — planning keeps running and waits for you in the Flights pill.</span>
           </div>
           {task?.status === 'running' && (
@@ -134,7 +133,7 @@ export function ProposalView({
   return (
     <div className="flex flex-col gap-2.5" data-testid="flight-proposal-view">
       <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-        This breaks down into {n} suite{n === 1 ? '' : 's'} — each gets its own flight.
+        This breaks down into {plural(n, 'suite')} — each gets its own flight.
       </div>
 
       {/* R69 follow-up: the shared group applies to EVERY card, so it heads the

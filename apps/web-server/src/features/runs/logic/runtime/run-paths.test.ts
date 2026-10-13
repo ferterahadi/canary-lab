@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import path from 'path'
 import {
+  RUN_MANIFEST_FILE,
   buildRunPaths,
   runDirFor,
+  runManifestPath,
+  runSummaryPath,
   runsIndexPath,
   runsRoot,
 } from './run-paths'
@@ -26,6 +29,16 @@ describe('buildRunPaths', () => {
     expect(p.healIndexPath).toBe(path.join(runDir, 'heal-index.md'))
     expect(p.diagnosisJournalPath).toBe(path.join(runDir, 'diagnosis-journal.md'))
     expect(p.failedDir).toBe(path.join(runDir, 'failed'))
+  })
+
+  it('places the external command audit log at runDir root', () => {
+    expect(p.externalCommandsPath).toBe(path.join(runDir, 'external-commands.jsonl'))
+  })
+
+  it('agrees with the standalone manifest and summary builders', () => {
+    expect(runManifestPath(runDir)).toBe(p.manifestPath)
+    expect(runSummaryPath(runDir)).toBe(p.summaryPath)
+    expect(path.basename(p.manifestPath)).toBe(RUN_MANIFEST_FILE)
   })
 
   it('places the run-start suite copy under suite/', () => {

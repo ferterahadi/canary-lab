@@ -9,6 +9,11 @@ import {
 } from './ast-extractor'
 
 describe('extractTestsFromSource', () => {
+  it('preserves interpolated step labels as display text', () => {
+    const source = "test('checkout', async () => { await test.step(`open ${pageName}`, async () => {}) })"
+    expect(extractTestsFromSource('fixture.spec.ts', source).tests[0].steps[0].label).toBe('open ${pageName}')
+  })
+
   it('returns empty array when no tests are present', () => {
     const r = extractTestsFromSource('a.spec.ts', `import {} from 'x';\nconst x = 1;`)
     expect(r.tests).toEqual([])

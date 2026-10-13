@@ -2,7 +2,7 @@ You are authoring Playwright E2E specs for the Canary Lab feature "{{feature}}" 
 Close every coverage gap below by writing/rewriting spec files.
 Read the feature config at {{configPath}} first — it declares the services, port slots, and health-check URLs the booted app exposes; target those.
 
-The feature directory is {{featureDir}}. Existing specs (if any) live at {{featureDir}}/e2e/*.spec.ts — read them with your tools before deciding what to change; rewrite them freely.
+The feature directory is {{featureDir}}. Existing specs (if any) live at {{featureDir}}/e2e/ (including nested folders; .spec and .test JavaScript/TypeScript files) — read them with your tools before deciding what to change; rewrite them freely.
 
 Requirements (from the PRD summary):
 ```json

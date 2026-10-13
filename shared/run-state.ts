@@ -1,3 +1,5 @@
+import type { ExecutionType } from './verification'
+
 export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
 export type ServiceStatus = 'queued' | 'starting' | 'ready' | 'failed' | 'timeout' | 'stopped'
 
@@ -167,9 +169,10 @@ export interface HealEnd {
   /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
   agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
   /** Best-effort classification of why the agent went quiet, from its output
-   *  tail. Set only when `reason === 'no-signal'`. `unknown` = tail captured
+   *  tail plus (claude) the text its session log ended on. Set only when
+   *  `reason === 'no-signal'`. `unknown` = tail captured
    *  but no known fingerprint matched. */
-  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'trust-prompt' | 'approval-prompt' | 'unknown'
+  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'trust-prompt' | 'approval-prompt' | 'cli-dialog' | 'unknown'
   /** 1-based heal cycle in flight when the loop gave up (0 if it never began). */
   cycle: number
   /** Plain-language sentence for the UI + transcript. */
@@ -254,12 +257,30 @@ export interface RunPrAttempt {
   results: Array<{ repoName: string; ok: boolean; url?: string; reason?: string }>
 }
 
+/** One Playwright invocation within a run. `index` counts invocations from 1
+ *  across the whole run, restart-heal included. `afterCycle` is the run-wide
+ *  repair-cycle count when it started: 0 for the initial execution, n for an
+ *  execution that verifies repair cycle n. Several executions can share one
+ *  `afterCycle` (a no-agent pending-test rerun), so neither number can be
+ *  derived from the other. */
+export interface RunExecutionRef {
+  index: number
+  afterCycle: number
+}
+
 export interface RunLifecycleSnapshot {
   phase: RunLifecyclePhase
   headline: string
   detail?: string
   updatedAt: string
+  /** The heal loop's own cycle counter. It restarts at 1 on a restart-heal, so
+   *  it numbers what the narration says, not the run's repair cycles. */
   activeCycle?: number
+  /** Run-wide repair-cycle ordinal (`manifest.healCycles` once this cycle is
+   *  counted), on the record that starts a repair cycle. */
+  repairCycle?: number
+  /** On the records that start and end a Playwright invocation. */
+  execution?: RunExecutionRef
   lastSignal?: RunLifecycleSignal
   restartPlan?: RunLifecycleRestartPlan
   targetedRerun?: RunLifecycleTargetedRerun
@@ -356,14 +377,28 @@ export function deriveDisplayStatus(
 export function deriveRunActionAvailability(
   status: RunStatus,
   transient: TransientAction | null = null,
+  context: { executionType?: ExecutionType; newRunRequired?: boolean } = {},
 ): RunActionAvailabilitySet {
-  return {
+  const base = {
     pauseHeal: availability(status === 'running' && !transient, disabledReason('pauseHeal', status, transient)),
     stop: availability((status === 'running' || status === 'queued') && !transient, disabledReason('stop', status, transient)),
     cancelHeal: availability(status === 'healing' && !transient, disabledReason('cancelHeal', status, transient)),
     delete: availability(isTerminalRunStatus(status) && !transient, disabledReason('delete', status, transient)),
     restartHeal: availability(isRestartableRunStatus(status) && !transient, disabledReason('restartHeal', status, transient)),
   }
+  // Preserve the browser's spent-attempt precedence over execution-type reasons.
+  if (context.newRunRequired) return { ...base, restartHeal: { enabled: false, reason: 'This attempt is spent; start a fresh run after approval.' } }
+  if (context.executionType === 'verify') return {
+    ...base,
+    pauseHeal: { enabled: false, reason: 'Verify is observational and does not start healing.' },
+    cancelHeal: { enabled: false, reason: 'Verify does not start heal cycles.' },
+    restartHeal: { enabled: false, reason: 'Verify results are not healed; start another Verify execution instead.' },
+  }
+  if (context.executionType === 'boot') {
+    const reason = 'Boot-only sessions do not run tests or heal.'
+    return { ...base, pauseHeal: { enabled: false, reason }, cancelHeal: { enabled: false, reason }, restartHeal: { enabled: false, reason } }
+  }
+  return base
 }
 
 export function reduceRunLifecycleSnapshot(
@@ -390,6 +425,8 @@ export function createRunLifecycleEvent(
     updatedAt: opts.updatedAt ?? new Date().toISOString(),
     ...(opts.detail ? { detail: opts.detail } : {}),
     ...(opts.activeCycle !== undefined ? { activeCycle: opts.activeCycle } : {}),
+    ...(opts.repairCycle !== undefined ? { repairCycle: opts.repairCycle } : {}),
+    ...(opts.execution ? { execution: opts.execution } : {}),
     ...(opts.lastSignal ? { lastSignal: opts.lastSignal } : {}),
     ...(opts.restartPlan ? { restartPlan: opts.restartPlan } : {}),
     ...(opts.targetedRerun ? { targetedRerun: opts.targetedRerun } : {}),

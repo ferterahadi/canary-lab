@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocket from '@fastify/websocket'
@@ -8,11 +7,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { discoveryRepairRoutes, type DiscoveryRepairRouteDeps } from './discovery-repair'
 import { DiscoveryRepairService } from '../logic/discovery-repair-service'
 import type { runDiscoveryRepairAgent } from '../logic/discovery-repair-agent'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 // A real workspace on disk per test. The routes read `feature.config.cjs`,
 // `canary-lab.config.json` and the repair records themselves, and the record
 // store is memoized per logs directory — a shared root would carry one test's
 // repairs into the next.
+const tempDir = trackTempDirs('discovery-route-')
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!()
@@ -22,13 +23,12 @@ afterEach(async () => {
 
 interface Workspace extends DiscoveryRepairRouteDeps { projectRoot: string }
 function workspace(features: string[] = ['suite']): Workspace {
-  const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-route-')))
+  const projectRoot = tempDir()
   const featuresDir = path.join(projectRoot, 'features')
   for (const name of features) {
     fs.mkdirSync(path.join(featuresDir, name), { recursive: true })
     fs.writeFileSync(path.join(featuresDir, name, 'feature.config.cjs'), `module.exports={config:{name:'${name}',featureDir:__dirname,repos:[],envs:[]}}`)
   }
-  cleanups.push(() => fs.rmSync(projectRoot, { recursive: true, force: true }))
   return { projectRoot, featuresDir, logsDir: path.join(projectRoot, 'logs') }
 }
 
@@ -48,7 +48,7 @@ const external = { kind: 'external', clientKind: 'codex', sessionId: 'owner' } a
 
 describe('discovery repair transport', () => {
   it('pushes external creation, milestones and terminal state to an already-open Tests stream and replays on reconnect', async () => {
-    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-stream-'))
+    const projectRoot = tempDir('discovery-stream-')
     const featuresDir = path.join(projectRoot, 'features')
     const dir = path.join(featuresDir, 'suite')
     fs.mkdirSync(dir, { recursive: true })
@@ -80,7 +80,7 @@ describe('discovery repair transport', () => {
       resumed.close()
       const invalid = await app.inject({ method: 'POST', url: '/api/features/suite/discovery-repairs', payload: { kind: 'external', sessionId: '', clientKind: 'codex' } })
       expect(invalid.statusCode).toBe(400)
-    } finally { socket.close(); await app.close(); fs.rmSync(projectRoot, { recursive: true, force: true }) }
+    } finally { socket.close(); await app.close() }
   })
 
   it('says on every row whether the instructions the agent is told to read exist yet', async () => {

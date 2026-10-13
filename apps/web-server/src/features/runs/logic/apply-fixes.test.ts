@@ -1,30 +1,28 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { applyFixCapture, buildApplyPreflight } from './apply-fixes'
 import { porcelainPath } from '../../../shared/git-status-path'
 import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('apply-fix-')
 
 let root: string
 let repo: string
 let fixesDir: string
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-fix-'))
+  root = tempDir()
   repo = path.join(root, 'repo')
   fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
   initGitRepo(repo)
   fixesDir = path.join(root, 'fixes')
   fs.mkdirSync(fixesDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 /** Build a real patch that turns app.js `x = 1` → `x = 2`, from a scratch clone. */
@@ -183,6 +181,38 @@ describe('buildApplyPreflight', () => {
     fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
     const [t] = await buildApplyPreflight(capture(makePatch()))
     expect(t.foreignDirty).toEqual(['app.js'])
+  })
+
+  it('reads from the repo itself whether the repair is in it yet', async () => {
+    const fix = capture(makePatch())
+    fix.repos[0].fileNames = ['app.js']
+    // The run edited an isolated copy, so a fresh capture is not in the repo.
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('absent')
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('uncommitted')
+    git(repo, 'commit', '-aqm', 'take the repair', '--no-verify')
+    expect((await buildApplyPreflight(fix))[0].inRepo).toBe('committed')
+  })
+
+  it("names the repair's files from the patch when the capture predates file names", async () => {
+    const patchPath = makePatch()
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
+    expect((await buildApplyPreflight(capture(patchPath)))[0].inRepo).toBe('uncommitted')
+    git(repo, 'commit', '-aqm', 'take the repair', '--no-verify')
+    expect((await buildApplyPreflight(capture(patchPath)))[0].inRepo).toBe('committed')
+  })
+
+  it('says nothing about a repair whose patch is gone or empty', async () => {
+    expect((await buildApplyPreflight(capture(path.join(fixesDir, 'gone.patch'))))[0]).not.toHaveProperty('inRepo')
+    const empty = path.join(fixesDir, 'empty.patch')
+    fs.writeFileSync(empty, '')
+    expect((await buildApplyPreflight(capture(empty)))[0]).not.toHaveProperty('inRepo')
+  })
+
+  it('reports a patch git cannot read as not in the repo', async () => {
+    const garbled = path.join(fixesDir, 'garbled.patch')
+    fs.writeFileSync(garbled, 'not a patch\n')
+    expect((await buildApplyPreflight(capture(garbled)))[0].inRepo).toBe('absent')
   })
 
   it('marks a repo whose path is gone as not ready, with the reason', async () => {

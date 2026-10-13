@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { CoverageJobIndexEntry } from '@shared/coverage/types'
 import type { DraftRecord } from '@shared/draft-types'
@@ -10,6 +10,7 @@ import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { PortifyIndexEntry } from '@shared/portify-index'
 import type { FeatureActivity } from './feature-activity'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The hook's only job is to compose the live stores and memoize the
 // derivation; each store owns a WebSocket, which is the edge a unit test can't
@@ -71,18 +72,14 @@ vi.mock('@/shared/api/coverage', () => ({
   listAllCoverageJobs: vi.fn(async () => []),
 }))
 
-const { useFeatureActivity } = await import('./feature-activity')
+const { useFeatureWorkState } = await import('./feature-activity')
 const { listAllCoverageJobs } = await import('@/shared/api/coverage')
 
-let container: HTMLDivElement
 let root: Root
 let seen: Map<string, FeatureActivity>
 
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 beforeEach(() => {
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
   stores.runs = []
   stores.allRuns = []
   stores.runDetails = {}
@@ -93,19 +90,14 @@ beforeEach(() => {
   stores.coverageJobs = null
 })
 
-afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-})
-
 function Probe() {
-  seen = useFeatureActivity()
+  seen = useFeatureWorkState().activity
   return null
 }
 
 const render = (): void => { act(() => root.render(<Probe />)) }
 
-describe('useFeatureActivity', () => {
+describe('useFeatureWorkState — activity', () => {
   it('is empty when every store is', () => {
     render()
     expect(seen.size).toBe(0)

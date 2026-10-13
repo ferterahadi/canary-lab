@@ -3,10 +3,11 @@ import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
 import { effortArgs, modelArgs } from './agent-models'
 import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
-import { internalAgentContextArgs } from './agent-context-policy'
+import { internalAgentInvocationArgs } from './agent-context-policy'
 import { agentJobStore } from './agent-jobs/store'
 import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 import { processGroupAlive, signalProcessTree } from '../../../shared/process-tree'
+import { sleep } from '../../../../../../shared/lib/sleep'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -219,9 +220,7 @@ async function terminate(entry: LiveAgentProcess, graceMs: number, by: 'user' | 
       const descendantsAlive = entry.detachedProcessGroup
         && processGroupAlive(entry.child.pid)
       if (parentDone && !descendantsAlive) return
-      const tick = new Promise<void>((resolve) =>
-        setTimeout(resolve, Math.min(25, Math.max(0, deadline - Date.now()))),
-      )
+      const tick = sleep(Math.min(25, Math.max(0, deadline - Date.now())))
       if (parentDone) await tick
       else await Promise.race([done, tick])
     }
@@ -288,9 +287,12 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   // cancellable unit. Windows reaches the same tree through taskkill /T.
   const detachedProcessGroup = process.platform !== 'win32'
   // This is the final common boundary for every non-interactive Canary-owned
-  // agent. Feature-specific builders cannot accidentally omit the context and
-  // auto-compaction policy, and arbitrary non-agent commands stay untouched.
-  const args = agent ? [...internalAgentContextArgs(agent), ...opts.args] : opts.args
+  // agent. Feature-specific builders cannot accidentally omit the context,
+  // auto-compaction and unattended-dialog policy, and arbitrary non-agent
+  // commands stay untouched. The policy carries this spawn's only claude
+  // `--settings`; a builder that needs its own settings must go through
+  // `withClaudeUnattendedSettings`, because a second flag replaces the first.
+  const args = agent ? [...internalAgentInvocationArgs(agent), ...opts.args] : opts.args
   const child = spawnImpl(command, args, {
     cwd: opts.cwd,
     detached: detachedProcessGroup,

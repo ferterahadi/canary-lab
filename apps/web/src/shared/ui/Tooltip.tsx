@@ -1,5 +1,6 @@
 import { cloneElement, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
+import { clampToViewport } from '@/shared/lib/viewport'
 
 // Lightweight, instant tooltip. The app otherwise leans on native `title`, which
 // is slow (~1s) and easy to miss; this shows immediately on hover/focus and
@@ -71,7 +72,7 @@ export function Tooltip({
     const { width, height } = tipRef.current.getBoundingClientRect()
     const vw = window.innerWidth
     const vh = window.innerHeight
-    const left = Math.min(Math.max(EDGE, anchor.centerX - width / 2), Math.max(EDGE, vw - width - EDGE))
+    const left = clampToViewport({ left: anchor.centerX, right: anchor.centerX }, width, 'center', vw, EDGE)
     let top = placement === 'top' ? anchor.top - GAP - height : anchor.bottom + GAP
     // Flip to the other side if the preferred placement overflows vertically.
     if (top < EDGE) top = anchor.bottom + GAP
@@ -98,7 +99,10 @@ export function Tooltip({
           style={{
             position: 'fixed',
             top: coords?.top ?? anchor.bottom + GAP,
-            left: coords?.left ?? anchor.centerX,
+            // Measured at the viewport's left edge: at the anchor, a mark near the
+            // right edge leaves the tip a few pixels to shrink into, so it wrapped
+            // a word per line and kept that width once clamped back inside.
+            left: coords?.left ?? 0,
             // Hidden for the one pre-paint commit before coords are measured, so
             // it never flashes at an unclamped position.
             visibility: coords ? 'visible' : 'hidden',

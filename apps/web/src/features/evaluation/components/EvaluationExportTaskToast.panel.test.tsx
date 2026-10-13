@@ -1,12 +1,11 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import { ExternalEvaluationPanel } from './EvaluationExportTaskToast'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The open-client CTA calls api.openAgentApp on click; stub it so the mount is inert.
 vi.mock('@/shared/api/workspace', async (importOriginal) => ({
@@ -32,17 +31,10 @@ const BASE_TASK: EvaluationExportTaskView = {
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
-
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function render(task: EvaluationExportTaskView, log = ''): void {
   act(() => {
@@ -79,4 +71,20 @@ describe('ExternalEvaluationPanel', () => {
     expect(container.textContent).toContain('Ready')
     expect(container.textContent).toContain('Download it from the list')
   })
+})
+
+it('trims evaluation output and retains scrollers as status changes', () => {
+  render(BASE_TASK, '   ')
+  const wrapper = container.querySelector('[data-testid="evaluation-external-monitor"]')!
+  const log = container.querySelector('pre')!
+  expect(log.textContent).toContain('Waiting for the client')
+  wrapper.scrollTop = 20
+  log.scrollTop = 32
+  render({ ...BASE_TASK, status: 'failed' }, '  failure details  ')
+  expect(container.querySelector('[data-testid="evaluation-external-monitor"]')).toBe(wrapper)
+  expect(container.querySelector('pre')).toBe(log)
+  expect(wrapper.scrollTop).toBe(20)
+  expect(log.scrollTop).toBe(32)
+  expect(log.textContent).toBe('failure details')
+  expect(container.textContent).toContain('Failed')
 })

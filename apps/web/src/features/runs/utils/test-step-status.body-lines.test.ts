@@ -467,3 +467,19 @@ describe('sourceLineForBodyLine', () => {
     expect(sourceLineForBodyLine(61, 4)).toBe(64)
   })
 })
+
+it.each([
+  { location: '/suite/spec.ts:12', source: '/suite/spec.ts', expected: 3 },
+  { location: '/suite/spec.ts:12:4', source: '/suite/spec.ts', expected: 3 },
+  { location: 'C:\\suite\\spec.ts:12:4', source: 'C:/suite/spec.ts', expected: 3 },
+  { location: '/suite/a:b.spec.ts:12:4', source: '/suite/a:b.spec.ts', expected: 3 },
+  { location: '/suite/spec.ts', source: '/suite/spec.ts', expected: null },
+  { location: '/suite/spec.ts:nope', source: '/suite/spec.ts', expected: null },
+  { location: '/suite/spec.ts:' + '9'.repeat(400), source: '/suite/spec.ts', expected: null },
+  { location: ':12', source: '/suite/spec.ts', expected: null },
+])('maps shared source locations without broadening file matching: $location', ({ location, source, expected }) => {
+  expect(activeBodyLineForTest({
+    testName: 'Fixture', testLine: 10, bodySource: '{\nstep()\nexpect()\n}', sourceFile: source,
+    summary: { complete: false, total: 1, passed: 0, failed: [], running: { name: summaryEntryName('Fixture'), location: source + ':10', step: { title: 'expect', category: 'expect', location } } },
+  })).toBe(expected)
+})

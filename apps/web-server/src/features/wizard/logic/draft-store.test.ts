@@ -1,8 +1,10 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
+import type { DraftRecord } from '../../../../../../shared/draft-types'
 import {
+  type CreateDraftInput,
+  type TransitionPatch,
   canTransition,
   createDraft,
   deleteDraft,
@@ -17,13 +19,13 @@ import {
   validateFeatureTarget,
   writeDraft,
 } from './draft-store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('draft-store-test-')
 
 let tmp: string
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-store-test-'))
-})
-afterEach(() => {
-  fs.rmSync(tmp, { recursive: true, force: true })
+  tmp = tempDir()
 })
 
 const baseInput = {
@@ -243,4 +245,11 @@ describe('renameDraftFeature', () => {
     expect(renameDraftFeature(tmp, 'absent', 'new_name')).toBe(0)
     expect(readDraft(tmp, 'd1')?.featureName).toBe('kept')
   })
+})
+
+it('derives external metadata without widening transition authority', () => {
+  type MetadataKeys = 'producer' | 'externalStage' | 'externalClientKind' | 'externalSessionId' | 'externalConversationName' | 'externalSessionUrl'
+  expectTypeOf<Pick<CreateDraftInput, MetadataKeys>>().toEqualTypeOf<Pick<DraftRecord, MetadataKeys>>()
+  expectTypeOf<Pick<TransitionPatch, MetadataKeys>>().toEqualTypeOf<Pick<DraftRecord, MetadataKeys>>()
+  expectTypeOf<Extract<keyof TransitionPatch, 'draftId' | 'status' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<never>()
 })

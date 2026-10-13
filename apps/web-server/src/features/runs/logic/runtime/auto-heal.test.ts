@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -18,6 +18,9 @@ import {
   type HealAgent,
 } from '../../../agent-sessions/logic/agent-binary'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-auto-heal-')
 
 // Deps that find nothing — `which` misses and no candidate path is executable.
 const NONE: AgentResolveDeps = {
@@ -37,28 +40,28 @@ const onPath = (present: HealAgent): AgentResolveDeps => ({
 
 describe('buildClaudeMcpConfigArg', () => {
   it('writes the MCP config to disk and returns `--mcp-config "<file>"`', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-')))
-    try {
-      const cfgPath = path.join(tmp, 'mcp-config.json')
-      const arg = buildClaudeMcpConfigArg('/tmp/run-1/failed/foo/playwright-mcp', cfgPath)
-      // Returned arg references the FILE PATH (not inline JSON) so claude's
-      // `open()`-then-fallback path doesn't trip ENAMETOOLONG.
-      expect(arg).toBe(`--mcp-config ${JSON.stringify(cfgPath)}`)
-      // File contents are valid JSON wiring @playwright/mcp + --output-dir.
-      const written = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
-      expect(written.mcpServers.playwright.command).toBe('npx')
-      expect(written.mcpServers.playwright.args).toContain('@playwright/mcp@latest')
-      expect(written.mcpServers.playwright.args).toContain('--output-dir')
-      expect(written.mcpServers.playwright.args).toContain('/tmp/run-1/failed/foo/playwright-mcp')
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir('cl-mcp-')
+    const cfgPath = path.join(tmp, 'mcp-config.json')
+    const arg = buildClaudeMcpConfigArg('/tmp/run-1/failed/foo/playwright-mcp', cfgPath)
+    // Returned arg references the FILE PATH (not inline JSON) so claude's
+    // `open()`-then-fallback path doesn't trip ENAMETOOLONG.
+    expect(arg).toBe(`--mcp-config ${JSON.stringify(cfgPath)}`)
+    // File contents are valid JSON wiring @playwright/mcp + --output-dir.
+    const written = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
+    expect(written.mcpServers.playwright.command).toBe('npx')
+    expect(written.mcpServers.playwright.args).toContain('@playwright/mcp@latest')
+    expect(written.mcpServers.playwright.args).toContain('--output-dir')
+    expect(written.mcpServers.playwright.args).toContain('/tmp/run-1/failed/foo/playwright-mcp')
   })
 })
 
 describe('buildAgentSpawnCommand', () => {
   it('enforces each REPL context and auto-compaction policy', () => {
     expect(buildAgentSpawnCommand('claude')).toContain('--autocompact 350k')
+    // Without an isolation file the policy travels inline, shell-quoted.
+    expect(buildAgentSpawnCommand('claude')).toContain(
+      `--settings ${JSON.stringify('{"skillOverrides":{"auto-mode-setup":"off"}}')}`,
+    )
     for (const cmd of [
       buildAgentSpawnCommand('codex'),
       buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true }),
@@ -69,28 +72,24 @@ describe('buildAgentSpawnCommand', () => {
   })
 
   it('claude REPL: pins --session-id and wires MCP, but does NOT bypass permissions', () => {
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-spawn-')))
-    try {
-      const cfgPath = path.join(tmp, 'mcp-config.json')
-      const cmd = buildAgentSpawnCommand('claude', {
-        sessionId: 'abc-123',
-        mcpOutputDir: '/tmp/out',
-        mcpConfigFile: cfgPath,
-      })
-      expect(cmd).toContain('claude')
-      expect(cmd).toContain('--session-id "abc-123"')
-      expect(cmd).toContain(`--mcp-config ${JSON.stringify(cfgPath)}`)
-      // Permissions stay interactive — the user is in the REPL pane and can
-      // approve / deny tool calls (and see MCP auth prompts).
-      expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
-      // No `-p` (REPL mode — prompt arrives via stdin).
-      expect(cmd.includes(' -p ')).toBe(false)
-      // The MCP config file actually exists with the playwright server entry.
-      const written = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
-      expect(written.mcpServers.playwright.args).toContain('/tmp/out')
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir('cl-spawn-')
+    const cfgPath = path.join(tmp, 'mcp-config.json')
+    const cmd = buildAgentSpawnCommand('claude', {
+      sessionId: 'abc-123',
+      mcpOutputDir: '/tmp/out',
+      mcpConfigFile: cfgPath,
+    })
+    expect(cmd).toContain('claude')
+    expect(cmd).toContain('--session-id "abc-123"')
+    expect(cmd).toContain(`--mcp-config ${JSON.stringify(cfgPath)}`)
+    // Permissions stay interactive — the user is in the REPL pane and can
+    // approve / deny tool calls (and see MCP auth prompts).
+    expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
+    // No `-p` (REPL mode — prompt arrives via stdin).
+    expect(cmd.includes(' -p ')).toBe(false)
+    // The MCP config file actually exists with the playwright server entry.
+    const written = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'))
+    expect(written.mcpServers.playwright.args).toContain('/tmp/out')
   })
 
   it('claude REPL: omits --mcp-config when mcpOutputDir is missing', () => {
@@ -139,6 +138,9 @@ describe('buildAgentSpawnCommand', () => {
     })
     expect(cmd).toContain('--setting-sources ""')
     expect(cmd).toContain('--settings "/runs/demo/heal-agent-isolation.settings.json"')
+    // The file stands in for the inline dialog policy — never beside it: a
+    // second `--settings` replaces the first, which would drop the sandbox.
+    expect(cmd.match(/--settings /g)).toHaveLength(1)
     expect(buildAgentSpawnCommand('codex', {
       isolationSettingsFile: '/runs/demo/heal-agent-isolation.settings.json',
     })).not.toContain('--settings')
@@ -284,26 +286,22 @@ describe('buildAgentSpawnCommand', () => {
     // another config file path — opens it, fails JSON parse, exits with
     // `Invalid MCP configuration: MCP config file not found: <cwd>/@<path>`.
     // The POSIX `--` end-of-options marker terminates flag parsing.
-    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-prompt-')))
-    try {
-      const cfgPath = path.join(tmp, 'mcp-config.json')
-      const cmd = buildAgentSpawnCommand('claude', {
-        sessionId: 'abc-123',
-        mcpOutputDir: '/tmp/out',
-        mcpConfigFile: cfgPath,
-        promptFile: '/tmp/run/heal-prompt.md',
-      })
-      // The `--` must appear AFTER --mcp-config and BEFORE the @-prefixed
-      // positional. Anything else means the variadic collector wins.
-      const mcpIdx = cmd.indexOf('--mcp-config')
-      const sepIdx = cmd.indexOf(' -- ')
-      const promptIdx = cmd.indexOf('"@/tmp/run/heal-prompt.md"')
-      expect(mcpIdx).toBeGreaterThan(0)
-      expect(sepIdx).toBeGreaterThan(mcpIdx)
-      expect(promptIdx).toBeGreaterThan(sepIdx)
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true })
-    }
+    const tmp = tempDir('cl-mcp-prompt-')
+    const cfgPath = path.join(tmp, 'mcp-config.json')
+    const cmd = buildAgentSpawnCommand('claude', {
+      sessionId: 'abc-123',
+      mcpOutputDir: '/tmp/out',
+      mcpConfigFile: cfgPath,
+      promptFile: '/tmp/run/heal-prompt.md',
+    })
+    // The `--` must appear AFTER --mcp-config and BEFORE the @-prefixed
+    // positional. Anything else means the variadic collector wins.
+    const mcpIdx = cmd.indexOf('--mcp-config')
+    const sepIdx = cmd.indexOf(' -- ')
+    const promptIdx = cmd.indexOf('"@/tmp/run/heal-prompt.md"')
+    expect(mcpIdx).toBeGreaterThan(0)
+    expect(sepIdx).toBeGreaterThan(mcpIdx)
+    expect(promptIdx).toBeGreaterThan(sepIdx)
   })
 
   it('omits the `@<promptFile>` arg when promptFile is not set', () => {
@@ -384,11 +382,7 @@ describe('readPriorSessionId', () => {
   let tmp: string
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prior-sid-')))
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true })
+    tmp = tempDir('cl-prior-sid-')
   })
 
   it('returns null when the file does not exist', () => {
@@ -572,7 +566,7 @@ describe('repair rule — spawned heal agent', () => {
   })
 
   it('selects test mode only on zero repoPaths, and falls back to service without a manifest', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-mode-'))
+    const dir = tempDir('cl-heal-mode-')
     const manifestPath = path.join(dir, 'run-manifest.json')
     // Missing manifest: a transient read glitch must never hand a feature with
     // app code the "edit the spec" directive.
@@ -581,6 +575,5 @@ describe('repair rule — spawned heal agent', () => {
     expect(detectHealMode(manifestPath)).toBe('service')
     fs.writeFileSync(manifestPath, JSON.stringify({ runId: 'r', feature: 'f', startedAt: 't', status: 'healing', healCycles: 0, services: [], repoPaths: [] }))
     expect(detectHealMode(manifestPath)).toBe('test')
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 })

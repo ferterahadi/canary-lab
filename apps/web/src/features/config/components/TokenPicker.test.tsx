@@ -6,6 +6,7 @@ import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { TokenPicker } from './TokenPicker'
 import type { TokenNamespace } from './TemplatedInput'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
 
 const api = vi.hoisted(() => ({ getEnvsetsIndex: vi.fn(), getFeatureConfigDoc: vi.fn(), getEnvsetSlot: vi.fn() }))
 vi.mock('@/shared/api/config', () => ({
@@ -28,11 +29,7 @@ function Probe({ feature = 'checkout', namespaces = ['envset'] }: { feature?: st
 const render = (feature = 'checkout', namespaces?: TokenNamespace[]) => act(async () => root.render(<InvalidationProvider><Probe feature={feature} namespaces={namespaces} /></InvalidationProvider>))
 const button = (label: string) => [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)
 const tick = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms))
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((yes) => { resolve = yes })
-  return { promise, resolve }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()

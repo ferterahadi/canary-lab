@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import {
@@ -18,6 +17,9 @@ import {
   isGettingStartedFlightStart,
   isGettingStartedRunFeature,
 } from './onboarding'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-onboarding-')
 
 let projectRoot: string
 let featuresDir: string
@@ -32,13 +34,9 @@ function writeSuite(name: string): void {
 }
 
 beforeEach(() => {
-  projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-onboarding-')))
+  projectRoot = tempDir()
   featuresDir = path.join(projectRoot, 'features')
   fs.mkdirSync(featuresDir, { recursive: true })
-})
-
-afterEach(() => {
-  fs.rmSync(projectRoot, { recursive: true, force: true })
 })
 
 describe('readOnboardingSamples', () => {

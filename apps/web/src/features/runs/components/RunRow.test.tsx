@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import { RunRow } from './RunRow'
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const run: RunIndexEntry = { runId: 'run-z6kc', feature: 'checkout', startedAt: '2026-05-31T10:00:00.000Z', status: 'failed' }
 const detail = {
@@ -19,16 +18,10 @@ const detail = {
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
   vi.clearAllMocks()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function renderRow(props: Partial<Parameters<typeof RunRow>[0]> = {}): void {
   act(() => {
@@ -69,9 +62,38 @@ describe('RunRow (R80 hero props)', () => {
     expect(container.textContent).not.toContain(':4123')
   })
 
-  it('marker appends an extra meta segment (the run ordinal)', () => {
-    renderRow({ marker: 'run 2 of 2' })
-    expect(container.textContent).toContain('run 2 of 2')
+  it("dot='live' drops a finished run's dot and its lane, so the title sits flush", () => {
+    renderRow({ dot: 'live' })
+    expect(container.querySelector('button .cl-status-dot')).toBeNull()
+    // The chip still names the outcome — the dot was only repeating it.
+    expect(container.textContent).toContain('Failed')
+  })
+
+  it("dot='live' keeps the status dot while the run is still going", () => {
+    renderRow({ dot: 'live', run: { ...run, status: 'healing' } })
+    expect(container.querySelector('button .cl-status-dot')).not.toBeNull()
+  })
+
+  it('showDuration appends a finished run\'s duration, and says nothing for a live one', () => {
+    renderRow({ showDuration: true, run: { ...run, endedAt: '2026-05-31T10:18:02.000Z' } })
+    expect(container.textContent).toContain('18m 2s')
+    renderRow({ showDuration: true, run: { ...run, status: 'running' } })
+    expect(container.textContent).not.toMatch(/\dm \d+s/)
+  })
+
+  it('showRepairs appends the repair cycles a run used, and nothing for a clean run', () => {
+    renderRow({ showRepairs: true, run: { ...run, healCycles: 1 } })
+    expect(container.textContent).toContain('1 repair')
+    renderRow({ showRepairs: true, run: { ...run, healCycles: 10 } })
+    expect(container.textContent).toContain('10 repairs')
+    renderRow({ showRepairs: true })
+    expect(container.textContent).not.toContain('repair')
+  })
+
+  it("stamp='day' adds the day to a run from another day", () => {
+    renderRow({ stamp: 'day' })
+    expect(container.textContent).not.toContain('Today')
+    expect(container.textContent).toMatch(/May/)
   })
 
   it("passCount 'promoted' lifts the pass count out of the meta line", () => {
@@ -107,3 +129,9 @@ describe('RunRow (R80 hero props)', () => {
     expect(onSelect).toHaveBeenCalledWith(run)
   })
 })
+
+it.each(['passed', 'failed', 'aborted'] as const)('does not label historical changes as pending for a %s run', (status) => {
+    renderRow({ run: { ...run, status, pendingSpecEdits: 2 } })
+    expect(container.querySelector('[data-testid="run-pending-edits"]')).toBeNull()
+    expect(container.textContent).toContain(status[0].toUpperCase() + status.slice(1))
+  })

@@ -1,9 +1,11 @@
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { ConfigDocCacheProvider } from './config-doc-cache'
 import { useEditableSlice } from './useEditableSlice'
+import { deferred } from '../../../../../../tools/test-helpers/deferred'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 type Doc = { edited: string; untouched: string }
 const load = vi.fn<() => Promise<Doc>>()
@@ -11,7 +13,6 @@ const save = vi.fn<(payload: unknown) => Promise<Doc>>()
 let editor: ReturnType<typeof useEditableSlice<Doc, string>>
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']
 let root: Root
-let container: HTMLDivElement
 function Harness({ name }: { name: string }) {
   invalidate = useInvalidation().invalidate
   editor = useEditableSlice({ cacheKey: `config:${name}`, load, save,
@@ -23,21 +24,14 @@ const remote = async (edited: string, untouched = 'remote') => {
   load.mockResolvedValue({ edited, untouched })
   await act(async () => { invalidate('configuration', 'checkout') })
 }
-function deferred() {
-  let resolve!: (value: Doc) => void
-  let reject!: (reason: unknown) => void
-  const promise = new Promise<Doc>((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
-}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   load.mockResolvedValue({ edited: 'initial', untouched: 'initial' })
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
 })
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
+mountRoot({ attach: true, onMount: (mounted) => ({ root } = mounted) })
 
 it('updates clean forms and retains dirty drafts through unchanged reads and external edits', async () => {
   await act(async () => { render() })
@@ -74,7 +68,7 @@ it('saves a preserved draft into the latest document without reverting unrelated
 it('preserves edits typed while saving and retains drafts across background failures and recovery', async () => {
   await act(async () => { render() })
   await act(async () => { editor.setDraft('submitted') })
-  const pending = deferred()
+  const pending = deferred<Doc>()
   save.mockReturnValue(pending.promise)
   let saving!: Promise<void>
   await act(async () => { saving = editor.doSave() })
@@ -96,7 +90,7 @@ it('preserves edits typed while saving and retains drafts across background fail
 it.each(['success', 'failure'])('ignores a late save %s after switching suites', async (result) => {
   await act(async () => { render() })
   await act(async () => { editor.setDraft('old suite draft') })
-  const pending = deferred()
+  const pending = deferred<Doc>()
   save.mockReturnValue(pending.promise)
   let saving!: Promise<void>
   await act(async () => { saving = editor.doSave() })
@@ -116,7 +110,7 @@ it.each(['success', 'failure'])('ignores a late save %s after switching suites',
 })
 
 it('ignores delayed reads for another suite and allows failed saves to be retried', async () => {
-  const pending = deferred()
+  const pending = deferred<Doc>()
   load.mockReturnValueOnce(pending.promise)
   await act(async () => { render() })
   expect(editor.loading).toBe(true)

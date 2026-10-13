@@ -1,12 +1,14 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CoverageInputReads } from './input-reads'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('coverage-inputs-')
 
 let root: string
-beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-inputs-')) })
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }) })
+beforeEach(() => { root = tempDir() })
+afterEach(() => { vi.restoreAllMocks() })
 
 describe('coverage input checks', () => {
   it('tracks missing files, directory membership, linked trees and cycles without traversing outputs', () => {

@@ -1,14 +1,17 @@
+import { newestFirst } from '../../../../../../shared/journal-order'
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   splitJournalSections,
   filterSections,
-  newestFirst,
   parseStructured,
   readJournal,
 } from './journal-store'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+import { evidenceJournalMarkdown } from '../../../../../../shared/__fixtures__/run-evidence'
+
+const tempDir = trackTempDirs('cl-jrnl-')
 
 const SAMPLE = `# Diagnosis Journal
 
@@ -41,7 +44,7 @@ const SAMPLE = `# Diagnosis Journal
 
 let tmpDir: string
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-jrnl-')))
+  tmpDir = tempDir()
 })
 
 describe('splitJournalSections', () => {
@@ -143,5 +146,35 @@ describe('readJournal', () => {
     fs.writeFileSync(file, SAMPLE)
     const { sections } = readJournal(file)
     expect(sections).toHaveLength(3)
+  })
+})
+
+// The run panel attaches journal entries to repair cycles. Pin what an entry
+// can and cannot say about that today: its input failures arrive as summary
+// NAMES only, so same-title cases in different files share one name, and its
+// per-cycle diff lives inside the body rather than as a field.
+describe('journal as cycle evidence', () => {
+  it('reads the cycle and input-execution stamps of a current entry', () => {
+    const [section] = splitJournalSections('## Iteration 4 — 2026-10-09T00:00:00Z\n\n- failingTests: test-case-a\n- cycle: 3\n- inputExecution: 5\n- cycle.note: ignored\n')
+    expect(section).toMatchObject({ iteration: 4, failingTests: ['test-case-a'], cycle: 3, inputExecution: 5 })
+  })
+
+  it('treats an empty failingTests line and a malformed stamp as absent', () => {
+    const [section] = splitJournalSections('## Iteration 1\n\n- failingTests: \n- cycle: two\n')
+    expect(section.failingTests).toBeUndefined()
+    expect(section.cycle).toBeUndefined()
+  })
+
+  it('carries input failures by name and the cycle diff inside the body', () => {
+    const [first, second] = parseStructured(evidenceJournalMarkdown)
+    expect(first).toMatchObject({ iteration: 1, failingTests: 'test-case-applies-the-discount, test-case-reserves-stock', outcome: 'partial' })
+    expect(second).toMatchObject({ iteration: 2, failingTests: 'test-case-applies-the-discount', outcome: 'all_tests_passed' })
+    const sections = splitJournalSections(evidenceJournalMarkdown)
+    expect(sections.map((s) => s.iteration)).toEqual([1, 2])
+    expect(sections.map((s) => s.failingTests)).toEqual([['test-case-applies-the-discount', 'test-case-reserves-stock'], ['test-case-applies-the-discount']])
+    // An unstamped (legacy) entry claims no cycle at all.
+    expect(sections.map((s) => s.cycle)).toEqual([undefined, undefined])
+    expect(sections[0].body).toContain('```diff\n--- a/src/pricing.ts')
+    expect(sections[1].body).not.toContain('### Diff')
   })
 })

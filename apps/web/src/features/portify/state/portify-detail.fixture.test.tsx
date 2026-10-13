@@ -2,7 +2,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/internal'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { detailFixture } from './portify-detail.fixture'
 
 let root: Root

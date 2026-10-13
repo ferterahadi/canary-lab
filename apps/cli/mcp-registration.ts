@@ -1,10 +1,11 @@
-import { commandAvailable } from './command-available'
+import { commandAvailable } from '../../shared/lib/command-available'
 import { execFileSync } from 'child_process'
 import path from 'path'
 import { claudeGlobalConfigFile } from '../web-server/src/features/agent-sessions/logic/agent-workspace-trust'
-import { isRecord, readMcpConfig } from './mcp-config'
+import { readMcpConfig } from './mcp-config'
 import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tool-profiles'
 import { isUnderTempDir } from '../../shared/runtime/temp-path'
+import { isRecord } from '../../shared/lib/is-record'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 
@@ -44,7 +45,7 @@ export interface SavedMcpEntry {
 // Client config key + display name. Claude Code/Codex show the registered key
 // verbatim (the server's advertised title is ignored), so this drives what the
 // user sees in `/mcp`. Tool prefixes normalize it to `mcp__Canary_Lab__*`.
-const SERVER_NAME = 'Canary_Lab'
+export const SERVER_NAME = 'Canary_Lab'
 // npm package id used in the portable `npx <pkg>@latest` invocation — must stay
 // the publishable package name, not the display key.
 const PACKAGE_NAME = 'canary-lab'

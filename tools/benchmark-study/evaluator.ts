@@ -6,6 +6,7 @@ import { allocatePorts, releasePorts } from '../../apps/web-server/src/features/
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { command, copy, json, prefixedCommand } from './files'
 import { services, serviceInvocation, playwrightOutputArgs } from './runtime'
+import { sleep } from '../../shared/lib/sleep'
 export async function ports(): Promise<Record<string, number>> {
   return Object.fromEntries(await allocatePorts(services.map((name) => ({ name }))))
 }
@@ -50,7 +51,7 @@ export async function withServices<T>(root: string, work: (allocated: Record<str
         if (child.exitCode !== null) throw new Error(`${name} exited before readiness; see ${name}.log`)
         try { ready = (await fetch(`http://127.0.0.1:${allocated[name]}/`, { signal: AbortSignal.timeout(500) })).ok }
         catch { /* poll until the service binds its port */ }
-        if (!ready) await new Promise((resolve) => setTimeout(resolve, 100))
+        if (!ready) await sleep(100)
       }
       if (!ready) throw new Error(`${name} readiness timed out`)
     }

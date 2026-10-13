@@ -1,31 +1,24 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Root } from 'react-dom/client'
+import { afterEach, describe, expect, it } from 'vitest'
 import { awaitingFact, FACT_GLOSS, FACT_HELP, FactTile, type StageFact } from './StageFacts'
 import type { AwaitingState } from '@/shared/ui/Skeleton'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 // The three lines every tile owes: label (+ the `?` that says an explanation
 // exists), value, and a second line that is never blank. The band used to drop
 // that second line exactly when the news was clean — a green run history showed
 // two bare numbers — so these pin the fallback, not just the happy path.
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 let container: HTMLDivElement
 let root: Root
 
-beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
 afterEach(() => {
-  act(() => { root.unmount() })
-  container.remove()
   document.body.querySelector('[role="tooltip"]')?.remove()
 })
+mountRoot({ attach: true, onMount: (mounted) => ({ container, root } = mounted) })
 
 function renderWith(fact: StageFact, awaiting: AwaitingState) {
   act(() => { root.render(<FactTile fact={fact} awaiting={awaiting} />) })

@@ -1,65 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { PtyFactory } from './pty-spawner'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
 import type { RunLifecycleEvent } from '../../../../../../../shared/run-state'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -67,7 +18,7 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -76,26 +27,9 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.runFullCycle', () => {
   function bootForFullCycle(opts: {
-    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakeFactory>['spawned'] }
+    spawned: { factory: PtyFactory; spawned: ReturnType<typeof makeFakePtyFactory>['spawned'] }
     pwExitCodes: number[]
     autoHeal?: boolean
     manualHeal?: boolean
@@ -104,7 +38,7 @@ describe('RunOrchestrator.runFullCycle', () => {
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: opts.spawned.factory,
@@ -142,10 +76,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     // Agent prints a usage-limit banner, then goes silent. The idle timeout
     // fires; the classifier reads the captured tail and records agentCause,
     // and the tail is persisted for the UI's "why" line.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -180,10 +114,10 @@ describe('RunOrchestrator.runFullCycle', () => {
   it('records a max-cycles healEnd when the loop exhausts its cycle cap', async () => {
     // maxCycles:1 — cycle 1 signals a rerun, the rerun re-fails the same set,
     // and the next observeFailures trips the cap → healEnd reason 'max-cycles'.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -219,10 +153,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     // Agent pty is alive AND producing output continuously (never goes
     // idle), but the hard ceiling kicks in. Should write a hard-timeout
     // journal entry — not idle, not exited.
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     let pwIdx = 0
     const orch = new RunOrchestrator({
-      feature: makeFeature(),
+      feature: demoFeature(tmpDir),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -266,10 +200,10 @@ describe('RunOrchestrator.runFullCycle', () => {
     // temp dir for the duration of the test so the orchestrator's
     // os.homedir() lookup resolves there.
     const originalHome = process.env.HOME
-    const homeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-home-')))
+    const homeDir = tempDir('cl-orc-home-')
     process.env.HOME = homeDir
     try {
-      const f = makeFakeFactory()
+      const f = makeFakePtyFactory()
       // Capture the orchestrator's view of the run dir (realpathSync'd
       // tmpDir) so the encoded project path matches.
       const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], autoHeal: true })
@@ -316,7 +250,6 @@ describe('RunOrchestrator.runFullCycle', () => {
     } finally {
       if (originalHome === undefined) delete process.env.HOME
       else process.env.HOME = originalHome
-      try { fs.rmSync(homeDir, { recursive: true, force: true }) } catch { /* best-effort */ }
     }
   }, 15000)
 })

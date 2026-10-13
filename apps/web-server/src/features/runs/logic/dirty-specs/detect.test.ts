@@ -1,8 +1,6 @@
-import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   computeDirty,
   computePendingEdits,
@@ -14,14 +12,14 @@ import {
   type DirtyBaseline,
 } from './detect'
 import * as astExtractor from '../../../../shared/ast-extractor'
+import { git } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('dirty-detect-')
 
 const EMPTY: DirtyBaseline = { lastGreenHashes: {}, runStartHashes: {}, approvedHashes: {} }
 
 let dir: string
-
-function git(args: string[]): void {
-  execFileSync('git', args, { cwd: dir, stdio: 'pipe' })
-}
 
 function writeSpec(name: string, body: string): string {
   const rel = path.join('e2e', name)
@@ -49,7 +47,7 @@ const ONE_ASSERTION_DROPPED = `test('applies voucher', async () => { expect(1).t
 
 /** A run-start copy of the suite in its own directory — what the D9 snapshot is. */
 function writeRunStartCopy(name: string, body: string): string {
-  const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dirty-detect-copy-'))
+  const copyDir = tempDir('dirty-detect-copy-')
   const abs = path.join(copyDir, 'e2e', name)
   fs.mkdirSync(path.dirname(abs), { recursive: true })
   fs.writeFileSync(abs, body)
@@ -57,14 +55,10 @@ function writeRunStartCopy(name: string, body: string): string {
 }
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dirty-detect-'))
-  git(['init', '-q'])
-  git(['config', 'user.email', 't@t.dev'])
-  git(['config', 'user.name', 'test'])
-})
-
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true })
+  dir = tempDir()
+  git(dir, 'init', '-q')
+  git(dir, 'config', 'user.email', 't@t.dev')
+  git(dir, 'config', 'user.name', 'test')
 })
 
 describe('computeDirty', () => {
@@ -101,13 +95,13 @@ describe('computeDirty', () => {
   it('clears once the change is committed (matches HEAD)', async () => {
     writeSpec('voucher.spec.ts', PASS)
     const runStartHashes = hashFeatureSpecs(dir)
-    git(['add', '-A'])
-    git(['commit', '-q', '-m', 'baseline'])
+    git(dir, 'add', '-A')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     // edit then commit — stale run-start baseline still holds PASS, but HEAD now
     // matches the working tree, so the committed change reads clean.
     writeSpec('voucher.spec.ts', TAMPERED)
-    git(['add', '-A'])
-    git(['commit', '-q', '-m', 'change'])
+    git(dir, 'add', '-A')
+    git(dir, 'commit', '-q', '-m', 'change')
     const res = await computeDirty(dir, { ...EMPTY, runStartHashes })
     expect(res.status).toBe('clean')
   })
@@ -240,8 +234,8 @@ describe('computeDirty', () => {
 describe('computeDirty — strength verdict', () => {
   it('reads the before side from the committed spec when there is no run-start copy', async () => {
     const rel = writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
-    git(['add', '.'])
-    git(['commit', '-q', '-m', 'baseline'])
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
 
     const { dirtySpecs } = await computeDirty(dir, EMPTY)
@@ -269,13 +263,12 @@ describe('computeDirty — strength verdict', () => {
 
     expect(dirtySpecs[0].strength?.baseline).toBe('run-start')
     expect(dirtySpecs[0].strength?.verdict).toBe('weaker')
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('falls back to HEAD when the run-start copy no longer holds the spec', async () => {
     const rel = writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
-    git(['add', '.'])
-    git(['commit', '-q', '-m', 'baseline'])
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'baseline')
     writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
     const copyDir = writeRunStartCopy('other.spec.ts', TWO_ASSERTIONS)
     const baseline: DirtyBaseline = { ...EMPTY, runStartSourceDir: copyDir }
@@ -284,7 +277,6 @@ describe('computeDirty — strength verdict', () => {
 
     expect(dirtySpecs.map((d) => d.file)).toEqual([rel])
     expect(dirtySpecs[0].strength?.baseline).toBe('head')
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('carries no verdict when no baseline content is readable', async () => {
@@ -308,7 +300,6 @@ describe('computePendingEdits', () => {
     writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
     const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
     expect(computePendingEdits(dir, copyDir)).toEqual([])
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('reports a modified spec with the edited test and a run-start strength verdict', () => {
@@ -318,7 +309,6 @@ describe('computePendingEdits', () => {
     expect(pending).toHaveLength(1)
     expect(pending[0]).toMatchObject({ file: rel, change: 'modified', affectedTests: ['b'] })
     expect(pending[0].strength).toMatchObject({ baseline: 'run-start' })
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('names every declared test when the pending edit is outside any test body', () => {
@@ -329,18 +319,16 @@ describe('computePendingEdits', () => {
     // No test body changed, so the file-level edit is attributed to both tests
     // rather than to none — the same rule `computeDirty` applies.
     expect(pending[0]).toMatchObject({ file: rel, change: 'modified', affectedTests: ['a', 'b'] })
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('still reports the edit when the live content was committed to HEAD', async () => {
     const rel = writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
-    git(['add', '.'])
-    git(['commit', '-q', '-m', 'agent committed the weakening'])
+    git(dir, 'add', '.')
+    git(dir, 'commit', '-q', '-m', 'agent committed the weakening')
     const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
     expect(computePendingEdits(dir, copyDir).map((p) => `${p.change}:${p.file}:${p.strength?.verdict}`)).toEqual([
       `modified:${rel}:weaker`,
     ])
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('reports a spec added after run start with every test it declares', () => {
@@ -351,7 +339,6 @@ describe('computePendingEdits', () => {
     expect(pending).toHaveLength(1)
     expect(pending[0]).toMatchObject({ file: rel, change: 'added', affectedTests: ['a', 'b'] })
     expect(pending[0].strength?.tests.map((t) => t.kind)).toEqual(['added', 'added'])
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
   it('reports a spec deleted after run start with the tests the copy still holds', () => {
@@ -361,7 +348,6 @@ describe('computePendingEdits', () => {
     expect(pending).toHaveLength(1)
     expect(pending[0]).toMatchObject({ file: 'e2e/two.spec.ts', change: 'deleted', affectedTests: ['a', 'b'] })
     expect(pending[0].strength).toMatchObject({ baseline: 'run-start', verdict: 'weaker' })
-    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 })
 

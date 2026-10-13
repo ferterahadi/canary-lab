@@ -146,3 +146,35 @@ export interface TestFileReview {
   meaningfulChanges?: { before: number[]; after: number[] }
   comparisonAlignment?: Array<{ before?: { line: number; endLine: number }; after?: { line: number; endLine: number } }>
 }
+
+export function deriveRunReviewCapabilities(active: boolean, terminal: boolean, decision: TestReviewDecision | undefined, hasFiles: boolean): Pick<RunTestReview, 'reviewState' | 'allowedActions' | 'nextAction' | 'receipt'> {
+  if (decision) return {
+    reviewState: 'settled' as const,
+    allowedActions: [],
+    nextAction: decision.decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
+    ...(decision.receipt ? { receipt: decision.receipt } : {}),
+  }
+  if (!hasFiles) return { reviewState: 'settled' as const, allowedActions: [], nextAction: 'none' as const }
+  if (active) return {
+    reviewState: 'pending-active' as const,
+    allowedActions: ['adopt-and-rerun', 'restore', 'leave-pending'] as const,
+    nextAction: 'rerun-current' as const,
+  }
+  if (terminal) return {
+    reviewState: 'pending-terminal' as const,
+    allowedActions: ['approve-new-run', 'restore', 'leave-pending'] as const,
+    nextAction: 'restore-or-leave' as const,
+  }
+  return { reviewState: 'locked' as const, allowedActions: [], nextAction: 'none' as const }
+}
+
+
+/** Explicit capability fields, including empty actions, override legacy canAdopt. */
+export function normalizeRunTestReview<T extends Partial<RunTestReview>>(review: T) {
+  return {
+    ...review,
+    reviewState: review.reviewState ?? (review.canAdopt ? 'pending-active' as const : undefined),
+    allowedActions: review.allowedActions ?? (review.canAdopt ? ['adopt-and-rerun', 'restore', 'leave-pending'] as RunTestReview['allowedActions'] : []),
+    nextAction: review.nextAction ?? (review.canAdopt ? 'rerun-current' as const : undefined),
+  }
+}

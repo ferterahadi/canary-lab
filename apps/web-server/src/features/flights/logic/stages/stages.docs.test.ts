@@ -1,54 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
 
-import os from 'os'
-
 import path from 'path'
-
-import { execFileSync } from 'child_process'
-
-// Transparent pass-through by default — every other test in this file spawns
-// real processes (fake npx/claude binaries on PATH). Only the one test below
-// that needs to control child-process event ordering deterministically
-// installs an override via setMockSpawn.
-const { getMockSpawn, setMockSpawn } = vi.hoisted(() => {
-  let impl: ((...args: unknown[]) => unknown) | null = null
-  return {
-    getMockSpawn: () => impl,
-    setMockSpawn: (fn: ((...args: unknown[]) => unknown) | null) => { impl = fn },
-  }
-})
-
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>()
-  return {
-    ...actual,
-    spawn: (...args: unknown[]) => {
-      const impl = getMockSpawn()
-      return impl ? impl(...args) : (actual.spawn as (...a: unknown[]) => unknown)(...args)
-    },
-  }
-})
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
 import { prdSummaryStage } from './prd-summary'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary-render'
 import { readRequirementsDraft } from './requirements-draft'
 
-import type { FlightInject, FlightStageDeps } from './context'
+import type { FlightStageDeps } from './context'
 
-import type { StageContext, StageOutcome } from '../flight-stages'
+import type { StageOutcome } from '../flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightManifest,
-  type FlightStage,
-  type FlightStageKey,
-} from '../../../../../../../shared/flights/types'
+import type { FlightManifest } from '../../../../../../../shared/flights/types'
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { stageContextStub } from './__fixtures__/stage-context'
+import { flightStageCtx, stageDirs, stageDeps, stageManifest } from './__fixtures__/stage-context'
+import { git, initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flight-stages-')
 
 let tmpDir: string
 
@@ -59,82 +31,19 @@ let logsDir: string
 let repoDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-stages-')))
-  featuresDir = path.join(tmpDir, 'features')
-  logsDir = path.join(tmpDir, 'logs')
-  repoDir = path.join(tmpDir, 'product-repo')
-  fs.mkdirSync(featuresDir, { recursive: true })
-  fs.mkdirSync(logsDir, { recursive: true })
-  fs.mkdirSync(repoDir, { recursive: true })
+  ({ tmpDir, featuresDir, logsDir, repoDir } = stageDirs(tempDir()))
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
-
-type InjectCall = { method: string; url: string; payload?: unknown }
-
-type InjectImpl = (call: InjectCall) => { statusCode: number; body: unknown } | undefined
-
-function makeInject(impl: InjectImpl, calls: InjectCall[] = []): FlightInject {
-  return async (opts) => {
-    calls.push(opts)
-    const out = impl(opts) ?? { statusCode: 500, body: { error: `unstubbed ${opts.method} ${opts.url}` } }
-    return { statusCode: out.statusCode, json: () => out.body }
-  }
-}
-
 function deps(over: Partial<FlightStageDeps> = {}): FlightStageDeps {
-  return {
-    featuresDir,
-    logsDir,
-    projectRoot: tmpDir,
-    inject: makeInject(() => undefined),
-    ...over,
-  }
+  return stageDeps({ featuresDir, logsDir, projectRoot: tmpDir }, over)
 }
 
 function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
-  return {
-    flightId: 'fl-test',
-    feature: 'checkout',
-    repoPaths: [repoDir],
-    description: 'checkout flow',
-    opts: { env: 'local', coverageTarget: 100, yolo: false },
-    status: 'running',
-    currentStage: 'similarity',
-    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...over,
-  }
+  return stageManifest(repoDir, over)
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
-  const state = { m }
-  const progressLog: unknown[] = []
-  const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
-    state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
-  }
-  return {
-    progressLog,
-    ctx: stageContextStub({
-      manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      setProgress: (progress) => { progressLog.push(progress) },
-      addAgentSession: (session) => {
-        const stage = state.m.stages.find((candidate) => candidate.key === 'docs')
-        setStage('docs', { agentSessions: [...(stage?.agentSessions ?? []), session] })
-      },
-      patchFlight: (patch) => {
-        state.m = {
-          ...state.m,
-          ...patch,
-          links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
-        }
-      },
-    }),
-    current: () => state.m,
-    setStage,
-  }
+function ctxFor(m: FlightManifest) {
+  return flightStageCtx(m, { logsDir, agentSessionStage: 'docs' })
 }
 
 function configCjs(name: string, repoLocalPath: string, description = 'existing feature'): string {
@@ -192,17 +101,12 @@ describe('docs stage', () => {
   })
 
   function initGitRepoWithDiff(): void {
-    const run = (args: string[]) => execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' })
-    run(['init', '-q', '-b', 'main'])
-    run(['config', 'user.email', 't@t.com'])
-    run(['config', 'user.name', 't'])
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'init'])
-    run(['checkout', '-qb', 'feature'])
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'checkout', '-qb', 'feature')
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\nworld\n'.repeat(5))
-    run(['add', '.'])
-    run(['commit', '-qm', 'change'])
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-qm', 'change')
   }
 
   it('parks even when docs already exist — with `continue` as the release (requirements always pause)', async () => {
@@ -335,7 +239,7 @@ describe('docs stage', () => {
   it('falls back past a no-op diff (same branch as base) to description-only', async () => {
     initGitRepoWithDiff()
     // Stay on main — current === base, diffVsBase short-circuits to null.
-    execFileSync('git', ['checkout', '-q', 'main'], { cwd: repoDir, encoding: 'utf-8' })
+    git(repoDir, 'checkout', '-q', 'main')
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, base: 'main' } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only' } })
@@ -360,42 +264,32 @@ describe('docs stage', () => {
 
   it('detectBaseBranch follows origin/HEAD when it resolves', async () => {
     initGitRepoWithDiff()
-    execFileSync('git', ['checkout', '-q', 'feature'], { cwd: repoDir })
+    git(repoDir, 'checkout', '-q', 'feature')
     // Fake a remote-tracking origin/HEAD pointing at main, without a real remote.
-    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'main'], { cwd: repoDir })
-    execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], { cwd: repoDir })
+    git(repoDir, 'update-ref', 'refs/remotes/origin/main', 'main')
+    git(repoDir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })
   })
 
   it('a genuinely empty diff (no file changes) is treated as no-op and falls through', async () => {
-    const run = (args: string[]) => execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' })
-    run(['init', '-q', '-b', 'main'])
-    run(['config', 'user.email', 't@t.com'])
-    run(['config', 'user.name', 't'])
     fs.writeFileSync(path.join(repoDir, 'a.txt'), 'hi\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'init'])
-    run(['checkout', '-qb', 'feature'])
-    run(['commit', '-qm', 'empty change', '--allow-empty']) // current !== base, but the diff itself is empty
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'checkout', '-qb', 'feature')
+    git(repoDir, 'commit', '-qm', 'empty change', '--allow-empty') // current !== base, but the diff itself is empty
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, base: 'main' } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only' } })
   })
 
   it('a diff over MAX_DIFF_BYTES gets truncated', async () => {
-    const run = (args: string[]) => execFileSync('git', args, { cwd: repoDir, encoding: 'utf-8' })
-    run(['init', '-q', '-b', 'main'])
-    run(['config', 'user.email', 't@t.com'])
-    run(['config', 'user.name', 't'])
     fs.writeFileSync(path.join(repoDir, 'a.txt'), '\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'init'])
-    run(['checkout', '-qb', 'feature'])
+    initGitRepo(repoDir, { branch: 'main' })
+    git(repoDir, 'checkout', '-qb', 'feature')
     fs.writeFileSync(path.join(repoDir, 'a.txt'), Array.from({ length: 40000 }, (_, i) => `line number is quite long here indeed ${i}`).join('\n') + '\n')
-    run(['add', '.'])
-    run(['commit', '-qm', 'huge change'])
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-qm', 'huge change')
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, base: 'main' } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })

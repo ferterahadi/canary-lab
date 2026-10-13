@@ -1,88 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
-  newestFirst,
-  filterEntries,
   parseBodyFields,
   classifyOutcome,
   outcomeBadgeClass,
   outcomeLabel,
   formatJournalFieldKey,
   presentJournalFields,
+  splitLead,
+  codeSpans,
 } from './journal-utils'
-import type { JournalSection } from '@shared/run-detail'
-
-const entry = (overrides: Partial<JournalSection>): JournalSection => ({
-  iteration: 1,
-  timestamp: 't',
-  feature: null,
-  run: null,
-  outcome: null,
-  hypothesis: null,
-  body: '',
-  ...overrides,
-})
-
-describe('newestFirst', () => {
-  it('sorts by iteration descending', () => {
-    const out = newestFirst([entry({ iteration: 1 }), entry({ iteration: 3 }), entry({ iteration: 2 })])
-    expect(out.map((e) => e.iteration)).toEqual([3, 2, 1])
-  })
-
-  it('sinks entries with null iteration to the bottom', () => {
-    const out = newestFirst([entry({ iteration: null }), entry({ iteration: 5 })])
-    expect(out.map((e) => e.iteration)).toEqual([5, null])
-  })
-
-  it('treats missing iteration like null when sorting', () => {
-    const missingIteration = entry({}) as JournalSection
-    delete (missingIteration as { iteration?: number | null }).iteration
-
-    const out = newestFirst([missingIteration, entry({ iteration: 2 })])
-    expect(out.map((e) => e.iteration ?? null)).toEqual([2, null])
-  })
-
-  it('sinks null iteration when the null entry is already last', () => {
-    // V8's sort calls compare(arr[i+1], arr[i]), so we need the nullish
-    // entry as the *later* element to exercise the `a.iteration ?? ...`
-    // nullish arm (as opposed to `b.iteration ?? ...` which fires when
-    // the null entry is first).
-    const out = newestFirst([entry({ iteration: 5 }), entry({ iteration: null })])
-    expect(out.map((e) => e.iteration)).toEqual([5, null])
-  })
-
-  it('treats equal iterations as stable (returns 0)', () => {
-    const out = newestFirst([
-      entry({ iteration: 2, hypothesis: 'a' }),
-      entry({ iteration: 2, hypothesis: 'b' }),
-    ])
-    expect(out).toHaveLength(2)
-  })
-})
-
-describe('filterEntries', () => {
-  const data = [
-    entry({ iteration: 1, feature: 'foo', run: 'r1' }),
-    entry({ iteration: 2, feature: 'bar', run: 'r2' }),
-    entry({ iteration: 3, feature: 'foo', run: 'r2' }),
-  ]
-
-  it('returns all when filter is empty', () => {
-    expect(filterEntries(data, {})).toHaveLength(3)
-  })
-
-  it('filters by feature', () => {
-    expect(filterEntries(data, { feature: 'foo' }).map((e) => e.iteration)).toEqual([1, 3])
-  })
-
-  it('filters by run', () => {
-    expect(filterEntries(data, { run: 'r2' }).map((e) => e.iteration)).toEqual([2, 3])
-  })
-
-  it('combines feature and run filters', () => {
-    expect(filterEntries(data, { feature: 'foo', run: 'r2' }).map((e) => e.iteration)).toEqual([3])
-  })
-})
-
 describe('parseBodyFields', () => {
   it('extracts key/value field lines', () => {
     const body = `## Iteration 1\n\n- feature: foo\n- run: r1\n- fix.file: src/a.ts\n\nfree text`
@@ -203,5 +129,52 @@ describe('presentJournalFields', () => {
       { key: 'feature', value: 'demo' },
       { key: 'mystery', value: 'v' },
     ])).toEqual([])
+  })
+})
+
+describe('splitLead', () => {
+  it('takes the first sentence as the lead, without splitting a path', () => {
+    expect(splitLead('Test is wrong, not the service. a.service.ts runs b() first.')).toEqual({
+      lead: 'Test is wrong, not the service.',
+      rest: 'a.service.ts runs b() first.',
+    })
+  })
+
+  it('ends a lead at a semicolon and drops it', () => {
+    expect(splitLead('spec.ts: check applies to X only; added a stricter check.')).toEqual({
+      lead: 'spec.ts: check applies to X only',
+      rest: 'added a stricter check.',
+    })
+  })
+
+  it('reads past an abbreviation', () => {
+    expect(splitLead('Use a clock, e.g. the fake one. Then rerun.').lead).toBe('Use a clock, e.g. the fake one.')
+  })
+
+  it('keeps a single sentence whole', () => {
+    expect(splitLead('  multiply by 0.9  ')).toEqual({ lead: 'multiply by 0.9', rest: '' })
+  })
+})
+
+describe('codeSpans', () => {
+  it('marks calls, files, constants and backtick spans as code', () => {
+    expect(codeSpans('scheduled() in a-b.service.ts starts RERATE_MONTH via `settle`.')).toEqual([
+      { text: 'scheduled()', code: true },
+      { text: ' in ', code: false },
+      { text: 'a-b.service.ts', code: true },
+      { text: ' starts ', code: false },
+      { text: 'RERATE_MONTH', code: true },
+      { text: ' via ', code: false },
+      { text: 'settle', code: true },
+      { text: '.', code: false },
+    ])
+  })
+
+  it('ends on a code span with no empty tail', () => {
+    expect(codeSpans('edited a.spec.ts')).toEqual([{ text: 'edited ', code: false }, { text: 'a.spec.ts', code: true }])
+  })
+
+  it('leaves plain prose as one part', () => {
+    expect(codeSpans('The discount is 10 percent, not 5.')).toEqual([{ text: 'The discount is 10 percent, not 5.', code: false }])
   })
 })

@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { freezeToolConfig, sessionEvidence } from './agents'
@@ -12,12 +11,12 @@ import { report, summarize } from './report'
 import type { StudyManifest } from './types'
 import { validatePins } from './prepare'
 import { configurationDigest, policyDigests } from './experiment'
+import { trackTempDirs } from '../test-helpers/temp-dir'
 
-const roots: string[] = []
-function temp(): string { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-study-test-')); roots.push(root); return root }
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+const tempDir = trackTempDirs('canary-study-test-')
+afterEach(() => { vi.restoreAllMocks() })
 function fixture(): StudyManifest {
-  const root = fs.realpathSync(temp())
+  const root = tempDir()
   for (const scenario of ['single-service', 'cross-service']) write(path.join(root, 'frozen', scenario, 'checkout-service/server.ts'), 'broken\n')
   for (const mode of ['original', 'plain']) {
     write(path.join(root, `frozen/${mode}-suite/e2e/storefront.spec.ts`), 'protected\n')
@@ -46,7 +45,7 @@ describe('study protocol', () => {
     expect(groupUsage('codex', [parent, tokens(25), approval])?.input).toBe(135)
   })
   it('preserves platform approval usage without mistaking its model for the repair model', () => {
-    const root = temp(); const logPath = path.join(root, 'approval.jsonl')
+    const root = tempDir(); const logPath = path.join(root, 'approval.jsonl')
     const context = JSON.stringify({ type: 'turn_context', payload: { model: 'codex-auto-review', effort: 'low' } })
     const raw = JSON.stringify({ type: 'session_meta', payload: { thread_source: 'guardian_review' } }) + '\n' + context
     write(logPath, raw)
@@ -76,7 +75,7 @@ describe('study protocol', () => {
   it('derives both scenarios from the existing repair recipes without changing the source', () => {
     const original = path.join(sourceRoot, 'templates/project/demo-app')
     const before = digest(original)
-    const root = temp()
+    const root = tempDir()
     buildScenario(original, path.join(root, 'gold'), [])
     buildScenario(original, path.join(root, 'single'), [2])
     buildScenario(original, path.join(root, 'cross'), [0, 1, 2])
@@ -86,7 +85,7 @@ describe('study protocol', () => {
   })
   it('changes only the fixture import in the plain spec and preserves helpers', () => {
     const source = path.join(sourceRoot, 'templates/project/features/storefront-journey')
-    const dest = path.join(temp(), 'plain')
+    const dest = path.join(tempDir(), 'plain')
     plainSuite(source, dest, { workers: 4, retries: 0 })
     expect(fs.readFileSync(path.join(dest, 'e2e/storefront.spec.ts'), 'utf8')).toBe(fs.readFileSync(path.join(source, 'e2e/storefront.spec.ts'), 'utf8').replace("from 'canary-lab/feature-support/log-marker-fixture'", "from '@playwright/test'"))
     expect(digest(path.join(dest, 'e2e/helpers'))).toBe(digest(path.join(source, 'e2e/helpers')))

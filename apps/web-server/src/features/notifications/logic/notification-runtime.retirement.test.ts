@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createNotificationRuntime } from './notification-runtime'
@@ -11,17 +10,17 @@ import { FlightRunStore } from '../../flights/logic/store'
 import { WorkspaceEventBus } from '../../../shared/workspace-events'
 import { runManifest } from '../../runs/logic/__fixtures__/run-manifest'
 import * as review from '../../runs/logic/runtime/run-review-gate'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('notification-scoped-')
 
 let runtime: ReturnType<typeof createNotificationRuntime> | undefined
-const roots: string[] = []
 afterEach(async () => {
   await runtime?.dispose()
   vi.restoreAllMocks()
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notification-scoped-'))
-  roots.push(root)
+  const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const logsDir = path.join(root, 'logs')
   fs.mkdirSync(featuresDir)

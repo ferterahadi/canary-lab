@@ -1,9 +1,11 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { buildTestReviewPacket } from './test-review/packet'
 import { detail } from './__fixtures__/test-review-fixtures'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-review-suite-')
 
 // The report renders the source the VERDICT executed. With a run-start copy in
 // place (D9), an agent's later edit to the live spec must not appear as what the
@@ -13,10 +15,8 @@ import { detail } from './__fixtures__/test-review-fixtures'
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-suite-')))
+  tmpDir = tempDir()
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 function spec(assertion: string): string {
   return `import { test, expect } from '@playwright/test'

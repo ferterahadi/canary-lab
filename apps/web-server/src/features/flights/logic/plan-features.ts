@@ -1,5 +1,5 @@
 import { sameRepoSet } from '../../../shared/repo-identity'
-import crypto from 'crypto'
+import { newTaskId } from '../../../shared/task-id'
 import path from 'path'
 import {
   FileBackedTaskStore,
@@ -16,6 +16,7 @@ import { renderPrompt } from '../../../shared/prompts'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { defaultSpawnAgent, extractJson, type FlightAgentSpawner } from './stages/context'
 import { stopAgentProcesses } from '../../agent-sessions/logic/agent-process'
+import { errorMessage } from '../../../../../../shared/lib/error-message'
 
 /** Outcome of the server's single-feature auto-launch attempt. A name clash
  *  leaves the plan `done` (the dialog reopens on the proposal to rename). */
@@ -155,7 +156,7 @@ export function startPlanFeatures(
   if (running) return running
 
   const task: PlanFeaturesTask = {
-    taskId: `fp_${crypto.randomBytes(6).toString('hex')}`,
+    taskId: newTaskId('fp'),
     repoPaths: args.repoPaths,
     description: args.description,
     ...(args.autopilot === false ? { autopilot: false } : {}),
@@ -246,6 +247,6 @@ async function runPlanAgent(
       }
     }
   } catch (err) {
-    settle({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
+    settle({ status: 'failed', error: errorMessage(err) })
   }
 }

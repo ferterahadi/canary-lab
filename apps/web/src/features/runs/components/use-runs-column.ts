@@ -1,4 +1,5 @@
-import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import { useControlledBoolean } from '@/shared/state/use-controlled-boolean'
+import { usePopoverDismiss } from '@/shared/ui/Overlays'
 // RunsColumn's state: the four pending-confirmation slots, the menu/popover and
 // compact-layout observers, the restart tracker, and the confirm handlers.
 // Lifted out of the component verbatim so the column file is its markup; every
@@ -10,6 +11,7 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { useInvalidationKey } from '@/shared/state/invalidation'
+import { displayError } from '@/shared/api/error-message'
 
 // Below this width the column drops the per-run action buttons for a kebab menu.
 const COMPACT_THRESHOLD_PX = 340
@@ -31,12 +33,7 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null)
   const [runPopoverOpen, setRunPopoverOpen] = useState(false)
   // Controlled when App drives it from the route; uncontrolled otherwise.
-  const [verifyDialogOpenInternal, setVerifyDialogOpenInternal] = useState(false)
-  const verifyDialogOpen = verifyOpen ?? verifyDialogOpenInternal
-  const setVerifyDialogOpen = useCallback((open: boolean) => {
-    if (onVerifyOpenChange) onVerifyOpenChange(open)
-    else setVerifyDialogOpenInternal(open)
-  }, [onVerifyOpenChange])
+  const [verifyDialogOpen, setVerifyDialogOpen] = useControlledBoolean(verifyOpen, onVerifyOpenChange)
   const [compact, setCompact] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { gatePromo } = useMcpPromo()
@@ -74,7 +71,7 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
         : undefined
       const msg = typeof reason === 'string'
         ? `Retest failed: ${reason}`
-        : e instanceof Error ? e.message : 'Retest failed'
+        : displayError(e, 'Retest failed')
       setRestartErrors((prev) => ({ ...prev, [runId]: msg }))
     } finally {
       setRestartingIds((prev) => {
@@ -105,8 +102,8 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
     return () => obs.disconnect()
   }, [])
 
-  useDismissOnOutsideMousedown(() => setOpenMenuRunId(null), Boolean(openMenuRunId), [], (target) => isMenuTarget(target, '[data-run-menu]'))
-  useDismissOnOutsideMousedown(() => setRunPopoverOpen(false), runPopoverOpen, [], (target) => isMenuTarget(target, '[data-run-launch-menu]'))
+  usePopoverDismiss(() => setOpenMenuRunId(null), Boolean(openMenuRunId), [], (target) => isMenuTarget(target, '[data-run-menu]'))
+  usePopoverDismiss(() => setRunPopoverOpen(false), runPopoverOpen, [], (target) => isMenuTarget(target, '[data-run-launch-menu]'))
 
   // Close the popover automatically when leaving compact mode.
   useEffect(() => {

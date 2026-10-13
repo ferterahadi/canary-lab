@@ -1,3 +1,5 @@
+import { ApprovalStore } from './approval-store'
+import { registerApprovalRoutes } from './approval-routes'
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'crypto'
@@ -69,6 +71,10 @@ export async function registerMcpRoutes(
   // rejects every later initialize with -32600 "Server already
   // initialized", so a singleton would cap us at one MCP client per
   // Fastify boot. Keyed by the session id the transport mints on init.
+  const approvals = new ApprovalStore(deps.store.logsDir, deps.workspaceEvents)
+  registerApprovalRoutes(app, approvals)
+  const stopExpiry = approvals.startExpiry()
+  app.addHook('onClose', async () => stopExpiry())
   const transports = new Map<string, NodeStreamableHTTPServerTransport>()
 
   // The session's McpServer, kept alongside its transport. Previously it was
@@ -91,7 +97,7 @@ export async function registerMcpRoutes(
     defaultClientKind: ClientKind | undefined,
   ): McpServer => {
     const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
-    registerCanaryLabTools(mcp, { ...deps, getUiUrl: () => uiUrlFromAddress(app.server.address()) }, {
+    registerCanaryLabTools(mcp, { ...deps, approvals, getUiUrl: () => uiUrlFromAddress(app.server.address()) }, {
       profile,
       defaultClientKind,
       onExecCall: (event) => {

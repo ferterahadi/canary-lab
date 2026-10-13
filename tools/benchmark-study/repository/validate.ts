@@ -6,6 +6,8 @@ import { signalProcessTree } from '../../../apps/web-server/src/shared/process-t
 import { checked, command, copy, json, readJson, sourceRoot } from '../files'
 import { parseResults, type TestEvidence } from '../evaluator'
 import { loadRepositoryStudy, repositoryScenarios, subjectPackageName, type RepositoryScenario, type RepositoryStudyManifest } from './adapter'
+import { stripTerminalEscapes } from '../../../apps/web-server/src/shared/terminal-text'
+import { sleep } from '../../../shared/lib/sleep'
 
 async function requireFreePort(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -25,7 +27,7 @@ async function waitForHost(child: ChildProcess, spawnError: () => Error | undefi
       const response = await fetch('http://127.0.0.1:3411/api/v1/users/me', { signal: AbortSignal.timeout(500) })
       if (response.ok) return
     } catch { /* The host may still be starting. */ }
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleep(200)
   }
   throw new Error('Fixture host readiness timed out')
 }
@@ -71,7 +73,7 @@ export function assertExpectedEvidence(scenario: RepositoryScenario, evidence: T
     return
   }
   const results = specs.map((spec) => spec.tests[0].results[0])
-  const cleanMessage = (message: string): string => message.replace(/\x1b\[[0-9;]*m/g, '')
+  const cleanMessage = (message: string): string => stripTerminalEscapes(message, 'color')
   const messages = results.map((result) => cleanMessage(result.error?.message ?? ''))
   const signatures = scenario === 'overlap'
     ? [/toEqual\(expected\)[\s\S]*"row-2"/, /toBe\(expected\)[\s\S]*Expected:[\s\S]*row-2[\s\S]*Received:[\s\S]*row-1/]
@@ -100,7 +102,7 @@ export async function withRepositoryHost<T>(args: { cwd: string; executable: str
     signalProcessTree(child, 'SIGKILL', { detachedProcessGroup: true })
     if (child.exitCode === null) await Promise.race([
       new Promise<void>((resolve) => child.once('close', () => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+      sleep(5_000),
     ])
     fs.closeSync(log)
   }

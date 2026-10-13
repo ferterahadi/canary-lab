@@ -164,20 +164,23 @@ export function strongestQuality(assertions: TestReviewAssertion[]): AssertionQu
     rank[assertion.quality] > rank[best] ? assertion.quality : best, 'unknown')
 }
 
-export function qualitySummary(assertions: TestReviewAssertion[]): string {
+function formatQualitySummary(
+  assertions: TestReviewAssertion[],
+  label: (quality: AssertionQuality) => string,
+): string {
   const counts = new Map<AssertionQuality, number>()
   for (const assertion of assertions) counts.set(assertion.quality, (counts.get(assertion.quality) ?? 0) + 1)
   return (['strict', 'moderate', 'shallow', 'unknown'] as const)
-    .flatMap((quality) => counts.has(quality) ? [`${counts.get(quality)} ${quality}`] : [])
+    .flatMap((quality) => counts.has(quality) ? [`${counts.get(quality)} ${label(quality)}`] : [])
     .join(', ')
 }
 
+export function qualitySummary(assertions: TestReviewAssertion[]): string {
+  return formatQualitySummary(assertions, (quality) => quality)
+}
+
 export function qualitySummaryForAudience(assertions: TestReviewAssertion[]): string {
-  const counts = new Map<AssertionQuality, number>()
-  for (const assertion of assertions) counts.set(assertion.quality, (counts.get(assertion.quality) ?? 0) + 1)
-  return (['strict', 'moderate', 'shallow', 'unknown'] as const)
-    .flatMap((quality) => counts.has(quality) ? [`${counts.get(quality)} ${qualityLabel(quality)}`] : [])
-    .join(', ')
+  return formatQualitySummary(assertions, qualityLabel)
 }
 
 export function unknownAssertion(rationale: string): TestReviewAssertion {

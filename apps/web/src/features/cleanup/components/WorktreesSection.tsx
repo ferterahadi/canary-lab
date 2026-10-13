@@ -1,13 +1,16 @@
+import { CleanupInventoryFrame } from './CleanupInventoryFrame'
 import { useCleanupInventory } from '../state/use-cleanup-inventory'
 import { useCleanupSelection } from '../state/use-cleanup-selection'
 import { useCleanupAction } from '../state/use-cleanup-action'
 import { useState } from 'react'
 import * as cleanupApi from '@/shared/api/cleanup'
-import type { CleanupWorktree } from '@/shared/api/types-cleanup'
+import type { CleanupWorktree } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
-import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, SpinnerGlyph, WarnGlyph, WorktreeGlyph } from './CleanupTableParts'
+import { CleanupActionBar, CleanupToolbar, CleanupEmptyState, WorktreeGlyph } from './CleanupTableParts'
 import { SEVEN_DAYS_MS, WORKTREE_OWNER_LABEL } from './cleanup-rows'
+import { displayError } from '@/shared/api/error-message'
+import { pluralSuffix } from '@shared/lib/plural'
 
 // Self-contained worktree inventory: every git worktree canary-lab created
 // under the logs dir (frozen-bug snapshots, run isolation, benchmark arms, and
@@ -33,7 +36,7 @@ export function WorktreesSection({ now }: { now: number }) {
       // `window.prompt` this replaced was really being used for.
       if (!r.opened) setActionError(`Could not launch your editor. The worktree is at ${wt.path}`)
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
+      setActionError(displayError(e))
     }
   }
   const remove = async (wt: CleanupWorktree): Promise<void> => {
@@ -70,33 +73,37 @@ export function WorktreesSection({ now }: { now: number }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <CleanupToolbar presets={sorted.length > 0 ? presets : []} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={bulkBusy} loading={inventory.loading} onRefresh={load}>
-        {sorted.length > 0 && <>
-          <span>Worktrees: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
-          <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
-        </>}
-      </CleanupToolbar>
-      {inventory.value !== null && err && <CleanupRefreshError error={err} />}
-      {actionError && (
-        <div role="alert" data-testid="worktrees-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
-      )}
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
-      {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Scanning worktrees…" />}
-      {!loading && err && inventory.value === null && (
-        <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load worktrees" hint={err} action={{ label: 'Retry', onClick: () => void load() }} />
-      )}
-      {!loading && !err && sorted.length === 0 && (
-        <CleanupEmptyState
-          icon={<WorktreeGlyph />}
-          title="No worktrees on disk"
-          hint="Worktrees appear here when you open a frozen bug to inspect, isolate a run, or a benchmark spins up its arms — remove them here to reclaim disk."
-        />
-      )}
-      {sorted.length > 0 && (
+    <>
+      <CleanupInventoryFrame
+        initialLoading={loading}
+        hasSnapshot={inventory.value !== null}
+        error={err}
+        itemCount={sorted.length}
+        onRetry={load}
+        loadingTitle="Scanning worktrees…"
+        errorTitle="Couldn't load worktrees"
+        emptyState={
+          <CleanupEmptyState
+            icon={<WorktreeGlyph />}
+            title="No worktrees on disk"
+            hint="Worktrees appear here when you open a frozen bug to inspect, isolate a run, or a benchmark spins up its arms — remove them here to reclaim disk."
+          />
+        }
+        toolbar={
+          <CleanupToolbar presets={sorted.length > 0 ? presets : []} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={bulkBusy} loading={inventory.loading} onRefresh={load}>
+            {sorted.length > 0 && <>
+              <span>Worktrees: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
+              <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
+            </>}
+          </CleanupToolbar>
+        }
+        actionError={actionError && (
+          <div role="alert" data-testid="worktrees-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+        )}
+      >
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <tr className="cl-rubric" style={{ textAlign: 'left' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Owner</th>
               <th className="py-1 pr-3">Ref</th>
@@ -126,7 +133,7 @@ export function WorktreesSection({ now }: { now: number }) {
                   />
                 </td>
                 <td className="py-1 pr-3">
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  <span className="cl-rubric">
                     {WORKTREE_OWNER_LABEL[wt.ownerKind]}
                   </span>
                   {wt.ownerId && <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{wt.ownerId}</span>}
@@ -155,8 +162,7 @@ export function WorktreesSection({ now }: { now: number }) {
             ))}
           </tbody>
         </table>
-      )}
-      </div>
+      </CleanupInventoryFrame>
 
       {selected.size > 0 && (
         <CleanupActionBar selectedCount={selected.size}>
@@ -179,7 +185,7 @@ export function WorktreesSection({ now }: { now: number }) {
         confirmLabel="Remove"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void doRemoveSelected()}
-        message={<>Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{selectedTargets.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.</>}
+        message={<>Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{pluralSuffix(selectedTargets.length)}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.</>}
       />
 
       <ConfirmModal
@@ -192,6 +198,6 @@ export function WorktreesSection({ now }: { now: number }) {
         onConfirm={() => { if (confirmOne) void remove(confirmOne) }}
         message={<>Run <strong>git worktree remove</strong> on <code style={{ fontFamily: 'var(--font-mono)' }}>{confirmOne?.path}</code>, reclaiming about <strong>{formatBytes(confirmOne?.bytes ?? 0)}</strong>. The source repo is untouched — this only removes the checked-out copy under logs.</>}
       />
-    </div>
+    </>
   )
 }

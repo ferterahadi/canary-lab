@@ -10,6 +10,7 @@
 // than compact JSON). NOTE: @toon-format/toon is ESM-only, so this require()
 // needs Node >=20.19 / >=22.12 — see package.json `engines`.
 import { encode } from '@toon-format/toon'
+import { isRecord } from '../../../../shared/lib/is-record'
 
 type Primitive = string | number | boolean | null
 
@@ -20,10 +21,6 @@ function isPrimitive(value: unknown): value is Primitive {
     typeof value === 'number' ||
     typeof value === 'boolean'
   )
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
@@ -42,7 +39,7 @@ export function encodeToonTable(value: unknown): string {
   const columns: string[] = []
   const seen = new Set<string>()
   for (const row of value) {
-    if (!isPlainObject(row)) return JSON.stringify(value)
+    if (!isRecord(row)) return JSON.stringify(value)
     for (const key of Object.keys(row)) {
       if (!seen.has(key)) {
         seen.add(key)

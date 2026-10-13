@@ -1,6 +1,8 @@
+import { distinctRepoPaths } from '@shared/lib/repository-paths'
 import type { ReactNode } from 'react'
+import './stage-evidence.css'
 import type { FlightManifest, FlightStage, FlightStageKey } from '@shared/flights/types'
-import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/portify'
+import type { PortifyBootInstance, PortifyManifest } from '@shared/portify-index'
 import type { EvaluationExportTaskView } from '@shared/evaluation-export-types'
 import type { FeatureDocsListing } from '@shared/coverage/feature-docs'
 import type { CoverageLedger } from '@shared/coverage/types'
@@ -13,7 +15,7 @@ import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { STAGE_COLUMN, evidenceOf, num, portifyWorkflowId, progressOf, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at
@@ -70,6 +72,7 @@ export interface StageBandData {
   ledger?: CoverageLedger | null
   /** The dry-run boot the env-capture stage performed, for its boot span. */
   boot?: RunDetail | null
+  setupError?: string | null
   /** The portify workflow, for attempts, instances and the overlay diff. */
   portify?: PortifyManifest | null
   portifyRecovery?: { error: string | null; missing: boolean; retry: () => void }
@@ -135,7 +138,7 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
  *  is only meaningful when a match actually exists. */
 const slots = (...labels: string[]): readonly string[] => labels
 
-const REPORT_FACT_SLOTS = slots('Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven')
+const REPORT_FACT_SLOTS = slots('Requirements with tests', 'Test depth', 'Requirements proven')
 const RUN_HISTORY_FACT_SLOTS = slots('Runs performed', 'Succeeded', 'Avg duration')
 
 const FACT_SLOTS: Partial<Record<FlightStageKey, readonly string[]>> = {
@@ -176,7 +179,9 @@ export function stageFacts(
   band: StageBandData = {},
 ): StageFact[] {
   const measured = measuredStageFacts(stage, flight, companion, band)
-  const contract = FACT_SLOTS[stage.key]
+  const contract = stage.key === 'scaffold' && band.config?.services === 0
+    ? slots('Local services', 'Boot time', 'Env files')
+    : FACT_SLOTS[stage.key]
   return contract ? materializeFactSlots(contract, measured) : measured
 }
 
@@ -269,6 +274,16 @@ function measuredStageFacts(
       ]
     }
     case 'scaffold': {
+      if (band.config?.services === 0) {
+        const captured = num(cev, 'captured')
+        return [
+          { label: 'Local services', value: 'Not required', sub: 'No start commands configured', help: 'This suite does not start local services.' },
+          { label: 'Boot time', value: 'Not applicable', sub: 'Nothing to start locally', help: 'No local boot is required for this suite.' },
+          ...(captured === null
+            ? [{ label: 'Env files', value: 'Not recorded', sub: 'No capture count available' }]
+            : envFileFacts(flight, captured)),
+        ]
+      }
       // This stage CONFIGURES, so its settings are not its evidence: the worker
       // count and the service list are inputs the user can edit six inches
       // below, and counting them here measures nothing. What it actually proved
@@ -556,12 +571,13 @@ function measuredStageFacts(
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
     case 'evaluation-export': {
-      // The Report measures four distinct evidence axes. This function emits
-      // only what was measured; the Report contract keeps every frontend slot
-      // mounted around it. Requirements and proof need a requirement
-      // model; test depth only needs authored tests; outcomes need recorded
-      // executions. Export identity and archive metadata stay on the
-      // deliverable card instead of replacing a missing evidence axis here.
+      // The Report measures three evidence axes. This function emits only what
+      // was measured; the Report contract keeps every frontend slot mounted
+      // around it. Requirements and proof need a requirement model; test depth
+      // only needs authored tests. The run's test outcomes ride the proof tile's
+      // sub-line, since they are what the conclusion is drawn from. Export
+      // identity and archive metadata stay on the deliverable card instead of
+      // replacing a missing evidence axis here.
       const led = ledgerEvidence(band.ledger)
       const reportRunId = evalTask?.runId ?? str(ev, 'runId')
       const bandFacts: StageFact[] = [
@@ -589,20 +605,9 @@ function measuredStageFacts(
               }
             })()]
           : []),
-        // Outcomes stay useful without requirement labels. Require at least one
-        // recorded result so an authored suite with no joined run does not read
-        // as a 0/N execution finding.
-        ...(led && led.outcomes.passed + led.outcomes.failed > 0
-          ? [{
-              label: 'Tests that passed',
-              value: `${led.outcomes.passed}/${led.outcomes.total}`,
-              big: true as const,
-              tone: led.outcomes.passed === led.outcomes.total ? 'good' as const : 'warn' as const,
-              sub: passedSub(led),
-            }]
-          : []),
-        // GATE TWO — the requirement conclusion stays last when that axis
-        // exists, after the evidence that explains it.
+        // GATE TWO — the requirement conclusion stays last, after the claim and
+        // depth that frame it. Its sub-line carries the run outcomes it is
+        // drawn from.
         ...(led && led.total > 0 && led.proven != null
           ? [{
               label: 'Requirements proven',
@@ -630,37 +635,37 @@ function claimedSub(led: LedgerEvidence): string {
   return `${gaps} not fully covered`
 }
 
-/** What became of every test in the suite. Empty buckets drop out, and a clean
- *  sweep says so rather than leaving the tile bare — "18/18" with no sub-line
- *  reads as a truncated tile.
+/** What became of every test in the suite, unmapped ones included. Empty
+ *  buckets drop out.
  *
- *  Two honesty caveats displace the clean-sweep line when they apply: a pass
- *  that needed a Playwright retry is a flake, not a clean pass, and a summary
- *  merged forward across partial heal reruns never saw all its passes in one
- *  execution. Both come off the run's own summary (never re-derived here), and
- *  "every test passed" without them would be the exact rounding-up this band
- *  exists to prevent. */
-function passedSub(led: LedgerEvidence): string {
+ *  Two honesty caveats ride along when they apply: a pass that needed a
+ *  Playwright retry is a flake, not a clean pass, and a summary merged forward
+ *  across partial heal reruns never saw all its passes in one execution. Both
+ *  come off the run's own summary (never re-derived here), and "7/7 tests
+ *  passed" without them would be the exact rounding-up this band exists to
+ *  prevent. */
+function outcomesLine(led: LedgerEvidence): string {
   const { outcomes } = led
   const parts = [
+    `${outcomes.passed}/${outcomes.total} tests passed`,
     ...(outcomes.failed > 0 ? [`${outcomes.failed} failed`] : []),
     ...(outcomes.neverRan > 0 ? [`${outcomes.neverRan} never ran`] : []),
     ...(outcomes.passedOnRetry > 0 ? [`${outcomes.passedOnRetry} passed on a retry`] : []),
+    ...(led.spansExecutions ? ['across partial runs'] : []),
   ]
-  const line = parts.length > 0 ? parts.join(' · ') : 'every test passed'
-  return led.spansExecutions ? `${line} · across partial runs` : line
+  return parts.join(' · ')
 }
 
-/** The conclusion tile's sub-line — the RULE that turns the other evidence into
- *  this number. A suite can have every requirement claimed and two tests passing
- *  and still prove nothing, because a requirement counts only when every path it
- *  declares is backed by a test that passed. Without that sentence the
- *  arithmetic looks broken.
+/** The conclusion tile's sub-line — the run outcomes the number is drawn from.
+ *  "1/3 tests passed · 1 failed · 1 never ran" under `0/6` is what explains it:
+ *  a requirement counts only when every path it declares is backed by a test
+ *  that passed, a rule the tooltip states. With no recorded outcome to show
+ *  (a proof the ledger joined without one), the line states that rule itself.
  *
  *  The engine joins the proven axis against the feature's LATEST recorded run,
  *  which is this report's run right after an export and stops being it the moment
  *  the suite runs again. When the ledger's run and the report's run differ, that
- *  caveat displaces the rule: a number attributed to the wrong run is a worse
+ *  caveat displaces the outcomes, which come off the same join: a number attributed to the wrong run is a worse
  *  problem than an unexplained one, and the deliverable card underneath names the
  *  report's own run a few inches below. */
 // `reportRunId` admits null as well as undefined because its two sources differ:
@@ -671,7 +676,7 @@ function provenSub(led: LedgerEvidence, reportRunId: string | null | undefined):
   if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
     return `measured on run ${led.provenRunId}, not this one`
   }
-  if (led.proven != null && led.proven === led.total) return 'every requirement had a test that passed'
+  if (led.outcomes.passed + led.outcomes.failed > 0) return outcomesLine(led)
   return 'each path needs a test that passed'
 }
 
@@ -797,14 +802,13 @@ export const FACT_HELP: Record<string, string> = {
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
   'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
   // Evaluation report
-  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under tests passed and requirements proven.',
+  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under requirements proven.',
   // All four tiers defined where the words are shown — the same definitions the
   // Composition card's hover titles carry (STRENGTH_TIER_HELP). The strong tier
   // needs a non-local URL, so a local-only suite genuinely tops out at solid;
   // saying so keeps its ceiling from reading as a defect.
   'Test depth': 'How much each test really checks. Strong — a real browser or outside system confirmed it. Solid — the app’s own API or UI said so. Basic — a database row changed. Shallow — only the app’s own log. Strong needs a non-local URL, so a local-only suite tops out at solid.',
-  'Tests that passed': 'Every test in this suite’s latest recorded run. A test the run never reached is not counted as a pass.',
-  'Requirements proven': 'A test has to exist and pass for every declared path. Depth is reported separately — a shallow pass still proves.',
+  'Requirements proven': 'A test has to exist and pass for every declared path; a shallow pass still proves. The line below counts every test in the latest run — one it never reached is not a pass.',
 }
 
 /** The static second line, used only when the fact carries no measured `sub`.
@@ -838,7 +842,6 @@ export const FACT_GLOSS: Record<string, string> = {
   'Files edited': 'fixed ports swapped out',
   'Instances proven': 'two copies ran at once',
   'Requirements with tests': 'claimed by a test’s label',
-  'Tests that passed': 'in the run this report reads',
   'Requirements proven': 'a passing test backs every path',
   'Cells run': 'test files × disturbances',
   'Findings': 'held in the green run, broke here',
@@ -948,19 +951,19 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       {f.awaiting ? (
         <FactPlaceholder awaiting={awaiting} />
       ) : f.big ? (
-        <div className="mt-1 flex items-baseline gap-1 leading-none">
+        <div data-testid="fact-value" className="mt-1 flex h-[22px] items-center gap-1 leading-none">
           <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
         </div>
       ) : (
         <div
-          className="mt-1 min-w-0 truncate cl-type-data"
+          data-testid="fact-value" className="mt-1 flex h-[22px] min-w-0 items-center cl-type-data"
           title={f.title ?? f.value}
           style={{ color: toneColor ?? 'var(--text-secondary)', ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}) }}
         >
-          {f.value}
+          <span className="truncate">{f.value}</span>
         </div>
       )}
-      {sub ? <div data-testid="fact-sub" className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
+      {sub ? <div data-testid="fact-sub" title={sub} className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
     </div>
   )
   return help ? <Tooltip label={help}>{tile}</Tooltip> : tile
@@ -972,29 +975,34 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
  *  Facts render as a responsive tile grid (R77): numeric facts get a large
  *  metric treatment (coverage %, pass N of M), text/path facts stay quiet — one
  *  layout that fits every stage's mix of scalar and sentence values. */
-export function FactsGrid({ facts, aside, awaiting = 'idle' }: {
+export function FactsGrid({ facts, aside, toolbar, footer, awaiting = 'idle' }: {
   facts: StageFact[]
   /** Passed to every tile: the pane's one awaiting state, so every placeholder
    *  in the band says the same thing about why it is empty. */
   awaiting?: AwaitingState
   /** The stage's one card-level action, on the kicker line (`PanelCard.aside`). */
   aside?: ReactNode
+  /** Shared stage heading and actions, integrated into the evidence card. */
+  toolbar?: ReactNode
+  footer?: ReactNode
 }) {
-  if (facts.length === 0) return null
+  if (facts.length === 0 && !toolbar) return null
   return (
     // Same column as every stage panel — the tile grid wraps inside it and
     // long values truncate within a tile, never sprawling the whole pane.
-    <div className={STAGE_COLUMN}>
-      <PanelCard kicker="At a glance" aside={aside} testId="stage-facts-card">
+    <div className={`${STAGE_COLUMN}${toolbar ? ' cl-stage-evidence' : ''}`}>
+      <PanelCard kicker={toolbar ? undefined : 'At a glance'} aside={aside} testId="stage-facts-card">
+        {toolbar}
         <div
           data-testid="stage-facts"
-          className="grid gap-2"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
+          className={toolbar ? 'cl-stage-evidence-facts' : 'grid gap-2'}
+          style={toolbar ? undefined : { gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
         >
           {facts.map((f, i) => (
             <FactTile key={`${f.label}-${i}`} fact={f} awaiting={awaiting} />
           ))}
         </div>
+        {footer}
       </PanelCard>
     </div>
   )

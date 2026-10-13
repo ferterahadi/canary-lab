@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   readManifest,
@@ -15,10 +14,12 @@ import {
 } from './manifest'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { runsIndexPath } from './run-paths'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
+const tempDir = trackTempDirs('cl-mf-')
 let tmpDir: string
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mf-')))
+  tmpDir = tempDir()
 })
 
 function makeManifest(over: Partial<RunManifest> = {}): RunManifest {
@@ -174,16 +175,12 @@ describe('service status updates', () => {
 
 describe('suiteDirForReading', () => {
   it('prefers the run-start copy while it exists, else the live feature dir, else nothing', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-suite-dir-'))
-    try {
-      const taken = { kind: 'taken' as const, dir, takenAt: 'x', digest: 'd' }
-      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: taken })).toBe(dir)
-      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { ...taken, dir: path.join(dir, 'gone') } })).toBe('/live')
-      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { kind: 'unavailable', at: 'x', reason: 'r' } })).toBe('/live')
-      expect(suiteDirForReading({ featureDir: '/live' })).toBe('/live')
-      expect(suiteDirForReading({})).toBeUndefined()
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true })
-    }
+    const dir = tempDir('cl-suite-dir-')
+    const taken = { kind: 'taken' as const, dir, takenAt: 'x', digest: 'd' }
+    expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: taken })).toBe(dir)
+    expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { ...taken, dir: path.join(dir, 'gone') } })).toBe('/live')
+    expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { kind: 'unavailable', at: 'x', reason: 'r' } })).toBe('/live')
+    expect(suiteDirForReading({ featureDir: '/live' })).toBe('/live')
+    expect(suiteDirForReading({})).toBeUndefined()
   })
 })

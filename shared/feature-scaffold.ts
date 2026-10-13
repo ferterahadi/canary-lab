@@ -1,6 +1,8 @@
+import { isSpecFile } from './spec-files'
 import { normalizeEnvironmentNames } from './lib/environment-names'
 import fs from 'fs'
 import path from 'path'
+import { isRecord } from './lib/is-record'
 
 export const CANONICAL_PLAYWRIGHT_CONFIG = 'playwright.config.ts'
 export const LOG_MARKER_FIXTURE_IMPORT = 'canary-lab/feature-support/log-marker-fixture'
@@ -101,14 +103,14 @@ export function validateGeneratedFeatureFiles(
     if (!byPath.has(required)) return { ok: false, error: `missing required file "${required}"` }
   }
 
-  if (!files.some((file) => /^e2e\/[^/]+\.spec\.ts$/.test(file.path))) {
-    return { ok: false, error: 'missing required e2e/*.spec.ts file' }
+  if (!files.some((file) => file.path.startsWith('e2e/') && isSpecFile(file.path))) {
+    return { ok: false, error: 'missing required spec or test file under e2e/' }
   }
 
   for (const file of files) {
-    if (file.path.endsWith('.spec.ts')) {
-      if (!file.path.startsWith('e2e/') || file.path.split('/').length !== 2) {
-        return { ok: false, error: `spec file "${file.path}" must live directly under e2e/` }
+    if (isSpecFile(file.path)) {
+      if (!file.path.startsWith('e2e/')) {
+        return { ok: false, error: `spec file "${file.path}" must live under e2e/` }
       }
       if (!file.content.includes(LOG_MARKER_FIXTURE_IMPORT)) {
         return { ok: false, error: `spec file "${file.path}" must import ${LOG_MARKER_FIXTURE_IMPORT}` }
@@ -137,16 +139,16 @@ export function validateGeneratedSpecFiles(
     if (!pathResult.ok) return pathResult
     if (seen.has(file.path)) return { ok: false, error: `duplicate generated file "${file.path}"` }
     seen.add(file.path)
-    if (!file.path.endsWith('.spec.ts')) continue
+    if (!isSpecFile(file.path)) continue
     specCount += 1
-    if (!file.path.startsWith('e2e/') || file.path.split('/').length !== 2) {
-      return { ok: false, error: `spec file "${file.path}" must live directly under e2e/` }
+    if (!file.path.startsWith('e2e/')) {
+      return { ok: false, error: `spec file "${file.path}" must live under e2e/` }
     }
     if (!file.content.includes(LOG_MARKER_FIXTURE_IMPORT)) {
       return { ok: false, error: `spec file "${file.path}" must import ${LOG_MARKER_FIXTURE_IMPORT}` }
     }
   }
-  if (specCount === 0) return { ok: false, error: 'missing required e2e/*.spec.ts file' }
+  if (specCount === 0) return { ok: false, error: 'missing required spec or test file under e2e/' }
   return { ok: true }
 }
 
@@ -325,10 +327,6 @@ function formatRepos(repos: FeatureScaffoldRepo[]): string {
     return `{\n      ${fields.join(',\n      ')}\n    }`
   })
   return `[\n    ${rendered.join(',\n    ')}\n  ]`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function escapeSingleQuoted(value: string): string {

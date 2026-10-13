@@ -1,3 +1,5 @@
+import { normalizeRunTestReview } from '@shared/test-review'
+import { isActiveRunStatus, isTerminalRunStatus } from '@shared/run-state'
 import { useEffect, useRef, useState } from 'react'
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import type { RunDetail } from '@shared/run-detail'
@@ -19,7 +21,7 @@ import { shortRunRef } from '@/shared/lib/format'
 import { TEST_CHANGE_KINDS } from '@/shared/lib/test-versions'
 import { StatusDot } from '@/shared/ui/atoms'
 import { ChevronLeftIcon, ChevronRightIcon } from '@/shared/ui/Icons'
-import { Modal } from '@/shared/ui/Overlays'
+import { CODE_DIALOG_SIZE, Modal } from '@/shared/ui/Overlays'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '@/shared/ui/TestChangeMark'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -28,6 +30,7 @@ import { featureTone, pendingFileScope, specTone } from '../utils/spec-integrity
 import { SpecToneChip } from './SpecToneChip'
 import { FullTestReview } from './FullTestReview'
 import type { ReviewFocus } from '../../../shared/lib/workspace-view-state'
+import { displayError } from '@/shared/api/error-message'
 
 interface Props {
   features: Feature[]
@@ -94,7 +97,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const act = async (action: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
     setError(null)
-    try { await action() } catch (err) { setError(err instanceof Error ? err.message : 'Action failed') }
+    try { await action() } catch (err) { setError(displayError(err, 'Action failed')) }
     finally { setBusy(false) }
   }
   const choose = (feature: string, file: string): void => {
@@ -109,12 +112,14 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
     : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
   const comparisonDir = comparisonManifest?.featureDir
-  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
+  // The run store skips detail reads in a hidden tab. An unknown manifest must
+  // not hold the comparison, so only a known missing snapshot withholds it.
+  const snapshotDir = !comparisonManifest ? undefined : comparisonManifest.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : null
   const sourceComparison = useTestSourceComparison({
     feature: selected?.name, runId: comparisonRunId, featureDir: comparisonDir, snapshotDir, refreshKey: testChanges,
   })
   const comparison = sourceComparison.comparison
-  const runFiles = selected && comparisonRunId && snapshotDir ? {
+  const runFiles = selected && comparisonRunId && snapshotDir !== null ? {
     feature: selected.name, runId: comparisonRunId, files: comparison.files,
     changedFiles: comparison.differences.map((item) => item.file),
     changes: comparison.state === 'ready' ? comparison.changes : undefined,
@@ -138,7 +143,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
     ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
-  const missingSnapshot = !!comparisonRunId && ((!!comparisonManifest && !snapshotDir) || !!currentRunFiles?.missingSnapshot)
+  const missingSnapshot = !!comparisonRunId && (snapshotDir === null || !!currentRunFiles?.missingSnapshot)
   // RunStore decisions arrive through the run WebSocket as a new manifest.
   // Use that pushed revision to refetch the REST-only review immediately;
   // bounded reconciliation below remains the missed-event recovery path.
@@ -151,7 +156,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     leaseMs: 15000,
     refreshKey: reviewRefreshKey,
   })
-  const reviewState = runReview.value?.reviewState ?? (runReview.value?.canAdopt && run && ['running', 'healing'].includes(run.status) ? 'pending-active' : undefined)
+  const normalizedReview = normalizeRunTestReview(runReview.value ?? {})
+  // Legacy inferred capabilities still need the browser's current-run race guard.
+  const reviewState = runReview.value?.reviewState || (run && isActiveRunStatus(run.status)) ? normalizedReview.reviewState : undefined
   const pendingRunReview = reviewState === 'pending-active' || reviewState === 'pending-terminal'
   // A decision must display the same recorded-run boundary its exact revision
   // will settle. Otherwise a cold pending-review link can show Git changes
@@ -163,16 +170,16 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     leaseMs: 15000,
   })
   const reviewStateMatchesRun = reviewState === 'pending-active'
-    ? !!run && ['running', 'healing'].includes(run.status)
+    ? !!run && isActiveRunStatus(run.status)
     : reviewState === 'pending-terminal'
-      ? !!run && ['passed', 'failed', 'aborted'].includes(run.status)
+      ? !!run && isTerminalRunStatus(run.status)
       : false
   const reviewRun = run && reviewStateMatchesRun && (!useRunBaseline || run.runId === comparisonRunId)
     && runReview.value?.files.length
-    && (runReview.value.allowedActions ?? (runReview.value.canAdopt ? ['adopt-and-rerun', 'restore'] : []))
+    && normalizedReview.allowedActions
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
-  const comparisonAllowsAction = !comparisonRunId || !snapshotDir || sourceComparison.confirmed
+  const comparisonAllowsAction = !comparisonRunId || snapshotDir === null || sourceComparison.confirmed
   const reviewRevision = comparisonAllowsAction && runReview.confirmed && reviewRun ? runReview.value?.review_revision : undefined
   const featureReviewRevision = comparisonAllowsAction && featureReview.confirmed && suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
   const displayedRunRevision = useRef<string | undefined>(undefined)
@@ -238,9 +245,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         title="Compare test versions"
         ariaLabel="Changed test files"
         testId="dirty-review-dialog"
-        width={2560}
-        height="96vh"
-        viewportInset={2}
+        {...CODE_DIALOG_SIZE}
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         footer={<div className="cl-review-footer" data-testid="dirty-review-actions">
           <div className="cl-review-footer-navigation" ref={setNavigationTarget}>

@@ -1,7 +1,6 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { runGit } from '../../../../shared/git-repo'
 import {
   OVERLAY_VERSION,
@@ -16,21 +15,12 @@ import {
 } from './overlay'
 import { patchFileName } from '../../../../../../../shared/portify-overlay'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-const roots: string[] = []
-afterEach(() => {
-  for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }) } catch { /* ignore */ } }
-  roots.length = 0
-})
-
-function tmpDir(prefix: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
-  roots.push(root)
-  return root
-}
+const tempDir = trackTempDirs('portify-overlay-feat-')
 
 function tmpRepo(initialFile: { name: string; body: string }): string {
-  const root = tmpDir('portify-overlay-git-')
+  const root = tempDir('portify-overlay-git-')
   fs.writeFileSync(path.join(root, initialFile.name), initialFile.body)
   initGitRepo(root)
   return root
@@ -50,7 +40,7 @@ describe('patchFileName', () => {
 
 describe('overlay write/read round-trip', () => {
   it('persists meta + per-repo patch and reads them back', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const patch = 'diff --git a/app.js b/app.js\n@@ -1 +1 @@\n-const PORT = 3007\n+const PORT = process.env.PORT\n'
 
     const meta = writeOverlay(featureDir, {
@@ -75,7 +65,7 @@ describe('overlay write/read round-trip', () => {
   })
 
   it('overwrites a prior overlay and clears orphaned patch files', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't1',
       repos: [{ name: 'gone', baseSha: 's', patch: 'x', touchedFiles: [] }],
@@ -95,7 +85,7 @@ describe('overlay write/read round-trip', () => {
 
 describe('overlayExists / readOverlay edge cases', () => {
   it('treats a meta.json whose repos field is not an array as absent', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const dir = path.join(featureDir, 'portify')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(
@@ -107,20 +97,20 @@ describe('overlayExists / readOverlay edge cases', () => {
   })
 
   it('reports false with no overlay and null on read', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     expect(overlayExists(featureDir)).toBe(false)
     expect(readOverlay(featureDir)).toBeNull()
   })
 
   it('reports false for an overlay with zero repos', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     writeOverlay(featureDir, { featureName: 'f', agent: 'claude', capturedAt: 't', repos: [] })
     expect(overlayExists(featureDir)).toBe(false)
     expect(readOverlay(featureDir)).toBeNull()
   })
 
   it('treats a missing patch file as a corrupt (absent) overlay', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
       repos: [{ name: 'api', baseSha: 's', patch: 'x', touchedFiles: [] }],
@@ -130,7 +120,7 @@ describe('overlayExists / readOverlay edge cases', () => {
   })
 
   it('removeOverlay deletes the directory', () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
       repos: [{ name: 'api', baseSha: 's', patch: 'x', touchedFiles: [] }],
@@ -162,7 +152,7 @@ describe('checkStaleness', () => {
   it('reports not stale when touched files are unchanged since capture', async () => {
     const repo = await tmpRepo({ name: 'app.js', body: 'const PORT = 3007\n' })
     const base = await headSha(repo)
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const touchedFiles = await captureTouchedFiles(repo, base, ['app.js'])
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
@@ -177,7 +167,7 @@ describe('checkStaleness', () => {
   it('flags a touched file whose contents drifted since capture', async () => {
     const repo = await tmpRepo({ name: 'app.js', body: 'const PORT = 3007\n' })
     const base = await headSha(repo)
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const touchedFiles = await captureTouchedFiles(repo, base, ['app.js'])
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
@@ -196,7 +186,7 @@ describe('checkStaleness', () => {
   it('flags a touched file that was deleted since capture', async () => {
     const repo = await tmpRepo({ name: 'app.js', body: 'const PORT = 3007\n' })
     const base = await headSha(repo)
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const touchedFiles = await captureTouchedFiles(repo, base, ['app.js'])
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
@@ -214,7 +204,7 @@ describe('checkStaleness', () => {
   it('skips repos whose git root could not be resolved', async () => {
     const repo = await tmpRepo({ name: 'app.js', body: 'const PORT = 3007\n' })
     const base = await headSha(repo)
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const touchedFiles = await captureTouchedFiles(repo, base, ['app.js'])
     writeOverlay(featureDir, {
       featureName: 'f', agent: 'claude', capturedAt: 't',
@@ -227,7 +217,7 @@ describe('checkStaleness', () => {
   })
 
   it('returns not stale when there is no overlay', async () => {
-    const featureDir = tmpDir('portify-overlay-feat-')
+    const featureDir = tempDir()
     const res = await checkStaleness(featureDir, {})
     expect(res.stale).toBe(false)
   })

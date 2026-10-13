@@ -1,38 +1,3 @@
-// Pure utilities for the Journal tab. The server already filters and orders
-// entries via the `?run=` / `?feature=` query, but we re-derive these client
-// side too so the in-place "show all runs" toggle and the optimistic-after-
-// delete refresh don't always need a round trip.
-
-import type { JournalSection } from '@shared/run-detail'
-
-// Newest first by iteration. Entries with a null iteration sink to the
-// bottom (this is also what the server returns, but we re-sort to be safe
-// after a client-side mutation).
-export function newestFirst(entries: readonly JournalSection[]): JournalSection[] {
-  return [...entries].sort((a, b) => {
-    const ai = a.iteration ?? -Infinity
-    const bi = b.iteration ?? -Infinity
-    if (ai === bi) return 0
-    return bi > ai ? 1 : -1
-  })
-}
-
-export interface JournalFilter {
-  feature?: string
-  run?: string
-}
-
-export function filterEntries(
-  entries: readonly JournalSection[],
-  filter: JournalFilter,
-): JournalSection[] {
-  return entries.filter((e) => {
-    if (filter.feature && e.feature !== filter.feature) return false
-    if (filter.run && e.run !== filter.run) return false
-    return true
-  })
-}
-
 // Pull `- key: value` lines out of the entry body. The server-side parser
 // only surfaces a handful of fields as structured columns; this digs further
 // so the UI can render every field the user wrote without having to ship a
@@ -140,4 +105,44 @@ export function outcomeBadgeClass(outcome: OutcomeBadge): string {
 export function outcomeLabel(outcome: OutcomeBadge): string {
   if (outcome === 'applicable_passed') return 'applicable tests passed'
   return outcome.replaceAll('_', ' ')
+}
+
+// A journal field's first sentence is its takeaway; the rest is its working.
+// A sentence ends at `.`, `!`, `?` or `;` followed by whitespace, so a path
+// (`a.service.ts`) or an abbreviation (`e.g.`) never splits one. A trailing
+// `;` belongs to the clause it closes, so the lead drops it.
+const LEAD_END_RE = /[.!?;](?=\s+\S)/g
+const ABBREVIATION_RE = /\b(?:e\.g|i\.e|vs|cf|etc)$/i
+
+export function splitLead(text: string): { lead: string; rest: string } {
+  const trimmed = text.trim()
+  for (const match of trimmed.matchAll(LEAD_END_RE)) {
+    const end = match.index
+    if (match[0] === '.' && ABBREVIATION_RE.test(trimmed.slice(0, end))) continue
+    const lead = trimmed.slice(0, match[0] === ';' ? end : end + 1)
+    return { lead, rest: trimmed.slice(end + 1).trim() }
+  }
+  return { lead: trimmed, rest: '' }
+}
+
+// Spans of agent prose that name code: a backtick span, a call (`fn()`), a
+// source file, or a SCREAMING_SNAKE constant. They render in mono so the
+// sentence around them reads as English.
+const CODE_TOKEN_RE = /`([^`]+)`|[A-Za-z_$][\w$.]*\(\)|[\w@][\w./-]*\.(?:[cm]?[jt]sx?|json|md|ya?ml|py|go|rb|rs|java|kt|sql|s?css|html|sh)\b|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g
+
+export interface ProsePart {
+  text: string
+  code: boolean
+}
+
+export function codeSpans(text: string): ProsePart[] {
+  const out: ProsePart[] = []
+  let at = 0
+  for (const match of text.matchAll(CODE_TOKEN_RE)) {
+    if (match.index > at) out.push({ text: text.slice(at, match.index), code: false })
+    out.push({ text: match[1] ?? match[0], code: true })
+    at = match.index + match[0].length
+  }
+  if (at < text.length) out.push({ text: text.slice(at), code: false })
+  return out
 }

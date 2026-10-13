@@ -4,8 +4,6 @@ import { createRoot } from 'react-dom/client'
 import { expect, it } from 'vitest'
 import { useCleanupSelection } from './use-cleanup-selection'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 it('lets a user deselect eligible rows and refuses stale callbacks for protected rows', () => {
   const container = document.createElement('div')
   const root = createRoot(container)

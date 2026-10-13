@@ -23,6 +23,7 @@ import {
   locateLatestSessionLogForAgent,
 } from '../../../agent-sessions/logic/agent-session-paths'
 import { renderAgentSessionContext } from '../../../agent-sessions/logic/agent-session-render'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 export type AgentSessionAgent = 'claude' | 'codex'
 
@@ -59,7 +60,7 @@ export class AgentSessionRefStore {
     }
     try {
       fs.mkdirSync(path.dirname(this.paths.agentSessionRefPath), { recursive: true })
-      fs.writeFileSync(this.paths.agentSessionRefPath, JSON.stringify(next, null, 2))
+      atomicWriteJson(this.paths.agentSessionRefPath, next)
       fs.writeFileSync(this.paths.agentSessionIdPath, ref.sessionId)
       this.cached = next
     } catch { /* best-effort */ }

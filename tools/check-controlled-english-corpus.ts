@@ -19,6 +19,7 @@ import {
   composeSwitchPath,
   composeTryHeader,
 } from '../apps/web-server/src/shared/controlled-english/structured-english'
+import { errorMessage } from '../shared/lib/error-message'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
 const SKIPPED_DIRECTORIES = new Set(['.git', 'coverage', 'dist', 'node_modules'])
@@ -91,7 +92,7 @@ for (const root of roots) {
     failures.push({
       file: displayPath(root),
       kind: 'crash',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     })
   }
 }
@@ -118,7 +119,7 @@ for (const file of files) {
     failures.push({
       file: displayPath(file),
       kind: error instanceof UnsupportedSyntaxKindError ? 'unsupported' : 'crash',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     })
   }
 }

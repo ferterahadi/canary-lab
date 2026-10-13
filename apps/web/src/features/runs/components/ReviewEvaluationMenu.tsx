@@ -10,7 +10,7 @@
  * watched via the Flights pill and the flight's Evaluation Report stage.
  */
 import { useCallback, useRef, useState } from 'react'
-import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
+import { usePopoverDismiss } from '@/shared/ui/Overlays'
 import type {
   EvaluationExportMode,
   EvaluationExportTaskView,
@@ -46,7 +46,7 @@ export function ReviewEvaluationMenu({
   // An open menu in a tab row has to close on an outside click — it overlays the
   // pane below it, and leaving it open makes the next click land on the menu
   // instead of what the user aimed at.
-  useDismissOnOutsideMousedown(() => setOpen(false), open, [wrapRef])
+  usePopoverDismiss(() => setOpen(false), open, [wrapRef])
 
   return (
     <div ref={wrapRef} className="relative shrink-0">

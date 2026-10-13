@@ -1,66 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
 import * as sessionLogAgentSessionPaths from '../../../agent-sessions/logic/agent-session-paths'
 import * as sessionLogAgentSessionRender from '../../../agent-sessions/logic/agent-session-render'
-import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
 import { readManifest } from './manifest'
+import { makeFakePtyFactory } from '../../../../../../../tools/test-helpers/fake-pty'
+import { demoFeature } from '../../../../../../../tools/test-helpers/feature-fixture'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
-interface FakeProcess {
-  pid: number
-  options: PtySpawnOptions
-  data: EventEmitter
-  exit: EventEmitter
-  killed: string | null
-  writes: string[]
-  resizes: Array<{ cols: number; rows: number }>
-  emitData(chunk: string): void
-  emitExit(code: number, signal?: number): void
-}
-
-function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
-  const spawned: FakeProcess[] = []
-  let nextPid = 100
-  const factory: PtyFactory = (options): PtyHandle => {
-    const data = new EventEmitter()
-    const exit = new EventEmitter()
-    const proc: FakeProcess = {
-      pid: nextPid++,
-      options,
-      data,
-      exit,
-      killed: null,
-      writes: [],
-      resizes: [],
-      emitData(chunk) { data.emit('data', chunk) },
-      emitExit(code, signal) { exit.emit('exit', { exitCode: code, signal }) },
-    }
-    spawned.push(proc)
-    return {
-      get pid() { return proc.pid },
-      onData: (cb) => {
-        data.on('data', cb)
-        return { dispose: () => data.off('data', cb) }
-      },
-      onExit: (cb) => {
-        exit.on('exit', cb)
-        return { dispose: () => exit.off('exit', cb) }
-      },
-      write: vi.fn((data: string) => { proc.writes.push(data) }),
-      resize: vi.fn((cols: number, rows: number) => {
-        proc.resizes.push({ cols, rows })
-      }),
-      kill: (signal) => { proc.killed = signal ?? 'SIGTERM' },
-    }
-  }
-  return { factory, spawned }
-}
-
+const tempDir = trackTempDirs('cl-orc-')
 let tmpDir: string
 
 let runDir: string
@@ -74,7 +24,7 @@ beforeEach(() => {
   // killTree falls back to pty.kill, which the fakes record. (Same convention
   // as boot-probe.test.ts.)
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
+  tmpDir = tempDir()
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
@@ -84,27 +34,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
-  return {
-    name: 'demo',
-    description: 'demo',
-    envs: ['local'],
-    featureDir: path.join(tmpDir, 'features', 'demo'),
-    repos: [
-      {
-        name: 'api',
-        localPath: tmpDir,
-        startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
-      },
-    ],
-    ...over,
-  }
-}
-
 describe('RunOrchestrator.restartHealFromFailure', () => {
   it('restores runtime inputs before healing while preserving the recorded suite and review history', async () => {
-    const f = makeFakeFactory()
-    const feature = makeFeature({ repos: [{ name: 'api', localPath: tmpDir }] })
+    const f = makeFakePtyFactory()
+    const feature = demoFeature(tmpDir, { repos: [{ name: 'api', localPath: tmpDir }] })
     const envTarget = path.join(feature.featureDir, '.env')
     fs.mkdirSync(path.join(feature.featureDir, 'e2e'), { recursive: true })
     fs.mkdirSync(path.join(feature.featureDir, 'envsets', 'local'), { recursive: true })
@@ -166,8 +99,8 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
   })
 
   it('refuses a missing recorded suite before replacing evidence or spawning an agent', async () => {
-    const f = makeFakeFactory()
-    const feature = makeFeature({ repos: undefined })
+    const f = makeFakePtyFactory()
+    const feature = demoFeature(tmpDir, { repos: undefined })
     fs.mkdirSync(feature.featureDir, { recursive: true })
     const options = {
       feature, runId: RUN_ID, runDir, ptyFactory: f.factory,
@@ -192,9 +125,9 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
     fs.mkdirSync(path.dirname(receipt), { recursive: true })
     fs.writeFileSync(receipt, '{}')
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' } }),
+      feature: demoFeature(tmpDir, { singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' } }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -206,9 +139,9 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
   })
 
   it('starts services only after the restarted heal agent requests a rerun', async () => {
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -278,10 +211,10 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const paths = buildRunPaths(runDir)
     fs.writeFileSync(paths.agentSessionIdPath, PRIOR_SID)
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -324,10 +257,10 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const paths = buildRunPaths(runDir)
     expect(fs.existsSync(paths.agentSessionIdPath)).toBe(false)
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -369,10 +302,10 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const paths = buildRunPaths(runDir)
     fs.writeFileSync(paths.agentSessionIdPath, 'not-a-uuid')
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,
@@ -420,10 +353,10 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     })
 
     try {
-      const f = makeFakeFactory()
+      const f = makeFakePtyFactory()
       const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
       const orch = new RunOrchestrator({
-        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
         runId: RUN_ID,
         runDir,
         ptyFactory: f.factory,
@@ -482,11 +415,11 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
       .mockReturnValue('Previous codex session 019e...\nASSISTANT: inspect fallback SMS call')
 
     try {
-      const f = makeFakeFactory()
+      const f = makeFakePtyFactory()
       let receivedContext: string | undefined
       const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
       const orch = new RunOrchestrator({
-        feature: makeFeature({ healOnFailureThreshold: 1 }),
+        feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
         runId: RUN_ID,
         runDir,
         ptyFactory: f.factory,
@@ -540,10 +473,10 @@ describe('RunOrchestrator.restartHealFromFailure', () => {
     const paths = buildRunPaths(runDir)
     fs.writeFileSync(paths.agentSessionIdPath, PRIOR_SID)
 
-    const f = makeFakeFactory()
+    const f = makeFakePtyFactory()
     const spawnCalls: Array<{ sessionId?: string; resume?: boolean }> = []
     const orch = new RunOrchestrator({
-      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      feature: demoFeature(tmpDir, { healOnFailureThreshold: 1 }),
       runId: RUN_ID,
       runDir,
       ptyFactory: f.factory,

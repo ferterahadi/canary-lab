@@ -1,4 +1,5 @@
-import { isTerminalPortifyStatus } from '../../../../../../../shared/portify-index'
+import { DEFAULT_HEALTH_DEADLINE_MS } from '../../../runs/logic/runtime/service-readiness'
+import { isTerminalPortifyStatus, type PortifyManifest } from '../../../../../../../shared/portify-index'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -12,7 +13,7 @@ import { buildPortifyPaths, portifyDir } from './paths'
 import { discardWorktree } from './git-ops'
 import { writeOverlay } from './overlay'
 import { buildPortifyPrompt, buildPortifyFeedbackPrompt, buildPortifyRetryPrompt } from './prompt'
-import type { PortifyManifest, PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
+import type { PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
 import { captureOverlayRepos, readPendingOverlay, restoreConfig } from './portify-overlay-capture'
 import { RepoGroup, SeededFrom, buildSeededNote, portifyConcurrencyCap, seededSlotsAlreadyDeclared } from './portify-worktree-borrow'
 import { collectPortSlots } from '../../../runs/logic/runtime/service-specs'
@@ -70,7 +71,7 @@ export interface ActiveWorkflow {
 
 export function createPortifyRunner(deps: PortifyRunnerDeps) {
   const active = new Map<string, ActiveWorkflow>()
-  const healthDeadlineMs = deps.healthDeadlineMs ?? 60000
+  const healthDeadlineMs = deps.healthDeadlineMs ?? DEFAULT_HEALTH_DEADLINE_MS
 
   // Admission for a new workflow. One workflow PER FEATURE (a second on the same
   // feature would fight over its featureDir config + overlay path); different

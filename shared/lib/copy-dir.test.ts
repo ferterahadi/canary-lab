@@ -1,21 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { copyDirRecursive } from './copy-dir'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('copy-dir-')
 
 describe('copyDirRecursive', () => {
   let dir: string
   let src: string
   let dst: string
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-dir-'))
+    dir = tempDir()
     src = path.join(dir, 'src')
     dst = path.join(dir, 'dst')
     fs.mkdirSync(src, { recursive: true })
-  })
-  afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it('copies files and nested directories', () => {

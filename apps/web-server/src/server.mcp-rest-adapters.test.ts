@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -8,6 +7,9 @@ import { writeOverlay, overlayExists } from './features/portify/logic/runtime/ov
 import { FlightRunStore } from './features/flights/logic/store'
 import { FLIGHT_STAGE_KEYS } from '../../../shared/flights/types'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { trackTempDirs } from '../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-mcp-adapters-')
 
 const inertPty: PtyFactory = () => ({ pid: 0, onData: () => ({ dispose() {} }), onExit: () => ({ dispose() {} }), write() {}, resize() {}, kill() {} })
 function toolText(result: Awaited<ReturnType<Client['callTool']>>): string {
@@ -25,7 +27,7 @@ async function drainSocket(socket: Awaited<ReturnType<typeof app.injectWS>>): Pr
   await new Promise<void>((resolve) => { socket.once('pong', () => resolve()); socket.ping() })
 }
 beforeEach(async () => {
-  projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-adapters-'))
+  projectRoot = tempDir()
   suiteDir = path.join(projectRoot, 'features', 'checkout')
   fs.mkdirSync(path.join(suiteDir, 'envsets', 'local'), { recursive: true })
   fs.writeFileSync(path.join(suiteDir, 'feature.config.cjs'),
@@ -45,7 +47,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await client?.close()
   await app?.close()
-  fs.rmSync(projectRoot, { recursive: true, force: true })
 })
 
 describe('production MCP REST adapter wiring', () => {

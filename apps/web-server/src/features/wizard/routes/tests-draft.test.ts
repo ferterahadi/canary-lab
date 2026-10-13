@@ -1,8 +1,6 @@
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 // A pass-through `vi.mock` for `../logic/draft-agent-session` used to sit here,
 // with a one-shot override for the route's TOCTOU guard. Both the module and the
@@ -20,6 +18,9 @@ import {
 import type { DraftRecord } from '../../../../../../shared/draft-types'
 import { resetSharedTaskStores } from '../../../../../../shared/lib/file-backed-task-store'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './tests-draft'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('tests-draft-logs-')
 
 // These routes are the READ/TRACK surface for drafts an external MCP client
 // authors (start_external_draft & friends). Canary spawns no local authoring
@@ -32,13 +33,8 @@ beforeEach(() => {
   // The draft store is memoized per logs dir; each case gets a fresh dir, and
   // dropping the memo keeps a previous case's bridge from listening in.
   resetSharedTaskStores()
-  logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tests-draft-logs-'))
-  projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tests-draft-proj-'))
-})
-
-afterEach(() => {
-  fs.rmSync(logsDir, { recursive: true, force: true })
-  fs.rmSync(projectRoot, { recursive: true, force: true })
+  logsDir = tempDir()
+  projectRoot = tempDir('tests-draft-proj-')
 })
 
 function makeDeps(overrides: Partial<TestsDraftRouteDeps> = {}): TestsDraftRouteDeps {

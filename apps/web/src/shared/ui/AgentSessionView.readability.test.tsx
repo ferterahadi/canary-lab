@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectAgentSessionOptions } from '@/shared/api/agent-session-socket'
 import { AgentSessionView } from './AgentSessionView'
+import { mountRoot } from '@/test-helpers/mount-root'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), connect: vi.fn((_options: ConnectAgentSessionOptions) => ({ close: vi.fn() })) }))
 vi.mock('@/shared/api/flights', async (original) => ({
   ...(await original<typeof import('@/shared/api/flights')>()), getFlightAgentSession: mocks.get,
 }))
 vi.mock('@/shared/api/agent-session-socket', () => ({ connectAgentSessionStream: mocks.connect }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const stamp = '2026-10-02T11:00:00+08:00'
 
 describe('readable Activity', () => {
@@ -18,11 +18,9 @@ describe('readable Activity', () => {
   let root: Root
   beforeEach(() => {
     vi.clearAllMocks()
-    host = document.createElement('div')
-    document.body.appendChild(host)
-    root = createRoot(host)
   })
-  afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers() })
+  afterEach(() => { vi.useRealTimers() })
+  mountRoot({ attach: true, onMount: (mounted) => ({ container: host, root } = mounted) })
   const renderHistory = async (live = false) => act(async () => root.render(<AgentSessionView
     sessionSources={[{ source: { kind: 'flight', flightId: 'flight', stage: 'mapping', live }, label: 'Mapping coverage', startedAt: stamp }]}
     systemRows={{ pre: [`[coverage@${stamp}] Mapping started.`], post: [] }}

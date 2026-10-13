@@ -1,7 +1,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/config'
+import type { ConfigValue } from '@shared/config-value'
+import type { ParsedConfigDoc } from '@/shared/api/config'
 import { useImmediateConfig } from './use-immediate-config'
 import { useRepoPathProbe } from './use-repo-path-probe'
 

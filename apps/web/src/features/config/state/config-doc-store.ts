@@ -1,3 +1,4 @@
+import { displayError } from '@/shared/api/error-message'
 export interface ConfigDocSnapshot {
   doc: unknown | null
   error: string | null
@@ -70,7 +71,7 @@ export function createConfigDocStore() {
         return doc
       }).catch((error: unknown) => {
         if (entry.request === request) {
-          publish(entry, { ...entry.snapshot, error: error instanceof Error ? error.message : 'Failed to load' })
+          publish(entry, { ...entry.snapshot, error: displayError(error, 'Failed to load') })
         }
         throw error
       }).finally(() => { if (entry.request === request) entry.request = null })

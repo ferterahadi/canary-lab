@@ -23,8 +23,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { REPO, walk } from './lib/fs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
 const SRC = path.join(REPO, 'apps/web/src')
 const FEATURES = path.join(SRC, 'features')
 
@@ -69,16 +69,6 @@ const PUBLIC = {
   wizard: ['state/WizardDraftContext'],
 }
 
-function walk(dir) {
-  const out = []
-  for (const name of readdirSync(dir)) {
-    const p = path.join(dir, name)
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else if (/\.tsx?$/.test(name)) out.push(p)
-  }
-  return out
-}
-
 const features = readdirSync(FEATURES).filter((f) => statSync(path.join(FEATURES, f)).isDirectory())
 
 // `from '…'`, `import('…')`, `vi.mock('…')`, `vi.importActual<…>('…')`. The
@@ -92,7 +82,7 @@ const barrels = []
 const used = new Set()
 
 for (const feature of features) {
-  for (const file of walk(path.join(FEATURES, feature))) {
+  for (const file of walk(path.join(FEATURES, feature), { ext: /\.tsx?$/ })) {
     const rel = path.relative(FEATURES, file)
     if (/^[^/]+\/index\.tsx?$/.test(rel)) barrels.push(path.relative(REPO, file))
     const test = isTestFile(file)

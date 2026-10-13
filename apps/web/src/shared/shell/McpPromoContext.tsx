@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { CopyField } from '@/shared/ui/CopyField'
 import { Section } from '@/shared/ui/atoms'
 import { Modal } from '@/shared/ui/Overlays'
+import { readStored, writeStored } from '@/shared/state/browser-storage'
 
 export type McpPromoAction = 'create-feature' | 'run-test' | 'export-evaluation'
 
@@ -71,19 +72,12 @@ export function useMcpPromo(): McpPromoContextValue {
 }
 
 function isDismissed(action: McpPromoAction): boolean {
-  try {
-    return window.localStorage.getItem(mcpPromoStorageKey(action)) === 'true'
-  } catch {
-    return false
-  }
+  return readStored(mcpPromoStorageKey(action)) === 'true'
 }
 
+/** Storage is only a convenience; a dropped write still lets the click continue. */
 function markDismissed(action: McpPromoAction): void {
-  try {
-    window.localStorage.setItem(mcpPromoStorageKey(action), 'true')
-  } catch {
-    // Storage is only a convenience; the current click should still continue.
-  }
+  writeStored(mcpPromoStorageKey(action), 'true')
 }
 
 function McpPromoDialog({

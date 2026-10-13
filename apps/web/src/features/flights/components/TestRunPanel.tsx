@@ -1,21 +1,24 @@
-import { useMemo, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import * as runsApi from '@/shared/api/runs'
-import type { HealEnd, RunStatus } from '@shared/run-state'
+import { isTerminalRunStatus, type HealEnd, type RunStatus } from '@shared/run-state'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { shortRunRef } from '@/shared/lib/format'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { RunRow } from '@/features/runs/components/RunRow'
-import { useRun, useRuns } from '@/features/runs/state/RunsContext'
+import { useRun } from '@/features/runs/state/RunsContext'
 import { FailingTests } from './FailingTests'
 import { HERO_ROW, STAGE_COLUMN } from './stage-meta'
 import { FactsGrid, runHistoryFacts } from './StageFacts'
 import { healEndShort } from './StageStatusLines'
 import { plural } from '@shared/lib/plural'
+import { normalizeRunCounts } from '@shared/run-counts'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
-import { isAuxiliaryExecution } from '@shared/verification'
+import type { ConnectionState } from '@/shared/state/record-stream'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { displayError } from '@/shared/api/error-message'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -37,7 +40,7 @@ import { isAuxiliaryExecution } from '@shared/verification'
 // card every other checkpoint kind gets, below this panel, so a flight's
 // questions all look and sit the same. What remains here is evidence.
 //
-// Data comes from the shared runs store (`useRun` / `useRuns`): `/ws/runs`
+// Data comes from the shared runs store (the parent selects the history): `/ws/runs`
 // already pushes the run detail and the index live, so the panel's old 5s
 // interval re-downloaded the app's biggest payload (full playback events) to
 // read a handful of summary fields the store was holding all along.
@@ -57,6 +60,10 @@ export interface RunStageEvidence {
 
 export function TestRunPanel({
   feature,
+  featureRuns,
+  indexLoaded,
+  indexError,
+  connection,
   runId,
   live,
   evidence,
@@ -65,11 +72,15 @@ export function TestRunPanel({
   onError,
   awaiting,
   pausedNotice,
+  factsToolbar,
   mutationLockedReason,
 }: {
   feature: string
-  /** Absent until the stage HAS a run — the hero then renders as its own
-   *  skeleton (R83) rather than the stage pane going blank. */
+  featureRuns: RunIndexEntry[]
+  indexLoaded: boolean
+  indexError: string | null
+  connection: ConnectionState
+  /** Identity selected from the suite history, independent of flight progress. */
   runId?: string
   /** A run for this feature is active right now — gates the live controls and
    *  the "still running" reading of a verdictless run. */
@@ -82,7 +93,7 @@ export function TestRunPanel({
   /** Opens the changed-tests review (?dialog=tests-review) — where the run's
    *  pending spec edits get adopted or restored. Without it the hero still
    *  states where the verdict came from, just not as a link. */
-  onOpenSpecReview?: () => void
+  onOpenSpecReview?: (feature: string, runId: string) => void
   onError?: (msg: string) => void
   /** Why any missing run-history value is a skeleton. Required so a completed
    *  run with old/incomplete evidence reads as unavailable, not idle. */
@@ -90,30 +101,23 @@ export function TestRunPanel({
   /** The shared stage recovery card. It sits after this panel's own facts band,
    *  matching every other stage without giving run history a second owner. */
   pausedNotice?: ReactNode
+  factsToolbar?: ReactNode
   /** External ownership leaves live run controls visible but inert. */
   mutationLockedReason?: string
 }) {
-  const { detail } = useRun(runId)
-  const { runs } = useRuns()
+  const { detail: loadedDetail } = useRun(runId)
+  const detail = loadedDetail?.manifest.runId === runId ? loadedDetail : undefined
+  const selectedEntry = featureRuns[0]
 
   const manifest = detail?.manifest
   const summary = detail?.summary
-  const status: RunStatus = (manifest?.status ?? (evidence.status as RunStatus | undefined) ?? (live ? 'running' : 'failed'))
-  const healCycles = manifest?.healCycles ?? evidence.healCycles ?? 0
+  const status: RunStatus = (manifest?.status ?? selectedEntry?.status ?? (evidence.status as RunStatus | undefined) ?? (live ? 'running' : 'failed'))
+  const healCycles = manifest?.healCycles ?? selectedEntry?.healCycles ?? evidence.healCycles ?? 0
   const healEnd = manifest?.healEnd ?? evidence.healEnd
 
-  // The feature's real test runs, newest first (boot/benchmark/verify are
-  // plumbing, not test runs). The current run's ordinal reads off this list.
-  const featureRuns = useMemo(
-    () => runs.filter((r) => r.feature === feature && !isAuxiliaryExecution(r.executionType) && r.executionType !== 'verify'),
-    [runs, feature],
-  )
-  const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1
-  const ordinal = idx >= 0 ? featureRuns.length - idx : null
   const previous = featureRuns
     .filter((r) => r.runId !== runId)
     .slice(0, 5)
-    .map((r) => ({ run: r, ordinal: featureRuns.length - featureRuns.findIndex((x) => x.runId === r.runId) }))
 
   // The identity row is a RunRow — same chrome as the runs list, so the run
   // reads as the one object it is. Prefer the live index entry; synthesize one
@@ -127,6 +131,7 @@ export function TestRunPanel({
   }
 
   const stats = runStats({
+    status,
     summary,
     healCycles,
     healEnd,
@@ -139,37 +144,46 @@ export function TestRunPanel({
     // catches up. Either way it is the run's own number, not the dirty store's.
     pendingSpecEdits: manifest?.specEdits?.pending.length ?? currentEntry.pendingSpecEdits ?? 0,
     integrityHints: manifest?.integrity?.hints.length ?? currentEntry.integrityHints ?? 0,
-    onOpenSpecReview,
+    onOpenSpecReview: runId && onOpenSpecReview ? () => onOpenSpecReview(feature, runId) : undefined,
   })
   const failing = summary?.failed ?? []
-  const active = live && (status === 'running' || status === 'healing')
+  const active = status === 'running' || status === 'healing'
   const runRef = runId ? shortRunRef(runId) : null
 
-  const report = (err: unknown): void => onError?.(err instanceof Error ? err.message : String(err))
+  const report = (err: unknown): void => onError?.(displayError(err))
 
   return (
     <div className={`flex flex-col gap-3 ${STAGE_COLUMN}`} data-testid="test-run">
       {/* The band belongs HERE rather than in `stageFacts`, because this panel
-          already reads the feature's run list off the shared store — resolving
+          receives the feature's selected history from the shared store — resolving
           it a second time in the band-data hook would be two owners for one
           answer. It reports the HISTORY (how many runs, how they ended, how
           long they take); the hero below reports the latest run. Different
           scopes, so no number repeats. */}
-      <FactsGrid facts={runHistoryFacts(featureRuns)} awaiting={awaiting} />
+      <FactsGrid facts={runHistoryFacts(featureRuns)} awaiting={awaiting} toolbar={factsToolbar} />
 
       {pausedNotice}
+      <p className="m-0 text-xs text-muted">Suite-wide test runs, including standalone executions. Flight progress is tracked separately.</p>
+      {(indexError || connection === 'reconnecting' || connection === 'disconnected') && <p role="status" className="m-0 text-xs text-warning">Run history may be out of date. {indexError ?? 'Reconnecting to Canary…'}</p>}
 
       <PanelCard kicker="Latest run" testId="test-run-hero">
-        {runId == null && awaiting ? (
-          <RunHeroSkeleton awaiting={awaiting} />
+        {runId == null ? (
+          indexError || connection === 'disconnected' || connection === 'reconnecting'
+            ? <EmptyState compact reason="not-yet" title="Run history unavailable" />
+            : !indexLoaded ? <RunHeroSkeleton awaiting="live" />
+            : <EmptyState compact reason="not-yet" title="No test runs yet" />
         ) : (
           <>
         <ul className="m-0 list-none p-0">
           <RunRow
             run={currentEntry}
             detail={detail ?? undefined}
-            primaryLabel={`Run ${runRef}`}
-            marker={ordinal != null ? `run ${ordinal} of ${featureRuns.length}` : undefined}
+            primaryLabel={`${currentEntry.executionType === 'verify' ? 'Verify' : 'Run'} ${runRef}`}
+            /* When, where and how long. No ordinal: "run 6 of 6" restated the
+               card's own "Latest run" kicker and the band's run count. No repair
+               count either — the Repair cycles stat right below states it. */
+            stamp="day"
+            showDuration
             showPorts={false}
             /* R82: the score is HIDDEN on the identity row — the stats line
                right below states it. Showing it here too (promoted beside the
@@ -181,6 +195,10 @@ export function TestRunPanel({
                start on the card's own left edge — and on the same column as the
                Previous runs titles below. */
             chrome="headline"
+            /* The verdict chip names a finished run's outcome; the dot stays
+               only while the run is live. */
+            dot="live"
+            arrow="always"
             /* Guarded on `runId` like the `onOpenFixes` wiring above: the hero
                also renders from a synthesized entry before the run list
                resolves, and this used to hand `onOpenRun` an undefined id in
@@ -190,6 +208,7 @@ export function TestRunPanel({
         </ul>
 
         <RunStatsLine stats={stats} />
+        {!detail && <p role="status" className="mt-2 text-xs text-muted">Run details are loading or temporarily unavailable.</p>}
 
         {/* WHICH tests failed — identity only. Each row opens that failure on the
             run detail, where the assertion error, the snippet and the spec live
@@ -199,7 +218,7 @@ export function TestRunPanel({
           knownTests={summary?.knownTests}
           {...(onOpenRun && runId
             ? {
-                onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }),
+                onOpenTest: (name: string, identity: Pick<RunOpenTarget, 'testId' | 'testLocation'>) => onOpenRun(feature, runId, { test: name, ...identity }),
                 /* The remainder past the sixth goes to the same place a row
                    does, minus the per-test landing. */
                 onOpenAll: () => onOpenRun(feature, runId),
@@ -219,9 +238,9 @@ export function TestRunPanel({
           background — the one block with no surface, its rubric 12px left of
           every card kicker and its rows carrying RunRow's own gutter — so it
           read as spill-over from the card above. The rows now sit flush on the
-          card's text column, the same edge the Latest run title uses, with no
-          dividers or fill, like the Failing tests rows. Each row is labelled by
-          its run REF and ordinal — the old list repeated the feature name on
+          card's text column, the same edge the Latest run title uses, unfilled
+          and split by hairlines. Each row is labelled by its run REF — the old
+          list repeated the feature name on
           every row, which is the one thing every row shares — and carries its own
           open action rather than relying on the row being secretly clickable. */}
       {previous.length > 0 && (
@@ -230,14 +249,22 @@ export function TestRunPanel({
           aside={<span className="cl-count-chip">{previous.length}</span>}
           testId="previous-runs"
         >
-          <ul className="m-0 flex list-none flex-col p-0">
-            {previous.map(({ run, ordinal: n }) => (
+          {/* Hairlines between rows: two-line rows with no fill and no rule
+              ran together, so the eye could not tell where one run ended. */}
+          <ul className="m-0 flex list-none flex-col divide-y divide-line p-0">
+            {previous.map((run) => (
               <RunRow
                 key={run.runId}
                 run={run}
                 detail={undefined}
-                primaryLabel={`Run ${shortRunRef(run.runId)}`}
-                marker={`run ${n} of ${featureRuns.length}`}
+                primaryLabel={`${run.executionType === 'verify' ? 'Verify' : 'Run'} ${shortRunRef(run.runId)}`}
+                /* The ordinal gave way to duration and repairs — position is
+                   already the list order and the kicker's count. Both come off
+                   the index entry, so no row needs a detail read. */
+                stamp="day"
+                showDuration
+                showRepairs
+                dot="live"
                 showPorts={false}
                 chrome="item"
                 /* The row IS the open action — its trailing arrow stops being
@@ -297,29 +324,26 @@ interface RunStat {
  *  has, on the same left edge.
  *
  *  Composed here rather than stacked out of `SkeletonRows`, because a generic row
- *  list drew every block flush at x=0 — a left edge no value in this card ever
- *  lands on. It also made the widest bar in the card a 7px sub-line and the two
- *  test rows identical twins, so the placeholders promised a layout the card does
- *  not have. Everything now hangs off `HERO_ROW`, the same constant RunRow's
- *  stats line and the failure rows use.
+ *  list made the widest bar in the card a 7px sub-line and the two test rows
+ *  identical twins, so the placeholders promised a layout the card does not
+ *  have. The identity and stats blocks sit flush on the card's text column like
+ *  the settled run; the failure rows use `HERO_ROW`'s dot lane.
  *
  *  Widths follow what actually arrives: a short "Run 4f2a" title over a longer
  *  meta line, then wrapping test titles over a shorter tag line. */
 function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
   return (
     <div data-testid="test-run-hero-skeleton" className="flex flex-col">
-      {/* Identity row — RunRow's dot size and two-line text column, flush. */}
-      <div className="flex items-center gap-2 pb-0.5">
-        <SkeletonBead awaiting={awaiting} size={8.8} />
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <SkeletonBar awaiting={awaiting} width="28%" height={10} />
-          <SkeletonBar awaiting={awaiting} width="52%" height={7} />
-        </div>
+      {/* Identity row — RunRow's two-line text column, flush: a finished run
+          carries no dot lane. */}
+      <div className="flex min-w-0 flex-col gap-1.5 pb-0.5">
+        <SkeletonBar awaiting={awaiting} width="28%" height={10} />
+        <SkeletonBar awaiting={awaiting} width="52%" height={7} />
       </div>
 
       {/* Tests · Repairs · Services land in these rungs: a short label over a
           shorter value, a column apart, exactly where RunStatsLine puts them. */}
-      <div className="mt-3 flex gap-x-7" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+      <div className="mt-3 flex gap-x-7">
         {[64, 72, 80].map((w) => (
           <div key={w} className="flex flex-col gap-1.5">
             <SkeletonBar awaiting={awaiting} width={`${w}px`} height={7} />
@@ -354,7 +378,6 @@ function RunStatsLine({ stats }: { stats: RunStat[] }) {
     <dl
       data-testid="run-hero-stats"
       className="m-0 mt-3 flex flex-wrap gap-x-7 gap-y-2.5"
-      style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}
     >
       {stats.map((s) => (
         <div key={s.label} className="flex min-w-0 flex-col gap-0.5" {...(s.title ? { title: s.title } : {})}>
@@ -392,6 +415,7 @@ function RunStatsLine({ stats }: { stats: RunStat[] }) {
  *  the captured fixes as a link. Boot health is a different axis than the test
  *  verdict, so it stays its own fact. */
 function runStats({
+  status,
   summary,
   healCycles,
   healEnd,
@@ -403,6 +427,7 @@ function runStats({
   integrityHints,
   onOpenSpecReview,
 }: {
+  status: RunStatus
   summary: RunDetail['summary'] | undefined
   healCycles: number
   healEnd: HealEnd | undefined
@@ -423,8 +448,10 @@ function runStats({
   onOpenSpecReview?: () => void
 }): RunStat[] {
   const stats: RunStat[] = []
-  if (summary && summary.total > 0) {
-    stats.push({ label: 'Tests passed', value: `${summary.passed}/${summary.total}` })
+  // The same counts the MCP tools report, so the hero and an agent never disagree.
+  const counts = summary ? normalizeRunCounts(summary) : null
+  if (counts && counts.totalKnown > 0) {
+    stats.push({ label: 'Tests passed', value: `${counts.passed}/${counts.totalKnown}` })
   }
   // Repairs: a clean run reads a bare "0"; any cycle names the cap it is
   // counting toward, and a loop that gave up carries the reason as the note.
@@ -483,14 +510,14 @@ function runStats({
     const pending = pendingSpecEdits ?? 0
     const hints = integrityHints ?? 0
     const qualifier = pending > 0
-      ? ` · ${plural(pending, 'pending test-file change')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
+      ? ` · ${plural(pending, isTerminalRunStatus(status) ? 'recorded unexecuted test-file change' : 'pending test-file change')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
       : ''
     stats.push({
       label: 'Verdict from',
       value: `recorded tests${qualifier}`,
       title: pending > 0
-        ? `${plural(pending, 'test-file change')} made since the run started ${pending > 1 ? 'were' : 'was'} not run. This run result is based on the recorded tests. Review, then adopt or restore the changes.`
-        : `Tests were recorded when the run started (${suiteSnapshot.digest.slice(0, 12)}). No test files have changed since.`,
+        ? `${plural(pending, 'test-file change')} made since the run started ${pending > 1 ? 'were' : 'was'} not run. This run result is based on the recorded tests. ${isTerminalRunStatus(status) ? 'This is historical metadata, not a current review count. Compare with current tests to see today’s differences.' : 'Review the current changes before adopting or restoring them.'}`
+        : `Tests were recorded when the run started (${suiteSnapshot.digest.slice(0, 12)}). This saved record does not establish whether current tests have changed.`,
       ...(pending > 0 && onOpenSpecReview ? { onClick: onOpenSpecReview, testId: 'run-hero-spec-edits' } : {}),
     })
   } else if (suiteSnapshot?.kind === 'unavailable') {

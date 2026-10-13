@@ -1,6 +1,8 @@
-import fs from 'fs'
+import { isPathUnder } from '../../../../shared/path-containment'
 import path from 'path'
 import type { WorktreeHandle } from './repo-worktree'
+import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
+import { withClaudeUnattendedSettings } from '../../../agent-sessions/logic/agent-context-policy'
 
 export const HEAL_AGENT_ISOLATION_SETTINGS = 'heal-agent-isolation.settings.json'
 
@@ -9,13 +11,12 @@ function uniqueResolved(paths: readonly string[]): string[] {
 }
 
 function isSameOrAncestor(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate)
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+  return isPathUnder(candidate, parent, true)
 }
 
 function canonicalLocalPath(handle: WorktreeHandle): string {
   const relative = path.relative(handle.worktreeRoot, handle.localPath)
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (!isPathUnder(handle.localPath, handle.worktreeRoot, true)) {
     throw new Error(`worktree path for "${handle.repoName}" escapes its worktree root`)
   }
   return path.resolve(handle.sourceRoot, relative)
@@ -40,7 +41,9 @@ export interface HealAgentIsolationArgs {
 
 /** Write invocation-local Claude settings that make the authored suite and any
  * canonical checkout read-only. The CLI is also started without user/project
- * settings sources, so a broad personal allow rule cannot reopen these paths. */
+ * settings sources, so a broad personal allow rule cannot reopen these paths.
+ * The file is the heal REPL's only `--settings`, so it also carries the shared
+ * unattended-dialog policy. */
 export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): string {
   const writableDirs = uniqueResolved(args.writableDirs)
   const featureDir = path.resolve(args.featureDir)
@@ -73,7 +76,7 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
   ])
 
   const settingsPath = path.join(args.runDir, HEAL_AGENT_ISOLATION_SETTINGS)
-  const settings = {
+  const settings = withClaudeUnattendedSettings({
     permissions: {
       deny: protectedDirs.map((candidate) => `Edit(${claudeAbsolutePermissionPath(candidate)}/**)`),
     },
@@ -87,8 +90,7 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
         denyWrite: protectedDirs,
       },
     },
-  }
-  fs.mkdirSync(args.runDir, { recursive: true })
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+  })
+  atomicWriteJson(settingsPath, settings)
   return settingsPath
 }

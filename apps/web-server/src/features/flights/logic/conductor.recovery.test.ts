@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { FlightRunStore, type FlightStore } from './store'
 import {
@@ -27,13 +26,13 @@ import {
   FlightFrozenError,
   FlightStageEntryError,
 } from './flight-errors'
-import type { StageAdapter, StageAdapters, StageOutcome } from './flight-stages'
+import type { StageAdapters, StageOutcome } from './flight-stages'
 
-import {
-  FLIGHT_STAGE_KEYS,
-  type FlightOptions,
-  type FlightStageKey,
-} from '../../../../../../shared/flights/types'
+import { type FlightOptions, type FlightStageKey } from '../../../../../../shared/flights/types'
+import { allDoneAdapters } from './__fixtures__/stage-adapters'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-flights-')
 
 let tmpDir: string
 
@@ -42,30 +41,16 @@ let store: FlightRunStore
 let n: number
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flights-')))
+  tmpDir = tempDir()
   store = new FlightRunStore(tmpDir)
   n = 0
 })
-
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 const ids = () => `fl-${++n}`
 
 const now = () => '2026-01-01T00:00:00Z'
 
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
-
-const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
-  teardown: () => null,
-  run: async (ctx) => {
-    calls?.push(ctx.manifest().currentStage as FlightStageKey)
-    return { kind: 'done' }
-  },
-})
-
-function allDone(calls?: FlightStageKey[]): StageAdapters {
-  return Object.fromEntries(FLIGHT_STAGE_KEYS.map((k) => [k, doneAdapter(calls)])) as StageAdapters
-}
 
 function deps(adapters: StageAdapters): FlightConductorDeps {
   return { store, adapters, now, newFlightId: ids }
@@ -78,7 +63,7 @@ function args(repo = '/repo/a') {
 describe('failure + resume', () => {
   it('parks the flight paused on a failed stage and resumes from that stage', async () => {
     let attempts = 0
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters['env-capture'] = {
       teardown: () => null,
       run: async () => {
@@ -108,13 +93,13 @@ describe('failure + resume', () => {
   })
 
   it('refuses to resume a flight that is not paused', async () => {
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    const { manifest, completion } = startFlight(args(), deps(allDoneAdapters()))
     await completion
-    expect(() => resumeFlight(manifest.flightId, deps(allDone()))).toThrow(/not paused/)
+    expect(() => resumeFlight(manifest.flightId, deps(allDoneAdapters()))).toThrow(/not paused/)
   })
 
   it('fails a stage with no adapter and stays resumable', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     delete adapters.portify
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
@@ -127,7 +112,7 @@ describe('failure + resume', () => {
 describe('skipped outcome', () => {
   it('marks a stage skipped and continues to the next stage', async () => {
     const calls: FlightStageKey[] = []
-    const adapters = allDone(calls)
+    const adapters = allDoneAdapters(calls)
     adapters.docs = { teardown: () => null, run: async () => ({ kind: 'skipped', reason: 'no docs requested' }) }
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
@@ -143,7 +128,7 @@ describe('skipped outcome', () => {
 
 describe('adapter throws', () => {
   it('treats a thrown/rejected adapter as a failed outcome and pauses the flight', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scaffold = {
       teardown: () => null,
       run: async () => {
@@ -159,7 +144,7 @@ describe('adapter throws', () => {
   })
 
   it('stringifies a non-Error throw from an adapter', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scaffold = {
       teardown: () => null,
       run: async () => {
@@ -175,7 +160,7 @@ describe('adapter throws', () => {
 
 describe('machine bug (outer catch)', () => {
   it('fails the flight hard when the manifest disappears mid-drive', async () => {
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.scaffold = {
       teardown: () => null,
       run: async () => {
@@ -212,7 +197,7 @@ describe('machine bug (outer catch)', () => {
       onEvent: (...a) => store.onEvent(...a),
       offEvent: (...a) => store.offEvent(...a),
     }
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const { manifest, completion } = startFlight(args(), { store: badStore, adapters, now, newFlightId: ids })
     await completion
     const final = store.get(manifest.flightId)!
@@ -244,7 +229,7 @@ describe('machine bug (outer catch)', () => {
       onEvent: (...a) => store.onEvent(...a),
       offEvent: (...a) => store.offEvent(...a),
     }
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     const { manifest, completion } = startFlight(args(), { store: badStore, adapters, now, newFlightId: ids })
     await completion
     const final = store.get(manifest.flightId)!
@@ -274,7 +259,7 @@ describe('crash recovery', () => {
     expect(recovered.error).toMatch(/Interrupted by server restart/)
 
     // The recovered flight resumes from the interrupted stage.
-    const resumed = resumeFlight(manifest.flightId, { store: fresh, now, adapters: allDone() })
+    const resumed = resumeFlight(manifest.flightId, { store: fresh, now, adapters: allDoneAdapters() })
     await resumed.completion
     expect(fresh.get(manifest.flightId)!.status).toBe('done')
   })
@@ -297,7 +282,7 @@ describe('resume replays the in-flight answer (R78: resume is seamless, never a 
   it('a stage paused MID-EXECUTION of its answer re-runs with the same answer — the fork is not re-asked', async () => {
     const runCalls: string[] = []
     const responses: Array<Record<string, unknown>> = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => {
@@ -348,7 +333,7 @@ describe('resume replays the in-flight answer (R78: resume is seamless, never a 
   it('an answer that was already SPENT (stage re-parked, then paused while waiting) is not replayed — resume re-asks', async () => {
     const runCalls: string[] = []
     const responses: string[] = []
-    const adapters = allDone()
+    const adapters = allDoneAdapters()
     adapters.docs = {
       teardown: () => null,
       run: async () => {

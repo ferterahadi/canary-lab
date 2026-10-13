@@ -11,8 +11,6 @@ import type { ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
 import type { InvalidationTopic } from './invalidation-bus'
 import type { WorkspaceData, WorkspaceDataDeps } from './use-workspace-data'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 // The hook's whole job is orchestration: four REST loads, a flights push
 // channel, a poll backstop and the /ws/workspace event fan-out. All three of
 // those edges are module-level imports rather than injected deps, so they are
@@ -560,6 +558,9 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'notifications-changed' })
     expect(harness.invalidated).toContainEqual(['notifications', undefined])
     harness.invalidated = []
+    await fire({ type: 'approvals-changed' })
+    expect(harness.invalidated).toEqual([['approvals', undefined]])
+    harness.invalidated = []
     await fire({ type: 'flights-changed' })
 
     expect(harness.invalidated).toEqual([['flights', undefined]])
@@ -607,7 +608,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
       ['cleanup', 'runs'], ['cleanup', 'worktrees'], ['cleanup', 'portify'],
       ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined], ['pre-flights', undefined],
-      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
+      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined], ['approvals', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
     expect(api.getVersionStatus.mock.calls.length).toBe(2)

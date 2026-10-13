@@ -84,28 +84,6 @@ export function estimateTokens(bytes: number): number {
   return Math.round(bytes / 4)
 }
 
-/** The DISTINCT repositories a flight scanned, in first-seen order.
- *
- *  `repoPaths` carries one entry per configured repo, and several services may
- *  legitimately share one source tree — a suite that starts three processes out
- *  of a single checkout declares three repos so each gets its own per-run
- *  worktree. Counting the entries then claimed three repositories where there is
- *  one, and the Repo scan panel listed the same directory three times over (with
- *  duplicate React keys to match). Services are counted separately, off the
- *  start commands, so nothing is lost by collapsing these. */
-export function distinctRepoPaths(paths: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const p of paths) {
-    // Trailing separators are cosmetic — `/srv/app` and `/srv/app/` are one repo.
-    const key = p.replace(/[\\/]+$/, '')
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(p)
-  }
-  return out
-}
-
 /** A stage the conductor stepped over, but whose artifact is on disk, is DONE —
  *  the work happened, just not on this flight's watch.
  *

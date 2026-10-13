@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEscapeToClose } from '@/shared/ui/Overlays'
 import { useOpenPortifyProject } from '../state/use-open-portify-project'
-import type { PortifyManifest } from '@/shared/api/portify'
+import type { PortifyManifest } from '@shared/portify-index'
 import { DiffView } from '@/shared/ui/DiffView'
+import { CapsLabel } from '@/shared/ui/CapsLabel'
 import { NoChangesNeeded, VerificationBadge } from './SavedOverlayPanel'
 const ghostBtn: React.CSSProperties = {
   padding: '8px 14px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
@@ -75,9 +76,9 @@ function ReviewLocally({ m, openError }: { m: PortifyManifest; openError: string
   if (trees.length === 0) return null
   return (
     <div style={{ marginBottom: 14, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '11px 13px' }}>
-      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+      <CapsLabel style={{ marginBottom: 8 }}>
         Review locally
-      </div>
+      </CapsLabel>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 10 }}>
         Not ready? Open the scratch worktree in your editor to review the full change first — it stays here until you save. Hand-edits in the worktree are captured into the overlay.
       </div>

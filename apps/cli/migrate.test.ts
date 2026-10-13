@@ -1,15 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { main, planFeatureMigration, rewriteHelper, analyzeFeatureConfigText, collectConcurrencyAdvisories } from './migrate'
+import { trackTempDirs } from '../../tools/test-helpers/temp-dir'
 
-const tmpDirs: string[] = []
+const tempDir = trackTempDirs('cl-mig-')
 
 function mkProjectRoot(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mig-'))
-  tmpDirs.push(dir)
-  const root = fs.realpathSync(dir)
+  const root = tempDir()
   fs.mkdirSync(path.join(root, 'features'))
   return root
 }
@@ -67,7 +65,6 @@ export class Api {
 }
 
 afterEach(() => {
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
@@ -377,9 +374,7 @@ export default defineConfig({})
   })
 
   it('exits 1 with a clear error when features/ is missing', async () => {
-    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mig-nofeat-'))
-    tmpDirs.push(rootDir)
-    const root = fs.realpathSync(rootDir)
+    const root = tempDir('cl-mig-nofeat-')
     vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
 
     vi.spyOn(console, 'log').mockImplementation(() => {})

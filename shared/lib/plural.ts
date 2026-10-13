@@ -3,5 +3,11 @@
  *  strings avoid. Regular plurals only — a caller with an irregular noun writes
  *  the sentence itself. */
 export function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
+  return `${n} ${word}${pluralSuffix(n)}`
+}
+
+/** The `s` a regular noun takes for count `n` — for copy where the count is not
+ *  printed beside the noun (`<strong>3</strong> runs`, "the paths"). */
+export function pluralSuffix(n: number): string {
+  return n === 1 ? '' : 's'
 }

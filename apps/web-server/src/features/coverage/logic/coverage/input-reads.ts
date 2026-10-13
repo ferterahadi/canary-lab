@@ -1,10 +1,10 @@
+import { coverageJsonDigest } from './json-digest'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 
 type Probe = { signature: string; read: () => string }
 export type InputReadMemo = Map<string, string>
-const signature = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failedRead = (error: unknown) => `error:${String((error as NodeJS.ErrnoException)?.code ?? error)}`
 
 /** Remember the inputs actually read, including missing resolution candidates.
@@ -14,7 +14,7 @@ export class CoverageInputReads {
   private readonly probes = new Map<string, Probe>()
   private unstable = false
 
-  private capture<T>(key: string, read: () => T, digest: (value: T) => string = signature): T {
+  private capture<T>(key: string, read: () => T, digest: (value: T) => string = coverageJsonDigest): T {
     const probe = () => { try { return digest(read()) } catch (error) { return failedRead(error) } }
     const remember = (value: string) => {
       const before = this.probes.get(key)
@@ -42,7 +42,7 @@ export class CoverageInputReads {
 
   directory(dir: string): fs.Dirent[] {
     return this.capture(`directory:${dir}`, () => fs.readdirSync(dir, { withFileTypes: true }),
-      (entries) => signature(entries.map((entry) => [entry.name, entry.isDirectory(), entry.isSymbolicLink()]).sort()))
+      (entries) => coverageJsonDigest(entries.map((entry) => [entry.name, entry.isDirectory(), entry.isSymbolicLink()]).sort()))
   }
 
   tree(dir: string, recursive: boolean, visited = new Set<string>()): void {

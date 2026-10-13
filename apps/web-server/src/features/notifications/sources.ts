@@ -31,6 +31,7 @@ function awaitsTestReview(run: ReviewRun): boolean {
 export function flightNotificationSources(flights: FlightIndexEntry[]): NotificationSource[] {
   return flights.map((flight) => {
     const attention = flightNeedsAttention(flight)
+    const assessment = flight.attention
     const stage = flight.currentStage ? flightStageLabel(flight.currentStage) : 'Flight'
     const waiting = flight.status === 'waiting-for-approval'
     const title = waiting
@@ -40,10 +41,10 @@ export function flightNotificationSources(flights: FlightIndexEntry[]): Notifica
       key: `flight:${flight.flightId}`,
       signature: attention ? `${flight.status}:${flight.pauseReason ?? flight.checkpointKind ?? ''}:${flight.currentStage ?? ''}` : 'quiet',
       ...(attention ? { message: {
-        title: `${flight.feature}: ${title}`,
-        body: waiting ? `${stage} cannot continue until you respond.`
-          : flight.pauseReason === 'restart' ? 'The server restarted. Open Flight to resume.' : 'Open Flight to recover and continue.',
-        target: { kind: 'flight' as const, flightId: flight.flightId },
+        title: `${flight.feature}: ${assessment?.title || title}`,
+        body: assessment?.reason || (waiting ? `${stage} cannot continue until you respond.`
+          : flight.pauseReason === 'restart' ? 'The server restarted. Open Flight to resume.' : 'Open Flight to recover and continue.'),
+        target: { kind: 'flight' as const, flightId: flight.flightId, ...(flight.currentStage ? { stage: flight.currentStage } : {}) },
         severity: 'warning' as const,
         toast: true,
       } } : {}),

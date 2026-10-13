@@ -1,4 +1,7 @@
+import { readLiteralTestTitle } from '../../../../shared/test-title'
+import { parseSource } from '../../../../shared/controlled-english/compiler-context'
 import { isTestCall } from '../../../../shared/test-declaration'
+import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from '../../../../shared/test-tags'
 import ts from 'typescript'
 import type { PathType } from '../../../../../../../shared/coverage/types'
 
@@ -23,18 +26,12 @@ export interface CoversTag {
 
 /** Render requirement + path + variant ids into the `@req-*` / `@path-*` /
  *  `@variant-*` tag tokens. */
-export function coversTagTokens(tag: CoversTag): string[] {
+export function coversTagTokens(tag: CoversTag, file = 'spec.ts'): string[] {
   const tokens: string[] = []
   for (const id of tag.requirements) tokens.push(`@req-${id}`)
   for (const p of tag.pathTypes ?? []) tokens.push(`@path-${p}`)
   for (const v of tag.variants ?? []) tokens.push(`@variant-${v}`)
   return tokens
-}
-
-function getStringArg(node: ts.CallExpression): string | null {
-  const arg = node.arguments[0]
-  if (arg && ts.isStringLiteralLike(arg)) return arg.text
-  return null
 }
 
 interface TagEdit {
@@ -53,18 +50,16 @@ function renderTagArray(tokens: string[]): string {
  * null when the test isn't found or already carries every requested token (no-op
  * keeps the file untouched). Single-test resolution: the FIRST matching name.
  */
-function planTagEdit(source: string, testName: string, tag: CoversTag): TagEdit | null {
-  const src = ts.createSourceFile('spec.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+function planTagEdit(source: string, testName: string, tag: CoversTag, file: string): TagEdit | null {
+  const src = parseSource(file, source).sourceFile
   const wanted = coversTagTokens(tag)
   if (!wanted.length) return null
 
   let edit: TagEdit | null = null
   const visit = (node: ts.Node): void => {
     if (edit) return
-    if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) === testName) {
-      const detail = node.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-        | ts.ObjectLiteralExpression
-        | undefined
+    if (ts.isCallExpression(node) && isTestCall(node) && readLiteralTestTitle(node) === testName) {
+      const detail = findTestDetails(node)
       if (detail) {
         edit = planMergeIntoDetail(source, detail, wanted)
       } else {
@@ -84,7 +79,7 @@ function planInsertDetail(
   call: ts.CallExpression,
   tokens: string[],
 ): TagEdit {
-  // planInsertDetail is only called after getStringArg confirmed arguments[0]
+  // planInsertDetail is only called after readLiteralTestTitle confirmed arguments[0]
   // is a string literal, so arguments[0] is always defined here.
   const insertAt = call.arguments[0].getEnd()
   return {
@@ -100,12 +95,7 @@ function planMergeIntoDetail(
   detail: ts.ObjectLiteralExpression,
   tokens: string[],
 ): TagEdit | null {
-  const tagProp = detail.properties.find(
-    (p): p is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(p) &&
-      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
-      (p.name.text === 'tag' || p.name.text === 'tags'),
-  )
+  const tagProp = findTestTagProperty(detail)
 
   if (!tagProp) {
     // Details object exists but has no `tag` — add the property at the front.
@@ -118,11 +108,7 @@ function planMergeIntoDetail(
   }
 
   const value = tagProp.initializer
-  const existing: string[] = []
-  if (ts.isStringLiteralLike(value)) existing.push(value.text)
-  else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) if (ts.isStringLiteralLike(el)) existing.push(el.text)
-  }
+  const existing = readTagPropertyStrings(value)
   const merged: string[] = [...existing]
   for (const t of tokens) if (!merged.includes(t)) merged.push(t)
   if (merged.length === existing.length) return null // nothing new — no-op
@@ -138,8 +124,8 @@ function planMergeIntoDetail(
  * absent or already fully tagged, the original string is returned unchanged
  * (idempotent). Only the tag list is touched — never the test body.
  */
-export function writeCoversTag(source: string, testName: string, tag: CoversTag): string {
-  const edit = planTagEdit(source, testName, tag)
+export function writeCoversTag(source: string, testName: string, tag: CoversTag, file = 'spec.ts'): string {
+  const edit = planTagEdit(source, testName, tag, file)
   if (!edit) return source
   return source.slice(0, edit.start) + edit.text + source.slice(edit.end)
 }
@@ -149,10 +135,11 @@ export function writeCoversTag(source: string, testName: string, tag: CoversTag)
 export function writeCoversTags(
   source: string,
   mappings: Array<{ testName: string; tag: CoversTag }>,
+  file = 'spec.ts',
 ): string {
   const edits: TagEdit[] = []
   for (const m of mappings) {
-    const edit = planTagEdit(source, m.testName, m.tag)
+    const edit = planTagEdit(source, m.testName, m.tag, file)
     if (edit) edits.push(edit)
   }
   edits.sort((a, b) => b.start - a.start)
@@ -179,20 +166,11 @@ function planStripEdit(
   call: ts.CallExpression,
   detail: ts.ObjectLiteralExpression,
 ): TagEdit | null {
-  const tagProp = detail.properties.find(
-    (p): p is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(p) &&
-      (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) &&
-      (p.name.text === 'tag' || p.name.text === 'tags'),
-  )
+  const tagProp = findTestTagProperty(detail)
   if (!tagProp) return null
 
   const value = tagProp.initializer
-  const existing: string[] = []
-  if (ts.isStringLiteralLike(value)) existing.push(value.text)
-  else if (ts.isArrayLiteralExpression(value)) {
-    for (const el of value.elements) if (ts.isStringLiteralLike(el)) existing.push(el.text)
-  }
+  const existing = readTagPropertyStrings(value)
   const kept = existing.filter((t) => !COVERAGE_TOKEN.test(t))
   if (kept.length === existing.length) return null // nothing coverage-owned — no-op
 
@@ -223,14 +201,12 @@ function planStripEdit(
  * a spec with no coverage tags returns unchanged. This is the inverse used by the
  * "Redo from the start" reset to truly blank the slate.
  */
-export function stripCoverageTags(source: string): string {
-  const src = ts.createSourceFile('spec.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+export function stripCoverageTags(source: string, file = 'spec.ts'): string {
+  const src = parseSource(file, source).sourceFile
   const edits: TagEdit[] = []
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && isTestCall(node) && getStringArg(node) !== null) {
-      const detail = node.arguments.find((a) => ts.isObjectLiteralExpression(a)) as
-        | ts.ObjectLiteralExpression
-        | undefined
+    if (ts.isCallExpression(node) && isTestCall(node) && readLiteralTestTitle(node) !== null) {
+      const detail = findTestDetails(node)
       if (detail) {
         const edit = planStripEdit(source, node, detail)
         if (edit) edits.push(edit)

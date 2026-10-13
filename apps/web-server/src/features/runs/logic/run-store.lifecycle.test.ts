@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { RunStore, type RunStoreEvent } from './run-store'
 import { trimRunArtifacts } from './run-artifacts'
@@ -8,11 +7,14 @@ import { getRunDetail } from './run-detail'
 import { createRegistry } from './run-registry'
 import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
+import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-rs-')
 
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rs-')))
+  tmpDir = tempDir()
 })
 
 describe('RunStore', () => {
@@ -165,7 +167,7 @@ describe('RunStore', () => {
     const events: RunStoreEvent[] = []
     store.onEvent((event) => events.push(event))
 
-    store.notifySummaryChanged('r-summary-1')
+    store.notifyDetailChanged('r-summary-1')
 
     expect(events).toEqual([{ kind: 'changed', runId: 'r-summary-1' }])
     expect(readManifest(store.manifestPath('r-summary-1'))?.status).toBe('running')
@@ -302,9 +304,13 @@ describe('RunStore', () => {
     seedRun('trim-me', { status: 'passed' })
     seedArtifacts('trim-me', 1024)
     const paths = buildRunPaths(runDirFor(tmpDir, 'trim-me'))
-    expect(trimRunArtifacts(tmpDir, 'trim-me')).toBe(2048)
+    // Per-execution media is the same heavy evidence and goes with the rest.
+    fs.mkdirSync(path.join(paths.playwrightArtifactsHistoryDir, 'execution-1'), { recursive: true })
+    fs.writeFileSync(path.join(paths.playwrightArtifactsHistoryDir, 'execution-1', 'video.webm'), Buffer.alloc(512))
+    expect(trimRunArtifacts(tmpDir, 'trim-me')).toBe(2560)
     expect(fs.existsSync(paths.playwrightArtifactsDir)).toBe(false)
     expect(fs.existsSync(paths.playwrightArtifactsKeepDir)).toBe(false)
+    expect(fs.existsSync(paths.playwrightArtifactsHistoryDir)).toBe(false)
     expect(fs.existsSync(paths.manifestPath)).toBe(true)
     expect(trimRunArtifacts(tmpDir, 'trim-me')).toBe(0)
   })

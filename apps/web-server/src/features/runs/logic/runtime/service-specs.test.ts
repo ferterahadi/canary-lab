@@ -1,6 +1,47 @@
 import { describe, it, expect } from 'vitest'
-import { resolvePortEnv, collectPortSlots, bootsServicesForEnv } from './service-specs'
+import { resolvePortEnv, collectPortSlots, bootsServicesForEnv, buildServiceSpecs } from './service-specs'
+import { computePortPreflight } from './port-preflight'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+
+describe('service selection across readiness, allocation, and boot', () => {
+  const feature: FeatureConfig = {
+    name: 'shop', description: '', featureDir: '/features/shop', envs: ['local', 'remote'],
+    repos: [
+      { name: 'empty', localPath: '/repos/empty' },
+      { name: 'off', localPath: '/repos/off', envs: ['remote'], startCommands: ['remote-only'] },
+      { name: 'web', localPath: '/repos/web', startCommands: [
+        { command: 'hidden', envs: ['remote'], ports: [{ name: 'hidden' }] },
+        'plain',
+        { command: 'first', ports: [{ name: 'shared', env: 'FIRST' }] },
+        { command: 'second', name: 'named', ports: [{ name: 'shared', env: 'SECOND' }] },
+      ] },
+    ],
+  }
+
+  it.each([
+    ['local', ['web-cmd-2', 'web-cmd-3', 'named'], ['shared']],
+    ['remote', ['off-cmd-1', 'web-cmd-1', 'web-cmd-2', 'web-cmd-3', 'named'], ['hidden', 'shared']],
+    [undefined, ['off-cmd-1', 'web-cmd-1', 'web-cmd-2', 'web-cmd-3', 'named'], ['hidden', 'shared']],
+  ] as const)('agrees on enabled commands for env %s without renumbering them', (env, names, ports) => {
+    const preflight = computePortPreflight(feature, env)
+    const specs = buildServiceSpecs(feature, '/runs/run-1', env)
+    expect(preflight.repos.flatMap((repo) => repo.commands.map((command) => command.name))).toEqual(names)
+    expect(specs.map((spec) => spec.name)).toEqual(names)
+    expect(collectPortSlots(feature, env).map((slot) => slot.name)).toEqual(ports)
+    expect(collectPortSlots(feature, env).find((slot) => slot.name === 'shared')).toEqual({ name: 'shared', env: 'FIRST' })
+    expect(bootsServicesForEnv(feature, env)).toBe(true)
+    // The current readiness rule is any declared slot, not every command having one.
+    expect(preflight.portsConfigured).toBe(true)
+  })
+
+  it('agrees when every command is disabled', () => {
+    const remoteOnly: FeatureConfig = { ...feature, repos: [feature.repos![1]] }
+    expect(computePortPreflight(remoteOnly, 'local')).toEqual({ portsConfigured: true, repos: [] })
+    expect(collectPortSlots(remoteOnly, 'local')).toEqual([])
+    expect(bootsServicesForEnv(remoteOnly, 'local')).toBe(false)
+    expect(buildServiceSpecs(remoteOnly, '/runs/run-1', 'local')).toEqual([])
+  })
+})
 
 // The port-slot half of buildServiceSpecs, which the orchestrator's own tests
 // only ever reached through a full spec build. Both are pure, so the empty and

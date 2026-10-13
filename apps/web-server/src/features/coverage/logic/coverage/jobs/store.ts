@@ -7,6 +7,7 @@ import type {
   CoverageJobKind,
 } from '../../../../../../../../shared/coverage/types'
 import { FileBackedTaskStore, type TaskStoreEvent, TaskListeners, legacyEntryId, abortOnRestart } from '../../../../../../../../shared/lib/file-backed-task-store'
+import { COVERAGE_JOBS_DIR_NAME } from './paths'
 
 // File-backed, event-emitting store for coverage background jobs. A thin
 // wrapper over the shared FileBackedTaskStore: it owns the coverage-specific
@@ -56,7 +57,7 @@ export class CoverageJobRunStore implements CoverageJobStore {
   constructor(logsDir: string) {
     this.store = new FileBackedTaskStore<CoverageJobManifest>({
       logsDir,
-      dirName: 'coverage-jobs',
+      dirName: COVERAGE_JOBS_DIR_NAME,
       recordFile: 'job.json',
       idOf: (m) => m.jobId,
       statusOf: (m) => m.status,

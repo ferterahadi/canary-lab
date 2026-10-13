@@ -13,6 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { git } from "./lib/git.mjs";
 
 const force = process.argv.includes("--force");
 const skipPush = process.argv.includes("--no-push");
@@ -20,10 +21,6 @@ const skipRelease = process.argv.includes("--no-release");
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const tag = `v${pkg.version}`;
-
-function git(args, opts = {}) {
-  return execFileSync("git", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts }).trim();
-}
 
 // Pull the changelog section covering `version` — either its own `## X.Y.Z`
 // heading, or (if patch releases were folded into one entry, e.g. `## 1.4.x —

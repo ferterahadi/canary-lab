@@ -8,7 +8,6 @@ import { useCoverageRecalculation } from './use-coverage-recalculation'
 
 const mocks = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn() }))
 vi.mock('@/shared/api/coverage', () => ({ startCoverageJob: mocks.start, getCoverageJob: mocks.get }))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('direct coverage recalculation', () => {
   let root: Root

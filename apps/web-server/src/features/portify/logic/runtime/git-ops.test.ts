@@ -13,6 +13,9 @@ import {
   editFingerprint,
 } from './git-ops'
 import { initGitRepo } from '../../../../../../../tools/test-helpers/git-repo'
+import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('portify-git-')
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
@@ -26,8 +29,7 @@ afterEach(() => {
 })
 
 function tmpRepo(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-git-'))
-  roots.push(root)
+  const root = tempDir()
   fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = 3007\n')
   initGitRepo(root)
   return root
@@ -76,14 +78,12 @@ describe('git-ops scratch worktree lifecycle', () => {
   })
 
   it('changedFiles returns [] when git diff fails (non-git path)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nogit-cf-'))
-    roots.push(dir)
+    const dir = tempDir('portify-nogit-cf-')
     expect(await changedFiles(dir, 'HEAD')).toEqual([])
   })
 
   it('createBranchAndWorktree throws on a non-git path', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-nogit-'))
-    roots.push(dir)
+    const dir = tempDir('portify-nogit-')
     await expect(createBranchAndWorktree({
       repoName: 'x', localPath: dir, worktreesDir: path.join(dir, 'wt'), branch: 'b',
     })).rejects.toBeTruthy()

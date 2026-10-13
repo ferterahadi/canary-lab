@@ -1,28 +1,25 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
-import { afterEach, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { isCommittedSuiteRetirement } from './retired-suite'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+import { initGitRepo, git } from '../../../../../tools/test-helpers/git-repo'
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'suite-retirement-'))
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
+const tempDir = trackTempDirs('suite-retirement-')
+const root = tempDir()
 
 it('recognizes a committed suite deletion but not a missing working-tree folder', async () => {
-  const git = (...args: string[]): void => { execFileSync('git', args, { cwd: root, stdio: 'ignore' }) }
   const featuresDir = path.join(root, 'features')
   const suite = path.join(featuresDir, 'shop')
   fs.mkdirSync(suite, { recursive: true })
   fs.writeFileSync(path.join(suite, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
-  git('init', '-q')
-  git('add', '.')
-  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
+  initGitRepo(root)
 
   fs.rmSync(suite, { recursive: true })
   expect(await isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(false)
 
-  git('add', '-u')
-  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'retire suite')
+  git(root, 'add', '-u')
+  git(root, 'commit', '-qm', 'retire suite')
   expect(await isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(true)
   expect(await isCommittedSuiteRetirement(featuresDir, '../shop')).toBe(false)
 

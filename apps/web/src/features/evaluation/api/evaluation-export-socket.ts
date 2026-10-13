@@ -1,5 +1,6 @@
 import { dispatchOutputFrame } from '@/shared/api/output-frame'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { displayError } from '@/shared/api/error-message'
 
 export interface EvaluationExportSocketMessage {
   type: 'data' | 'exit' | 'error'
@@ -31,7 +32,7 @@ export function connectEvaluationExport(opts: ConnectEvaluationExportOptions): E
     maxReconnects: opts.maxReconnects,
     onError: opts.onError,
     onSetupError: opts.onUnavailable
-      ? (error) => opts.onUnavailable?.(error instanceof Error ? error.message : String(error))
+      ? (error) => opts.onUnavailable?.(displayError(error))
       : undefined,
     onMessage: (data) => dispatchOutputFrame(data, opts, () => conn.markDone()),
   })

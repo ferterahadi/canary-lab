@@ -1,4 +1,4 @@
-import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
+import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, RunLocation, WorkspaceView } from '../lib/workspace-view-state'
 import { ACTIVITY_STAGE, type FeatureActivity } from '@/features/flights/state/feature-activity'
 import { derivedFlightToken } from '@/features/flights/lib/derived-stages'
 import { stageRowKey } from '@/features/flights/components/StageRail'
@@ -43,6 +43,7 @@ export interface NavState {
   /** The changed-tests review (routed ?dialog=tests-review) — the status bar's
    *  "Tests changed" pill and the run hero's snapshot link both open it. */
   specReviewOpen: boolean
+  approval?: string | null
   notificationsOpen: boolean
   /** The run whose boot-failure detail is open (routed ?dialog=boot-failure on
    *  that `run`). Stored as the run id, like `focusTest`, so selecting another
@@ -73,13 +74,19 @@ export interface NavState {
   /** R82: which failing test the run detail should land on, paired with the run
    *  it belongs to. Stored as a PAIR so selecting a different run makes the focus
    *  inert automatically — no clearing effect to keep in sync, and the run detail
-   *  only honours a focus whose `runId` is the run it is showing. */
-  focusTest: { runId: string; test: string } | null
+   *  only honours a focus whose `runId` is the run it is showing. `request`
+   *  counts in-session clicks (never routed), so clicking the same test again
+   *  re-opens a row the reader collapsed. */
+  focusTest: { runId: string; test: string; testId?: string; testLocation?: string; request?: number } | null
   /** Which run-detail tab a drill-through asked for, paired with its run for the
    *  same reason `focusTest` is: a tab intent that outlived the run it was meant
    *  for would silently reroute the next run the user opens. The flight's Test
    *  Run stage sets it when the run's captured fixes are clicked. */
   runTab: { runId: string; tab: RunArrivalTab } | null
+  /** Where the reader is inside a run's detail, paired with that run for the
+   *  `focusTest` reason. Reported by the run detail itself; a cold load seeds it
+   *  from the URL so the detail can open on the same place. */
+  runLocation: { runId: string; location: RunLocation } | null
   /** R83: the flight this view was drilled into FROM, or null when the user got
    *  here on their own. Set only by the flight's stage drill-throughs (coverage
    *  ledger, run detail), which switch the top-level view and would otherwise
@@ -107,6 +114,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     verifyOpen: persisted.dialog === 'verification',
     specReviewOpen: persisted.dialog === 'tests-review',
     notificationsOpen: persisted.dialog === 'notifications',
+    approval: persisted.approval,
     bootFailureFor: persisted.dialog === 'boot-failure' ? persisted.run : null,
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
@@ -118,11 +126,12 @@ export function initialNavState(persisted: PersistedView): NavState {
     modelsFor: persisted.dialog === 'settings' ? persisted.modelsAgent : null,
     resumePlanTaskId: null,
     focusTest: persisted.run && persisted.focusTest
-      ? { runId: persisted.run, test: persisted.focusTest }
+      ? { runId: persisted.run, test: persisted.focusTest, testId: persisted.testId, testLocation: persisted.testLocation }
       : null,
     runTab: persisted.run && persisted.runTab
       ? { runId: persisted.run, tab: persisted.runTab }
       : null,
+    runLocation: persisted.run && persisted.runLocation ? { runId: persisted.run, location: persisted.runLocation } : null,
     returnFlight: persisted.returnFlight,
   }
 }
@@ -166,6 +175,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     feature: state.feature,
     run: state.run,
     dialog: routedDialog(state),
+    ...(state.notificationsOpen && state.approval ? { approval: state.approval } : {}),
     flight: state.flight,
     flightStage: state.flightStage,
     flightLog: state.flightLog,
@@ -176,7 +186,10 @@ export function navToPersistedView(state: NavState): PersistedView {
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
     focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,
+    testId: state.focusTest?.runId === state.run ? state.focusTest.testId : undefined,
+    testLocation: state.focusTest?.runId === state.run ? state.focusTest.testLocation : undefined,
     runTab: state.runTab?.runId === state.run ? state.runTab.tab : null,
+    ...(state.runLocation?.runId === state.run ? { runLocation: state.runLocation.location } : {}),
     returnFlight: state.returnFlight,
   }
 }
@@ -186,9 +199,10 @@ export function navToPersistedView(state: NavState): PersistedView {
  *  universal fallback, so no state can make a row unclickable. `flights`
  *  resolves the feature's flight record; features without one open their
  *  DERIVED flight (the `feature:` token). */
-export type ActivityTarget =
-  | { kind: 'run'; feature: string; runId: string }
-  | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
+// Always a flight pinned to a stage: every activity kind maps to the stage
+// that owns it (`ACTIVITY_STAGE`), so there is no run-detail or bare-flight
+// destination for a caller to branch on.
+export type ActivityTarget = { kind: 'flight'; flightId: string; stage: FlightStageKey }
 
 export function resolveActivityTarget(
   feature: string,

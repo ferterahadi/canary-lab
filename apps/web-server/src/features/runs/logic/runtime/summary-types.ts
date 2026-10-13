@@ -1,3 +1,6 @@
+import type { RunSummaryRunningStep as RunningStep } from '../../../../../../../shared/playback'
+export type { PlaywrightPlaybackEvent as PlaybackEvent, RunSummaryRunningStep as RunningStep } from '../../../../../../../shared/playback'
+
 import path from 'path'
 import type { EnvironmentExclusion } from '../../../../../../../shared/run-applicability'
 
@@ -37,40 +40,9 @@ export interface TestEntry {
   harFile?: string
 }
 
-export interface RunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
-}
-
 export interface RunningTest {
   id?: string
   name: string
   location: string
   step?: RunningStep
 }
-
-export type PlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { id?: string; name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { id?: string; name: string; title: string }
-      step: RunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { id?: string; name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }

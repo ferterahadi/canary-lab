@@ -1,6 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { RunStore } from '../runs/logic/run-store'
@@ -14,8 +13,8 @@ import { CoverageJobRunStore } from '../coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from '../flights/logic/store'
 import type { FlightManifest, FlightStatus } from '../../../../../shared/flights/types'
 import type { CoverageJobManifest } from '../../../../../shared/coverage/types'
-import type { PortifyManifest } from '../portify/logic/runtime/types'
-import type { BenchmarkManifest } from '../benchmark/logic/runtime/types'
+import type { PortifyManifest } from '../../../../../shared/portify-index'
+import type { BenchmarkManifest } from '../../../../../shared/benchmark-index'
 import { agentJobStore } from '../agent-sessions/logic/agent-jobs/store'
 import { discoveryRepairStore } from './logic/discovery-repair-store'
 import { runStartRequestStore } from '../runs/logic/run-start-requests'
@@ -30,6 +29,9 @@ import { agentProbeRoutes } from './routes/agent-probe'
 import { onboardingRoutes } from './routes/onboarding'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
+import { trackTempDirs } from '../../../../../tools/test-helpers/temp-dir'
+
+const tempDir = trackTempDirs('cl-config-reg-')
 
 let tmpDir: string
 let logsDir: string
@@ -59,7 +61,7 @@ const workspaceEvents: WorkspaceEventPublisher = {
 }
 
 beforeEach(() => {
-  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-config-reg-')))
+  tmpDir = tempDir()
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
   fs.mkdirSync(logsDir, { recursive: true })

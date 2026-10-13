@@ -3,6 +3,7 @@ import * as runsApi from '@/shared/api/runs'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import type { RunStartRequest } from '@shared/test-review'
 import type { PendingRunStart } from '../state/pending-run-starts'
+import { displayError } from '@/shared/api/error-message'
 
 interface Props {
   pending: PendingRunStart
@@ -44,7 +45,7 @@ export function PendingRunStartNotice({ pending, onRunStarted, onReview, onDismi
     try {
       await runsApi.cancelRunStartRequest(pending.requestId)
       live.refresh()
-    } catch (error) { setActionError(error instanceof Error ? error.message : 'Could not cancel the run request') }
+    } catch (error) { setActionError(displayError(error, 'Could not cancel the run request')) }
     finally { setBusy(false) }
   }
   const done = request?.status === 'cancelled' || request?.status === 'failed'
