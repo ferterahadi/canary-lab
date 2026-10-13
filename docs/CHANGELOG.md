@@ -37,6 +37,8 @@ Each entry is tagged with the area it touches:
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to pick up shared approvals and the new run-recovery instructions.
 
+2.3.3 is the last planned feature release in the 2.3.x series; maintenance fixes may still follow. Development now moves to Canary Lab 3.0 — [3D Workspace](ROADMAP.md), a new way to explore test suites, watch runs, inspect repairs, and review verification evidence. The plan is to share the build along the way on [Instagram](https://instagram.com/ferterahadi).
+
 - **[Test Runner]** **One place for a run's results and fixes.** The Playwright, Changes, and Journal tabs merge into Results & Fixes. Each test shows its runs in order: what each repair changed, in the same code editor as your tests, and how the test went after it.
 - **[Test Runner]** **See whether a fix is in your code yet.** The repair agent edits an isolated copy of each repo. The Changes dialog labels each repo "Not in your repo", "In your repo, uncommitted", or "Already in your repo".
 - **[Test Runner]** **Runs recover from a server restart.** A run whose server stopped mid-run is marked aborted with the reason instead of looking stuck, and you can restart it from where it was.
