@@ -9,7 +9,7 @@ pull request to `main`.
 
 ## Prerequisites
 
-- Node.js 22.12 or newer
+- Node.js 22.23.4 or newer
 - npm 9 or newer
 
 Install dependencies once:

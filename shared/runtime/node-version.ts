@@ -10,7 +10,7 @@ import { compareSemver } from './registry-version'
 
 /** Must match `engines.node` in package.json — pinned by node-version.test.ts,
  *  because two sources of truth for a floor is how one of them goes stale. */
-export const MINIMUM_NODE_VERSION = '22.12.0'
+export const MINIMUM_NODE_VERSION = '22.23.4'
 
 /**
  * False only when the running Node is definitively older than the floor.

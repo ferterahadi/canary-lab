@@ -139,7 +139,7 @@ successful setup probe does not prove an already-running app has reloaded them.
 
 ### Upgrade from 1.5.x to 2.0.0
 
-Install Node 22.12 or newer first, then run:
+Install Node 22.23.4 or newer first, then run:
 
 ```bash
 npm install --save-dev canary-lab@2
