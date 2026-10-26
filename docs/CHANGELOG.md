@@ -33,6 +33,10 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.4 — Unreleased
+
+- **[General]** **Node with the HTTP2Shell fix is required.** Canary Lab now needs Node 22.23.4, 24.22.1, or 26.12.1, or a newer release on one of those lines. Older releases carry the HTTP2Shell Brotli bug (CVE-2026-111497), and Node 23 and 25 never got a fix. On an older Node, Canary Lab stops at startup and says which version to install.
+
 ## 2.3.3 — 2026-10-13
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to pick up shared approvals and the new run-recovery instructions.

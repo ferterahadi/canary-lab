@@ -11,7 +11,7 @@ Your Claude or Codex agent investigates the app, writes Playwright tests, and re
 
 ## Quick Start
 
-You need Node.js 22.12 or newer and npm 9 or newer.
+You need Node.js 22.23.4, 24.22.1, or 26.12.1 (or a newer release on one of those lines) and npm 9 or newer. Those are the first releases that fix the HTTP2Shell Brotli bug (CVE-2026-111497).
 
 1. Create a Canary Lab workspace. This is separate from the app repo you want to test:
 
@@ -136,7 +136,7 @@ Use Canary Lab when you need service orchestration, environment switching, backe
 
 ## Updating a Workspace
 
-With Node.js 22.12 or newer:
+With Node.js 22.23.4, 24.22.1, 26.12.1, or newer on those lines:
 
 ```bash
 npm install --save-dev canary-lab@latest
@@ -147,7 +147,7 @@ Restart Canary Lab and connected agent apps afterwards so they load the refreshe
 
 ## Requirements
 
-- Node.js 22.12 or newer and npm 9 or newer.
+- Node.js 22.23.4, 24.22.1, or 26.12.1 (or newer on those lines) and npm 9 or newer.
 - Chromium for Playwright, installed automatically by `canary-lab init` unless installation is skipped.
 - A local UI server, started automatically through the agent connection or manually with `npx canary-lab ui`.
 - Optional repair agents: supported Claude or Codex command-line clients on `PATH`.
