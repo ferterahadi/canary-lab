@@ -7,9 +7,8 @@
 // unsupported Node (a require() of an ESM-only dependency). A guard placed after
 // it would print its message only on the runs that did not need it.
 import {
-  MINIMUM_NODE_VERSION,
   formatUnsupportedNode,
-  meetsMinimumNode,
+  isSupportedNode,
 } from '../../shared/runtime/node-version'
 
 /** Returns true when this Node is supported. Otherwise prints why and exits 1 —
@@ -18,8 +17,8 @@ export function assertSupportedNode(
   current: string = process.versions.node,
   deps: { error?: (msg: string) => void; exit?: (code: number) => void } = {},
 ): boolean {
-  if (meetsMinimumNode(current)) return true
-  ;(deps.error ?? console.error)(formatUnsupportedNode(current, MINIMUM_NODE_VERSION))
+  if (isSupportedNode(current)) return true
+  ;(deps.error ?? console.error)(formatUnsupportedNode(current))
   ;(deps.exit ?? process.exit)(1)
   return false
 }

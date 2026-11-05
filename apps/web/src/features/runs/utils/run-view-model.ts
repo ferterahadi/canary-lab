@@ -102,8 +102,11 @@ function primaryAlert(status: RunStatus, service?: string, executionType: Execut
       message: service ? `${label} aborted because ${service} failed health checks.` : `${label} aborted before completion.`,
     }
   }
-  if (status === 'failed') return { tone: 'error', message: executionType === 'verify' ? 'Verify found deployment failures. No healing was started.' : 'Run finished with failing tests.' }
-  if (status === 'passed') return { tone: 'success', message: `${label} passed.` }
+  // A Verify pass/fail banner would only repeat the header status chip; the
+  // pane's observational note already says no healing ran.
+  if (executionType === 'verify') return null
+  if (status === 'failed') return { tone: 'error', message: 'Run finished with failing tests.' }
+  if (status === 'passed') return { tone: 'success', message: 'Run passed.' }
   return null
 }
 

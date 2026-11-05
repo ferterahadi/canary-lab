@@ -291,6 +291,13 @@ describe('deriveRunViewModel', () => {
     expect(vm.actions.delete.enabled).toBe(true)
   })
 
+  it('leaves a settled Verify verdict to the status chip, but still explains an abort', () => {
+    expect(deriveRunViewModel(detail({ executionType: 'verify', status: 'failed' })).primaryAlert).toBeUndefined()
+    expect(deriveRunViewModel(detail({ executionType: 'verify', status: 'passed' })).primaryAlert).toBeUndefined()
+    expect(deriveRunViewModel(detail({ executionType: 'verify', status: 'aborted' })).primaryAlert)
+      .toEqual({ tone: 'warning', message: 'Verify aborted before completion.' })
+  })
+
   it('holds a boot session: only Stop is offered, with a teal-friendly headline + alert', () => {
     const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'running' }))
 

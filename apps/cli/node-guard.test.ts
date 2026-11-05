@@ -12,13 +12,13 @@ describe('cli node guard', () => {
     const errors: string[] = []
     let exited: number | null = null
 
-    expect(assertSupportedNode('20.19.0', {
+    expect(assertSupportedNode('22.12.0', {
       error: (m) => errors.push(m),
       exit: (c) => { exited = c },
     })).toBe(false)
 
     expect(exited).toBe(1)
-    expect(errors.join('\n')).toContain('needs Node 22.23.4 or newer')
+    expect(errors.join('\n')).toContain('needs Node 22.23.4, 24.22.1, 26.12.1')
     // The install succeeding is the confusing part; the message has to own it.
     expect(errors.join('\n')).toContain('npm only warns')
   })

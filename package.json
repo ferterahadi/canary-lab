@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "The independent local harness for AI-repaired Playwright tests — it runs the tests itself, so a green run can't be faked.",
   "keywords": [
     "playwright",
@@ -38,7 +38,7 @@
   },
   "homepage": "https://github.com/ferterahadi/canary-lab#readme",
   "engines": {
-    "node": ">=22.23.4",
+    "node": ">=22.23.4 <23.0.0 || >=24.22.1 <25.0.0 || >=26.12.1",
     "npm": ">=9.0.0"
   },
   "bin": {
