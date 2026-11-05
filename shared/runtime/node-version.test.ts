@@ -32,6 +32,7 @@ describe('node version floor', () => {
     // 24.0.0 is newer than the 22 floor and still unpatched — the reason this
     // is a floor per line rather than one global minimum.
     expect(isSupportedNode('22.23.3')).toBe(false)
+    expect(isSupportedNode('22.22.2')).toBe(false) // the release most local installs were on
     expect(isSupportedNode('22.12.0')).toBe(false)
     expect(isSupportedNode('24.0.0')).toBe(false)
     expect(isSupportedNode('24.22.0')).toBe(false)
