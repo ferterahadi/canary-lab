@@ -19,10 +19,18 @@ describe('node version floor', () => {
   })
 
   it('accepts the floor and anything newer', () => {
-    expect(meetsMinimumNode('22.12.0')).toBe(true)
-    expect(meetsMinimumNode('22.12.1')).toBe(true)
+    expect(meetsMinimumNode('22.23.4')).toBe(true)
+    expect(meetsMinimumNode('22.23.5')).toBe(true)
     expect(meetsMinimumNode('24.3.0')).toBe(true)
     expect(meetsMinimumNode('v23.0.0')).toBe(true)
+  })
+
+  it('rejects 22.x releases that bundle the vulnerable Brotli decoder', () => {
+    // CVE-2026-111497 (HTTP2Shell): fixed in 22.23.4, so the floor moved there
+    // from 22.12. 22.22.2 is the release most local installs were on.
+    expect(meetsMinimumNode('22.12.0')).toBe(false)
+    expect(meetsMinimumNode('22.22.2')).toBe(false)
+    expect(meetsMinimumNode('22.23.3')).toBe(false)
   })
 
   it('rejects the versions 1.5.1 supported', () => {
