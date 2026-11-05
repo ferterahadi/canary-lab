@@ -98,10 +98,12 @@ if (!tarballName) {
 
 const tarballPath = path.join(tempRoot, tarballName)
 
-// Upgrade proof starts from the preceding npm release, not a hand-shaped
-// fixture. A patch release must migrate a real 2.3.0 workspace without rewriting
-// its suites or user-owned files, then leave the documented upgrade retryable.
-const upgradeFromVersion = '2.3.0'
+// Upgrade proof starts from an earlier npm release, not a hand-shaped fixture.
+// A patch release must migrate a real 2.3.x workspace without rewriting its
+// suites or user-owned files, then leave the documented upgrade retryable.
+// 2.3.2 is the oldest 2.3.x still on the registry; 2.3.0 and 2.3.1 were
+// unpublished, and a version npm cannot serve fails the install step.
+const upgradeFromVersion = '2.3.2'
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version
 const upgradeHarnessDir = path.join(tempRoot, 'upgrade-harness')
 const upgradeProjectDir = path.join(upgradeHarnessDir, 'upgrade-project')
