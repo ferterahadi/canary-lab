@@ -67,9 +67,17 @@ function reviewedRepoPaths(root: string, featureDir: string, files: string[]): s
 export async function commitReviewedFiles(feature: string, featureDir: string, files: string[]): Promise<TestReviewGitReceipt> {
   const { root, realDir } = await gitLocation(featureDir)
   const repoPaths = reviewedRepoPaths(root, realDir, files)
+  // The review discloses every copied suite byte, including local state the
+  // suite's own .gitignore keeps out of Git. Naming one such path makes
+  // `git add` refuse the whole set, so Git records the rest and the caller's
+  // receipt still covers the full reviewed revision.
+  const ignored = await runGit(root, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', ...repoPaths])
+  if (ignored.code !== 0) throw Object.assign(new Error((ignored.stderr || ignored.stdout).trim() || 'Git could not inspect the reviewed files.'), { statusCode: 500 })
+  const gitIgnored = new Set(ignored.stdout.split('\0'))
   const stagePaths: string[] = []
   const commitPaths: string[] = []
   for (const repoPath of repoPaths) {
+    if (gitIgnored.has(repoPath)) continue
     if (fs.existsSync(path.join(root, repoPath))) {
       stagePaths.push(repoPath)
       commitPaths.push(repoPath)

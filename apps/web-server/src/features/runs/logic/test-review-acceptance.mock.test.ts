@@ -5,9 +5,14 @@ import { trackTempDirs } from '../../../../../../tools/test-helpers/temp-dir'
 
 const tempDir = trackTempDirs('cl-review-git-mock-')
 
-const git = vi.hoisted(() => ({ getGitRoot: vi.fn(), runGit: vi.fn() }))
+const git = vi.hoisted(() => ({ getGitRoot: vi.fn(), runGit: vi.fn(), ignored: vi.fn() }))
 
-vi.mock('../../../shared/git-repo', () => git)
+// The ignored-path query is answered apart from `runGit`, so each positional
+// reply sequence below still names only the staging and commit protocol.
+vi.mock('../../../shared/git-repo', () => ({
+  getGitRoot: git.getGitRoot,
+  runGit: (cwd: string, args: string[]) => (args.includes('--ignored') ? git.ignored(cwd, args) : git.runGit(cwd, args)),
+}))
 
 const { buildGitReview, commitReviewedFiles, restoreGitReview } = await import('./test-review-acceptance')
 
@@ -20,6 +25,19 @@ beforeEach(() => {
   git.getGitRoot.mockReset()
   git.runGit.mockReset()
   git.getGitRoot.mockResolvedValue(root)
+  git.ignored.mockReset()
+  git.ignored.mockResolvedValue({ code: 0, stdout: '', stderr: '' })
+})
+
+it('refuses to stage when Git cannot say which reviewed files it ignores', async () => {
+  git.ignored.mockResolvedValueOnce({ code: 128, stdout: '', stderr: 'index locked' })
+  await expect(commitReviewedFiles('checkout', root, ['e2e/a.spec.ts'])).rejects.toMatchObject({ statusCode: 500, message: 'index locked' })
+
+  git.ignored.mockResolvedValueOnce({ code: 128, stdout: '', stderr: '' })
+  await expect(commitReviewedFiles('checkout', root, ['e2e/a.spec.ts'])).rejects.toMatchObject({
+    statusCode: 500, message: 'Git could not inspect the reviewed files.',
+  })
+  expect(git.runGit).not.toHaveBeenCalled()
 })
 
 it('returns actionable Git review failures without attempting a partial commit', async () => {

@@ -85,6 +85,26 @@ describe('revision-bound Git test review', () => {
     })
   })
 
+  it('accepts a reviewed file the suite keeps out of Git and commits the rest', async () => {
+    const root = fixture()
+    fs.writeFileSync(path.join(root, '.gitignore'), '.local-state.json\n')
+    git(root, 'add', '.gitignore')
+    git(root, 'commit', '-qm', 'ignore local state')
+    fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after\n')
+    fs.writeFileSync(path.join(root, '.local-state.json'), '{}\n')
+
+    const receipt = await commitReviewedFiles('checkout', root, ['.local-state.json', 'e2e/a.spec.ts'])
+    expect(receipt.status).toBe('committed')
+    expect(git(root, 'show', '--format=', '--name-status', 'HEAD')).toBe('M\te2e/a.spec.ts')
+    expect(git(root, 'ls-files', '.local-state.json')).toBe('')
+    expect(fs.readFileSync(path.join(root, '.local-state.json'), 'utf8')).toBe('{}\n')
+
+    // Nothing Git can record is still an approval the caller persists.
+    expect(await commitReviewedFiles('checkout', root, ['.local-state.json'])).toEqual({
+      status: 'already-committed', commit: receipt.commit,
+    })
+  })
+
   it('accepts a committed move without passing its removed path to Git', async () => {
     const root = fixture()
     fs.writeFileSync(path.join(root, 'e2e/subscription.cjs'), 'original\n')
