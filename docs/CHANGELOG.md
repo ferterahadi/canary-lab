@@ -33,6 +33,15 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.5 — 2026-11-12
+
+- **[General]** **Approvals are easier to scan.** Answer pending questions in Needs attention, undo an answer for four seconds, and find resolved questions in History.
+- **[General]** **End a paused flight from its page.** Use the flight menu to close it without deleting the suite or its tests.
+- **[Test Runner]** **Accept reviews that include files ignored by Git.** The review still covers those files, and Git commits only the eligible changes.
+- **[Test Runner]** **Temporary environment backups stay out of test reviews and snapshots.** They no longer show up as deleted tests or cause a fresh run to abort after you approve a review.
+
+---
+
 ## 2.3.4 — 2026-11-05
 
 - **[General]** **Node with the HTTP2Shell fix is required.** Canary Lab now needs Node 22.23.4, 24.22.1, or 26.12.1, or a newer release on one of those lines. Older releases carry the HTTP2Shell Brotli bug (CVE-2026-111497), and Node 23 and 25 never got a fix. On an older Node, Canary Lab stops at startup and says which version to install.
