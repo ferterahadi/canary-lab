@@ -7,7 +7,9 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreReviewedSuiteFiles, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { hashFeatureSpecs } from '../dirty-specs/detect'
-import { suiteReviewRevision } from './suite-review'
+import { suiteReviewFiles, suiteReviewRevision } from './suite-review'
+import { applyFeatureEnvset } from './run-primitives'
+import { restore } from './env-switcher/switch'
 import { writeManifest } from './manifest'
 import type { RunManifest } from '../../../../../../../shared/run-manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
@@ -417,6 +419,35 @@ describe('snapshotSuite', () => {
     ctx.suiteDir = ctx.feature.featureDir
     expect(() => snapshotSuite(ctx)).toThrow(/Approved test review changed before snapshot capture/)
     expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
+  })
+
+  it('keeps envset backups of runtime inputs out of an approved review and its next snapshot', () => {
+    // Each run's envset apply writes `<target>.bak.<now>` beside a nested
+    // runtime input and teardown deletes it. Neither backup is a test change.
+    const oldRunDir = path.join(tmpDir, 'logs', 'runs', 'old-run')
+    fs.mkdirSync(oldRunDir, { recursive: true })
+    const { ctx: oldCtx } = ctxFor({}, { env: 'local', runId: 'old-run', runDir: oldRunDir })
+    const live = oldCtx.feature.featureDir
+    configureSuiteEnvTarget(oldCtx, '.canary-inputs/evidence.json', '{"phone":"old"}\n')
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    vi.spyOn(Date, 'now').mockReturnValue(1794472206971)
+    const oldBackups = applyFeatureEnvset(live, 'local')!
+    snapshotSuite(oldCtx)
+    restore(oldBackups)
+    write(live, 'e2e/a.spec.ts', `${SPEC_A}// approved\n`)
+
+    const oldSnapshot = oldCtx.paths.suiteSnapshotDir
+    const exclusions = suiteRuntimeInputTargetsForSnapshot(oldSnapshot)
+    expect(suiteReviewFiles(oldSnapshot, live, exclusions).files.map(({ file }) => file)).toEqual(['e2e/a.spec.ts'])
+    const revision = suiteReviewRevision(oldSnapshot, live, exclusions)
+
+    const { ctx } = ctxFor({}, { env: 'local', testReviewApproval: { sourceRunId: 'old-run', revision, approvedAt: 'now' } })
+    vi.spyOn(Date, 'now').mockReturnValue(1794472206999)
+    const backups = applyFeatureEnvset(live, 'local')!
+    expect(() => snapshotSuite(ctx)).not.toThrow()
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), 'utf8')).toContain('// approved')
+    expect(fs.readdirSync(path.join(ctx.paths.suiteSnapshotDir, '.canary-inputs'))).toEqual(['evidence.json'])
+    restore(backups)
   })
 
   it('fails closed if an approved byte changes while the snapshot is copied', () => {
