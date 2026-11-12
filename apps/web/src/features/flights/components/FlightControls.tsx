@@ -487,9 +487,10 @@ export function RedoFlightDialog({
   )
 }
 
-/** R71/W1: the header's ⋯ menu — R74 slimmed it to the destructive disposal
- *  (Delete flight, two-step confirm in place: first click arms, second fires;
- *  closing disarms). Errors route to the header's inline error line. */
+/** R71/W1: the header's ⋯ menu — the flight's terminal actions: End flight on
+ *  a paused flight (two-step confirm in place: first click arms, second fires;
+ *  closing disarms) and the destructive disposal. Errors route to the header's
+ *  inline error line. */
 export function FlightMenu({
   flight,
   derived = false,
@@ -535,8 +536,9 @@ export function FlightMenu({
     fire: () => void
   }
   // R74/R76: Pause is a header button and resume/repeat/start-over collapsed
-  // into the header's Continue menu. The ⋯ menu keeps only destructive disposal:
-  // a suite after setup, or the lone flight record before setup creates one.
+  // into the header's Continue menu. The ⋯ menu keeps the terminal actions:
+  // ending a paused flight, and disposal of a suite after setup (or the lone
+  // flight record before setup creates one).
   const [deleteOpen, setDeleteOpen] = useState(false)
   // Before Suite setup the only durable thing is the flight record itself. A
   // suite delete would 404 because there is no feature directory yet. Never on a
@@ -546,6 +548,21 @@ export function FlightMenu({
   const removeFlightOnly = !derived
     && flight.stages.find((stage) => stage.key === 'scaffold')?.status === 'pending'
   const items: MenuItem[] = [
+    // A running flight stops through the header's Pause (R74). Once paused,
+    // this is the only way to close it short of deleting the whole suite.
+    // Never gated on external ownership: the server leaves abort open to the
+    // browser so a flight whose agent has gone away can still be closed.
+    ...(!derived && flight.status === 'paused'
+      ? [{
+          key: 'end',
+          label: 'End flight…',
+          confirmLabel: 'Confirm: end flight',
+          tone: 'var(--danger)',
+          title: 'Close this flight for good. The suite and its tests stay; you can start a new flight later.',
+          testId: 'flight-end',
+          fire: () => onAction(() => flightsApi.abortFlight(flight.flightId)),
+        }]
+      : []),
     ...(!active
       ? [{
           key: 'delete',
