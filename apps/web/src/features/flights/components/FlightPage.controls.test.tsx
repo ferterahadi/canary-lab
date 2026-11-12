@@ -436,14 +436,31 @@ describe('flight controls (R48/R71)', () => {
     expect(mocks.pauseFlight).toHaveBeenCalledWith('fl_1')
   })
 
-  it('R74: the settled ⋯ menu is Delete-only — no Stop, no Start over, no Repeat a step', async () => {
-    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user' }))
+  it('R74: a paused flight\'s ⋯ menu ends it or deletes it — no Start over, no Repeat a step', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'stage-failed' }))
     await render('fl_1')
     await openMenu()
     expect(container.querySelector('[data-testid="flight-abort"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-start-over"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-delete"]')).toBeTruthy()
+    // Two steps: the first click only arms it.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-end"]')?.click() })
+    expect(mocks.abortFlight).not.toHaveBeenCalled()
+    const confirm = container.querySelector<HTMLButtonElement>('[data-testid="flight-end-confirm"]')
+    expect(confirm?.textContent).toBe('Confirm: end flight')
+    mocks.abortFlight.mockResolvedValue(manifest({ status: 'aborted' }))
+    await act(async () => { confirm?.click() })
+    expect(mocks.abortFlight).toHaveBeenCalledExactlyOnceWith('fl_1')
+  })
+
+  it('offers End flight only while a flight is paused', async () => {
+    for (const status of ['done', 'failed', 'aborted'] as const) {
+      mocks.getFlight.mockResolvedValue(manifest({ status }))
+      await render('fl_1')
+      await openMenu()
+      expect(container.querySelector('[data-testid="flight-end"]')).toBeNull()
+    }
   })
 
   it('R74: a paused flight offers From here AND From a step… (→ dialog); no feedback → omitted', async () => {
@@ -658,6 +675,8 @@ describe('flight controls (R48/R71)', () => {
       expect(cont?.title).toBe('Your agent is driving this flight — continue or repeat this flight from the Claude/Codex session doing the work.')
       await openMenu()
       expect(container.querySelector('[data-testid="flight-abort"]')).toBeNull()
+      // Ending stays open: the agent driving it may be gone for good.
+      expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-end"]')?.disabled).toBe(false)
       const deleteButton = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
       expect(deleteButton?.disabled).toBe(true)
       expect(deleteButton?.title).toContain('from the Claude/Codex session')

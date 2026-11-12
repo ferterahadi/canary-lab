@@ -10,6 +10,8 @@ vi.mock('@/shared/api/notifications', () => api)
 import { NotificationCenter } from './NotificationCenter'
 import { useNotifications } from './use-notifications'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
+import type { ApprovalsResource } from '@/shared/state/use-approvals'
+import type { Approval } from '@shared/approval'
 
 let root: Root
 let rows: WorkspaceNotification[]
@@ -360,4 +362,35 @@ it('recovers a failed then hung initial list and retains accepted rows on later 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(state.error).toBeNull()
   } finally { vi.useRealTimers() }
+})
+
+it('keeps open approvals in Needs attention, settled ones in History, and routes a deep link once', async () => {
+  const approval = (id: string, status: Approval['status'], startedAt: string): Approval => ({
+    id, status, startedAt, command: 'start_run', feature: 'shop', reviewUrl: '', message: 'Coverage is stale.', expiresAt: '2026-09-08T12:00:00Z',
+    display: { title: `Question ${id}` }, schema: { properties: { choice: { type: 'string', enum: ['a', 'b'] } }, required: ['choice'] },
+    ...(status === 'answered' ? { answer: { choice: 'a' } } : {}),
+  })
+  rows = [{ ...rows[0], resolvedAt: '2026-09-08T10:30:00Z' }]
+  let items = [approval('open', 'pending', '2026-09-08T11:00:00Z'), approval('late', 'answered', '2026-09-08T11:00:00Z'), approval('early', 'expired', '2026-09-08T09:00:00Z')]
+  const resource = () => ({ items, confirmed: true, error: null, answer: vi.fn() }) as unknown as ApprovalsResource
+  const view = (focus: string | null, isOpen = true) => <InvalidationProvider>
+    <NotificationCenter open={isOpen} onOpenChange={vi.fn()} onNavigate={vi.fn()} approvals={resource()} approvalFocus={focus} />
+  </InvalidationProvider>
+  const ids = () => [...document.querySelectorAll('[data-testid="notification-center"] li')].map((li) => li.getAttribute('data-testid'))
+  await act(async () => root.render(view('late')))
+  expect(ids()).toEqual(['approval-late', 'notification-n1', 'approval-early'])
+  expect(button('History 3').className).toContain('cl-tab-active')
+  // Answering the linked question later must not move the reader.
+  await act(async () => button('Needs attention 1').click())
+  expect(ids()).toEqual(['approval-open'])
+  items = items.map((item) => item.id === 'late' ? { ...item, status: 'pending' as const, answer: undefined } : item)
+  await act(async () => root.render(view('late')))
+  expect(ids()).toEqual(['approval-open', 'approval-late'])
+  // Reopening the dialog routes the link again.
+  await act(async () => root.render(view('open', false)))
+  await act(async () => root.render(view('open')))
+  expect(button('Needs attention 2').className).toContain('cl-tab-active')
+  items = []
+  await act(async () => root.render(view(null)))
+  expect(document.querySelector('[data-testid="notification-center-empty"]')).not.toBeNull()
 })

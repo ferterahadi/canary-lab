@@ -1,4 +1,4 @@
-import type { Approval } from '../../../../shared/approval'
+import type { Approval, ApprovalDisplay } from '../../../../shared/approval'
 import { approvalContext } from './approval-context'
 import type { ApprovalStore } from './approval-store'
 import { createHash, randomUUID } from 'crypto'
@@ -15,7 +15,7 @@ type AnswerSpec<T> = {
   revision?: unknown
   onNonAccept?: (reason: string) => ToolResult | Promise<ToolResult>
 } & ({ mode: 'form'; schema: z.ZodType<T> } | { mode: 'url' })
-type InputSpec<T> = AnswerSpec<T> & { message: string; fallback: () => CallToolResult }
+type InputSpec<T> = AnswerSpec<T> & { message: string; display?: ApprovalDisplay; fallback: () => CallToolResult }
   & ({ mode: 'form' } | { mode: 'url'; url: string })
 
 interface PendingInput {
@@ -226,6 +226,7 @@ function openUserInput<T>(
   })
   if (browser && url && spec.mode === 'form') {
     if (!existing) browser.store.open({ id, reviewUrl: url, command: browser.command, feature: browser.feature, message: spec.message,
+      ...(spec.display ? { display: spec.display } : {}),
       schema: z.toJSONSchema(spec.schema) as Approval['schema'], status: 'pending', startedAt: new Date(now).toISOString(),
       expiresAt: new Date(now + INPUT_TTL_MS).toISOString(),
     }, async (answer) => browser.resume(id, answer))

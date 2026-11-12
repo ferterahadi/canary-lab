@@ -6,9 +6,18 @@ import { asJsonResult, errorResult, type ToolGroupContext } from '../tool-suppor
 import { healWaitNext } from '../heal-task-wait'
 import { TEST_REVIEW_WAIT_MS, testReviewOutcome, waitForTestReview } from '../test-review-wait'
 import { normalizeRunTestReview, testReviewUrl, type RunTestReview, type RunStartRequest } from '../../../../../shared/test-review'
+import type { ApprovalDisplay } from '../../../../../shared/approval'
 
 // A read-only wait follows disclosed review evidence or a capability fallback.
 // Reconnect obtains a new token; the decision itself lives in the run store.
+// Accepting is a review decision, never evidence that the tests passed.
+const TEST_REVIEW_DISPLAY: ApprovalDisplay = {
+  title: 'Test files changed',
+  choices: {
+    'Accept & commit': { detail: "Commits the changed test files. Accepting isn't a pass." },
+    'Restore recorded files': { label: 'Restore', detail: 'Puts back the test files the run used.' },
+  },
+}
 const waitSecret = randomBytes(32)
 const browserWaitToken = (scope: unknown) => createHmac('sha256', waitSecret).update(JSON.stringify(scope)).digest('hex')
 
@@ -120,6 +129,7 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
       scope, revision: review_revision,
       mode: 'form', schema: z.object({ choice: z.enum(['Accept & commit', 'Restore recorded files']) }),
       message: `${review.feature} has ${review.files.length} changed test-suite file${review.files.length === 1 ? '' : 's'}. Accept and commit the changes, or restore the files used in the run? Approval does not mean the tests passed. Cancel leaves this pending.${reviewUrl(review) ? `\n\n[Compare changes in Canary](${reviewUrl(review)}).` : ''}`,
+      display: TEST_REVIEW_DISPLAY,
       fallback: () => asJsonResult(browserHandoff(review, request_id, waitToken, 'elicitation-unavailable', facts)),
       onNonAccept: async (reason) => asJsonResult(await continuation(request_id, runId, browserHandoff(review, request_id, waitToken, reason, facts))),
     }, async (answer) => {

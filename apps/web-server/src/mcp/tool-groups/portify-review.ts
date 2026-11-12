@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { elicitationAdviceFor } from '../client-surface'
 import { requestUserInput, inputPending, inputFingerprint } from '../elicitation'
 import { asJsonResult, errorResult, summarizeUnifiedDiff, type ToolGroupContext } from '../tool-support'
-import { portifyReviewMessage } from '../../shared/approval-messages'
+import { PORTIFY_REVIEW_DISPLAY, portifyReviewMessage } from '../../shared/approval-messages'
 
 export function registerPortifyReviewTool(ctx: ToolGroupContext): void {
   ctx.registerTool('review_portify', {
@@ -20,6 +20,7 @@ export function registerPortifyReviewTool(ctx: ToolGroupContext): void {
       schema: z.object({ choice: z.enum(['save', 'revise', 'discard']), feedback: z.string().max(4000).optional().describe('If requesting changes, say what to change.') })
         .refine((value) => value.choice !== 'revise' || !!value.feedback?.trim()),
       message: portifyReviewMessage(manifest.feature),
+      display: PORTIFY_REVIEW_DISPLAY,
       fallback: () => asJsonResult({ workflowId, ...proof, status: 'needs-input', reason: 'elicitation-unavailable',
         next: `${elicitationAdviceFor(facts, 'form')} Show the verified diff and ASK THE USER whether to save, revise, or discard. Use save_portify/cancel_portify with confirm:true only for their chosen action; revise_external_portify requires their feedback.` }),
     }, async (answer) => asJsonResult({

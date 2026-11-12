@@ -30,7 +30,8 @@ import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
 import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE, NEW_RUN_REQUIRED_NEXT_STEPS } from '../../shared/single-attempt'
 import { findFeature } from '../../shared/feature-loader'
 import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
-import { repositoryIsolationMessage } from '../../shared/approval-messages'
+import { REPOSITORY_ISOLATION_DISPLAY, repositoryIsolationMessage } from '../../shared/approval-messages'
+import type { ApprovalDisplay } from '../../../../../shared/approval'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -60,6 +61,30 @@ type RemoteTarget = { env: string; targetOrigins: Record<string, string> }
 
 const VERIFY_CHOICE = 'Verify the deployed target'
 const RUN_CHOICE = 'Run with repair anyway'
+const UPDATE_COVERAGE_CHOICE = 'Update coverage first'
+const STALE_COVERAGE_CHOICE = 'Run now with stale coverage'
+const COVERAGE_DISPLAY: ApprovalDisplay = {
+  title: 'Coverage out of date',
+  choices: {
+    // This answer returns the recovery owner without starting a run.
+    [UPDATE_COVERAGE_CHOICE]: { label: 'Update first', detail: "Doesn't start the run yet. Coverage gets refreshed first." },
+    [STALE_COVERAGE_CHOICE]: { label: 'Run anyway', detail: 'Runs the tests now. Coverage stays marked out of date.' },
+  },
+}
+const REMOTE_TARGET_DISPLAY: ApprovalDisplay = {
+  title: 'Suite targets a deployed app',
+  choices: {
+    [VERIFY_CHOICE]: { label: 'Verify deployed', detail: 'Checks the deployed hosts. No services start and nothing is repaired.' },
+    [RUN_CHOICE]: { label: 'Run with repair', detail: "Runs with local repairs. The deployed app won't change." },
+  },
+}
+const ABORT_DISPLAY: ApprovalDisplay = {
+  title: 'Stop this run?',
+  choices: {
+    keep: { label: 'Keep running', detail: 'The run and its services continue.' },
+    abort: { label: 'Stop', detail: 'Stops the run and shuts down its services.' },
+  },
+}
 type CoverageDecision =
   | { revision: string; allowStale: false; change?: CoverageChange }
   | { revision: string; allowStale: true; change: CoverageChange }
@@ -100,7 +125,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       } : {}) })
     }
     const coverageScope = ['run-coverage-preflight', deps.projectRoot, args]
-    const coverageChoiceSchema = z.object({ choice: z.enum(['Update coverage first', 'Run now with stale coverage']) })
+    const coverageChoiceSchema = z.object({ choice: z.enum([UPDATE_COVERAGE_CHOICE, STALE_COVERAGE_CHOICE]) })
     const isolationSchema = z.object({ isolation: z.enum(['worktree', 'queue']) })
     const coverageRevision = (change: CoverageChange | undefined): string => change?.freshness.revision ?? 'coverage-check-unavailable'
     const requiresCoverageChoice = (change: CoverageChange | undefined): change is CoverageChange =>
@@ -173,6 +198,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const hosts = Object.values(target.targetOrigins).join(', ')
       const spec = {
         ...remoteQuestion(target),
+        display: REMOTE_TARGET_DISPLAY,
         message: `${feature} targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
         fallback: () => asJsonResult({
           type: 'remote_target_requires_choice',
@@ -202,12 +228,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const spec = {
         ...coverageQuestion(change),
         message: 'The coverage report may not match the current tests. Update it first, or run the tests anyway?',
+        display: COVERAGE_DISPLAY,
         fallback: () => asJsonResult({
           type: 'coverage_update_requires_choice',
           runStarted: false,
           feature,
           freshness: change.freshness,
-          options: ['Update coverage first', 'Run now with stale coverage'],
+          options: [UPDATE_COVERAGE_CHOICE, STALE_COVERAGE_CHOICE],
           message: 'Ask the user whether to update coverage first or run now with stale coverage. Do not start a run until they choose.',
           nextSteps: ['ask_user_update_coverage_or_run_now'],
         }),
@@ -219,7 +246,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       fallback: () => CallToolResult,
       message: string,
     ): CallToolResult | InputRequiredResult => {
-      const spec = { ...isolationQuestion(decision), message, fallback }
+      const spec = { ...isolationQuestion(decision), message, display: REPOSITORY_ISOLATION_DISPLAY, fallback }
       return openFormUserInput(request, ctx.clientFacts(), spec)
     }
     const begin = async (
@@ -450,7 +477,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const spec = coverageQuestion(coverage)
       return applyUserInput(request, spec, async (answer) => {
         if (!requiresCoverageChoice(coverage)) return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
-        return answer.choice === 'Update coverage first'
+        return answer.choice === UPDATE_COVERAGE_CHOICE
           ? coverageRecovery(coverage)
           : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage }, true)
       })
@@ -484,7 +511,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     // question), and the answering call reaches it through `applyUserInput`.
     const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
     const ask = (fallback: () => CallToolResult, message: string) =>
-      requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
+      requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, display: REPOSITORY_ISOLATION_DISPLAY, fallback }, chosen)
     const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
@@ -586,6 +613,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       mode: 'form',
       schema: z.object({ action: z.enum(['keep', 'abort']).describe('Keep the existing run, or stop it and its services.') }),
       message: `Stop run ${runId} for ${detail.manifest.feature} and its services? Choose keep to let it continue.`,
+      display: ABORT_DISPLAY,
       fallback: () => asJsonResult({
         type: 'abort_requires_confirmation', runId,
         message: 'Stop this run from its Run panel. confirm:true from an agent is not a human cancellation decision.',

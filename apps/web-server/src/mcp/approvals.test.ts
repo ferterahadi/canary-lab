@@ -10,19 +10,20 @@ import { registerApprovalRoutes } from './approval-routes'
 import { requestUserInput } from './elicitation'
 import { asJsonResult, errorResult } from './tool-support'
 import type { CanaryLabMcpDeps } from './tool-schemas'
+import type { ApprovalDisplay } from '../../../../shared/approval'
 import { registerApprovalTools } from './tool-groups/approvals'
 import { captureTools } from './tool-groups/__fixtures__/tool-group-harness'
 
 const temp = trackTempDirs('approvals-')
 const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'client-1', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
 const facts = { surface: 'other' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: false } }
-function setup(supportsForm = true) {
+function setup(supportsForm = true, display?: ApprovalDisplay) {
   const logsDir = temp(); const events = { publish: vi.fn() }; const store = new ApprovalStore(logsDir, events)
   let revision = 'one'
   const apply = vi.fn(async (answer: { choice: string }) => asJsonResult({ chosen: answer.choice }))
   const invoke = withApprovals('start_run', async (_args, request) => requestUserInput(request, { ...facts, elicitation: { form: supportsForm, url: false } }, {
     scope: ['fixture', logsDir], revision, mode: 'form', schema: z.object({ choice: z.enum(['Update coverage first', 'Run now with stale coverage']) }),
-    message: 'Coverage is stale. Choose what to do.', fallback: () => asJsonResult({ oldFallback: true }),
+    message: 'Coverage is stale. Choose what to do.', display, fallback: () => asJsonResult({ oldFallback: true }),
   }, apply), { approvals: store, getUiUrl: () => 'http://localhost:1234' } as CanaryLabMcpDeps)
   return { logsDir, store, events, apply, invoke, change: () => { revision = 'two' } }
 }
@@ -67,6 +68,14 @@ describe('shared browser and MCP approvals', () => {
     expect(h.apply).toHaveBeenCalledTimes(1)
     expect(h.store.list()[0]).toMatchObject({ status: 'answered', answer: { choice: 'Run now with stale coverage' } })
     expect(h.events.publish).toHaveBeenCalledWith({ type: 'approvals-changed' })
+  })
+
+  it('gives the browser card its title and choice notes without changing the native form', async () => {
+    const display = { title: 'Coverage may be out of date', choices: { 'Update coverage first': { detail: 'Refresh first.' } } }
+    const h = setup(true, display)
+    const form = await h.invoke({ feature: 'shop' }, context()) as InputRequiredResult
+    expect(h.store.list()[0].display).toEqual(display)
+    expect(JSON.stringify(form)).not.toContain('Refresh first.')
   })
 
   it('deduplicates native retries and broadcasts a native decision to the browser', async () => {
