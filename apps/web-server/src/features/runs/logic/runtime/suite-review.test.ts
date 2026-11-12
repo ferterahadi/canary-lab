@@ -93,6 +93,16 @@ describe('exact suite review', () => {
     expect((await buildSuiteReview(before, live)).patch).not.toContain('SECRET')
   })
 
+  it('hides envset backups of excluded runtime inputs but still reviews unrelated backup-named files', () => {
+    const { before, live } = fixture()
+    const inputs = ['.canary-inputs/evidence.json']
+    const revision = suiteReviewRevision(before, live, inputs)
+    write(live, '.canary-inputs/evidence.json.bak.1794472206971', 'SECRET')
+    expect(suiteReviewRevision(before, live, inputs)).toBe(revision)
+    write(live, 'notes.txt.bak.1794472206971', 'authored')
+    expect(suiteReviewRevision(before, live, inputs)).not.toBe(revision)
+  })
+
   it.each([Buffer.from([0, 1]), Buffer.from([255])])('refuses changed binary content without pretending a text diff is sufficient', async (content) => {
     const { before, live } = fixture()
     write(live, 'fixture.bin', content)

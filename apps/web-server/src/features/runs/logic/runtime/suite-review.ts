@@ -15,13 +15,21 @@ export function skipSuiteSnapshotPath(relativePath: string): boolean {
   return SUITE_SNAPSHOT_SKIP.has(relativePath) || relativePath === '.env' || /^\.env\.bak\.\d+$/.test(relativePath)
 }
 
+/** The envset apply step backs up each existing runtime input as
+ * `<target>.bak.<epoch-ms>` beside it and teardown deletes that copy. Both are
+ * runner state for an already-excluded input, never a reviewable suite change. */
+export function isRuntimeInputBackup(relativePath: string, runtimeInputs: ReadonlySet<string>): boolean {
+  const match = /^(.+)\.bak\.\d+$/.exec(relativePath)
+  return match !== null && runtimeInputs.has(match[1])
+}
+
 function readSuite(root: string, excludedPaths: Iterable<string> = []): Map<string, Buffer> {
   const excluded = new Set([...excludedPaths].map((file) => file.split(path.sep).join('/')))
   const files = new Map<string, Buffer>()
   const visit = (dir: string, prefix: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-      if (skipSuiteSnapshotPath(rel) || excluded.has(rel)) continue
+      if (skipSuiteSnapshotPath(rel) || excluded.has(rel) || isRuntimeInputBackup(rel, excluded)) continue
       const file = path.join(dir, entry.name)
       if (entry.isDirectory()) visit(file, rel)
       else if (entry.isFile()) files.set(rel, fs.readFileSync(file))
