@@ -1,6 +1,7 @@
-import { ApprovalCards } from '@/shared/ui/ApprovalCards'
+import { ApprovalNotices, isOpenApproval, PendingApprovalRow, SettledApprovalRow } from '@/shared/ui/ApprovalRows'
 import type { ApprovalsResource } from '@/shared/state/use-approvals'
-import { useState } from 'react'
+import type { Approval } from '@shared/approval'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { NotificationTarget, WorkspaceNotification } from '@shared/notifications/types'
 import { timeAgo } from '@/shared/lib/format'
 import { EmptyState } from '@/shared/ui/EmptyState'
@@ -42,10 +43,23 @@ export function NotificationCenter({ open, onOpenChange, onNavigate, approvals, 
   const inbox = useNotifications()
   const [showHistory, setShowHistory] = useState(false)
   const items = [...inbox.items].sort((a, b) => attentionRank(a) - attentionRank(b) || b.createdAt.localeCompare(a.createdAt))
-  const approvalCount = approvals?.items.filter((item) => item.status === 'pending').length ?? 0
+  const approvalItems = approvals?.items ?? []
+  const approvalCount = approvalItems.filter((item) => item.status === 'pending').length
+  const openApprovals = approvalItems.filter(isOpenApproval).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  const settledApprovals = approvalItems.filter((item) => !isOpenApproval(item)).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
   const attention = items.filter(needsAttention)
   const history = items.filter((item) => !needsAttention(item))
   const visible = showHistory ? history : attention
+  // A deep link opens the tab its approval lives in — once per link, so
+  // answering the focused question never yanks the view to History.
+  const routedFocus = useRef<string | null>(null)
+  const focused = approvalItems.find((item) => item.id === approvalFocus)
+  useEffect(() => {
+    if (!open) { routedFocus.current = null; return }
+    if (!focused || routedFocus.current === focused.id) return
+    routedFocus.current = focused.id
+    setShowHistory(!isOpenApproval(focused))
+  }, [open, focused])
   const hasWeakerHint = attention.some((item) => item.severity === 'danger')
   const openItem = async (item: WorkspaceNotification): Promise<void> => {
     const result = await inbox.resolveAction(item.id)
@@ -137,15 +151,15 @@ export function NotificationCenter({ open, onOpenChange, onNavigate, approvals, 
         stableScrollGutter
         subheader={
           <nav className="flex gap-5 border-b border-line px-5 pt-2" aria-label="Notification filter">
-            <Tab active={!showHistory} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length + approvalCount}</span></Tab>
-            <Tab active={showHistory} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length}</span></Tab>
+            <Tab active={!showHistory} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length + openApprovals.length}</span></Tab>
+            <Tab active={showHistory} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length + settledApprovals.length}</span></Tab>
           </nav>
         }
       >
-        {approvals && <ApprovalCards approvals={approvals} focus={approvalFocus} />}
+        {approvals && <ApprovalNotices approvals={approvals} focus={approvalFocus} />}
         {inbox.error && <div role="alert" className="px-5 pt-3 text-xs text-danger">{inbox.error} <button className="cl-button px-2 py-1" onClick={() => { void inbox.refresh() }}>Retry</button></div>}
         {inbox.loading && <p className="p-5 text-xs text-secondary">Loading notifications…</p>}
-        {!inbox.loading && !inbox.error && !visible.length && !approvalCount && !approvalFocus && (
+        {!inbox.loading && !inbox.error && !visible.length && !(showHistory ? settledApprovals : openApprovals).length && (
           <div className="px-5 py-6">
             <EmptyState
               testId="notification-center-empty"
@@ -153,8 +167,33 @@ export function NotificationCenter({ open, onOpenChange, onNavigate, approvals, 
             />
           </div>
         )}
-        <ul className="divide-y divide-line">{visible.map(row)}</ul>
+        <ul className="divide-y divide-line">
+          {showHistory
+            ? mergeByTime(settledApprovals, history, (item) => <SettledApprovalRow key={item.id} item={item} focused={item.id === approvalFocus} />, row)
+            : <>
+              {approvals && openApprovals.map((item) => <PendingApprovalRow key={item.id} item={item} focused={item.id === approvalFocus}
+                confirmed={approvals.confirmed} answer={approvals.answer} />)}
+              {attention.map(row)}
+            </>}
+        </ul>
       </Modal>
     </>
   )
+}
+
+/** Newest first across both histories, keeping each list's own order. */
+function mergeByTime(
+  approvals: Approval[],
+  notes: WorkspaceNotification[],
+  approvalRow: (item: Approval) => ReactNode,
+  noteRow: (item: WorkspaceNotification) => ReactNode,
+): ReactNode[] {
+  const rows: ReactNode[] = []
+  let a = 0
+  let n = 0
+  while (a < approvals.length || n < notes.length) {
+    const takeApproval = n >= notes.length || (a < approvals.length && approvals[a].startedAt >= notes[n].createdAt)
+    rows.push(takeApproval ? approvalRow(approvals[a++]) : noteRow(notes[n++]))
+  }
+  return rows
 }
