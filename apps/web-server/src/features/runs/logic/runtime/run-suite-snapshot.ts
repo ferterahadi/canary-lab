@@ -21,7 +21,7 @@ import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { deriveIntegrityHints } from './run-integrity-hints'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
 import { detectHealMode } from './auto-heal'
-import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
+import { buildSuiteReview, isRuntimeInputBackup, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
@@ -306,7 +306,7 @@ export function snapshotSuite(ctx: RunContext): void {
   const runtimeInputs = new Set(suiteRuntimeInputTargets(ctx))
   try {
     fs.rmSync(target, { recursive: true, force: true })
-    copyDirRecursive(live, target, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative))
+    copyDirRecursive(live, target, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative) || isRuntimeInputBackup(relative, runtimeInputs))
     if (approvalSource && suiteReviewRevision(approvalSource, target, new Set([...approvalExclusions, ...runtimeInputs])) !== ctx.testReviewApproval!.revision) {
       throw new Error('Approved test review changed during snapshot capture; fetch and approve the current revision.')
     }
@@ -359,7 +359,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adopti
     scratch = fs.mkdtempSync(`${target}.review-`)
     const staging = path.join(scratch, 'candidate')
     const backup = path.join(scratch, 'original')
-    copyDirRecursive(ctx.feature.featureDir, staging, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative))
+    copyDirRecursive(ctx.feature.featureDir, staging, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative) || isRuntimeInputBackup(relative, runtimeInputs))
     if (suiteReviewRevision(target, staging, runtimeInputs) !== expectedRevision) return { ok: false, reason: 'review-changed' }
     saveSuiteTestRoster(staging)
     fs.renameSync(target, backup)
