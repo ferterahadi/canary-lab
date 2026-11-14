@@ -194,6 +194,23 @@ describe('shared browser and MCP approvals', () => {
     expect(h.store.list()).toHaveLength(1)
   })
 
+  it('closes only the unanswered questions one command asked about one run', async () => {
+    const h = setup()
+    const base = { reviewUrl: 'u', message: 'm', schema: {}, startedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }
+    const ids = ['a', 'b', 'c', 'd', 'e'].map((c) => c.repeat(8) + '-0000-4000-8000-' + c.repeat(12))
+    h.store.open({ ...base, id: ids[0], command: 'abort_run', runId: 'run-1', status: 'pending' }, async () => asJsonResult({}))
+    h.store.open({ ...base, id: ids[1], command: 'abort_run', runId: 'run-2', status: 'pending' }, async () => asJsonResult({}))
+    h.store.open({ ...base, id: ids[2], command: 'start_run', runId: 'run-1', status: 'pending' }, async () => asJsonResult({}))
+    h.store.open({ ...base, id: ids[3], command: 'abort_run', runId: 'run-1', status: 'answering' }, async () => asJsonResult({}))
+    h.store.open({ ...base, id: ids[4], command: 'abort_run', status: 'pending' }, async () => asJsonResult({}))
+    const ended = asJsonResult({ reason: 'run-already-ended' })
+    expect(h.store.closeForRun('abort_run', 'run-1', 'Run ended.', ended)).toBe(1)
+    expect(h.store.get(ids[0])).toMatchObject({ status: 'expired', error: 'Run ended.', result: ended })
+    expect(ids.slice(1).map((id) => h.store.get(id)?.status)).toEqual(['pending', 'pending', 'answering', 'pending'])
+    expect(await h.store.wait(ids[0], 0)).toEqual(ended)
+    await expect(h.store.answer(ids[0], { action: 'abort' })).rejects.toMatchObject({ statusCode: 409, message: 'Run ended.' })
+  })
+
   it('expires an unanswered approval on its own clock and tells open views', async () => {
     vi.useFakeTimers()
     const h = setup(); await h.invoke({}, context()); const [{ id }] = h.store.list()

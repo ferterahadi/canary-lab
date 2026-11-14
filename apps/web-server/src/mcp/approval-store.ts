@@ -31,6 +31,18 @@ export class ApprovalStore {
     if (r) this.records.save({ ...r, ...patch })
     if (patch.status && patch.status !== 'pending' && patch.status !== 'answering') this.continuations.delete(id)
   }
+  /** Close every unanswered question `command` asked about `runId`, leaving
+   * `result` for an agent still waiting on it. An answer already being
+   * applied keeps its own outcome. Returns how many questions it closed. */
+  closeForRun(command: string, runId: string, error: string, result: Result): number {
+    let closed = 0
+    for (const row of this.records.list()) {
+      if (row.command !== command || row.runId !== runId || row.status !== 'pending') continue
+      this.update(row.id, { status: 'expired', error, result })
+      closed++
+    }
+    return closed
+  }
   expire(): void {
     for (const row of this.records.list()) {
       if (row.status !== 'pending' || Date.parse(String(row.expiresAt)) > Date.now()) continue

@@ -35,6 +35,8 @@ import { findFeature } from '../../shared/feature-loader'
 import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
 import { REPOSITORY_ISOLATION_DISPLAY, repositoryIsolationMessage } from '../../shared/approval-messages'
 import type { ApprovalDisplay } from '../../../../../shared/approval'
+import type { ApprovalStore } from '../approval-store'
+import type { RunStore } from '../../features/runs/logic/run-store'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -91,6 +93,28 @@ const ABORT_DISPLAY: ApprovalDisplay = {
     abort: { label: 'Stop', detail: 'Stops the run and shuts down its services.' },
   },
 }
+/** A stop decision that arrives after its run ended some other way has nothing
+ *  left to stop. That is the command's real outcome, not an error, so a waiting
+ *  agent receives it instead of asking the human again. */
+function runAlreadyEnded(runId: string, status: string): CallToolResult {
+  return asJsonResult({
+    aborted: false, runId, status, reason: 'run-already-ended',
+    message: `Run ${runId} had already ended (${status}), so nothing was stopped.`,
+    next: 'Do not ask the human to stop this run again. Read its result, or start a new run if one is needed.',
+  })
+}
+
+/** Close the open "Stop this run?" questions of a run that has ended. Without
+ *  this the inbox kept asking, and wait_for_approval answered still_waiting
+ *  until the question expired. A run still active or queued keeps its question. */
+export function closeStopQuestionsForEndedRun(approvals: ApprovalStore, store: Pick<RunStore, 'get'>, runId: string): number {
+  const status = store.get(runId)?.manifest.status
+  if (status !== undefined && !isTerminalRunStatus(status)) return 0
+  const ending = status ?? 'deleted'
+  return approvals.closeForRun('abort_run', runId, `This run already ended (${ending}). There is nothing left to stop.`,
+    runAlreadyEnded(runId, ending))
+}
+
 type CoverageDecision =
   | { revision: string; allowStale: false; change?: CoverageChange }
   | { revision: string; allowStale: true; change: CoverageChange }
@@ -649,7 +673,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     }
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    if (!isActiveRunStatus(detail.manifest.status)) return errorResult(`run not active: ${runId}`)
+    if (!isActiveRunStatus(detail.manifest.status)) {
+      // The human can answer after the run ended some other way. Answer with
+      // that ending: an error here left the question open and the agent waiting.
+      return matchesUserInput(request, scope) ? runAlreadyEnded(runId, detail.manifest.status) : errorResult(`run not active: ${runId}`)
+    }
     return requestUserInput(request, ctx.clientFacts(), {
       scope,
       revision: [detail.manifest.startedAt, detail.manifest.status, detail.manifest.healCycles],
@@ -663,7 +691,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         nextSteps: ['continue the existing run with signal_run, or let the human stop it in Canary Lab'],
       }),
     }, async ({ action }) => {
-      if (action === 'keep') return inputPending('The user kept the run. Nothing was stopped.')
+      if (action === 'keep') {
+        return asJsonResult({
+          aborted: false, kept: true, runId,
+          message: 'The human chose to keep this run. Nothing was stopped.',
+          next: 'Do not ask to stop this run again unless the human asks. Continue it with signal_run or wait_for_heal_task.',
+        })
+      }
       const result = await deps.store.abort(runId)
       return result.ok ? asJsonResult({ aborted: true, runId }) : errorResult(`could not abort: ${result.reason}`)
     })

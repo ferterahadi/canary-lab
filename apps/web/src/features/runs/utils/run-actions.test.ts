@@ -30,10 +30,10 @@ describe('canCancelHeal', () => {
 })
 
 describe('canStop', () => {
-  it('is true only while running', () => {
-    expect(canStop('running')).toBe(true)
+  it.each([['running'], ['healing']] as const)('is true while the run is %s', (s) => {
+    expect(canStop(s)).toBe(true)
   })
-  it.each([['healing'], ['passed'], ['failed'], ['aborted']] as const)('is false when status is %s', (s) => {
+  it.each([['passed'], ['failed'], ['aborted']] as const)('is false when status is %s', (s) => {
     expect(canStop(s)).toBe(false)
   })
 })

@@ -385,6 +385,8 @@ export function deriveDisplayStatus(
   return transient ?? status
 }
 
+const isStoppableStatus = (status: RunStatus): boolean => status === 'running' || status === 'queued' || status === 'healing'
+
 export function deriveRunActionAvailability(
   status: RunStatus,
   transient: TransientAction | null = null,
@@ -392,7 +394,10 @@ export function deriveRunActionAvailability(
 ): RunActionAvailabilitySet {
   const base = {
     pauseHeal: availability(status === 'running' && !transient, disabledReason('pauseHeal', status, transient)),
-    stop: availability((status === 'running' || status === 'queued') && !transient, disabledReason('stop', status, transient)),
+    // Stop stays offered while healing. Without it the run's only stop control
+    // was Stop Heal, which ends the run as failed, so a human stopping a run
+    // that waited on a repair saw "Run failed" instead of "Run aborted".
+    stop: availability(isStoppableStatus(status) && !transient, disabledReason('stop', status, transient)),
     cancelHeal: availability(status === 'healing' && !transient, disabledReason('cancelHeal', status, transient)),
     delete: availability(isTerminalRunStatus(status) && !transient, disabledReason('delete', status, transient)),
     restartHeal: availability(isRestartableRunStatus(status) && !transient, disabledReason('restartHeal', status, transient)),
@@ -524,7 +529,7 @@ function disabledReason(
 ): string | undefined {
   if (transient) return `Action unavailable while ${transient.replace(/-/g, ' ')} is in progress.`
   if (action === 'pauseHeal') return status === 'running' ? undefined : 'Pause & Heal is available only while tests are running.'
-  if (action === 'stop') return (status === 'running' || status === 'queued') ? undefined : 'Stop is available only while a run is queued or its tests are running.'
+  if (action === 'stop') return isStoppableStatus(status) ? undefined : 'Stop is available only while a run is queued, running, or healing.'
   if (action === 'cancelHeal') return status === 'healing' ? undefined : 'Cancel Heal is available only while an agent is healing.'
   if (action === 'delete') return isTerminalRunStatus(status) ? undefined : 'Delete is available after the run finishes.'
   // `restartHeal` is the last remaining member of RunActionAvailabilitySet, so

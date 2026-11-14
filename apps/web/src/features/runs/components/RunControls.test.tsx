@@ -7,6 +7,7 @@ import type { RunDetail } from '@shared/run-detail'
 import type { RunIndexEntry } from '@shared/run-index'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
+import { useRuns } from '../state/RunsContext'
 
 const paneTerminalState = vi.hoisted(() => ({
   props: [] as Array<{ paneId?: string; onExit?: (code: number) => void }>,
@@ -193,6 +194,32 @@ describe('run launch controls', () => {
     expect(launch?.textContent).toContain('Run')
     expect(launch?.textContent).not.toContain('Healing')
     expect(launch?.title).toBe('Run')
+  })
+
+  it('offers Stop on a healing run and stops it through abort, not Stop Heal', async () => {
+    const actions = vi.mocked(useRuns)()
+    vi.mocked(useRuns).mockReturnValue(actions)
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="alpha"
+          envs={['local']}
+          runs={[{ runId: 'run-1', feature: 'alpha', status: 'healing', startedAt: '2026-01-01T00:00:00Z' }]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={() => {}}
+          onStartVerification={async () => {}}
+        />,
+      )
+    })
+    const rowActions = [...container.querySelectorAll<HTMLElement>('[role="button"]')]
+    expect(rowActions.map((b) => b.textContent?.trim())).toEqual(expect.arrayContaining(['Stop', 'Stop Heal']))
+    act(() => rowActions.find((b) => b.textContent?.trim() === 'Stop')?.click())
+    expect(container.textContent).toContain('Stop this run?')
+    const confirm = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Stop Run')
+    await act(async () => { confirm?.click() })
+    expect(actions.abort).toHaveBeenCalledExactlyOnceWith('run-1')
+    expect(actions.cancelHeal).not.toHaveBeenCalled()
   })
 
   it('gates a run through the MCP promo before starting (env-less feature)', () => {
