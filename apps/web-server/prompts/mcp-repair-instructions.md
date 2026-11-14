@@ -31,7 +31,8 @@ start a background repair agent.
   use the run-specific `heartbeat` with `status: "healing"` at work milestones
   before the claim goes stale. Chat, unrelated tool calls, and `get_run_actions`
   do not supervise this run. Do not send heartbeats merely to keep an abandoned
-  task appearing active.
+  task appearing active. A claim silent for 40 minutes is treated as gone: the
+  heal ends and the run fails as "agent disconnected".
 - If a tool fails, distinguish a retryable call error from a permission denial
   or missing connection. Correct an invalid argument and retry the same run;
   never bypass a denied action through shell commands or a different API.
@@ -49,6 +50,14 @@ start a background repair agent.
   `pause_run` enters heal mode, and `release_heal` only releases ownership:
   neither parks nor cancels the run. If stopping is blocked or needs user
   input, report that the run is still active and needs attention.
+- If you conclude there is nothing to heal in this run — the failure is a
+  genuine product result, or the fix cannot be made or verified here (no
+  editable repo, a one-attempt suite already spent) — end the heal yourself:
+  call `cancel_heal` with `runId`, your `session_id`, and a one-sentence
+  `reason`. The run ends failed with your reason recorded as "agent ended the
+  heal", distinct from a user stop. Report the reason and the result's
+  `runStatus`. Never edit or weaken a test to avoid this, and never leave the
+  run parked in healing.
 
 When a blocked start returns request_id, carry it through get_test_review and
 review_test_changes. Accept & commit makes the original external request ready:

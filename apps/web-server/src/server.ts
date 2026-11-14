@@ -10,6 +10,7 @@ import { isActiveRunStatus, isRestartableRunStatus } from '../../../shared/run-s
 import { runsRoutes } from './features/runs/routes/runs'
 import type { ExternalHealAgentRequest } from './features/runs/routes/runs-route-support'
 import { makeExternalHealAuditLogger } from './features/runs/routes/external-heal'
+import { sweepGoneHealAgents } from './features/runs/logic/heal/agent-gone-sweep'
 import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
 import { createMcpRestAdapters } from './mcp/rest-adapters'
@@ -267,12 +268,20 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     audit: makeExternalHealAuditLogger(logsDir),
   })
   // Periodic sweep: any external session whose heartbeat is older than
-  // HEARTBEAT_STALE_MS gets its status flipped to 'disconnected'. The
-  // orchestrator's signal-wait loop is untouched — runs stay parked at
-  // waiting-for-signal so the client can reconnect with the same session id
-  // and resume without losing state.
+  // HEARTBEAT_STALE_MS gets its status flipped to 'disconnected'. The run
+  // stays parked at waiting-for-signal so the client can reconnect with the
+  // same session id and resume — until EXTERNAL_AGENT_GONE_MS, when the heal
+  // ends failed as "agent disconnected" instead of waiting out the 24h ceiling.
+  // One gone-agent sweep at a time: a heal still unwinding from the last
+  // sweep must not be ended (and recorded) twice.
+  let sweepingGoneAgents = false
   const externalHealWatchdog = setInterval(() => {
     try { externalHealBroker.markStaleClaims() } catch { /* best-effort */ }
+    if (sweepingGoneAgents) return
+    sweepingGoneAgents = true
+    void sweepGoneHealAgents(externalHealBroker, registry, Date.now())
+      .catch(() => { /* best-effort */ })
+      .finally(() => { sweepingGoneAgents = false })
   }, 5_000)
   // Don't keep the process alive solely for the watchdog interval — that
   // would prevent `canary-lab ui` from exiting cleanly on SIGINT/SIGTERM.

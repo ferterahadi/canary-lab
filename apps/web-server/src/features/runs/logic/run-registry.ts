@@ -1,4 +1,4 @@
-import type { PauseResult, CancelHealResult, InterjectResult, AdoptSpecEditsResult, RestoreSpecEditsResult } from './run-control-results'
+import type { PauseResult, CancelHealResult, HealEnding, InterjectResult, AdoptSpecEditsResult, RestoreSpecEditsResult } from './run-control-results'
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { getRunDetail, readRunSummary } from './run-detail'
@@ -29,7 +29,7 @@ export interface OrchestratorLike {
   runId: string
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<PauseResult>
-  cancelHeal(): Promise<CancelHealResult>
+  cancelHeal(ending?: HealEnding): Promise<CancelHealResult>
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
   adoptSpecEdits?(expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptSpecEditsResult>

@@ -91,7 +91,7 @@ export interface RepoBranchSnapshot {
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
 // user-invoked Pause & Heal. Heal-index rendering uses this so the agent
 // doesn't assume the suite size from the partial summary.
-export type StoppedEarlyReason = 'max-failures' | 'user-pause' | 'user-cancel-heal'
+export type StoppedEarlyReason = 'max-failures' | 'user-pause' | 'user-cancel-heal' | 'agent-ended-heal' | 'agent-disconnected'
 
 export interface StoppedEarlyInfo {
   reason: StoppedEarlyReason

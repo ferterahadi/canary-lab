@@ -283,6 +283,13 @@ describe('healEndLine / healEndShort (R80)', () => {
     expect(healEndShort(he({ reason: 'cancelled' }))).toBe('stopped by you')
   })
 
+  it('never reads an agent conclusion or a vanished agent as "stopped by you"', () => {
+    expect(healEndShort(he({ reason: 'agent-ended' }))).toBe('ended by agent — no fix')
+    expect(healEndShort(he({ reason: 'no-signal', agentWait: 'agent-disconnected' }))).toBe('stopped — agent disconnected')
+    expect(healEndLine(he({ reason: 'agent-ended', message: '' }))).toBe('The repair agent ended the heal without a fix.')
+    expect(healEndLine(he({ reason: 'no-signal', agentWait: 'agent-disconnected', message: '' }))).toBe('Auto-repair stopped — the repair agent disconnected without a fix.')
+  })
+
   it('names a record taken over by another server, so it is not read as the user stopping it', () => {
     // The repair was healthy; a second server booting on the same logs dir
     // marked the run finished under it. Attributing that to the user (or to the

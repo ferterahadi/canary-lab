@@ -1127,11 +1127,113 @@ describe('cancel_heal', () => {
     expect(await text('cancel_heal', { runId: 'run-1' })).toBe('could not cancel: no heal cycle in flight')
   })
 
-  it('cancels the in-flight cycle', async () => {
-    const orch = { cancelHeal: async () => ({ ok: true }) }
-    const { call } = harness({ store: storeOf([], { registry: { get: () => orch } }) })
+  it('cancels the in-flight cycle and reports the status the run settled on', async () => {
+    const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+    const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z', healEnd: { reason: 'cancelled', cycle: 1, message: 'stopped', at: 'x' } })
+    const { call } = harness({ store: storeOf([settled], { registry: { get: () => orch } }) })
 
-    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled' })
+    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled', runStatus: 'failed', healEnd: settled.manifest.healEnd })
+    expect(orch.cancelHeal).toHaveBeenCalledWith(undefined)
+  })
+
+  // The reply used to return while the run still read `healing`, so the
+  // coverageUpdate riding on it reported latestRunStatus "healing".
+  it('waits for the run to settle before replying, so piggy-backed state is current', async () => {
+    const detail = runDetail({ status: 'healing' })
+    const listeners = new Set<(event: { kind: string; runId: string }) => void>()
+    const orch = {
+      cancelHeal: async () => {
+        setTimeout(() => {
+          Object.assign(detail.manifest, { status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+          for (const listener of listeners) listener({ kind: 'run-status', runId: 'run-1' })
+        }, 5)
+        return { ok: true }
+      },
+    }
+    const store = storeOf([detail], {
+      registry: { get: () => orch },
+      onEvent: (fn: (event: { kind: string; runId: string }) => void) => listeners.add(fn),
+      offEvent: (fn: (event: { kind: string; runId: string }) => void) => listeners.delete(fn),
+    })
+    const { call } = harness({ store })
+
+    expect(await call('cancel_heal', { runId: 'run-1' })).toMatchObject({ status: 'cancelled', runStatus: 'failed' })
+    expect(listeners.size).toBe(0)
+  })
+
+  it('treats a terminal run whose runner has let go as settled even before endedAt is written', async () => {
+    let live = true
+    const orch = { cancelHeal: async () => { live = false; return { ok: true } } }
+    const { call } = harness({ store: storeOf([runDetail({ status: 'failed' })], { registry: { get: () => live ? orch : undefined } }) })
+    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled', runStatus: 'failed' })
+  })
+
+  it('replies with whatever the run reads once the settle window runs out', async () => {
+    vi.useFakeTimers()
+    try {
+      const orch = { cancelHeal: async () => ({ ok: true }) }
+      const listeners = new Set<() => void>()
+      const events = { onEvent: (fn: () => void) => listeners.add(fn), offEvent: (fn: () => void) => listeners.delete(fn) }
+      const stuck = harness({ store: storeOf([runDetail({ status: 'healing' })], { registry: { get: () => orch }, ...events }) })
+      const reply = stuck.call('cancel_heal', { runId: 'run-1' })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await reply).toEqual({ status: 'cancelled', runStatus: 'healing' })
+
+      const gone = harness({ store: storeOf([], { registry: { get: () => orch }, ...events }) })
+      const goneReply = gone.call('cancel_heal', { runId: 'run-1' })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await goneReply).toEqual({ status: 'cancelled' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  describe('agent-ended heal (reason)', () => {
+    const owner = (sessionId = 'sess-1') => ({
+      assertOwnership: (_runId: string, id: string | undefined) => id === sessionId ? { ok: true } : { ok: false, reason: 'session-mismatch', currentSession: { sessionId } },
+      getSession: () => ({ sessionId, clientKind: 'claude' }),
+      recordHealEnded: vi.fn(),
+    })
+
+    it('records the agent conclusion as an agent-ended heal, not a user stop', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const broker = owner()
+      const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+      const { call } = harness({ broker, store: storeOf([settled], { registry: { get: () => orch } }) })
+
+      const reason = 'Real staging latency (1104 ms > 1000 ms); no editable repo, and a rerun cannot send again.'
+      expect(await call('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason })).toMatchObject({ status: 'agent-ended', runStatus: 'failed' })
+      expect(orch.cancelHeal).toHaveBeenCalledWith({ kind: 'agent-ended', reason, client: 'Claude' })
+      expect(broker.recordHealEnded).toHaveBeenCalledWith('run-1', 'sess-1', reason)
+    })
+
+    it('needs the claim holder session for a reason', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const { text } = harness({ broker: owner(), store: storeOf([runDetail({ status: 'healing' })], { registry: { get: () => orch } }) })
+
+      expect(await text('cancel_heal', { runId: 'run-1', reason: 'nothing to fix' })).toContain('session_id')
+      expect(await text('cancel_heal', { runId: 'run-1', session_id: 'other', reason: 'nothing to fix' })).toContain('session-mismatch')
+      expect(orch.cancelHeal).not.toHaveBeenCalled()
+    })
+
+    it('refuses a reason on a run nobody has claimed', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const broker = { ...owner(), assertOwnership: () => ({ ok: false, reason: 'no-claim' }) }
+      const { text } = harness({ broker, store: storeOf([], { registry: { get: () => orch } }) })
+      expect(await text('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason: 'x' })).toBe('no external heal claim for run: run-1')
+      expect(orch.cancelHeal).not.toHaveBeenCalled()
+    })
+
+    it('labels an unidentified or vanished claim holder as the repair agent', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+      for (const session of [{ sessionId: 'sess-1', clientKind: 'other' }, null]) {
+        const broker = { ...owner(), getSession: () => session }
+        const { call } = harness({ broker, store: storeOf([settled], { registry: { get: () => orch } }) })
+        await call('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason: 'x' })
+        expect(orch.cancelHeal).toHaveBeenLastCalledWith({ kind: 'agent-ended', reason: 'x', client: 'The repair agent' })
+      }
+    })
   })
 })
 

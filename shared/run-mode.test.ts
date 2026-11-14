@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isClientKind } from './run-mode'
+import { clientKindLabel, isClientKind } from './run-mode'
 
 describe('isClientKind', () => {
   // The guard is the validation seam for untrusted MCP args and persisted
@@ -18,5 +18,14 @@ describe('isClientKind', () => {
     expect(isClientKind(undefined)).toBe(false)
     expect(isClientKind(null)).toBe(false)
     expect(isClientKind({ clientKind: 'claude' })).toBe(false)
+  })
+})
+
+describe('clientKindLabel', () => {
+  it('names each client the same on every surface; only the unknown label is the caller\'s', () => {
+    expect(['claude', 'codex', 'claude-pty', 'codex-pty'].map((kind) => clientKindLabel(kind as 'claude')))
+      .toEqual(['Claude', 'Codex', 'Claude (runner)', 'Codex (runner)'])
+    expect(clientKindLabel('other')).toBe('External agent')
+    expect(clientKindLabel('other', 'The repair agent')).toBe('The repair agent')
   })
 })

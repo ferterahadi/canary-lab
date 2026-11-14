@@ -152,6 +152,9 @@ export interface RunServiceFailure {
  * - `no-progress` — the same failing set survived the no-progress limit of
  *                   consecutive fix attempts, or a fixless rerun made no gain.
  * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ * - `agent-ended` — the claimed external agent ended the heal on purpose with
+ *                   a recorded reason (a genuine product result, or nothing it
+ *                   can heal in this run). The agent's conclusion, not a fix.
  * - `foreign-abort` — a DIFFERENT process wrote a terminal status onto this
  *                   run's manifest while this one was still repairing (a second
  *                   server booting against the same logs dir is how this
@@ -165,9 +168,11 @@ export interface RunServiceFailure {
  * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort' | 'new-run-required'
-  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
-  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'agent-ended' | 'foreign-abort' | 'new-run-required'
+  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`.
+   *  `agent-disconnected`: a claimed external agent stopped heartbeating for
+   *  `EXTERNAL_AGENT_GONE_MS`. */
+  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died' | 'agent-disconnected'
   /** Best-effort classification of why the agent went quiet, from its output
    *  tail plus (claude) the text its session log ended on. Set only when
    *  `reason === 'no-signal'`. `unknown` = tail captured
@@ -317,6 +322,12 @@ export type ActiveRunStatus = typeof ACTIVE_RUN_STATUSES[number]
 export type UnsettledRunStatus = typeof UNSETTLED_RUN_STATUSES[number]
 
 export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
+
+/** A claimed external heal agent silent this long (since its last heartbeat)
+ *  is gone: the run stops waiting for its signal and ends failed with
+ *  `healEnd.agentWait: 'agent-disconnected'`. The claim reads `disconnected`
+ *  after `HEARTBEAT_STALE_MS`; the extra 30 minutes is the reconnect grace. */
+export const EXTERNAL_AGENT_GONE_MS = HEARTBEAT_STALE_MS + 30 * 60 * 1000
 
 export function isTerminalRunStatus(status: string | null | undefined): status is TerminalRunStatus {
   return status === 'passed' || status === 'failed' || status === 'aborted'

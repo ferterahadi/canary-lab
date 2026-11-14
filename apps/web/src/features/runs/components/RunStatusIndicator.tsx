@@ -2,7 +2,7 @@ import type { DisplayStatus } from '@shared/run-state'
 import type { ExecutionType } from '@shared/verification'
 import { StatusDot } from '@/shared/ui/atoms'
 import { presentRunStatus } from '../utils/run-presentation'
-import type { RunWaitingState } from '../utils/run-waiting-state'
+import type { RunAgentTurn, RunWaitingState } from '../utils/run-waiting-state'
 
 // Linear-style status indicator: a coloured dot + muted uppercase label.
 // Reads as data, not a button. Active states (`running`, `healing`) and
@@ -18,12 +18,14 @@ export function RunStatusIndicator({
   status,
   executionType,
   waiting,
+  agentTurn,
 }: {
   status: DisplayStatus
   executionType?: ExecutionType
   waiting?: RunWaitingState
+  agentTurn?: RunAgentTurn
 }) {
-  const p = presentRunStatus({ status, executionType, waiting })
+  const p = presentRunStatus({ status, executionType, waiting, agentTurn })
   return (
     <span
       data-testid="run-status-indicator"

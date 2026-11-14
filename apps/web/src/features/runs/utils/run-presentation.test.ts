@@ -28,6 +28,16 @@ describe('presentRunStatus', () => {
     }
   })
 
+  it('names the agent turn on a healing run while keeping its live healing look', () => {
+    const agentTurn = { label: 'Agent repairing', detail: 'Tests finished: 0/5 passed, 1 failed.' }
+    expect(presentRunStatus({ status: 'healing', agentTurn })).toMatchObject({
+      label: 'Agent repairing', title: agentTurn.detail, tone: 'var(--warning)', dot: 'warning', pulse: true,
+    })
+    // A transient action or a non-healing status keeps its own presentation.
+    expect(presentRunStatus({ status: 'cancelling-heal', agentTurn }).label).toBe('Cancelling')
+    expect(presentRunStatus({ status: 'failed', agentTurn }).label).toBe('Failed')
+  })
+
   it('presents queued and boot sessions without implying tests are executing', () => {
     expect(presentRunStatus({ status: 'queued', waiting: {
       kind: 'queued', label: 'Queued', detail: 'Waiting for resources.',

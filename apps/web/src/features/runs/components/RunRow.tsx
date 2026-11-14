@@ -4,7 +4,7 @@ import type { RunIndexEntry } from '@shared/run-index'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-state'
+import { runAgentTurn, runWaitingState, type RunAgentTurn, type RunWaitingState } from '../utils/run-waiting-state'
 import { presentRunStatus } from '../utils/run-presentation'
 import { dayTime, durationBetween, formatDuration, shortTime } from '@/shared/lib/format'
 import { plural } from '@shared/lib/plural'
@@ -100,7 +100,8 @@ export function RunRow({
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
   const waiting = runWaitingState(detail ?? run)
-  const presentation = presentRunStatus({ status: run.status, executionType: run.executionType, waiting })
+  const agentTurn = waiting ? undefined : runAgentTurn(detail)
+  const presentation = presentRunStatus({ status: run.status, executionType: run.executionType, waiting, agentTurn })
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: stamp === 'day' ? dayTime(run.startedAt) : shortTime(run.startedAt) }]
   // The envset sits next to the timestamp — when and where, before any outcome.
   // Spec selection cannot vary by envset, so sibling runs of one suite declare
@@ -155,7 +156,7 @@ export function RunRow({
             {passLabel}
           </span>
         )}
-        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waiting={waiting} />
+        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waiting={waiting} agentTurn={agentTurn} />
         <span
           className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
@@ -175,8 +176,8 @@ export function RunRow({
  *  chrome and muted tone: a fact about provenance, not an alarm (the danger
  *  reading, if any, is the features column's weaker badge). The count is
  *  mirrored onto the runs index by the server so this needs no detail read. */
-export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waiting?: RunWaitingState }) {
-  const presentation = presentRunStatus({ status, executionType, waiting })
+export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting, agentTurn }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waiting?: RunWaitingState; agentTurn?: RunAgentTurn }) {
+  const presentation = presentRunStatus({ status, executionType, waiting, agentTurn })
   const pending = pendingSpecEdits ?? 0
   return (
     <>

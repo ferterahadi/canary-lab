@@ -47,6 +47,13 @@ describe('buildTimelineRows', () => {
     expect(rows[0].durationLabel).toBe('for 3.0s')
   })
 
+  it('shows an agent ending the heal with its reason', () => {
+    const rows = buildTimelineRows([], [
+      audit({ ts: '2026-05-26T10:19:10.000Z', action: 'end-heal', clientKind: 'claude', sessionId: 'claude-001', args: { reason: 'Real latency; nothing to fix.' } }),
+    ], { now: NOW })
+    expect(rows[0]).toMatchObject({ headline: 'Ended the heal — no fix', severity: 'warning', detail: expect.stringContaining('Real latency; nothing to fix.') })
+  })
+
   it('interleaves external audit entries by timestamp without disturbing engine durations', () => {
     const rows = buildTimelineRows(
       [

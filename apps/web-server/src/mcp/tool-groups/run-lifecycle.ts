@@ -7,7 +7,10 @@ import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../../../../shared/run-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
-import { isActiveRunStatus } from '../../../../../shared/run-state'
+import { isActiveRunStatus, isTerminalRunStatus } from '../../../../../shared/run-state'
+import { clientKindLabel } from '../../../../../shared/run-mode'
+import type { HealEnding } from '../../features/runs/logic/run-control-results'
+import { waitForRunCondition } from '../wait-for-run-condition'
 import {
   type ToolGroupContext,
   CLAIM_SUPPRESSED_MESSAGE,
@@ -59,6 +62,9 @@ const coverageChangeResponse = z.object({
 type CoverageChange = z.infer<typeof coverageChangeResponse>['change']
 type RemoteTarget = { env: string; targetOrigins: Record<string, string> }
 
+// The heal loop unwinds within a second of cancelHeal (it only kills ptys and
+// tears down); the cap keeps a wedged teardown from holding the reply open.
+const CANCEL_HEAL_SETTLE_MS = 10_000
 const VERIFY_CHOICE = 'Verify the deployed target'
 const RUN_CHOICE = 'Run with repair anyway'
 const UPDATE_COVERAGE_CHOICE = 'Update coverage first'
@@ -572,9 +578,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('cancel_heal', {
-    description: 'Cancel an in-flight heal cycle. Run transitions to failed.',
-    inputSchema: { runId: z.string() },
-  }, async ({ runId }) => {
+    description: 'End an in-flight heal cycle; the run transitions to failed. Two uses. (1) The user asked to stop repair: call with runId only. (2) You hold the heal claim and concluded there is nothing to heal in this run — the failure is a genuine product result, or the fix cannot be verified here (no editable repo, a one-attempt suite already spent): pass session_id and a one-sentence reason. The run ends failed with your reason recorded as "agent ended the heal", never as a pass and never as a user stop. Never weaken or edit a test to avoid this. Replies after the run has settled.',
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string().optional().describe('Your heal-claim session id. Required with reason.'),
+      reason: z.string().trim().min(1).max(1000).optional().describe('Why you are ending the heal without a fix, in one sentence the user will read on the run.'),
+    },
+  }, async ({ runId, session_id, reason }) => {
     const orch = deps.store.registry.get(runId)
     if (!orch) {
       // A heal whose server exited has already stopped; settling records it.
@@ -582,9 +592,42 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         ? asJsonResult({ status: 'aborted', reason: 'server-exited', runId, ...serverExitedGuidance(runId) })
         : errorResult(`run not active: ${runId}`)
     }
-    const result = await orch.cancelHeal()
+    let ending: Extract<HealEnding, { kind: 'agent-ended' }> | undefined
+    if (reason !== undefined) {
+      if (!session_id) return errorResult('reason needs session_id: only the heal claim holder can end the heal with a reason')
+      const ownership = deps.broker.assertOwnership(runId, session_id)
+      if (!ownership.ok) {
+        return errorResult(ownership.reason === 'session-mismatch'
+          ? `session-mismatch: run is held by ${ownership.currentSession?.sessionId}`
+          : `no external heal claim for run: ${runId}`)
+      }
+      const kind = deps.broker.getSession(runId)?.clientKind
+      ending = { kind: 'agent-ended', reason, client: kind ? clientKindLabel(kind, 'The repair agent') : 'The repair agent' }
+    }
+    const result = await orch.cancelHeal(ending)
     if (!result.ok) return errorResult(`could not cancel: ${result.reason}`)
-    return asJsonResult({ status: 'cancelled' })
+    if (ending && session_id) deps.broker.recordHealEnded(runId, session_id, ending.reason)
+    // Reply once the run has settled so this reply — and the coverageUpdate
+    // the catch-up wrapper appends to it — reads the final status, not the
+    // `healing` the loop is still unwinding from.
+    const settled = await waitForRunCondition({
+      store: deps.store,
+      runId,
+      read: () => {
+        const detail = deps.store.get(runId)
+        if (!detail) return null
+        const { status, endedAt } = detail.manifest
+        return isTerminalRunStatus(status) && (endedAt || !deps.store.registry.get(runId)) ? detail : null
+      },
+      timeoutMs: CANCEL_HEAL_SETTLE_MS,
+      maxWaitMs: CANCEL_HEAL_SETTLE_MS,
+      onTimeout: () => deps.store.get(runId) ?? null,
+    })
+    return asJsonResult({
+      status: ending ? 'agent-ended' : 'cancelled',
+      ...(settled ? { runStatus: settled.manifest.status } : {}),
+      ...(settled?.manifest.healEnd ? { healEnd: settled.manifest.healEnd } : {}),
+    })
   })
 
   registerTool('abort_run', {
