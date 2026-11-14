@@ -33,6 +33,13 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.6 — 2026-11-14
+
+- **[Test Runner]** **Stop a run while it waits for a repair.** The Run panel now offers Stop while a run is healing, not only Stop Heal. Stop ends the run as aborted. Stop Heal still ends it as failed.
+- **[Test Runner]** **A "Stop this run?" question no longer outlives its run.** When the run ends some other way, the question leaves Needs attention, and the waiting agent learns how the run ended instead of asking again. Choosing Keep running also tells the agent not to ask again.
+
+---
+
 ## 2.3.5 — 2026-11-12
 
 - **[General]** **Approvals are easier to scan.** Answer pending questions in Needs attention, undo an answer for four seconds, and find resolved questions in History.
