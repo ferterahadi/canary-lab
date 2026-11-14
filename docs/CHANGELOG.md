@@ -37,6 +37,9 @@ Each entry is tagged with the area it touches:
 
 - **[Test Runner]** **Stop a run while it waits for a repair.** The Run panel now offers Stop while a run is healing, not only Stop Heal. Stop ends the run as aborted. Stop Heal still ends it as failed.
 - **[Test Runner]** **A "Stop this run?" question no longer outlives its run.** When the run ends some other way, the question leaves Needs attention, and the waiting agent learns how the run ended instead of asking again. Choosing Keep running also tells the agent not to ask again.
+- **[Test Runner]** **A repair agent can end a heal honestly.** When the failure is a real product result, or a fix can't be tested in this run, the agent ends the heal with a reason. The run ends failed and shows that reason, so it no longer reads as "stopped by you".
+- **[Test Runner]** **A run waiting on a repair agent says whose turn it is.** The run list and header show "Agent repairing" with the test counts, the agent, and its last heartbeat, instead of "Awaiting Agent".
+- **[Test Runner]** **A run whose repair agent disappears no longer waits all day.** After 40 minutes without a heartbeat, the heal ends and the run fails with "agent disconnected".
 
 ---
 
