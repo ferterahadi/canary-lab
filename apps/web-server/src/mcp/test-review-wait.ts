@@ -18,7 +18,7 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
     next: decision.decision === 'adopted'
       ? 'The human accepted these test changes. Continue with wait_for_heal_task for the runner result; acceptance is not a pass.'
       : decision.decision === 'approved-for-new-run'
-        ? 'The human approved these exact candidate bytes for a new run. Call start_run without run_ref; the approval is not a pass and the old result stays immutable.'
+        ? 'The human approved these exact candidate bytes for a new run. Call start_run with force_new:true and without run_ref; the approval is not a pass and the old result stays immutable.'
       : 'The human restored the recorded tests. Continue with wait_for_heal_task and fix the app against those tests. Do not reapply the rejected test edits.',
     nextSteps: decision.decision === 'approved-for-new-run' ? ['start_run'] : ['wait_for_heal_task'],
   }

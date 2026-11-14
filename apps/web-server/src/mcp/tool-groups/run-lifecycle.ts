@@ -21,6 +21,7 @@ import {
   gettingStartedBusyResult,
   repoCollisionResult,
   findContinuingRunForFeature,
+  findSessionRerunCandidate,
   resolveRunRef,
   runCandidate,
   serverExitedGuidance,
@@ -72,7 +73,7 @@ const RUN_CHOICE = 'Run with repair anyway'
 const UPDATE_COVERAGE_CHOICE = 'Update coverage first'
 const STALE_COVERAGE_CHOICE = 'Run now with stale coverage'
 const COVERAGE_DISPLAY: ApprovalDisplay = {
-  title: 'Coverage out of date',
+  title: 'New run: coverage out of date',
   choices: {
     // This answer returns the recovery owner without starting a run.
     [UPDATE_COVERAGE_CHOICE]: { label: 'Update first', detail: "Doesn't start the run yet. Coverage gets refreshed first." },
@@ -80,11 +81,26 @@ const COVERAGE_DISPLAY: ApprovalDisplay = {
   },
 }
 const REMOTE_TARGET_DISPLAY: ApprovalDisplay = {
-  title: 'Suite targets a deployed app',
+  title: 'New run: suite targets a deployed app',
   choices: {
     [VERIFY_CHOICE]: { label: 'Verify deployed', detail: 'Checks the deployed hosts. No services start and nothing is repaired.' },
     [RUN_CHOICE]: { label: 'Run with repair', detail: "Runs with local repairs. The deployed app won't change." },
   },
+}
+/** start_run without run_ref, from the session whose run just ended. Nothing
+ *  starts: the agent re-calls with run_ref to rerun, or force_new for a new run. */
+function rerunAvailable(runId: string, status: string) {
+  return {
+    type: 'rerun_available',
+    runStarted: false,
+    runId,
+    status,
+    message: `Run not started. Your last run of this suite, ${runId}, ended ${status} and can be rerun in place. If the user asked to rerun, retry or run again, rerun it: same run ID, its recorded suite and journal, and no start question. Start a new run only when the user asked for a new run, or a result told you to start fresh (Accept & commit on an ended run).`,
+    nextSteps: [
+      `rerun: start_run with run_ref "${runId}" (the default when the user said rerun)`,
+      'new run: start_run with force_new:true',
+    ],
+  }
 }
 const ABORT_DISPLAY: ApprovalDisplay = {
   title: 'Stop this run?',
@@ -129,7 +145,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Start or continue a run. A run boots this suite\'s services from its repos and repairs that code; for a deployed, staging or live target with nothing to boot, use execute_verification instead — a repair cycle cannot change a remote deployment, so a fresh start whose suite boots nothing and targets deployed hosts asks the user to choose first. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
+      'Start or continue a run. A run boots this suite\'s services from its repos and repairs that code; for a deployed, staging or live target with nothing to boot, use execute_verification instead — a repair cycle cannot change a remote deployment, so a fresh start whose suite boots nothing and targets deployed hosts asks the user to choose first. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref (with force_new:true), and only the new run can produce a verdict. A fresh start from the session that drove the suite\'s latest failed/aborted run starts nothing and returns rerun_available: re-call with run_ref to rerun that run (the default when the user said rerun), or force_new:true for a new run. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       request_id: z.string().optional().describe('Resume the exact blocked request returned by test_review_required. Reuse its original session_id; approval in another surface never transfers this request to that client.'),
@@ -141,7 +157,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
-      force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
+      force_new: z.boolean().default(false).describe('Start a new run instead of rerunning this session\'s last failed/aborted run (see rerun_available). Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
       remote_target: z.enum(['run']).optional().describe('Only after start_run returns remote_target_requires_choice AND the user chose to run with repair anyway against those deployed hosts. Never set it on your own; the default is Verify.'),
       update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
@@ -232,7 +248,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const spec = {
         ...remoteQuestion(target),
         display: REMOTE_TARGET_DISPLAY,
-        message: `${feature} targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
+        message: `Starts a new run of ${feature}. It targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
         fallback: () => asJsonResult({
           type: 'remote_target_requires_choice',
           runStarted: false,
@@ -260,7 +276,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const askCoverage = (change: CoverageChange): CallToolResult | InputRequiredResult => {
       const spec = {
         ...coverageQuestion(change),
-        message: 'The coverage report may not match the current tests. Update it first, or run the tests anyway?',
+        message: `Starts a new run of ${feature}. The coverage report may not match the current tests. Update it first, or run the tests anyway?`,
         display: COVERAGE_DISPLAY,
         fallback: () => asJsonResult({
           type: 'coverage_update_requires_choice',
@@ -400,6 +416,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
+        // A fresh start right after this conversation's own failed/aborted run
+        // is usually a rerun. Say so before any start question, so the human
+        // is never asked to start a new run they did not mean to start.
+        const rerunnable = force_new ? null : findSessionRerunCandidate(deps, feature, env, session_id)
+        if (rerunnable) return asJsonResult(rerunAvailable(rerunnable.manifest.runId, rerunnable.manifest.status))
         if (!remoteDecided) {
           const remote = readRemoteTarget()
           if (remote) return askRemote(remote)

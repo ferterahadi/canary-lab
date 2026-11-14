@@ -455,6 +455,68 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
   })
 })
 
+// Regression (2026-11-14): "rerun now" after this conversation's own failed run
+// made a second run ID and asked the human a start question that looked like it
+// belonged to the old run. A fresh start from that session now stops first.
+describe('start_run: a fresh start right after this session\'s own ended run', () => {
+  const driven = (status: string, sessionId = 'sess-1', over: Record<string, unknown> = {}) => runDetail({
+    status, executionType: 'run', externalHealSession: { sessionId, clientKind: 'claude', status: 'disconnected' }, ...over,
+  })
+  const harnessWith = (details: RunDetail[]) => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    const read = coverageRequest()
+    const tools = harness({ store: storeOf(details, { logsDir: '/logs' }), startRun, coverageRequest: read })
+    return { ...tools, startRun, read }
+  }
+
+  it('starts nothing and asks no start question, naming the run to rerun with run_ref', async () => {
+    const { call, startRun, read } = harnessWith([driven('failed')])
+
+    expect(await call('start_run', START)).toMatchObject({
+      type: 'rerun_available',
+      runStarted: false,
+      runId: 'run-1',
+      status: 'failed',
+      nextSteps: ['rerun: start_run with run_ref "run-1" (the default when the user said rerun)', 'new run: start_run with force_new:true'],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('offers an aborted run the same way', async () => {
+    const { call } = harnessWith([driven('aborted')])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'rerun_available', runId: 'run-1', status: 'aborted' })
+  })
+
+  it('goes on to a new run when the caller says force_new', async () => {
+    const { call, read } = harnessWith([driven('failed')])
+
+    expect(await call('start_run', { ...START, force_new: true })).toMatchObject({ type: 'coverage_update_requires_choice' })
+    expect(read).toHaveBeenCalled()
+  })
+
+  it('does not stop a session that never drove the run', async () => {
+    const { call } = harnessWith([driven('failed', 'someone-else')])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
+  })
+
+  it('only looks at the latest run, and a passed run is not rerun', async () => {
+    const older = driven('failed', 'sess-1', { runId: 'run-0', startedAt: '2026-05-25T07:00:00.000Z' })
+    const passed = { ...driven('passed'), runId: 'run-2', manifest: { ...driven('passed').manifest, runId: 'run-2', startedAt: '2026-05-25T09:00:00.000Z' } } as RunDetail
+    const { call } = harnessWith([older, passed])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
+  })
+
+  it('ignores a verify run, which has no repair to rerun', async () => {
+    const { call } = harnessWith([driven('failed', 'sess-1', { executionType: 'verify' })])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
+  })
+})
+
 describe('start_run: starting fresh', () => {
   it('starts nothing and tells a form-less client to ask when coverage mapping is stale', async () => {
     const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))

@@ -1,5 +1,7 @@
 import { unifiedDiffLines } from '../../../../shared/lib/unified-diff'
 import { selectRunForFeature } from '../features/runs/logic/active-run-selection'
+import { checkRestartEligibility } from '../features/runs/logic/restart-eligibility'
+import { runDirFor } from '../features/runs/logic/runtime/run-paths'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -111,6 +113,26 @@ export function findContinuingRunForFeature(
     (entry) => isActiveRunStatus(entry.status),
     (detail) => detail.manifest.executionType !== 'boot',
   )
+}
+
+/** The suite's latest run when THIS session drove it and it can be rerun in
+ *  place. A fresh start from the same conversation right after such a run is
+ *  usually a "rerun", so start_run asks the agent to choose run_ref or
+ *  force_new instead of silently opening a second run ID. */
+export function findSessionRerunCandidate(
+  deps: CanaryLabMcpDeps,
+  feature: string,
+  env: string | undefined,
+  sessionId: string,
+): RunDetail | null {
+  const latest = selectRunForFeature(
+    deps.store, feature, env,
+    () => true,
+    (detail) => (detail.manifest.executionType ?? 'run') === 'run',
+  )
+  if (!latest || latest.manifest.externalHealSession?.sessionId !== sessionId) return null
+  const eligibility = checkRestartEligibility(latest.manifest, runDirFor(deps.store.logsDir, latest.manifest.runId), 'run')
+  return eligibility.ok ? latest : null
 }
 
 export type RunRefResolution =

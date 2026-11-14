@@ -40,6 +40,8 @@ Each entry is tagged with the area it touches:
 - **[Test Runner]** **A repair agent can end a heal honestly.** When the failure is a real product result, or a fix can't be tested in this run, the agent ends the heal with a reason. The run ends failed and shows that reason, so it no longer reads as "stopped by you".
 - **[Test Runner]** **A run waiting on a repair agent says whose turn it is.** The run list and header show "Agent repairing" with the test counts, the agent, and its last heartbeat, instead of "Awaiting Agent".
 - **[Test Runner]** **A run whose repair agent disappears no longer waits all day.** After 40 minutes without a heartbeat, the heal ends and the run fails with "agent disconnected".
+- **[Test Runner]** **"Rerun" reruns the same run.** When an agent starts the suite again right after its own failed or aborted run, Canary Lab starts nothing and points it at that run. A rerun keeps the run ID, the recorded tests, and the repair history, and asks no start question. The agent starts a new run only when you ask for one.
+- **[Test Runner]** **Start questions say they start a new run.** The deployed-target and out-of-date-coverage questions now begin with "New run" and name the suite, so they no longer read as questions about the run you have open.
 
 ---
 
