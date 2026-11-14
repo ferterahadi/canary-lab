@@ -84,6 +84,16 @@ it('uses declaration changes even when the runtime test roster is unchanged', as
   await act(async () => button('Compare 1 changed tests').click())
   expect(review).toHaveBeenLastCalledWith('e2e/a.spec.ts', 11, 'run', 'changed', 'failed')
 })
+it('names the selected run the drift is counted against, so it never reads as pending work', async () => {
+  // An older selected run keeps its count after the edit is accepted and
+  // committed; without the run's id the mark read as uncommitted changes.
+  comparison = { ...noChanges, changes: { added: [], removed: [], changed: [{ file: 'e2e/a.spec.ts', name: 'failed', line: 11, endLine: 18 }] } }
+  await render()
+  const mark = button('Compare 1 changed tests')
+  expect(mark.getAttribute('aria-label')).toBe('Compare 1 changed tests since run r1')
+  await act(async () => mark.focus())
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('1 changed test since run r1. Only changes inside the test count.')
+})
 it('never turns extra runtime cases or stale recorded names into new declarations', async () => {
   current.push(spec('/source', ['generated a', 'generated b']))
   recorded.push(spec('/recorded', ['old title']))

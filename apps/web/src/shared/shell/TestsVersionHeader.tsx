@@ -54,9 +54,13 @@ export function TestsVersionHeader({ currentTests, onCurrentTestsChange, current
     const shortExplanation = kind === 'added' ? 'Not in the recorded source.'
       : kind === 'changed' ? 'Only changes inside the test count.'
         : 'Missing from current source.'
+    /* The count is drift from the SELECTED run, not pending work: accepting or
+       committing the source does not clear it while an older run stays selected.
+       Naming the run keeps "4 changed" from reading as "4 uncommitted". */
+    const since = runId ? ` since run ${runId}` : ''
     return tests.length > 0 && <TestChangeMark key={kind} kind={kind} count={tests.length}
-      tooltip={`${tests.length} ${mark.label} ${tests.length === 1 ? 'test' : 'tests'}. ${shortExplanation}`}
-      ariaLabel={`Compare ${tests.length} ${mark.label} tests`}
+      tooltip={`${tests.length} ${mark.label} ${tests.length === 1 ? 'test' : 'tests'}${since}. ${shortExplanation}`}
+      ariaLabel={`Compare ${tests.length} ${mark.label} tests${since}`}
       onClick={() => onReviewTest?.(tests[0].file, tests[0].line, 'run', kind, tests[0].name)} />
   }
   /* Each tab carries ONE icon naming what it holds — a file, a run — and the run
