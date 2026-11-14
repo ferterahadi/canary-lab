@@ -105,6 +105,16 @@ describe('Stop this run? answered in Notifications', () => {
     expect(h.orch.stop).not.toHaveBeenCalled()
   })
 
+  it('gives the agent the same stop result when the human stops the run from the Run panel', async () => {
+    const h = await harness()
+    const id = await h.askToStop()
+    expect(await h.store.abort(RUN_ID)).toEqual({ ok: true })
+    expect(h.manifest().status).toBe('aborted')
+    expect(await h.exec('wait_for_approval', { approvalId: id, timeout_ms: 0 }))
+      .toMatchObject({ aborted: true, runId: RUN_ID, status: 'aborted', reason: 'run-already-ended' })
+    expect(await h.approvals()).toMatchObject([{ id, status: 'expired' }])
+  })
+
   it('closes the question of a run deleted from history', async () => {
     const h = await harness()
     const id = await h.askToStop()

@@ -95,11 +95,14 @@ const ABORT_DISPLAY: ApprovalDisplay = {
 }
 /** A stop decision that arrives after its run ended some other way has nothing
  *  left to stop. That is the command's real outcome, not an error, so a waiting
- *  agent receives it instead of asking the human again. */
+ *  agent receives it instead of asking the human again. `aborted` follows the
+ *  run's real ending, so a Stop from the Run panel reads the same to the agent
+ *  as Stop on this question. */
 function runAlreadyEnded(runId: string, status: string): CallToolResult {
+  const aborted = status === 'aborted'
   return asJsonResult({
-    aborted: false, runId, status, reason: 'run-already-ended',
-    message: `Run ${runId} had already ended (${status}), so nothing was stopped.`,
+    aborted, runId, status, reason: 'run-already-ended',
+    message: aborted ? `Run ${runId} was already stopped.` : `Run ${runId} had already ended (${status}), so nothing was stopped.`,
     next: 'Do not ask the human to stop this run again. Read its result, or start a new run if one is needed.',
   })
 }
