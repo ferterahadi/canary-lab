@@ -5,7 +5,8 @@ import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'crypto'
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node'
 import { createMcpHandler, isInitializeRequest, isLegacyRequest, McpServer } from '@modelcontextprotocol/server'
-import type { RunStore } from '../features/runs/logic/run-store'
+import type { RunStore, RunStoreEvent } from '../features/runs/logic/run-store'
+import { closeStopQuestionsForEndedRun } from './tool-groups/run-lifecycle'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { registerCanaryLabTools } from './tools'
 import {
@@ -74,7 +75,11 @@ export async function registerMcpRoutes(
   const approvals = new ApprovalStore(deps.store.logsDir, deps.workspaceEvents)
   registerApprovalRoutes(app, approvals)
   const stopExpiry = approvals.startExpiry()
-  app.addHook('onClose', async () => stopExpiry())
+  // However a run ends — Stop, Stop Heal, a pass, a server exit, a delete — its
+  // open stop question has nothing left to decide.
+  const closeStopQuestions = (event: RunStoreEvent): void => { if (event.runId) closeStopQuestionsForEndedRun(approvals, deps.store, event.runId) }
+  deps.store.onEvent(closeStopQuestions)
+  app.addHook('onClose', async () => { stopExpiry(); deps.store.offEvent(closeStopQuestions) })
   const transports = new Map<string, NodeStreamableHTTPServerTransport>()
 
   // The session's McpServer, kept alongside its transport. Previously it was

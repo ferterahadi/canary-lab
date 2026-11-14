@@ -69,6 +69,8 @@ describe('run action availability', () => {
 
     const healing = deriveRunActionAvailability('healing')
     expect(healing.cancelHeal.enabled).toBe(true)
+    // A healing run can also be stopped outright, ending as aborted.
+    expect(healing.stop.enabled).toBe(true)
     expect(healing.pauseHeal.reason).toContain('only while tests are running')
 
     const failed = deriveRunActionAvailability('failed')

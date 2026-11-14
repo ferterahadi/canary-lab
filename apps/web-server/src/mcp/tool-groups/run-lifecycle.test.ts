@@ -8,7 +8,7 @@ import type { CanaryLabMcpDeps } from '../tool-schemas'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'
 import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../client-surface'
-import { registerRunLifecycleTools } from './run-lifecycle'
+import { closeStopQuestionsForEndedRun, registerRunLifecycleTools } from './run-lifecycle'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { withApprovals } from '../approval-context'
 import { ApprovalStore } from '../approval-store'
@@ -1188,6 +1188,44 @@ describe('abort_run', () => {
     const { call } = harness({ store: storeOf([runDetail()], { abort }) })
     expect(await call('abort_run', { runId: 'run-1', confirm: true })).toMatchObject({ type: 'abort_requires_confirmation' })
     expect(abort).not.toHaveBeenCalled()
+  })
+
+  it('answers a stop decision that lands after the run ended with that ending, and closes the question', async () => {
+    const detail = runDetail({ status: 'healing', healCycles: 2 })
+    const abort = vi.fn()
+    const { raw } = harness({ store: storeOf([detail], { abort }) }, eliciting)
+    const approvals = new ApprovalStore(approvalTemp())
+    const invoke = withApprovals('abort_run', (args, ctx) => raw('abort_run', args, ctx),
+      { approvals, getUiUrl: () => 'http://localhost:1234', store: storeOf([detail]) } as unknown as CanaryLabMcpDeps)
+    const question = await invoke({ runId: 'run-1', confirm: true }, context()) as InputRequiredResult
+    const id = String(question.requestState)
+    expect(approvals.get(id)).toMatchObject({ runId: 'run-1', status: 'pending' })
+    // Stop Heal ended it as failed before the human's Stop reached the server.
+    detail.manifest.status = 'failed'
+    const waiting = approvals.wait(id, 30_000)
+    await approvals.answer(id, { action: 'abort' })
+    expect(JSON.parse(toolResultText(await waiting))).toMatchObject({ aborted: false, runId: 'run-1', status: 'failed', reason: 'run-already-ended' })
+    expect(approvals.get(id)?.status).not.toBe('pending')
+    expect(abort).not.toHaveBeenCalled()
+    // A call that is not an answer still reports the plain refusal.
+    expect(toolResultText(await raw('abort_run', { runId: 'run-1', confirm: true }, context()))).toBe('run not active: run-1')
+  })
+
+  it('closes stop questions only for runs that have ended or are gone', async () => {
+    const detail = runDetail({ status: 'healing' })
+    const approvals = { closeForRun: vi.fn(() => 1) } as unknown as ApprovalStore
+    const store = { get: (id: string) => id === 'run-1' ? detail : null }
+    expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(0)
+    for (const status of ['queued', 'running']) {
+      detail.manifest.status = status as never
+      expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(0)
+    }
+    expect(approvals.closeForRun).not.toHaveBeenCalled()
+    detail.manifest.status = 'passed'
+    expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(1)
+    expect(approvals.closeForRun).toHaveBeenLastCalledWith('abort_run', 'run-1', expect.stringContaining('already ended (passed)'), expect.anything())
+    closeStopQuestionsForEndedRun(approvals, store, 'gone')
+    expect(approvals.closeForRun).toHaveBeenLastCalledWith('abort_run', 'gone', expect.stringContaining('already ended (deleted)'), expect.anything())
   })
 
   it.each(['decline', 'cancel', 'keep', 'forged', 'stale'])('does not stop a run after %s input', async (choice) => {

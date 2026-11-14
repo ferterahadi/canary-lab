@@ -44,7 +44,7 @@ it.each(statuses)('keeps browser, HTTP and agent actions consistent for %s', asy
       for (const transient of transients) {
         const shared = deriveRunActionAvailability(status, transient, { executionType, newRunRequired })
         expect(shared.restartHeal.enabled).toBe(!newRunRequired && executionType !== 'verify' && executionType !== 'boot' && !transient && ['failed', 'aborted'].includes(status))
-        expect(shared.stop.enabled).toBe(!transient && ['queued', 'running'].includes(status))
+        expect(shared.stop.enabled).toBe(!transient && ['queued', 'running', 'healing'].includes(status))
         expect(shared.delete.enabled).toBe(!transient && ['passed', 'failed', 'aborted'].includes(status))
         expect(shared.pauseHeal.enabled).toBe(!transient && status === 'running' && (newRunRequired || !['verify', 'boot'].includes(executionType ?? 'run')))
         expect(shared.cancelHeal.enabled).toBe(!transient && status === 'healing' && (newRunRequired || !['verify', 'boot'].includes(executionType ?? 'run')))
