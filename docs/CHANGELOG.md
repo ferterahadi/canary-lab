@@ -33,7 +33,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.3.6 — 2026-11-14
+## 2.3.6 — 2026-11-18
 
 - **[Test Runner]** **Stop a run while it waits for a repair.** The Run panel now offers Stop while a run is healing, not only Stop Heal. Stop ends the run as aborted. Stop Heal still ends it as failed.
 - **[Test Runner]** **A "Stop this run?" question no longer outlives its run.** When the run ends some other way, the question leaves Needs attention, and the waiting agent learns how the run ended instead of asking again. Choosing Keep running also tells the agent not to ask again.
@@ -43,6 +43,10 @@ Each entry is tagged with the area it touches:
 - **[Test Runner]** **"Rerun" reruns the same run.** When an agent starts the suite again right after its own failed or aborted run, Canary Lab starts nothing and points it at that run. A rerun keeps the run ID, the recorded tests, and the repair history, and asks no start question. The agent starts a new run only when you ask for one.
 - **[Test Runner]** **Start questions say they start a new run.** The deployed-target and out-of-date-coverage questions now begin with "New run" and name the suite, so they no longer read as questions about the run you have open.
 - **[Test Runner]** **Changed-test counts name the run they compare against.** The new, changed, and removed marks in the Tests header now say "since run …". The count compares the selected run with current source, so it stays after you accept and commit an edit until you select a newer run.
+- **[Test Runner]** **Start a manual repair with one prompt.** Open Claude or Codex and paste the run-specific prompt. It tells the agent how to request a rerun after the fix.
+- **[Test Runner]** **Scan repair progress in the Heal Agent tab.** Claimed external sessions show their heartbeat and cycle count together. A live repair log starts with “Working” while it waits for output.
+- **[Test Runner]** **Boot and Verify share an “At a glance” card.** Both show run details and timestamps in the same layout. Hover or focus the Verify badge for an explanation.
+- **[General]** **Model recommendations reflect the task.** Codex prefers available Terra models for scouting, documentation, Portify and reports, and Sol for test generation and repair. Claude recommends Haiku for commit messages and pull request descriptions.
 
 ---
 
