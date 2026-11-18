@@ -83,6 +83,10 @@ export function Tooltip({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props = (children as ReactElement<any>).props ?? {}
   const child = cloneElement(children as ReactElement<Record<string, unknown>>, {
+    onKeyDown: (e: { key: string }) => {
+      if (e.key === 'Escape') hide()
+      props.onKeyDown?.(e)
+    },
     onMouseEnter: (e: { currentTarget: Element }) => { show(e.currentTarget); props.onMouseEnter?.(e) },
     onMouseLeave: (e: unknown) => { hide(); props.onMouseLeave?.(e) },
     onFocus: (e: { currentTarget: Element }) => { show(e.currentTarget); props.onFocus?.(e) },
