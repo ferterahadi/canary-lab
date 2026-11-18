@@ -13,7 +13,7 @@ export function flowName(node: ReadableNode) {
   const label = (node.flow?.label ?? node.english?.text ?? node.text).replace(/\s+/g, ' ').trim()
   return label.length > 52 ? label.slice(0, 51).trimEnd() + '…' : label
 }
-export interface FlowSection { id: string; label: string; nodes: ReadableNode[] }
+export interface FlowSection { id: string; label: string; nodes: ReadableNode[]; implementation?: ReadableGroupNode['implementation'] }
 
 export function flowSections(nodes: ReadableNode[]): FlowSection[] {
   const sections: FlowSection[] = [{ id: 'test', label: 'Test overview', nodes }]
@@ -25,10 +25,19 @@ export function flowSections(nodes: ReadableNode[]): FlowSection[] {
   }
   nodes.forEach(visit)
   for (const helper of helpers) {
-    sections.push({ id: helper.id, label: flowName(helper), nodes: helper.children })
+    sections.push({ id: helper.id, label: flowName(helper), nodes: helper.children, implementation: helper.implementation })
     helper.children.forEach(visit)
   }
   return sections
+}
+
+export function sectionNodes(section: FlowSection): ReadableNode[] {
+  function flatten(node: ReadableNode): ReadableNode[] {
+    if (node.kind === 'branch') return [node, ...node.paths.flatMap(p => p.children.flatMap(flatten))]
+    if (node.kind === 'loop' || (node.kind === 'group' && node.origin !== 'helper')) return [node, ...node.children.flatMap(flatten)]
+    return [node]
+  }
+  return section.nodes.flatMap(flatten)
 }
 
 /** Build successors backwards so exits never acquire an edge to the statement

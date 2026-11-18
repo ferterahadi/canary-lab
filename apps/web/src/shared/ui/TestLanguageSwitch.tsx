@@ -16,6 +16,9 @@ export function TestLanguageSwitch({ mode, onChange, disabled, onVisual }: { mod
       className="cl-lang-switch-btn" onClick={() => onChange(value)}
     >{value === 'english' ? 'Aa' : '</>'}</button>)}
     {onVisual && <button type="button" role="tab" aria-selected={mode === 'visual'} className="cl-lang-switch-btn"
-      data-active={mode === 'visual'} onClick={onVisual}>Visual</button>}
+      data-active={mode === 'visual'} onClick={onVisual} aria-label="Visual" title="Visual">
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="1.8" className="mx-auto"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+    </button>}
   </div>
 }

@@ -1,3 +1,4 @@
+import { renderExpression } from './expression'
 import { flowLabel } from './flow-label'
 import type { ResolveSuiteHelper } from './suite-helpers'
 import { authoredStep, callFromStatement } from './call-syntax'
@@ -505,17 +506,26 @@ function translateSupportedStatement(
       ...context, file, semanticContext, sourceFile: semanticContext.sourceFile,
       lineOffset: parsed?.lineOffset ?? 1, activeHelpers: new Set([...context.activeHelpers, key]),
     }
+    const definition = sourceFor(body, helperContext.sourceFile, file, helperContext.lineOffset)
     let children: ReadableNode[]
+    let story: ReadableTestStory
     if (ts.isBlock(body)) {
+      story = translateStory(body.statements, helperContext, true) ?? { steps: [] }
       children = body.statements.map((child, index) => translateStatement(child, [...path, index], helperContext))
     } else {
-      const source = sourceFor(body, semanticContext.sourceFile, file, helperContext.lineOffset)
+      const source = definition
+      const expression = renderExpression(body, helperContext.sourceFile)
+      const text = 'Return ' + expression.text
+      story = { steps: [{ id: stableNodeId(source, [-1, 0]), role: 'output', text, spans: [{ text }],
+        fidelity: 'derived', source, ...(expression.fidelity === 'unsupported' || expression.fidelity === 'unresolved'
+          ? { presentation: 'syntax-fallback' as const } : {}) }] }
       children = [{ id: stableNodeId(source, [...path, 0]), kind: 'leaf', role: 'action', source, text: source.snippet, fidelity: 'exact' }]
     }
     return {
       id: stableNodeId(source, path),
       kind: 'group',
       origin: 'helper',
+      implementation: { source: definition, story },
       text,
       english,
       fidelity: 'derived',

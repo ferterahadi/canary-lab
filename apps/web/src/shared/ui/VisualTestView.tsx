@@ -1,18 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ReadableNode, ReadableTest } from '@shared/readable-tests/types'
-import { parseSourceLocation, shortSourceLocation } from '@shared/lib/source-location'
+import type { ReadableTest } from '@shared/readable-tests/types'
+import { shortSourceLocation } from '@shared/lib/source-location'
 import type { ReadableSourceSelection } from './ReadableTestView'
-import { flowSections, layoutTestFlow, type FlowSection } from './test-flow-layout'
+import { layoutTestFlow, type FlowSection } from './test-flow-layout'
 import { Tooltip } from './Tooltip'
-
-function sectionNodes(section: FlowSection): ReadableNode[] {
-  function flatten(node: ReadableNode): ReadableNode[] {
-    if (node.kind === 'branch') return [node, ...node.paths.flatMap(p => p.children.flatMap(flatten))]
-    if (node.kind === 'loop' || (node.kind === 'group' && node.origin !== 'helper')) return [node, ...node.children.flatMap(flatten)]
-    return [node]
-  }
-  return section.nodes.flatMap(flatten)
-}
 
 function Chart({ section, active, selected, onSelect, onHelper }: {
   section: FlowSection; active?: string; selected?: string
@@ -80,26 +71,15 @@ function Chart({ section, active, selected, onSelect, onHelper }: {
   </div></>
 }
 
-export function VisualTestView({ test, location, selected, onSelect }: {
-  test: ReadableTest; location?: string; selected?: string; onSelect: (selection: ReadableSourceSelection) => void
+export function VisualTestView({ section, active, location, selected, onSelect, onHelper, test }: {
+  section: FlowSection; active?: string; location?: string; selected?: string; test: ReadableTest
+  onSelect: (selection: ReadableSourceSelection) => void
+  onHelper: (id: string) => void
 }) {
-  const sections = useMemo(() => flowSections(test.nodes), [test.nodes])
-  const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
-  const live = location && parseSourceLocation(location)
-  const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []
-  const active = matches.length === 1 ? matches[0] : undefined
-  const [picked, setPicked] = useState<string>()
-  const section = sections.find(s => s.id === picked) ?? active?.section ?? indexed.find(x => x.node.id === selected)?.section ?? sections[0]
   if (!test.nodes.length) return <p>No flow available for this source.</p>
   return <div role="region" aria-label="Test flow" className="cl-test-flow">
-    {sections.length > 1 && <label className="cl-flow-picker">Flow
-      <select value={section.id} onChange={e => setPicked(e.target.value)}>
-        {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-      </select>
-      {picked && location && <button type="button" onClick={() => setPicked(undefined)}>Follow run</button>}
-    </label>}
     {location && !active && <p>Running step has no unique box in this view.</p>}
     {test.completeness === 'partial' && <p>Some steps need inspection in Code.</p>}
-    <Chart section={section} active={active?.node.id} selected={selected} onSelect={onSelect} onHelper={setPicked} />
+    <Chart section={section} active={active} selected={selected} onSelect={onSelect} onHelper={onHelper} />
   </div>
 }

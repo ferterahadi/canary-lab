@@ -159,6 +159,9 @@ export interface ReadableGroupNode extends ReadableNodeBase {
   // shows only the call as a single line, while the evaluation flowchart
   // keeps descending into the children.
   origin?: 'helper'
+  /** Definition body in its own file, distinct from the call-site source.
+   * Older saved rosters may only contain the expanded diagram nodes. */
+  implementation?: { source: ReadableSource; story: ReadableTestStory }
   /** Catch/finally headers align with their owning Try header in English. */
   controlRole?: 'catch' | 'finally'
   children: ReadableNode[]

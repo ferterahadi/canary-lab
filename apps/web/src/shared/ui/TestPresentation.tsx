@@ -30,6 +30,7 @@ import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step
 import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
+import { flowSections, sectionNodes, type FlowSection } from './test-flow-layout'
 import { VisualTestView } from './VisualTestView'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import type { CodeLanguage } from './code-highlighter'
@@ -112,11 +113,35 @@ function usePresentationMode<M extends SingleTestViewMode>(props: TestPresentati
 }
 
 export function TestPresentation(props: TestPresentationProps) {
-  return props.view === 'single' ? <SinglePresentation {...props} /> : <AlignedPresentation {...props} />
+  return props.view === 'single' ? <SinglePresentation key={JSON.stringify([props.sourceFile, props.test.line, props.test.name])} {...props} /> : <AlignedPresentation {...props} />
 }
 
 function SinglePresentation(props: TestPresentationSingleProps) {
-  return <SingleTestView {...props} {...usePresentationMode<SingleTestViewMode>(props, 'english')} />
+  const mode = usePresentationMode<SingleTestViewMode>(props, 'english')
+  const [picked, setPicked] = useState<string>()
+  const sections = useMemo(() => flowSections(props.test.readable.nodes), [props.test.readable.nodes])
+  const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
+  const live = props.runningLocation && parseSourceLocation(props.runningLocation)
+  const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []
+  const active = matches.length === 1 ? matches[0] : undefined
+  const section = sections.find(s => s.id === picked) ?? active?.section ?? sections[0]
+  const implementation = section.implementation
+  const test = useMemo((): ExtractedTest => implementation ? {
+    name: section.label, line: implementation.source.startLine, bodySource: implementation.source.snippet, steps: [],
+    readable: { ...props.test.readable, title: section.label, nodes: section.nodes, story: implementation.story },
+  } : props.test, [section, implementation, props.test])
+  const picker = sections.length > 1 && <div className="cl-flow-picker text-xs">
+    <label className="contents">Flow <select value={section.id} onChange={event => setPicked(event.target.value)}>
+      {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+    </select></label>
+    {picked && props.runningLocation && <button type="button" onClick={() => setPicked(undefined)}>Follow run</button>}
+  </div>
+  const helper = section.id !== 'test'
+  return <SingleTestView key={section.id} {...props} {...mode} test={test}
+    sourceFile={implementation?.source.file ?? props.sourceFile}
+    changedLines={helper ? undefined : props.changedLines}
+    executionHighlight={helper ? undefined : props.executionHighlight}
+    section={section} picker={picker} active={active?.node.id} onPick={setPicked} />
 }
 
 function AlignedPresentation(props: TestPresentationAlignedProps) {
@@ -125,6 +150,7 @@ function AlignedPresentation(props: TestPresentationAlignedProps) {
 
 function SingleTestView({
   test,
+  section, picker, active, onPick,
   sourceFile,
   executionHighlight,
   runningLocation,
@@ -133,7 +159,9 @@ function SingleTestView({
   mode,
   onModeChange,
   header,
-}: Resolved<TestPresentationSingleProps>) {
+}: Resolved<TestPresentationSingleProps> & {
+  section: FlowSection; picker: ReactNode; active?: string; onPick: (id: string) => void
+}) {
   const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
     ? new Set(test.sourceChanges.changedLines.map((line) => bodyLineForSourceLine(test, line)))
     : undefined), [suppliedChangedLines, test])
@@ -142,6 +170,7 @@ function SingleTestView({
   const [fromVisual, setFromVisual] = useState(false)
   const visual = mode === 'visual'
   const selectSource = (selection: ReadableSourceSelection) => {
+    onPick(section.id)
     setFromVisual(visual)
     setSelectedSource(selection)
     onModeChange('code')
@@ -157,7 +186,9 @@ function SingleTestView({
     changedBodyLines: changedLines,
   })
   const liveSource = runningLocation ? parseSourceLocation(runningLocation) : undefined
-  const visualLines = fromVisual && liveSource?.file === code.file
+  const helper = section.id !== 'test'
+  const useLiveLine = fromVisual || helper
+  const visualLines = useLiveLine && (!helper || active) && liveSource?.file === code.file
     ? new Set(code.lineMap.flatMap((line, index) => line.sourceLines.includes(Number(liveSource.line)) ? [index + 1] : []))
     : undefined
   const displayedExecutionLines = markedRowIndexes(rows, (marks) => marks.execution !== undefined)
@@ -172,7 +203,7 @@ function SingleTestView({
       code.endLine,
     )
   }, [code.endLine, code.file, code.startLine, test.readable.story?.steps])
-  const executionSourceLine = executionHighlight
+  const executionSourceLine = helper && active && liveSource?.file === sourceFile ? Number(liveSource.line) : executionHighlight
     ? sourceLineForBodyLine(test, executionHighlight.bodyLine)
     : undefined
   const executionStoryNodeId = executionSourceLine == null || !test.readable.story
@@ -204,14 +235,18 @@ function SingleTestView({
             type="button"
             className="shrink-0 text-[10px]"
             style={{ color: 'var(--accent)' }}
-            onClick={() => setSelectedSource(null)}
+            onClick={() => { setSelectedSource(null); onPick('test') }}
           >
             Full test
           </button>
         )}
       </div>
 
-      {visual ? <VisualTestView test={test.readable} location={runningLocation} selected={selectedSource?.id} onSelect={selectSource} /> : mode === 'english' ? (
+      {picker}
+      {visual ? <VisualTestView section={section} active={active} test={test.readable} location={runningLocation}
+        selected={selectedSource?.id} onSelect={selectSource} onHelper={onPick} /> : helper && !section.implementation && !(mode === 'code' && selectedSource) ? (
+        <p>This saved flow has no function definition. Open Visual to inspect its recorded steps.</p>
+      ) : mode === 'english' ? (
         <div data-testid="test-presentation-english">
           {changedStory.unmappedSourceLines.length > 0 && (
             <div
@@ -246,8 +281,8 @@ function SingleTestView({
               test={test.readable}
               sourceFile={sourceFile}
               selectedNodeId={selectedSource?.id}
-              executionHighlight={executionHighlight && executionStoryNodeId
-                ? { kind: executionHighlight.kind, nodeId: executionStoryNodeId }
+              executionHighlight={executionStoryNodeId
+                ? { kind: executionHighlight?.kind ?? 'running', nodeId: executionStoryNodeId }
                 : undefined}
               changedNodeIds={changedStory.nodeIds}
               onSourceSelect={selectSource}
@@ -259,7 +294,7 @@ function SingleTestView({
           {code.source ? (
             <ShikiCode
               source={code.source}
-              lineHighlight={fromVisual ? (visualLines?.size ? { kind: 'running', lines: visualLines } : undefined) : executionHighlight && displayedExecutionLines
+              lineHighlight={useLiveLine ? (visualLines?.size ? { kind: 'running', lines: visualLines } : undefined) : executionHighlight && displayedExecutionLines
                 ? { kind: executionHighlight.kind, lines: displayedExecutionLines }
                 : undefined}
               sourceLocation={{ file: code.file, startLine: firstMappedSourceLine(code.lineMap) ?? code.startLine }}

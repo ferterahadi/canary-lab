@@ -24,7 +24,11 @@ it('resolves the bound import through a local helper and retains the definition 
     '}',
   ].join('\n'))
   const nodes = extract("import {poll as wait} from './health'\nasync function recover() { await wait(3000) }\ntest('probe', async () => { await recover() })")
-  expect(nodes[0]).toMatchObject({ kind: 'group', children: [{ kind: 'group', children: [
+  expect(nodes[0]).toMatchObject({ kind: 'group', children: [{ kind: 'group',
+    implementation: {
+      source: { file: helper, startLine: 1, endLine: 6, snippet: expect.stringContaining('throw new Error("timeout")') },
+      story: { steps: [{ kind: 'flow', flowKind: 'loop', source: { file: helper, startLine: 2 } }, { source: { startLine: 5 } }] },
+    }, children: [
     { kind: 'loop', flow: { label: 'Before deadline?' }, source: { file: helper, startLine: 2 },
       children: [{ kind: 'branch', paths: [{ children: [{ flow: { kind: 'return' } }] }] }] },
     { flow: { kind: 'throw', label: 'Report timeout' } },

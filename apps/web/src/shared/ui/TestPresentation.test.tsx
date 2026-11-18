@@ -663,7 +663,7 @@ it('shows a reported helper location in Visual and Code and clears it when the s
     <TestPresentation view="single" test={TEST} sourceFile={file} runningLocation={runningLocation} />
   ))
   await render('/repo/e2e/helpers/account.ts:30')
-  const visualTab = () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Visual')!
+  const visualTab = () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.getAttribute('aria-label') === 'Visual')!
   await act(async () => visualTab().click())
   const node = container.querySelector<HTMLButtonElement>('[data-running="true"]')!
   expect(node.textContent).toContain('Running now')
@@ -684,9 +684,48 @@ it('keeps boxes neutral when two helper invocations share a reported line', asyn
   await act(async () => root.render(<TestPresentation view="single" test={test}
     sourceFile="/repo/e2e/checkout.spec.ts" runningLocation="/repo/e2e/helpers/account.ts:30" />))
   await act(async () => {
-    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Visual')!
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.getAttribute('aria-label') === 'Visual')!
     tab.click()
   })
   expect(container.querySelector('[data-running="true"]')).toBeNull()
   expect(container.textContent).toContain('no unique box')
+})
+
+it('keeps the chosen implementation in English, Code and Visual and returns to the test overview', async () => {
+  const file = '/repo/e2e/checkout.spec.ts'
+  const check = TEST.readable.story!.steps[2]
+  const test: ExtractedTest = {
+    ...TEST, readable: { ...TEST.readable, nodes: [{
+      id: 'inspect', kind: 'group', origin: 'helper', fidelity: 'derived', text: 'Inspect account',
+      source: TEST.readable.nodes[0].source, children: [TEST.readable.nodes[1]],
+      implementation: { source: { ...check.source, startLine: 29, endLine: 31, snippet: '{\n  ' + check.source.snippet + '\n}' },
+        story: { steps: [check] } },
+    }] },
+  }
+  await act(async () => root.render(<TestPresentation view="single" test={test} sourceFile={file} />))
+  const select = () => container.querySelector<HTMLSelectElement>('select')!
+  async function pick(value: string) {
+    await act(async () => {
+      select().value = value
+      select().dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+  async function tab(name: string) {
+    await act(async () => container.querySelector<HTMLButtonElement>(`[role="tab"][aria-label="${name}"]`)!.click())
+  }
+  await pick('inspect')
+  expect(container.querySelectorAll('[data-story-role]')).toHaveLength(1)
+  expect(container.textContent).toContain('account is active')
+  await tab('Code')
+  expect(container.querySelector('[data-code-line]')?.textContent).toBe(check.source.snippet)
+  expect(container.textContent).toContain('helpers/account.ts:L29–31')
+  await tab('Visual')
+  expect(container.querySelector('[aria-label="Inspect account flowchart"]')).toBeTruthy()
+  expect(container.querySelector('[role="tab"][aria-label="Visual"] svg')).toBeTruthy()
+  await tab('English')
+  expect(select().value).toBe('inspect')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-helper-check"]')!.click())
+  expect(container.querySelector('[data-selected-line="true"]')?.textContent).toContain(check.source.snippet)
+  await pick('test')
+  expect(container.querySelector('[data-code-line]')?.textContent).toContain("page.goto('/checkout')")
 })
