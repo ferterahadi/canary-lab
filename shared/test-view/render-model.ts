@@ -13,6 +13,7 @@ import type { TestFileReview } from '../test-review'
 import type { ContextRow } from '../test-source-diff'
 
 export type TestViewMode = 'english' | 'code'
+export type SingleTestViewMode = TestViewMode | 'visual'
 export type TestViewSide = 'before' | 'after'
 export type TestViewExecution = 'running' | 'failed'
 

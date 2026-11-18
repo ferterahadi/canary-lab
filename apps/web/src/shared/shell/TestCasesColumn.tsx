@@ -604,6 +604,7 @@ function TestCard({
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}
+              runningLocation={runningStep?.location}
               changedLines={changedLines}
             />}
           </div>

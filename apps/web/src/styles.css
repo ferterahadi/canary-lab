@@ -1451,7 +1451,7 @@ body {
   box-shadow: var(--shadow-panel);
 }
 
-/* The English|Code language switch on test presentations: two equal segments
+/* The format switch on test presentations: equal segments
    under a sliding thumb, mono micro-caps to match the code shell it drives.
    The thumb is the only moving part — labels keep their position, so the
    switch itself never shifts layout either. */
@@ -2287,3 +2287,31 @@ body {
   .cl-review-footer-navigation { grid-column: 1; grid-row: 1; }
   .cl-review-commit-buttons { grid-column: 1; grid-row: 2; justify-content: flex-start; }
 }
+
+.cl-lang-switch[data-visual="true"] .cl-lang-switch-thumb { width: calc((100% - 4px) / 3); }
+.cl-lang-switch[data-mode="visual"] .cl-lang-switch-thumb { transform: translateX(200%); }
+.cl-test-flow { container-type: inline-size; font-size: 12px; }
+.cl-flow-sequence { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cl-flow-sequence li { min-width: 0; }
+.cl-flow-sequence > li + li::before {
+  content: ''; display: block; height: 6px; margin: -6px 0 0 14px;
+  border-inline-start: 1px solid var(--border-default);
+}
+.cl-flow-node code { font-family: var(--font-mono); }
+.cl-flow-node:hover { border-color: var(--accent); }
+.cl-flow-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cl-flow-node[data-kind="Decision"] strong::before { content: '◇ '; }
+.cl-flow-node[data-kind="Repeat"] strong::before { content: '↻ '; }
+.cl-flow-node[data-kind="Check"] strong::before { content: '◎ '; }
+.cl-flow-node {
+  width: 100%; padding: 6px 8px; text-align: start; overflow-wrap: anywhere;
+  border: 1px solid var(--border-default); border-radius: 5px; background: var(--bg-surface);
+}
+.cl-flow-node strong, .cl-flow-node b, .cl-flow-body > span, .cl-flow-paths > div > span {
+  display: block; font: 600 11px var(--font-mono); color: var(--text-secondary);
+}
+.cl-flow-node[data-running="true"] { border-color: var(--running); box-shadow: inset 3px 0 var(--running); }
+.cl-flow-node[data-running="true"] b { color: var(--running); }
+.cl-flow-body, .cl-flow-paths > div { border-inline-start: 2px solid var(--border-default); padding: 4px 0 4px 8px; }
+.cl-flow-paths { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,130px),1fr)); gap: 5px; }
+.cl-flow-body > span { padding-block-start: 4px; }

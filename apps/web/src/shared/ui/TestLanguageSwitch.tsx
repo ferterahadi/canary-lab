@@ -1,9 +1,11 @@
-export type TestLanguage = 'english' | 'code'
+import type { SingleTestViewMode, TestViewMode } from '@shared/test-view/render-model'
+
+export type TestLanguage = TestViewMode
 
 /** Test cards and source comparisons share one format control. A view that
  * can show code only keeps the control in place, disabled, with the reason. */
-export function TestLanguageSwitch({ mode, onChange, disabled }: { mode: TestLanguage; onChange: (mode: TestLanguage) => void; disabled?: { reason: string } }) {
-  return <div className="cl-lang-switch" role="tablist" aria-label="Test description format" data-mode={mode}
+export function TestLanguageSwitch({ mode, onChange, disabled, onVisual }: { mode: SingleTestViewMode; onVisual?: () => void; onChange: (mode: TestLanguage) => void; disabled?: { reason: string } }) {
+  return <div className="cl-lang-switch" role="tablist" aria-label="Test description format" data-mode={mode} data-visual={Boolean(onVisual)}
     aria-disabled={disabled ? true : undefined} title={disabled?.reason}>
     <span className="cl-lang-switch-thumb" aria-hidden="true" />
     {(['english', 'code'] as const).map((value) => <button
@@ -13,5 +15,7 @@ export function TestLanguageSwitch({ mode, onChange, disabled }: { mode: TestLan
       data-active={mode === value ? 'true' : 'false'} data-testid={`test-presentation-${value}-tab`}
       className="cl-lang-switch-btn" onClick={() => onChange(value)}
     >{value === 'english' ? 'Aa' : '</>'}</button>)}
+    {onVisual && <button type="button" role="tab" aria-selected={mode === 'visual'} className="cl-lang-switch-btn"
+      data-active={mode === 'visual'} onClick={onVisual}>Visual</button>}
   </div>
 }

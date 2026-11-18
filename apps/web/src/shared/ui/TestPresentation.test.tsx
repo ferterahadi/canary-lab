@@ -656,3 +656,37 @@ it('retains the recorded failure when the same source line is also edited', asyn
   expect(line?.getAttribute('style')).toContain('var(--danger)')
   expect(line?.textContent).toContain('FAILED HERE')
 })
+
+it('shows a reported helper location in Visual and Code and clears it when the step ends', async () => {
+  const file = '/repo/e2e/checkout.spec.ts'
+  const render = (runningLocation?: string) => act(async () => root.render(
+    <TestPresentation view="single" test={TEST} sourceFile={file} runningLocation={runningLocation} />
+  ))
+  await render('/repo/e2e/helpers/account.ts:30')
+  const visualTab = () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Visual')!
+  await act(async () => visualTab().click())
+  const node = container.querySelector<HTMLButtonElement>('[data-running="true"]')!
+  expect(node.textContent).toContain('Running now')
+  await act(async () => node.click())
+  expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('expect(account.active)')
+  await act(async () => visualTab().click())
+  expect(document.activeElement?.textContent).toContain('Review this source step')
+  await render()
+  expect(container.querySelector('[data-running="true"]')).toBeNull()
+})
+
+it('keeps boxes neutral when two helper invocations share a reported line', async () => {
+  const helper = TEST.readable.nodes[1]
+  const test = {
+    ...TEST,
+    readable: { ...TEST.readable, nodes: [helper, { ...helper, id: 'second-call' }] },
+  }
+  await act(async () => root.render(<TestPresentation view="single" test={test}
+    sourceFile="/repo/e2e/checkout.spec.ts" runningLocation="/repo/e2e/helpers/account.ts:30" />))
+  await act(async () => {
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Visual')!
+    tab.click()
+  })
+  expect(container.querySelector('[data-running="true"]')).toBeNull()
+  expect(container.textContent).toContain('no unique box')
+})

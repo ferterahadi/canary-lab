@@ -1,4 +1,5 @@
 import { useMemo, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
+import { parseSourceLocation } from '@shared/lib/source-location'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
 import { storyEndLine } from '@shared/readable-tests/source-lines'
@@ -19,6 +20,7 @@ import {
   type AlignedReview,
   type TestViewAlignedRow,
   type TestViewMode,
+  type SingleTestViewMode,
   type TestViewSelection,
   type TestViewSide,
   type TestViewSideLabels,
@@ -28,22 +30,24 @@ import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step
 import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
+import { VisualTestView } from './VisualTestView'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import type { CodeLanguage } from './code-highlighter'
 import { useCodeHighlight } from './use-code-highlight'
 
-interface TestPresentationShellProps {
+interface TestPresentationShellProps<M extends SingleTestViewMode = TestViewMode> {
   /** The format on show. Supplying it makes the toggle controlled; absent, the
    * view keeps its own and opens in English. */
-  mode?: TestViewMode
-  onModeChange?: (mode: TestViewMode) => void
+  mode?: M
+  onModeChange?: (mode: M) => void
   /** Content beside the format toggle in the header row. */
   header?: ReactNode
 }
 
 /** One test's story and body: the Tests column and the coverage cards. */
-export interface TestPresentationSingleProps extends TestPresentationShellProps {
+export interface TestPresentationSingleProps extends TestPresentationShellProps<SingleTestViewMode> {
   view: 'single'
+  runningLocation?: string
   test: ExtractedTest
   sourceFile: string
   executionHighlight?: TestExecutionLineHighlight | null
@@ -91,27 +95,39 @@ export interface TestPresentationAlignedProps extends TestPresentationShellProps
 export type TestPresentationProps = TestPresentationSingleProps | TestPresentationAlignedProps
 
 /** A view's props once the shell has settled which format shows. */
-type Resolved<P extends TestPresentationShellProps> = Omit<P, 'mode' | 'onModeChange'> & {
-  mode: TestViewMode
-  onModeChange: (mode: TestViewMode) => void
+type Resolved<P extends { mode?: SingleTestViewMode }> = P & {
+  mode: NonNullable<P['mode']>
+  onModeChange: (mode: NonNullable<P['mode']>) => void
+}
+
+function usePresentationMode<M extends SingleTestViewMode>(props: TestPresentationShellProps<M>, initial: M) {
+  const [ownMode, setOwnMode] = useState(initial)
+  return {
+    mode: props.mode ?? ownMode,
+    onModeChange: (next: M) => {
+      if (props.mode === undefined) setOwnMode(next)
+      props.onModeChange?.(next)
+    },
+  }
 }
 
 export function TestPresentation(props: TestPresentationProps) {
-  const [ownMode, setOwnMode] = useState<TestViewMode>('english')
-  const mode = props.mode ?? ownMode
-  const changeMode = (next: TestViewMode): void => {
-    if (props.mode === undefined) setOwnMode(next)
-    props.onModeChange?.(next)
-  }
-  return props.view === 'aligned'
-    ? <AlignedTestView {...props} mode={mode} onModeChange={changeMode} />
-    : <SingleTestView {...props} mode={mode} onModeChange={changeMode} />
+  return props.view === 'single' ? <SinglePresentation {...props} /> : <AlignedPresentation {...props} />
+}
+
+function SinglePresentation(props: TestPresentationSingleProps) {
+  return <SingleTestView {...props} {...usePresentationMode<SingleTestViewMode>(props, 'english')} />
+}
+
+function AlignedPresentation(props: TestPresentationAlignedProps) {
+  return <AlignedTestView {...props} {...usePresentationMode<TestViewMode>(props, 'english')} />
 }
 
 function SingleTestView({
   test,
   sourceFile,
   executionHighlight,
+  runningLocation,
   changedLines: suppliedChangedLines,
   showOpenButton = true,
   mode,
@@ -123,7 +139,10 @@ function SingleTestView({
     : undefined), [suppliedChangedLines, test])
   const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
 
+  const [fromVisual, setFromVisual] = useState(false)
+  const visual = mode === 'visual'
   const selectSource = (selection: ReadableSourceSelection) => {
+    setFromVisual(visual)
     setSelectedSource(selection)
     onModeChange('code')
   }
@@ -137,6 +156,10 @@ function SingleTestView({
     execution: executionHighlight ?? undefined,
     changedBodyLines: changedLines,
   })
+  const liveSource = runningLocation ? parseSourceLocation(runningLocation) : undefined
+  const visualLines = fromVisual && liveSource?.file === code.file
+    ? new Set(code.lineMap.flatMap((line, index) => line.sourceLines.includes(Number(liveSource.line)) ? [index + 1] : []))
+    : undefined
   const displayedExecutionLines = markedRowIndexes(rows, (marks) => marks.execution !== undefined)
   const displayedChangedLines = markedRowIndexes(rows, (marks) => marks.changed)
   const storyLineNumbers = useMemo(() => {
@@ -160,7 +183,7 @@ function SingleTestView({
   return (
     <div data-testid="test-presentation">
       <div className="mb-2 flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--border-subtle)' }}>
-        <TestLanguageSwitch mode={mode} onChange={onModeChange} />
+        <TestLanguageSwitch mode={mode} onVisual={() => onModeChange('visual')} onChange={next => { setFromVisual(false); onModeChange(next) }} />
         {header}
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
@@ -188,7 +211,7 @@ function SingleTestView({
         )}
       </div>
 
-      {mode === 'english' ? (
+      {visual ? <VisualTestView test={test.readable} location={runningLocation} selected={selectedSource?.id} onSelect={selectSource} /> : mode === 'english' ? (
         <div data-testid="test-presentation-english">
           {changedStory.unmappedSourceLines.length > 0 && (
             <div
@@ -236,7 +259,7 @@ function SingleTestView({
           {code.source ? (
             <ShikiCode
               source={code.source}
-              lineHighlight={executionHighlight && displayedExecutionLines
+              lineHighlight={fromVisual ? (visualLines?.size ? { kind: 'running', lines: visualLines } : undefined) : executionHighlight && displayedExecutionLines
                 ? { kind: executionHighlight.kind, lines: displayedExecutionLines }
                 : undefined}
               sourceLocation={{ file: code.file, startLine: firstMappedSourceLine(code.lineMap) ?? code.startLine }}
