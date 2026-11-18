@@ -15,7 +15,7 @@ describe('ExternalHealPanel', () => {
 
     expect(html).not.toContain('Waiting')
     expect(html).toContain('Failed')
-    expect(html).toContain('is no longer actively waiting for a signal')
+    expect(html).not.toContain('Session ended.')
   })
 
   it('keeps the external session status while the run is active', () => {
@@ -60,7 +60,7 @@ describe('ExternalHealPanel', () => {
 
     expect(html).toContain(label)
     expect(html).toContain(`alt="${label}"`)
-    expect(html).toContain(`Agent output is streaming in your ${label} window`)
+    expect(html).not.toContain('Follow the repair')
     if (openButton) {
       expect(html).toContain(openButton)
     } else {
@@ -80,11 +80,26 @@ describe('ExternalHealPanel', () => {
     )
 
     expect(html).toContain('AI Agent')
-    expect(html).toContain('No external agent session has claimed this run yet')
-    expect(html).toContain('AI Agent MCP session')
+    expect(html).toContain('Claim this run from an MCP-connected agent.')
+    expect(html).not.toContain('Heartbeat')
+    expect(html).not.toContain('Cycles')
     expect(html).toContain('aria-label="External agent session"')
     expect(html).not.toContain('Open Claude')
     expect(html).not.toContain('Open Codex')
+  })
+
+  it('hides session facts before a repair is requested', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="running" />)
+    expect(html).toContain('No agent has claimed this run.')
+    expect(html).not.toContain('Awaiting Agent')
+    expect(html).not.toContain('Heartbeat')
+    expect(html).not.toContain('Cycles')
+  })
+
+  it('shows a recorded zero in the Cycles column', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="healing" session={session({ cycleCount: 0 })} />)
+    expect(html).toContain('Cycles')
+    expect(html).toContain('>0<')
   })
 
   it('describes terminal no-claim external runs without duplicate wording', () => {
@@ -96,7 +111,10 @@ describe('ExternalHealPanel', () => {
     )
 
     expect(html).toContain('AI Agent')
-    expect(html).toContain('No external agent session is actively waiting for a signal')
+    expect(html).not.toContain('No agent claimed this run.')
+    expect(html).not.toContain('cl-card-body')
+    expect(html).not.toContain('Heartbeat')
+    expect(html).not.toContain('Cycles')
     expect(html).toContain('Failed')
     expect(html).toContain('var(--danger)')
     expect(html).not.toContain('external external')

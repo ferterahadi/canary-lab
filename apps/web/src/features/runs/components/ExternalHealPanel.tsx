@@ -2,7 +2,7 @@ import { useNow } from '@/shared/state/use-now'
 import { useMemo } from 'react'
 import type { ExternalHealSession, ExternalHealSessionStatus } from '@shared/run-manifest'
 import { isTerminalRunStatus, type RunStatus } from '@shared/run-state'
-import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
+import { clientLabel as brandingClientLabel, clientKindToDesktopAgent } from '@/shared/ui/external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, ExternalMetaFact, ExternalStatusPill, agentJobTone, pillPalette, useExternalClientAction, type PillPalette } from '@/shared/ui/ExternalAgentCard'
 import { presentRunStatus } from '../utils/run-presentation'
 import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
@@ -21,7 +21,6 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   const now = useNow()
   const { action, error: openError } = useExternalClientAction({ clientKind: session?.clientKind ?? 'other' })
 
-
   const heartbeatMs = useMemo(() => {
     if (!session) return null
     const t = Date.parse(session.lastHeartbeatAt)
@@ -29,12 +28,10 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
   }, [session])
 
   const ageMs = heartbeatMs == null ? null : Math.max(0, now - heartbeatMs)
-  const heartbeatColor = ageColor(ageMs)
-  const heartbeatLabel = ageLabel(ageMs)
+  const heartbeatColor = isTerminalRunStatus(runStatus) ? 'var(--text-muted)' : ageColor(ageMs)
 
   const terminalStatus = isTerminalRunStatus(runStatus) ? runStatus : null
-  const displayedStatus = terminalStatus ?? session?.status ?? 'waiting'
-  const isDisconnected = !terminalStatus && session?.status === 'disconnected'
+  const displayedStatus = terminalStatus ?? session?.status ?? (runStatus === 'healing' ? 'waiting' : null)
   const isLive =
     Boolean(session) && !terminalStatus && (
       session?.status === 'connected' ||
@@ -48,56 +45,61 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       clientKind={clientKind}
       fill
       eyebrow="External agent session"
-      headline={headlineFor(clientKind, Boolean(session))}
+      headline={clientLabel(clientKind)}
       statusPill={
         displayedStatus && (
           <ExternalStatusPill label={statusLabel(displayedStatus)} palette={statusPalette(displayedStatus)} />
         )
       }
-      meta={
-        <>
+      meta={session && (
+        <div className="cl-heal-session-facts">
           <ExternalMetaFact label="Heartbeat">
-            <span className="inline-flex items-center gap-1.5" style={{ color: heartbeatColor }}>
+            {ageMs === null ? '—' : <span className="flex items-center gap-1.5 tabular-nums" style={{ color: heartbeatColor }}>
               <span
-                className="inline-block h-1.5 w-1.5 rounded-full"
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
                 style={{
                   background: heartbeatColor,
                   boxShadow: isLive ? `0 0 6px ${heartbeatColor}` : 'none',
                 }}
                 aria-hidden
               />
-              {heartbeatLabel}
-            </span>
+              <span>{ageLabel(ageMs)}</span>
+            </span>}
           </ExternalMetaFact>
-          {session && session.cycleCount > 0 && (
-            <ExternalMetaFact label="Cycles">{session.cycleCount}</ExternalMetaFact>
+          <ExternalMetaFact label="Cycles">{session.cycleCount}</ExternalMetaFact>
+        </div>
+      )}
+      body={sessionMessage(runStatus, session)}
+    >
+      {action?.kind === 'app' && (
+        <>
+          <div className="cl-heal-session-launcher">
+            <ExternalClientCta
+              label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
+              compact
+              onClick={action.open}
+              busy={action.busy}
+            />
+          </div>
+          {openError && (
+            <div role="alert" className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>
+              {openError}
+            </div>
           )}
         </>
-      }
-      body={
-        terminalStatus
-          ? terminalMessage(terminalStatus, clientKind, Boolean(session))
-          : isDisconnected
-          ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
-          : !session
-          ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
-          : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
-      }
-      action={action?.kind === 'app' && (
-        <ExternalClientCta
-          label={`Open ${action.agent === 'claude' ? 'Claude' : 'Codex'}`}
-          onClick={action.open}
-          busy={action.busy}
-        />
-      )}
-    >
-      {openError && (
-        <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>
-          {openError}
-        </div>
       )}
     </ExternalAgentCard>
   )
+}
+
+function sessionMessage(runStatus: RunStatus, session?: ExternalHealSession): string | undefined {
+  if (isTerminalRunStatus(runStatus)) return undefined
+  if (!session) return runStatus === 'healing'
+    ? 'Claim this run from an MCP-connected agent.'
+    : 'No agent has claimed this run.'
+  return session.status === 'disconnected' && !clientKindToDesktopAgent(session.clientKind)
+    ? `Reconnect the same ${clientLabel(session.clientKind)} session to resume.`
+    : undefined
 }
 
 type PanelStatus = ExternalHealSessionStatus | Extract<RunStatus, 'passed' | 'failed' | 'aborted'>
@@ -132,24 +134,7 @@ function statusPalette(status: PanelStatus): PillPalette {
   return pillPalette('var(--success)')
 }
 
-function terminalMessage(
-  status: Extract<RunStatus, 'passed' | 'failed' | 'aborted'>,
-  clientKind: ExternalHealSession['clientKind'],
-  hasSession: boolean,
-): string {
-  if (!hasSession) {
-    return status === 'failed'
-      ? 'No external agent session is actively waiting for a signal.'
-      : 'No external agent session is active for this run.'
-  }
-  const agent = clientLabel(clientKind)
-  return status === 'failed'
-    ? `The ${agent} heal session is no longer actively waiting for a signal.`
-    : `The ${agent} heal session is no longer active for this run.`
-}
-
-function ageLabel(ageMs: number | null): string {
-  if (ageMs == null) return 'No heartbeat yet'
+function ageLabel(ageMs: number): string {
   if (ageMs < 1500) return 'just now'
   if (ageMs < 60_000) return `${Math.round(ageMs / 1000)}s ago`
   if (ageMs < 3_600_000) return `${Math.round(ageMs / 60_000)}m ago`
@@ -167,12 +152,4 @@ function ageColor(ageMs: number | null): string {
 // "External agent") — keep that copy while reusing the shared switch.
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
   return brandingClientLabel(kind, 'AI Agent')
-}
-
-function headlineFor(
-  kind: ExternalHealSession['clientKind'],
-  hasSession: boolean,
-): string {
-  if (!hasSession) return 'AI Agent'
-  return kind === 'other' ? 'AI Agent' : clientLabel(kind)
 }

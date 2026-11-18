@@ -46,10 +46,15 @@ it('preserves one error stream across launch, copying, cancellation, and retry w
   await click(0)
   expect(container.textContent).toContain('launch denied')
   await click(3)
-  expect(writeText).toHaveBeenCalledWith('/signals/rerun')
+  const prompt = container.querySelector('textarea')!.value
+  expect(writeText).toHaveBeenCalledWith(prompt)
+  expect(prompt).toContain('run-1')
+  expect(prompt).toContain('/signals/rerun')
+  expect(prompt).toContain('/signals/restart')
+  expect(buttons()[3].textContent).toBe('Copied')
   expect(container.textContent).toContain('launch denied')
   writeText.mockRejectedValueOnce(new Error('clipboard denied'))
-  await click(4)
+  await click(3)
   expect(container.textContent).toContain('Could not copy to clipboard')
   expect(container.textContent).not.toContain('launch denied')
   vi.mocked(runsApi.cancelHealRun).mockRejectedValueOnce(new Error('cancel denied'))
@@ -67,4 +72,35 @@ it('shows the agent-specific fallback for a non-Error rejection and clears it on
   expect(container.textContent).toContain('Could not open codex')
   await click(2)
   expect(container.textContent).not.toContain('Could not open codex')
+})
+
+it('shows the cycle and one recorded failure without attributing other failures to that test', () => {
+  const failure = { name: 'gateway becomes ready', error: { message: 'Readiness timed out' } }
+  const renderFailures = (failed: typeof failure[]) => act(() => root.render(
+    <ManualHealBanner
+      runId="run-1"
+      signalPaths={{ rerun: '/signals/rerun', restart: '/signals/restart' }}
+      cycle={2}
+      summary={{ complete: true, passed: 0, total: failed.length, failed }}
+    />,
+  ))
+  renderFailures([failure])
+  expect(container.textContent).toContain('Cycle 2')
+  expect(container.textContent).toContain('gateway becomes ready')
+  expect(container.textContent).toContain('Readiness timed out')
+  renderFailures([failure, { ...failure, name: 'gateway responds' }])
+  expect(container.textContent).toContain('2 failed tests')
+  expect(container.textContent).not.toContain('Readiness timed out')
+})
+
+it('emphasizes one launcher and yields the primary action to a pending review', () => {
+  const renderWith = (primaryAgent: 'codex' | null) => act(() => root.render(
+    <ManualHealBanner runId="run-1" signalPaths={{ rerun: '/rerun', restart: '/restart' }} primaryAgent={primaryAgent} />,
+  ))
+  expect(container.querySelector('.cl-button-primary')?.textContent).toBe('Open Claude')
+  renderWith('codex')
+  expect(container.querySelector('.cl-button-primary')?.textContent).toBe('Open Codex')
+  renderWith(null)
+  expect(container.querySelector('.cl-button-primary')).toBeNull()
+  expect(buttons().filter(button => !button.disabled)).toHaveLength(4)
 })

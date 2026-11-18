@@ -318,13 +318,15 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
   const showEmptyState = !hasOutput && graceElapsed
 
   return (
-    <div className="relative h-full w-full" style={{ background: 'var(--bg-base)' }}>
+    <div data-pane-idle={!hasOutput && !missingLog} className="relative h-full w-full" style={{ background: 'var(--bg-base)' }}>
       <div ref={containerRef} className="h-full w-full p-2" />
       {/* `pointer-events-none` keeps the xterm underneath fully interactive — the
           moment output streams in, `showEmptyState` flips false and this unmounts. */}
       {showEmptyState && (
         <div className="pointer-events-none absolute inset-0 select-none">
-          <EmptyState {...(missingLog ? emptyState.missing : emptyState.idle)} />
+          {paneId === 'agent' && !missingLog
+            ? <EmptyState compact reason={emptyState.idle.reason} title={emptyState.idle.title} />
+            : <EmptyState {...(missingLog ? emptyState.missing : emptyState.idle)} />}
         </div>
       )}
     </div>

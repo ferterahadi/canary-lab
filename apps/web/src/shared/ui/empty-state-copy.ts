@@ -123,8 +123,8 @@ export const EMPTY_COPY = {
   },
   paneAgentIdle: {
     reason: 'not-yet',
-    title: 'No repair agent running',
-    body: 'If the tests fail, a repair agent starts here and its reasoning streams live. The tests have not failed on this run, so none is running yet.',
+    title: 'No local agent output yet',
+    body: 'The terminal shows output when a local repair agent writes to the run. While it is quiet, the run header shows the current execution status.',
   },
   paneServiceMissing: {
     reason: 'not-captured',
