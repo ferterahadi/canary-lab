@@ -1,3 +1,4 @@
+import { shortSourceLocation } from '@shared/lib/source-location'
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
@@ -508,8 +509,10 @@ function TestCard({
       setLastRunningHighlight((previous) => previous?.bodySource === test.bodySource && previous.bodyLine === bodyLine ? previous : null)
     }
   }, [isRunningTest, nextKind, nextBodyLine, nextSourceLine, test.bodySource, bodyLine])
+  const directStep = runningStep?.location
   const lineMessage = executionHighlight?.kind === 'running'
     ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
+    : isRunningTest && directStep ? `Running now · ${shortSourceLocation(directStep)}`
     : isRunningTest
       ? runningStep?.category
         ? `Running now · ${runningStep.category} · source line unavailable`

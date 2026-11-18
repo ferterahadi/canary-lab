@@ -1,0 +1,80 @@
+import ts from 'typescript'
+import type { ReadableFlowLabel, ReadableNode } from '../../../../../shared/readable-tests/types'
+import { callFromStatement } from './call-syntax'
+
+function words(name: string) {
+  return name.replace(/([a-z\d])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase()
+}
+
+function title(text: string) { return text.charAt(0).toUpperCase() + text.slice(1) }
+
+function subject(expression: ts.Expression): string {
+  if (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) return subject(expression.expression)
+  if (ts.isCallExpression(expression)) return subject(expression.expression)
+  if (ts.isPropertyAccessExpression(expression)) return words(expression.name.text)
+  if (ts.isIdentifier(expression)) return words(expression.text)
+  if (ts.isStringLiteralLike(expression) || ts.isNumericLiteral(expression)) return expression.text
+  return expression.getText()
+}
+
+function question(expression: ts.Expression): string {
+  if (ts.isBinaryExpression(expression)) {
+    const operators: Record<string, string> = { '===': 'is', '==': 'equals', '!==': 'differs from', '<': '<', '>': '>', '<=': '≤', '>=': '≥' }
+    if (expression.left.getText() === 'Date.now()' && expression.operatorToken.kind === ts.SyntaxKind.LessThanToken) {
+      return `Before ${subject(expression.right)}?`
+    }
+    return title(`${subject(expression.left)} ${operators[expression.operatorToken.getText()] ?? expression.operatorToken.getText()} ${subject(expression.right)}?`)
+  }
+  if (ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) && expression.expression.name.text === 'ok') return 'Response OK?'
+  return title(subject(expression)) + '?'
+}
+
+/** Labels describe a single source statement. Its exact syntax and full arguments
+ * stay available in the tooltip, including literals too long for a shape. */
+export function flowLabel(s: ts.Statement, node: ReadableNode): ReadableFlowLabel {
+  if (ts.isIfStatement(s)) return { kind: 'decision', label: question(s.expression) }
+  if (ts.isSwitchStatement(s)) return { kind: 'decision', label: 'Switch on ' + subject(s.expression) }
+  if (ts.isWhileStatement(s) || ts.isDoStatement(s)) return { kind: 'decision', label: question(s.expression) }
+  if (ts.isForStatement(s)) return { kind: 'decision', label: s.condition ? question(s.condition) : 'Repeat' }
+  if (ts.isForOfStatement(s) || ts.isForInStatement(s)) return { kind: 'decision', label: 'More ' + subject(s.expression) + '?' }
+  if (ts.isTryStatement(s)) return { kind: 'try', label: 'Try' }
+  if (ts.isThrowStatement(s)) {
+    const message = ts.isNewExpression(s.expression) ? s.expression.arguments?.[0]?.getText() : undefined
+    return { kind: 'throw', label: message && /timeout|timed out/i.test(message) ? 'Report timeout' : 'Raise error' }
+  }
+  if (ts.isBreakStatement(s) || ts.isContinueStatement(s)) {
+    return { kind: s.label ? 'opaque' : ts.isBreakStatement(s) ? 'break' : 'continue', label: s.getText().replace(/;$/, '') }
+  }
+  const call = callFromStatement(s)
+  const callee = call?.expression
+  const method = callee && ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined
+  const kind = ts.isReturnStatement(s) ? 'return' : 'action'
+  const io = node.english?.semanticCategories?.includes('external-api')
+  if (call && method && io && ['get','post','put','patch','delete','head','fetch'].includes(method)) {
+    const url = call.arguments[0]
+    const target = url && ts.isTemplateExpression(url) ? url.templateSpans.at(-1)?.literal.text : url && subject(url)
+    const host = url && ts.isTemplateExpression(url) ? subject(url.templateSpans[0].expression).replace(/ url$/, '') : undefined
+    const label = method === 'get' && target === '/' && host ? 'Check ' + host
+      : target && target !== '/' ? method.toUpperCase() + ' ' + target : method.toUpperCase() + ' request'
+    return { kind: kind === 'return' ? 'return-io' : 'io', label }
+  }
+  if (call && callee && ts.isPropertyAccessExpression(callee) && node.english?.semanticCategories?.includes('assertion')) {
+    const expect = callee.expression
+    const actual = ts.isCallExpression(expect) && expect.arguments[0] ? subject(expect.arguments[0]) : 'value'
+    const expected = call.arguments[0]
+    const relation = ({toBe:'=',toEqual:'=',toMatchObject:'includes',toBeLessThanOrEqual:'≤',toBeGreaterThanOrEqual:'≥',toBeLessThan:'<'} as Record<string,string>)[callee.name.text]
+    return { kind: 'check', label: relation && expected ? `Check ${actual} ${relation} ${subject(expected)}` : 'Check ' + words(callee.name.text) }
+  }
+  if (ts.isReturnStatement(s)) return { kind, label: s.expression ? 'Return ' + subject(s.expression) : 'Return' }
+  if (node.kind === 'group' && node.fidelity === 'exact') return { kind, label: node.text }
+  if (call && callee) return { kind, label: method === 'json' ? 'Read JSON body' : title(subject(callee)) }
+  if (ts.isVariableStatement(s)) return { kind, label: 'Set ' + words(s.declarationList.declarations[0].name.getText()) }
+  if (ts.isExpressionStatement(s) && ts.isAwaitExpression(s.expression)) {
+    const awaited = s.expression.expression
+    const executor = ts.isNewExpression(awaited) && awaited.expression.getText() === 'Promise' ? awaited.arguments?.[0] : undefined
+    const timer = executor && ts.isArrowFunction(executor) && ts.isCallExpression(executor.body) ? executor.body : undefined
+    const delay = timer?.expression.getText() === 'setTimeout' ? timer.arguments[1] : undefined
+    return { kind, label: delay && ts.isNumericLiteral(delay) ? 'Wait ' + Number(delay.text) / 1000 + ' s' : 'Wait' }
+  }
+  return { kind, label: node.english?.text ?? node.text }
+}

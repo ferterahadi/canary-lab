@@ -1,4 +1,4 @@
-import { cloneElement, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
+import { cloneElement, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { clampToViewport } from '@/shared/lib/viewport'
 
@@ -44,10 +44,12 @@ export type TooltipGate = (el: Element) => boolean
 export function Tooltip({
   label,
   placement = 'bottom',
+  snippet,
   showIf,
   children,
 }: {
   label: string
+  snippet?: string
   placement?: 'top' | 'bottom'
   showIf?: TooltipGate
   children: ReactElement
@@ -55,6 +57,7 @@ export function Tooltip({
   const [anchor, setAnchor] = useState<{ top: number; bottom: number; centerX: number } | null>(null)
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  const tipId = useId()
 
   const show = (el: Element) => {
     if (showIf && !showIf(el)) return
@@ -83,6 +86,8 @@ export function Tooltip({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props = (children as ReactElement<any>).props ?? {}
   const child = cloneElement(children as ReactElement<Record<string, unknown>>, {
+    ...(snippet && anchor ? { 'aria-describedby': [props['aria-describedby'], tipId].filter(Boolean).join(' ') } : {}),
+    onKeyDown: (e: { key: string }) => { if (e.key === 'Escape') hide(); props.onKeyDown?.(e) },
     onMouseEnter: (e: { currentTarget: Element }) => { show(e.currentTarget); props.onMouseEnter?.(e) },
     onMouseLeave: (e: unknown) => { hide(); props.onMouseLeave?.(e) },
     onFocus: (e: { currentTarget: Element }) => { show(e.currentTarget); props.onFocus?.(e) },
@@ -96,6 +101,7 @@ export function Tooltip({
         <div
           ref={tipRef}
           role="tooltip"
+          id={tipId}
           style={{
             position: 'fixed',
             top: coords?.top ?? anchor.bottom + GAP,
@@ -108,7 +114,7 @@ export function Tooltip({
             visibility: coords ? 'visible' : 'hidden',
             zIndex: 300,
             pointerEvents: 'none',
-            maxWidth: 260,
+            maxWidth: snippet ? 'min(480px, calc(100vw - 16px))' : 260,
             padding: '4px 8px',
             borderRadius: 6,
             fontSize: 11.5,
@@ -124,6 +130,7 @@ export function Tooltip({
           }}
         >
           {label}
+          {snippet && <pre className="cl-flow-snippet">{snippet}</pre>}
         </div>,
         document.body,
       )}

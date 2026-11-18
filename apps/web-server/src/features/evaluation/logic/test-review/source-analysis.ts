@@ -1,3 +1,4 @@
+import { resolveImport } from '../../../../shared/relative-import'
 import { playbackSourceNodes } from '../../../../shared/playback-source-declarations'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { codeDisplayAttacher } from '../../../../shared/readable-tests/code-display'
@@ -8,7 +9,7 @@ import fs from 'fs'
 import ts from 'typescript'
 import { formatCodeForDisplay, formatSourceSnippetForDisplay } from '../../../../../../../shared/code-display-format'
 import { assertionFor, collectDirectAssertions, dedupeAssertions, helperAssertion, isNoiseHelper } from './assertions'
-import { calledIdentifier, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, resolveImport, safeRead } from './ast'
+import { calledIdentifier, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, safeRead } from './ast'
 import { cleanSnippet, dedupe } from './text'
 import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion } from './types'
 

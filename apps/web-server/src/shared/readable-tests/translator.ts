@@ -1,3 +1,5 @@
+import { flowLabel } from './flow-label'
+import type { ResolveSuiteHelper } from './suite-helpers'
 import { authoredStep, callFromStatement } from './call-syntax'
 import { createHash } from 'node:crypto'
 import ts from 'typescript'
@@ -60,6 +62,7 @@ export interface ReadableTestInput {
 }
 
 export interface ReadableTestAstInput {
+  resolveHelper?: ResolveSuiteHelper
   file: string
   title: string
   sourceFile: ts.SourceFile
@@ -71,6 +74,8 @@ export interface ReadableTestAstInput {
 }
 
 interface TranslationContext {
+  resolveHelper?: ResolveSuiteHelper
+  budget?: { remaining: number }
   file: string
   lineOffset: number
   sourceFile: ts.SourceFile
@@ -145,11 +150,6 @@ function containsIncomplete(node: ReadableNode): boolean {
     )
   }
   return false
-}
-
-function namedHelperCall(statement: ts.Statement): string | undefined {
-  const call = callFromStatement(statement)
-  return call && ts.isIdentifier(call.expression) ? call.expression.text : undefined
 }
 
 function parseBody(input: ReadableTestInput): {
@@ -485,23 +485,32 @@ function translateSupportedStatement(
     }
   }
 
-  const helperName = namedHelperCall(statement)
-  const helper = helperName ? context.helpers.get(helperName) : undefined
-  if (helperName && helper && !context.activeHelpers.has(helperName)) {
+  const expression = callFromStatement(statement)?.expression
+  const name = expression && ts.isIdentifier(expression) ? expression : undefined
+  const authored = name && context.resolveHelper?.(name, context.semanticContext)
+  const parsed = name && !context.resolveHelper ? context.helpers.get(name.text) : undefined
+  const body = authored?.body ?? parsed?.body
+  const semanticContext = authored?.semanticContext ?? parsed?.semanticContext
+  const file = authored?.file ?? parsed?.input.file
+  if (body && semanticContext && file) {
+    const key = authored ? `${file}:${body.pos}` : name!.text
+    if (parsed && context.activeHelpers.has(key)) return controlledLeaf(statement, source, path, context)
+    if (authored && (context.activeHelpers.has(key) || context.budget?.remaining === 0 || context.activeHelpers.size >= 16)) {
+      return { id: stableNodeId(source, path), kind: 'leaf', role: 'helper', text: source.snippet, fidelity: 'unresolved', source }
+    }
+    if (context.budget) context.budget.remaining--
     const text = renderEnglish(statementEnglish(statement))
-    // `namedHelperCall` only accepts statement shapes covered by the structured
-    // composer (expression, return, or single declaration).
     const english = composeStatementEnglish(statement, context.semanticContext) as ReadableEnglishBlock
-    const activeHelpers = new Set(context.activeHelpers)
-    activeHelpers.add(helperName)
     const helperContext: TranslationContext = {
-      file: helper.input.file,
-      lineOffset: helper.lineOffset,
-      sourceFile: helper.sourceFile,
-      semanticContext: helper.semanticContext,
-      compilerOptions: context.compilerOptions,
-      helpers: context.helpers,
-      activeHelpers,
+      ...context, file, semanticContext, sourceFile: semanticContext.sourceFile,
+      lineOffset: parsed?.lineOffset ?? 1, activeHelpers: new Set([...context.activeHelpers, key]),
+    }
+    let children: ReadableNode[]
+    if (ts.isBlock(body)) {
+      children = body.statements.map((child, index) => translateStatement(child, [...path, index], helperContext))
+    } else {
+      const source = sourceFor(body, semanticContext.sourceFile, file, helperContext.lineOffset)
+      children = [{ id: stableNodeId(source, [...path, 0]), kind: 'leaf', role: 'action', source, text: source.snippet, fidelity: 'exact' }]
     }
     return {
       id: stableNodeId(source, path),
@@ -511,9 +520,7 @@ function translateSupportedStatement(
       english,
       fidelity: 'derived',
       source,
-      children: helper.body.statements.map(
-        (child, index) => translateStatement(child, [...path, index], helperContext),
-      ),
+      children,
     }
   }
 
@@ -527,7 +534,9 @@ function translateStatement(
 ): ReadableNode {
   const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
   try {
-    return translateSupportedStatement(statement, path, context, source)
+    const node = translateSupportedStatement(statement, path, context, source)
+    if (context.resolveHelper) node.flow = flowLabel(statement, node)
+    return node
   } catch (error) {
     if (error instanceof UnsupportedSyntaxKindError) return unsupportedLeaf(source, path, error)
     throw error
@@ -692,6 +701,8 @@ export function translateReadableTestFromAst(input: ReadableTestAstInput, prepar
     sourceFile,
     semanticContext,
     compilerOptions: input.compilerOptions,
+    resolveHelper: input.resolveHelper,
+    budget: input.resolveHelper ? { remaining: 128 } : undefined,
     helpers: preparedHelpers ?? parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
     activeHelpers: new Set(),
   }

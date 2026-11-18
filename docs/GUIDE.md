@@ -54,6 +54,12 @@ Envsets may contain credentials. The scaffold's `.gitignore` excludes
 `features/*/envsets/*/*` by default. Review any envset file before force-adding
 it to Git. The MCP env-capture tools return redacted key previews, not values.
 
+## Reading a test flow
+
+In the Tests column, expand a test and select **Visual**. Follow the arrows from Start. A diamond asks a question, a parallelogram represents a recognized request, and a loop points back to its condition. Choose a helper in **Flow**, or use the arrow on its call, to inspect its own diagram. Hover or focus a shape for its source snippet. Click it to open Code at that statement.
+
+To follow execution, select the **Recorded run** tab above the Tests column. Visual follows a Playwright step when its reported source line identifies one box. Choosing a helper yourself holds that view until you select **Follow run**. Ordinary JavaScript conditions and loop arrows describe possible paths. A passing test alone cannot establish which ones executed.
+
 ## Run output
 
 Each run has a durable directory under `logs/runs/<runId>/`. Files appear only

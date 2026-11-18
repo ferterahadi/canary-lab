@@ -1,78 +1,105 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReadableNode, ReadableTest } from '@shared/readable-tests/types'
-import { parseSourceLocation } from '@shared/lib/source-location'
+import { parseSourceLocation, shortSourceLocation } from '@shared/lib/source-location'
 import type { ReadableSourceSelection } from './ReadableTestView'
+import { flowSections, layoutTestFlow, type FlowSection } from './test-flow-layout'
+import { Tooltip } from './Tooltip'
 
-/** A line without a column cannot identify two calls on the same line, or two
- * invocations of the same helper. Only mark an unambiguous reported location. */
-function observedNode(nodes: ReadableNode[], location: string | undefined): string | undefined {
-  if (!location) return
-  const { file, line } = parseSourceLocation(location)
-  const matches: string[] = []
-  function visit(node: ReadableNode) {
-    if (node.source.file === file && node.source.startLine === Number(line)) matches.push(node.id)
-    if (node.kind === 'branch') node.paths.forEach(path => path.children.forEach(visit))
-    else if (node.kind !== 'leaf') node.children.forEach(visit)
+function sectionNodes(section: FlowSection): ReadableNode[] {
+  function flatten(node: ReadableNode): ReadableNode[] {
+    if (node.kind === 'branch') return [node, ...node.paths.flatMap(p => p.children.flatMap(flatten))]
+    if (node.kind === 'loop' || (node.kind === 'group' && node.origin !== 'helper')) return [node, ...node.children.flatMap(flatten)]
+    return [node]
   }
-  nodes.forEach(visit)
-  return matches.length === 1 ? matches[0] : undefined
+  return section.nodes.flatMap(flatten)
 }
 
-function nodeLabel(node: ReadableNode) {
-  if (node.fidelity === 'unsupported' || node.fidelity === 'unresolved') return 'Inspect source'
-  if (node.kind === 'branch') return 'Decision'
-  if (node.kind === 'loop') return 'Repeat'
-  if (node.kind === 'group') return node.controlRole ?? (node.origin === 'helper' ? 'Helper' : 'Group')
-  const categories = node.english?.semanticCategories
-  if (node.role === 'check' || categories?.includes('assertion')) return 'Check'
-  if (categories?.includes('return')) return 'Return'
-  return 'Step'
-}
-
-/** Compact single-line calls already have names and arguments. Keep the compiler's
- * wording for conditions, checks and multiline statements. */
-function caption(node: ReadableNode) {
-  if (!node.english) return node.text
-  const snippet = node.source.snippet.trim()
-  if ((node.kind === 'leaf' || (node.kind === 'group' && node.origin === 'helper')) &&
-      !node.english.semanticCategories?.includes('assertion') && !snippet.includes('\n') && snippet.length <= 90) {
-    return <code>{snippet}</code>
-  }
-  return node.english.spans.map((span, index) => span.kind === 'code'
-    ? <code key={index}>{span.text}</code> : span.text)
+function Chart({ section, active, selected, onSelect, onHelper }: {
+  section: FlowSection; active?: string; selected?: string
+  onSelect: (selection: ReadableSourceSelection) => void
+  onHelper: (id: string) => void
+}) {
+  const chart = useMemo(() => layoutTestFlow(section.nodes), [section])
+  const marker = useId()
+  const [fit, setFit] = useState(false)
+  const sheet = useRef<HTMLDivElement>(null)
+  const focus = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(() => {
+    const viewport = sheet.current
+    const running = viewport?.querySelector('[data-running="true"]')
+    if (!viewport || !running) return
+    const card = running.getBoundingClientRect()
+    const bounds = viewport.getBoundingClientRect()
+    if (card.left < bounds.left) viewport.scrollLeft += card.left - bounds.left
+    else if (card.right > bounds.right) viewport.scrollLeft += card.right - bounds.right
+  }, [active, section, fit])
+  useEffect(() => { focus.current?.focus({ preventScroll: true }) }, [section, selected])
+  return <><div className="cl-flow-size">
+    <button type="button" aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? 'Actual size' : 'Fit to width'}</button>
+  </div><div ref={sheet} className="cl-flow-sheet" role="group" aria-label={section.label}>
+    <svg viewBox={`0 0 ${chart.width} ${chart.height}`} width={chart.width} height={chart.height}
+      style={{ maxWidth: fit ? '100%' : 'none' }} aria-label={section.label + ' flowchart'}>
+      <defs><marker id={marker} viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="7" refY="4" orient="auto-start-reverse">
+        <path d="M0 0 L8 4 L0 8 z" fill="var(--text-secondary)" />
+      </marker></defs>
+      {chart.edges.map((e, i) => <g key={i} className="cl-flow-edge">
+        <polyline points={e.points.map(p => p.x + ',' + p.y).join(' ')} markerEnd={`url(#${marker})`} />
+        {e.label && <text x={e.x} y={e.y} dy=".3em">{e.label}</text>}
+      </g>)}
+      {chart.nodes.map(box => {
+        const { width: w, height: h } = box
+        const node = box.source
+        const source = (node ?? box.context)?.source
+        const isActive = active !== undefined && box.id === active
+        const helper = node?.kind === 'group' && node.origin === 'helper' && node.children.length > 0
+        const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : box.label
+        const snippet = source?.snippet ?? ''
+        return <g key={box.id} transform={`translate(${box.x - w / 2},${box.y - h / 2})`}
+          className="cl-flow-shape" data-shape={box.shape} data-lit={isActive}>
+          {box.shape === 'decision'
+            ? <polygon points={`${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}`} />
+            : box.shape === 'io' ? <polygon points={`12,0 ${w},0 ${w - 12},${h} 0,${h}`} />
+              : <rect width={w} height={h} rx={box.shape === 'terminal' ? h / 2 : 2} />}
+          <foreignObject width={w} height={h}>
+            <Tooltip label={node ? tooltip : (box.id === 'start' ? 'First statement · ' : 'Boundary · ') + tooltip}
+              snippet={snippet}>
+              <button type="button" className="cl-flow-node" data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
+                ref={node && selected === box.id ? focus : undefined}
+                onClick={() => { if (node) onSelect({ id: node.id, source: node.source }); else if (box.context) onSelect({ id: box.context.id, source: box.context.source }) }}>
+                <span>{box.label}</span>{isActive && <b>Running now</b>}
+              </button>
+            </Tooltip>
+          </foreignObject>
+          {helper && <foreignObject x={w - 18} y={-6} width={23} height={23}>
+            <button className="cl-flow-open" type="button" aria-label={'Show flow for ' + box.label}
+              onClick={() => onHelper(box.id)}>↳</button>
+          </foreignObject>}
+        </g>
+      })}
+    </svg>
+  </div></>
 }
 
 export function VisualTestView({ test, location, selected, onSelect }: {
-  test: ReadableTest
-  location?: string
-  selected?: string
-  onSelect: (selection: ReadableSourceSelection) => void
+  test: ReadableTest; location?: string; selected?: string; onSelect: (selection: ReadableSourceSelection) => void
 }) {
-  const active = observedNode(test.nodes, location)
-  const returnFocus = useRef<HTMLButtonElement>(null)
-  useEffect(() => { returnFocus.current?.focus({ preventScroll: true }) }, [])
-  function sequence(nodes: ReadableNode[]) {
-    return <ol className="cl-flow-sequence">{nodes.map(node => <li key={node.id}>
-      <button type="button" className="cl-flow-node" data-running={node.id === active} data-kind={nodeLabel(node)}
-        title={`Show source at ${node.source.file}:${node.source.startLine}`}
-        ref={node.id === selected ? returnFocus : undefined}
-        onClick={() => onSelect({ id: node.id, source: node.source })}>
-        <strong>{nodeLabel(node)}</strong>{caption(node)}
-        {node.id === active && <b>Running now</b>}
-      </button>
-      {node.kind === 'branch' && <div className="cl-flow-paths">
-        {node.paths.map(path => <div key={path.id}><span>{path.role === 'then' ? 'Yes' : path.role === 'otherwise' ? 'No' : path.text}</span>{sequence(path.children)}</div>)}
-        {node.paths.length === 1 && node.paths[0].role === 'then' && <div><span>No</span>Continue</div>}
-      </div>}
-      {(node.kind === 'loop' || node.kind === 'group') && <div className="cl-flow-body">
-        {sequence(node.children)}
-        {node.kind === 'loop' && <span>↻ Repeat while the loop continues</span>}
-      </div>}
-    </li>)}</ol>
-  }
+  const sections = useMemo(() => flowSections(test.nodes), [test.nodes])
+  const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
+  const live = location && parseSourceLocation(location)
+  const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []
+  const active = matches.length === 1 ? matches[0] : undefined
+  const [picked, setPicked] = useState<string>()
+  const section = sections.find(s => s.id === picked) ?? active?.section ?? indexed.find(x => x.node.id === selected)?.section ?? sections[0]
+  if (!test.nodes.length) return <p>No flow available for this source.</p>
   return <div role="region" aria-label="Test flow" className="cl-test-flow">
-    {test.completeness === 'partial' && <p>Some steps need inspection in Code.</p>}
+    {sections.length > 1 && <label className="cl-flow-picker">Flow
+      <select value={section.id} onChange={e => setPicked(e.target.value)}>
+        {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+      </select>
+      {picked && location && <button type="button" onClick={() => setPicked(undefined)}>Follow run</button>}
+    </label>}
     {location && !active && <p>Running step has no unique box in this view.</p>}
-    {test.nodes.length ? sequence(test.nodes) : <p>No flow available for this source.</p>}
+    {test.completeness === 'partial' && <p>Some steps need inspection in Code.</p>}
+    <Chart section={section} active={active?.node.id} selected={selected} onSelect={onSelect} onHelper={setPicked} />
   </div>
 }

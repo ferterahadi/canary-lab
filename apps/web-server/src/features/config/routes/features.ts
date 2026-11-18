@@ -1,3 +1,4 @@
+import { suiteHelperResolver } from '../../../shared/readable-tests/suite-helpers'
 import { readSpecSource } from '../../../../../../shared/spec-files'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
@@ -243,6 +244,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     if (availability.kind === 'config-missing' || availability.kind === 'config-invalid') return reply.code(422).send({ code: 'discovery-failed', error: availability.diagnostic })
     const feature = availability.feature
     const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
+    const helperRoot = recorded ? recorded.dir : feature.featureDir
+    const resolveHelper = helperRoot ? suiteHelperResolver(helperRoot) : undefined
     const withCodeDisplay = codeDisplayAttacher()
     const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
     // Playwright module discovery and source enrichment read the same suite
@@ -272,7 +275,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       let source = ''
       if (recorded && !recorded.dir) unavailableSources.add(file)
       else try { source = readSpecSource(file) } catch { if (recorded) unavailableSources.add(file) }
-      const result = extractTestsFromSource(file, source, feature.semanticRules)
+      const result = extractTestsFromSource(file, source, feature.semanticRules, resolveHelper)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
@@ -325,7 +328,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules)
+      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules, resolveHelper)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
         app.log.warn({ err, file: entry.originFile }, 'test source change markers unavailable')
       }

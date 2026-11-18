@@ -2290,28 +2290,26 @@ body {
 
 .cl-lang-switch[data-visual="true"] .cl-lang-switch-thumb { width: calc((100% - 4px) / 3); }
 .cl-lang-switch[data-mode="visual"] .cl-lang-switch-thumb { transform: translateX(200%); }
-.cl-test-flow { container-type: inline-size; font-size: 12px; }
-.cl-flow-sequence { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.cl-flow-sequence li { min-width: 0; }
-.cl-flow-sequence > li + li::before {
-  content: ''; display: block; height: 6px; margin: -6px 0 0 14px;
-  border-inline-start: 1px solid var(--border-default);
-}
-.cl-flow-node code { font-family: var(--font-mono); }
-.cl-flow-node:hover { border-color: var(--accent); }
-.cl-flow-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.cl-flow-node[data-kind="Decision"] strong::before { content: '◇ '; }
-.cl-flow-node[data-kind="Repeat"] strong::before { content: '↻ '; }
-.cl-flow-node[data-kind="Check"] strong::before { content: '◎ '; }
-.cl-flow-node {
-  width: 100%; padding: 6px 8px; text-align: start; overflow-wrap: anywhere;
-  border: 1px solid var(--border-default); border-radius: 5px; background: var(--bg-surface);
-}
-.cl-flow-node strong, .cl-flow-node b, .cl-flow-body > span, .cl-flow-paths > div > span {
-  display: block; font: 600 11px var(--font-mono); color: var(--text-secondary);
-}
-.cl-flow-node[data-running="true"] { border-color: var(--running); box-shadow: inset 3px 0 var(--running); }
-.cl-flow-node[data-running="true"] b { color: var(--running); }
-.cl-flow-body, .cl-flow-paths > div { border-inline-start: 2px solid var(--border-default); padding: 4px 0 4px 8px; }
-.cl-flow-paths { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,130px),1fr)); gap: 5px; }
-.cl-flow-body > span { padding-block-start: 4px; }
+/* Flow geometry follows the source; only the running outline carries verdict-related colour. */
+.cl-test-flow { min-width: 0; font-size: 12px; }
+.cl-flow-picker { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--text-secondary); }
+.cl-flow-picker select { max-width: 65%; padding: 2px 6px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-surface); }
+.cl-flow-picker button, .cl-flow-open { color: var(--accent); }
+.cl-flow-sheet { overflow: auto; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); }
+.cl-flow-sheet svg { display: block; max-width: 100%; height: auto; margin: auto; }
+.cl-flow-size { text-align: right; color: var(--accent); margin-bottom: 3px; font-size: 11px; }
+.cl-flow-edge polyline { fill: none; stroke: var(--text-secondary); stroke-width: 1.1; }
+.cl-flow-edge text { text-anchor: middle; font: 11px var(--font-sans); fill: var(--text-secondary); paint-order: stroke; stroke: var(--bg-surface); stroke-width: 4px; }
+.cl-flow-shape { --fill: var(--bg-elevated); --stroke: var(--border-strong); }
+.cl-flow-shape[data-shape="terminal"] { --fill: color-mix(in srgb, var(--warning) 24%, var(--bg-surface)); }
+.cl-flow-shape[data-shape="decision"] { --fill: color-mix(in srgb, var(--code-keyword) 24%, var(--bg-surface)); }
+.cl-flow-shape[data-shape="io"] { --fill: color-mix(in srgb, var(--running) 21%, var(--bg-surface)); }
+.cl-flow-shape polygon, .cl-flow-shape rect { fill: var(--fill); stroke: var(--stroke); }
+.cl-flow-shape:focus-within, .cl-flow-shape:hover { --stroke: var(--accent); }
+.cl-flow-shape[data-lit="true"] { --fill: color-mix(in srgb, var(--running) 28%, var(--bg-surface)); --stroke: var(--running); stroke-width: 3; }
+.cl-flow-node { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%; height: 100%; text-align: center; font: 12px/1.15 var(--font-sans); color: var(--text-primary); padding: 3px 9px; }
+.cl-flow-node span { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+.cl-flow-shape[data-shape="decision"] .cl-flow-node { padding-inline: 24%; }
+.cl-flow-node b { font: 600 10px var(--font-mono); }
+.cl-flow-open { width: 21px; height: 21px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 5px; }
+.cl-flow-snippet { font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48vh; overflow: auto; margin: 4px 0 0; }

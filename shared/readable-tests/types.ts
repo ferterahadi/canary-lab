@@ -131,7 +131,13 @@ export interface ReadableTestStory {
   steps: ReadableStoryItem[]
 }
 
+export interface ReadableFlowLabel {
+  kind: 'action' | 'io' | 'check' | 'decision' | 'try' | 'return' | 'return-io' | 'throw' | 'break' | 'continue' | 'opaque'
+  label: string
+}
+
 interface ReadableNodeBase {
+  flow?: ReadableFlowLabel
   id: string
   /** Exhaustive syntax-level wording retained for version-2 clients. */
   text: string

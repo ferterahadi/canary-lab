@@ -1,3 +1,4 @@
+import type { ResolveSuiteHelper } from './readable-tests/suite-helpers'
 import { readDisplayTestTitle } from './test-title'
 import { unwrapExpression } from './unwrap-expression'
 import { findTestDetails, findTestTagProperty, readTagPropertyStrings } from './test-tags'
@@ -728,13 +729,14 @@ export function extractTestsFromSource(
   file: string,
   source: string,
   semanticRules?: ReadableSemanticRuleConfig,
+  resolveHelper?: ResolveSuiteHelper,
 ): ExtractResult {
   try {
     const semanticContext = compileSemanticSource(file, source, { semanticRules, absoluteSourceRanges: true })
     const src = semanticContext.sourceFile
     const tests: ExtractedTest[] = []
     const readableHelpers = topLevelReadableHelpers(file, src)
-    const translateAst = createReadableTestAstTranslator({ file, sourceFile: src, helpers: readableHelpers, semanticContext })
+    const translateAst = createReadableTestAstTranslator({ file, sourceFile: src, helpers: resolveHelper ? [] : readableHelpers, semanticContext, resolveHelper })
     for (const declaration of testDeclarationsFrom(src)) {
       const { call, body, name, line, bodySource, bodyLine } = declaration
       // Playwright tags are primary (R1); comment annotations are the migration

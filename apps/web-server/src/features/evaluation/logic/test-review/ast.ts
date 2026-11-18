@@ -1,7 +1,5 @@
 import { readSpecSource } from '../../../../../../../shared/spec-files'
 import { parseSourceLocation } from '../../../../../../../shared/lib/source-location'
-import fs from 'fs'
-import path from 'path'
 import ts from 'typescript'
 import { isTestCall } from '../../../../shared/test-declaration'
 
@@ -76,20 +74,6 @@ export function functionLikeBody(node: ts.Node): ts.ConciseBody | undefined {
 
 export function lineFor(node: ts.Node, src: ts.SourceFile): number {
   return src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1
-}
-
-export function resolveImport(fromFile: string, specifier: string): string | undefined {
-  const base = path.resolve(path.dirname(fromFile), specifier)
-  const candidates = [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    `${base}.js`,
-    `${base}.jsx`,
-    path.join(base, 'index.ts'),
-    path.join(base, 'index.tsx'),
-  ]
-  return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile())
 }
 
 export function safeRead(file: string): string | null {
