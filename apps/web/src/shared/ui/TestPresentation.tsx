@@ -30,7 +30,7 @@ import type { TestExecutionLineHighlight } from '@/features/runs/utils/test-step
 import { ComparisonTable } from './ComparisonTable'
 import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
-import { flowSections, sectionNodes, type FlowSection } from './test-flow-layout'
+import { flowSections, sectionNodes, stepVisitKey, type FlowSection } from './test-flow-layout'
 import { VisualTestView } from './VisualTestView'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import type { CodeLanguage } from './code-highlighter'
@@ -48,6 +48,7 @@ interface TestPresentationShellProps<M extends SingleTestViewMode = TestViewMode
 /** One test's story and body: the Tests column and the coverage cards. */
 export interface TestPresentationSingleProps extends TestPresentationShellProps<SingleTestViewMode> {
   view: 'single'
+  stepCounts?: ReadonlyMap<string, number>
   runningLocation?: string
   test: ExtractedTest
   sourceFile: string
@@ -126,6 +127,26 @@ function SinglePresentation(props: TestPresentationSingleProps) {
   const active = matches.length === 1 ? matches[0] : undefined
   const section = sections.find(s => s.id === picked) ?? active?.section ?? sections[0]
   const implementation = section.implementation
+  const sourceFile = implementation?.source.file ?? props.sourceFile
+  const checks = useMemo(() => {
+    const counts = new Map<number, number>()
+    if (!props.stepCounts?.size) return counts
+    const locations = new Map<number, number>()
+    for (const { node } of indexed) {
+      const { file, startLine } = node.source
+      if (file === sourceFile) locations.set(startLine, (locations.get(startLine) ?? 0) + 1)
+    }
+    for (const { section: owner, node } of indexed) {
+      if (owner !== section || node.kind !== 'loop' || !node.flow) continue
+      const { file, startLine } = node.source
+      // Repeated calls to one helper share a definition. A source line
+      // alone cannot assign a completed check to one of those invocations.
+      if (file !== sourceFile || locations.get(startLine) !== 1) continue
+      const count = props.stepCounts.get(stepVisitKey(`${file}:${startLine}`, node.flow.label))
+      if (count) counts.set(startLine, count)
+    }
+    return counts
+  }, [indexed, section, sourceFile, props.stepCounts])
   const test = useMemo((): ExtractedTest => implementation ? {
     name: section.label, line: implementation.source.startLine, bodySource: implementation.source.snippet, steps: [],
     readable: { ...props.test.readable, title: section.label, nodes: section.nodes, story: implementation.story },
@@ -138,10 +159,10 @@ function SinglePresentation(props: TestPresentationSingleProps) {
   </div>
   const helper = section.id !== 'test'
   return <SingleTestView key={section.id} {...props} {...mode} test={test}
-    sourceFile={implementation?.source.file ?? props.sourceFile}
+    sourceFile={sourceFile}
     changedLines={helper ? undefined : props.changedLines}
     executionHighlight={helper ? undefined : props.executionHighlight}
-    section={section} picker={picker} active={active?.node.id} onPick={setPicked} />
+    section={section} checks={checks} picker={picker} active={active?.node.id} onPick={setPicked} />
 }
 
 function AlignedPresentation(props: TestPresentationAlignedProps) {
@@ -150,7 +171,7 @@ function AlignedPresentation(props: TestPresentationAlignedProps) {
 
 function SingleTestView({
   test,
-  section, picker, active, onPick,
+  section, checks, picker, active, onPick,
   sourceFile,
   executionHighlight,
   runningLocation,
@@ -160,6 +181,7 @@ function SingleTestView({
   onModeChange,
   header,
 }: Resolved<TestPresentationSingleProps> & {
+  checks: ReadonlyMap<number, number>
   section: FlowSection; picker: ReactNode; active?: string; onPick: (id: string) => void
 }) {
   const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
@@ -243,7 +265,7 @@ function SingleTestView({
       </div>
 
       {picker}
-      {visual ? <VisualTestView section={section} active={active} test={test.readable} location={runningLocation}
+      {visual ? <VisualTestView checks={checks} section={section} active={active} test={test.readable} location={runningLocation}
         selected={selectedSource?.id} onSelect={selectSource} onHelper={onPick} /> : helper && !section.implementation && !(mode === 'code' && selectedSource) ? (
         <p>This saved flow has no function definition. Open Visual to inspect its recorded steps.</p>
       ) : mode === 'english' ? (
@@ -278,6 +300,7 @@ function SingleTestView({
             showOpenButton={showOpenButton}
           >
             <ReadableTestView
+              checks={checks}
               test={test.readable}
               sourceFile={sourceFile}
               selectedNodeId={selectedSource?.id}
@@ -293,6 +316,7 @@ function SingleTestView({
         <div data-testid="test-presentation-code">
           {code.source ? (
             <ShikiCode
+              checks={code.file === sourceFile ? checks : undefined}
               source={code.source}
               lineHighlight={useLiveLine ? (visualLines?.size ? { kind: 'running', lines: visualLines } : undefined) : executionHighlight && displayedExecutionLines
                 ? { kind: executionHighlight.kind, lines: displayedExecutionLines }

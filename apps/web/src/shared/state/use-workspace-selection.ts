@@ -46,6 +46,7 @@ export function useWorkspaceSelection({
   const selectedRunEvidence = {
     manifest: statusRunDetail.detail?.manifest,
     summary: statusRunDetail.detail?.summary,
+    playbackEvents: statusRunDetail.detail?.playbackEvents,
     status: statusRunDetail.detail?.manifest.status ?? selectedRunForFeature?.status ?? latestRunForFeature?.status,
   }
 

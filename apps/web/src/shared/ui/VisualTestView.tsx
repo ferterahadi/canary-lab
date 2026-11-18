@@ -5,8 +5,8 @@ import type { ReadableSourceSelection } from './ReadableTestView'
 import { layoutTestFlow, type FlowSection } from './test-flow-layout'
 import { Tooltip } from './Tooltip'
 
-function Chart({ section, active, selected, onSelect, onHelper }: {
-  section: FlowSection; active?: string; selected?: string
+function Chart({ section, checks, active, selected, onSelect, onHelper }: {
+  section: FlowSection; checks: ReadonlyMap<number, number>; active?: string; selected?: string
   onSelect: (selection: ReadableSourceSelection) => void
   onHelper: (id: string) => void
 }) {
@@ -42,11 +42,12 @@ function Chart({ section, active, selected, onSelect, onHelper }: {
         const node = box.source
         const source = (node ?? box.context)?.source
         const isActive = active !== undefined && box.id === active
+        const checked = node?.kind === 'loop' ? checks.get(node.source.startLine) : undefined
         const helper = node?.kind === 'group' && node.origin === 'helper' && node.children.length > 0
         const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : box.label
         const snippet = source?.snippet ?? ''
         return <g key={box.id} transform={`translate(${box.x - w / 2},${box.y - h / 2})`}
-          className="cl-flow-shape" data-shape={box.shape} data-lit={isActive}>
+          className="cl-flow-shape" data-shape={box.shape} data-lit={isActive} data-checked={checked}>
           {box.shape === 'decision'
             ? <polygon points={`${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}`} />
             : box.shape === 'io' ? <polygon points={`12,0 ${w},0 ${w - 12},${h} 0,${h}`} />
@@ -57,7 +58,7 @@ function Chart({ section, active, selected, onSelect, onHelper }: {
               <button type="button" className="cl-flow-node" data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
                 ref={node && selected === box.id ? focus : undefined}
                 onClick={() => { if (node) onSelect({ id: node.id, source: node.source }); else if (box.context) onSelect({ id: box.context.id, source: box.context.source }) }}>
-                <span>{box.label}</span>{isActive && <b>Running now</b>}
+                <span>{box.label}</span>{isActive ? <b>Running now</b> : checked ? <b>Checked ×{checked}</b> : null}
               </button>
             </Tooltip>
           </foreignObject>
@@ -71,8 +72,8 @@ function Chart({ section, active, selected, onSelect, onHelper }: {
   </div></>
 }
 
-export function VisualTestView({ section, active, location, selected, onSelect, onHelper, test }: {
-  section: FlowSection; active?: string; location?: string; selected?: string; test: ReadableTest
+export function VisualTestView({ section, checks, active, location, selected, onSelect, onHelper, test }: {
+  section: FlowSection; checks: ReadonlyMap<number, number>; active?: string; location?: string; selected?: string; test: ReadableTest
   onSelect: (selection: ReadableSourceSelection) => void
   onHelper: (id: string) => void
 }) {
@@ -80,6 +81,6 @@ export function VisualTestView({ section, active, location, selected, onSelect, 
   return <div role="region" aria-label="Test flow" className="cl-test-flow">
     {location && !active && <p>Running step has no unique box in this view.</p>}
     {test.completeness === 'partial' && <p>Some steps need inspection in Code.</p>}
-    <Chart section={section} active={active} selected={selected} onSelect={onSelect} onHelper={onHelper} />
+    <Chart checks={checks} section={section} active={active} selected={selected} onSelect={onSelect} onHelper={onHelper} />
   </div>
 }

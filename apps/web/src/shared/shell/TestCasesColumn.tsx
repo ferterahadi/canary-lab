@@ -1,3 +1,5 @@
+import { completedStepCounts } from '../ui/test-flow-layout'
+import type { PlaywrightPlaybackEvent } from '@shared/playback'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
@@ -31,6 +33,7 @@ import { TestListUnavailableCard } from './TestListUnavailableCard'
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
 type TestRunEvidence = {
+  playbackEvents?: PlaywrightPlaybackEvent[]
   manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
   summary?: RunSummary
   status?: RunStatus
@@ -64,6 +67,8 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const baselineRunSummary = comparisonBaseline?.summary
   const baselineRunStatus = comparisonBaseline?.status
   const activeRunManifest = currentTests ? undefined : runEvidence?.manifest
+  const events = currentTests ? undefined : runEvidence?.playbackEvents
+  const completedSteps = useMemo(() => completedStepCounts(events), [events])
   const activeRunSummary = currentTests ? undefined : runEvidence?.summary
   const activeRunStatus = currentTests ? undefined : runEvidence?.status
   // The spec list refetches when a `tests-changed` event fires for the selected
@@ -323,6 +328,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     showStatus={!currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
+                    stepCounts={testIdentity.id ? completedSteps.get(testIdentity.id) : undefined}
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
                     expanded={isExpanded}
@@ -449,7 +455,7 @@ function TestCard({
   showStatus,
   showNotRun,
   isRunningTest,
-  runningStep,
+  runningStep, stepCounts,
   executionHighlight: nextExecutionHighlight,
   expanded,
   modified,
@@ -466,6 +472,7 @@ function TestCard({
   showStatus: boolean
   showNotRun: boolean
   isRunningTest: boolean
+  stepCounts?: ReadonlyMap<string, number>
   runningStep?: RunSummaryRunningStep
   executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
@@ -607,6 +614,7 @@ function TestCard({
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}
+              stepCounts={stepCounts}
               runningLocation={runningStep?.location}
               changedLines={changedLines}
             />}

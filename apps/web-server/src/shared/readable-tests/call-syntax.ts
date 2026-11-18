@@ -21,8 +21,7 @@ export function callFromStatement(statement: ts.Statement): ts.CallExpression | 
   return expression ? callFromExpression(expression) : undefined
 }
 
-export function authoredStep(statement: ts.Statement): { label: string; body: ts.Block } | undefined {
-  const call = callFromStatement(statement)
+export function authoredStepLabel(call?: ts.CallExpression): string | undefined {
   if (
     !call
     || !ts.isPropertyAccessExpression(call.expression)
@@ -32,16 +31,22 @@ export function authoredStep(statement: ts.Statement): { label: string; body: ts
   ) {
     return undefined
   }
-  const [label, callback] = call.arguments
+  const label = call.arguments[0]
+  return label && ts.isStringLiteralLike(label) ? label.text : undefined
+}
+
+export function authoredStep(statement: ts.Statement): { label: string; body: ts.Block } | undefined {
+  const call = callFromStatement(statement)
+  const label = authoredStepLabel(call)
+  const callback = call?.arguments[1]
   if (
-    !label
-    || !ts.isStringLiteralLike(label)
+    label === undefined
     || !callback
     || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
     || !ts.isBlock(callback.body)
   ) {
     return undefined
   }
-  return { label: label.text, body: callback.body }
+  return { label, body: callback.body }
 }
 

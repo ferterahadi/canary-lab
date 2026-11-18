@@ -1,3 +1,4 @@
+import type { PlaywrightPlaybackEvent } from '@shared/playback'
 import dagre from '@dagrejs/dagre'
 import type { ReadableGroupNode, ReadableNode } from '@shared/readable-tests/types'
 
@@ -7,6 +8,27 @@ interface Point { x: number; y: number }
 interface Bounds extends Point { width: number; height: number }
 interface Connection { label: string; points: Point[]; x: number; y: number }
 interface Destinations { end: string; fail: string; breakTo?: string; continueTo?: string }
+
+export function stepVisitKey(location: string, title: string) {
+  return JSON.stringify([location, title])
+}
+
+/** A retry starts its own counts. Unidentified legacy events cannot establish
+ * which test or helper invocation ran. */
+export function completedStepCounts(events?: readonly PlaywrightPlaybackEvent[]) {
+  const counts = new Map<string, Map<string, number>>()
+  for (const event of events ?? []) {
+    const id = event.test.id
+    if (!id) continue
+    if (event.type === 'test-begin') counts.set(id, new Map())
+    if (event.type !== 'step-end' || event.step.category !== 'test.step' || !event.step.location) continue
+    const attempt = counts.get(id)
+    if (!attempt) continue
+    const key = stepVisitKey(event.step.location, event.step.title)
+    attempt.set(key, (attempt.get(key) ?? 0) + 1)
+  }
+  return counts
+}
 
 export function flowName(node: ReadableNode) {
   if (node.kind === 'group' && node.children.some(n => n.kind === 'group' && n.controlRole === 'finally')) return 'Inspect try / finally'

@@ -51,3 +51,15 @@ it('respects bindings, recursion, and the retained suite boundary', () => {
   expect(bound.readable.nodes.map(n => n.kind)).toEqual(['leaf', 'leaf'])
   expect(cycle.readable.nodes[0]).toMatchObject({ kind: 'group', children: [{ fidelity: 'unresolved' }] })
 })
+
+it('uses the authored Playwright labels at the loop and timer source lines', () => {
+  const nodes = extract([
+    "test('poll', async () => {",
+    "  while (await test.step('Before deadline?', async () => Date.now() < deadline)) {",
+    "    await test.step('Wait 3 s', () => new Promise<void>(r => setTimeout(r, 3000)))",
+    "  }",
+    "})",
+  ].join('\n'))
+  expect(nodes).toMatchObject([{ kind: 'loop', source: { startLine: 2 }, flow: { label: 'Before deadline?' },
+    children: [{ source: { startLine: 3 }, flow: { label: 'Wait 3 s' } }] }])
+})

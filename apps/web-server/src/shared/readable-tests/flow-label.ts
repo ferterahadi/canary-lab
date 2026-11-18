@@ -1,6 +1,6 @@
 import ts from 'typescript'
 import type { ReadableFlowLabel, ReadableNode } from '../../../../../shared/readable-tests/types'
-import { callFromStatement } from './call-syntax'
+import { authoredStepLabel, callFromExpression, callFromStatement } from './call-syntax'
 
 function words(name: string) {
   return name.replace(/([a-z\d])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase()
@@ -18,6 +18,8 @@ function subject(expression: ts.Expression): string {
 }
 
 function question(expression: ts.Expression): string {
+  const label = authoredStepLabel(callFromExpression(expression))
+  if (label !== undefined) return label
   if (ts.isBinaryExpression(expression)) {
     const operators: Record<string, string> = { '===': 'is', '==': 'equals', '!==': 'differs from', '<': '<', '>': '>', '<=': '≤', '>=': '≥' }
     if (expression.left.getText() === 'Date.now()' && expression.operatorToken.kind === ts.SyntaxKind.LessThanToken) {
@@ -46,9 +48,11 @@ export function flowLabel(s: ts.Statement, node: ReadableNode): ReadableFlowLabe
     return { kind: s.label ? 'opaque' : ts.isBreakStatement(s) ? 'break' : 'continue', label: s.getText().replace(/;$/, '') }
   }
   const call = callFromStatement(s)
+  const kind = ts.isReturnStatement(s) ? 'return' : 'action'
+  const stepLabel = authoredStepLabel(call)
+  if (stepLabel !== undefined) return { kind, label: stepLabel }
   const callee = call?.expression
   const method = callee && ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined
-  const kind = ts.isReturnStatement(s) ? 'return' : 'action'
   const io = node.english?.semanticCategories?.includes('external-api')
   if (call && method && io && ['get','post','put','patch','delete','head','fetch'].includes(method)) {
     const url = call.arguments[0]

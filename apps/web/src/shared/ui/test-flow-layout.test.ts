@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { ReadableNode } from '@shared/readable-tests/types'
-import { layoutTestFlow } from './test-flow-layout'
+import { completedStepCounts, layoutTestFlow, stepVisitKey } from './test-flow-layout'
 
 const base = { text: '', fidelity: 'exact' as const, source: { file: 'suite.ts', startLine: 2, endLine: 2, snippet: 'return' } }
 const exit: ReadableNode = { ...base, kind: 'leaf', role: 'action', id: 'exit', flow: { kind: 'return', label: 'Return' } }
@@ -16,4 +16,19 @@ it('routes the retry path back to the loop, the early return to End, and the tim
   ]))
   expect(chart.edges.filter(e => e.from === 'exit')).toHaveLength(1)
   expect(chart.nodes.find(n => n.id === 'ready')?.shape).toBe('decision')
+})
+
+it('counts completed named steps per test and starts fresh on retry', () => {
+  const a = { id: 'a', name: 'poll', title: 'poll', location: 'poll.spec.ts:1' }
+  const b = { ...a, id: 'b' }
+  const time = '2026-01-01T00:00:00Z'
+  const step = { title: 'Before deadline?', location: 'gateway.ts:16', category: 'test.step' }
+  const counts = completedStepCounts([
+    { type: 'test-begin', time, test: a }, { type: 'test-begin', time, test: b },
+    { type: 'step-end', time, test: a, step }, { type: 'step-end', time, test: b, step },
+    { type: 'test-begin', time, test: b }, { type: 'step-begin', time, test: b, step },
+    { type: 'step-end', time, test: a, step },
+  ])
+  expect(counts.get('a')?.get(stepVisitKey(step.location, step.title))).toBe(2)
+  expect(counts.get('b')?.size).toBe(0)
 })

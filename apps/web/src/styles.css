@@ -2313,3 +2313,9 @@ body {
 .cl-flow-node b { font: 600 10px var(--font-mono); }
 .cl-flow-open { width: 21px; height: 21px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 5px; }
 .cl-flow-snippet { font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48vh; overflow: auto; margin: 4px 0 0; }
+
+.cl-flow-shape[data-checked] { --stroke: var(--running); stroke-width: 2; }
+.cl-check-count { margin-inline-start: 6px; color: var(--running); font-size: 10px; }
+.cl-numbered-code [data-checked], .cl-readable-body button[data-checked] {
+  box-shadow: inset 2px 0 var(--running);
+}

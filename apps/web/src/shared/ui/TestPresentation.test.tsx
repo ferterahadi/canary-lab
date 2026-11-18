@@ -9,6 +9,7 @@ import type { ReadableStoryItem } from '@shared/readable-tests/types'
 import { openEditor } from '../api/workspace'
 import { applyTheme } from '../lib/theme'
 import { TestPresentation } from './TestPresentation'
+import { stepVisitKey } from './test-flow-layout'
 import { mountRoot } from '@/test-helpers/mount-root'
 
 vi.mock('shiki/core', () => ({
@@ -728,4 +729,31 @@ it('keeps the chosen implementation in English, Code and Visual and returns to t
   expect(container.querySelector('[data-selected-line="true"]')?.textContent).toContain(check.source.snippet)
   await pick('test')
   expect(container.querySelector('[data-code-line]')?.textContent).toContain("page.goto('/checkout')")
+})
+
+it('keeps completed loop checks separate from the running wait across all three formats', async () => {
+  const file = '/suite/helpers.ts'
+  const definition = { file, startLine: 20, endLine: 24, snippet: '{\n  while (beforeDeadline()) {\n    await wait()\n  }\n}' }
+  const header = { ...definition, startLine: 21, endLine: 23 }
+  const wait = { ...definition, startLine: 22, endLine: 22, snippet: 'await wait()' }
+  const action = { id: 'wait', fidelity: 'derived' as const, text: 'Wait 3 s', source: wait }
+  const loop = { id: 'loop', fidelity: 'derived' as const, text: 'Before deadline?', source: header }
+  const test: ExtractedTest = { ...TEST, readable: { ...TEST.readable, nodes: [{
+    ...TEST.readable.nodes[0], kind: 'group', origin: 'helper',
+    children: [{ ...loop, kind: 'loop', loopKind: 'while', flow: { kind: 'decision', label: loop.text },
+      children: [{ ...action, kind: 'leaf', role: 'action' }] }],
+    implementation: { source: definition, story: { steps: [{ ...loop, kind: 'flow', flowKind: 'loop', role: 'action',
+      spans: [{ text: loop.text }], children: [{ ...action, role: 'action', spans: [{ text: action.text }] }] }] } },
+  }] } }
+  const counts = new Map([[stepVisitKey(file + ':21', loop.text), 3]])
+  await act(async () => root.render(<TestPresentation view="single" test={test}
+    sourceFile="/suite/test.spec.ts" runningLocation={file + ':22'} stepCounts={counts} />))
+  expect(container.querySelector('[data-checked="3"]')?.textContent).toContain('Before deadline?')
+  expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Wait 3 s')
+  await act(async () => container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Code"]')!.click())
+  expect(container.querySelector('[data-source-line="21"][data-checked="3"]')?.textContent).toContain('Checked ×3')
+  expect(container.querySelector('[data-source-line="22"][data-execution-highlight="running"]')).toBeTruthy()
+  await act(async () => container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Visual"]')!.click())
+  expect(container.querySelector('[data-checked="3"]')?.textContent).toContain('Checked ×3')
+  expect(container.querySelector('[data-running="true"]')?.textContent).toContain('Wait 3 s')
 })

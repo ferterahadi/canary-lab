@@ -27,13 +27,14 @@ interface ReadableExecutionHighlight {
 export function ReadableTestView({
   test,
   sourceFile,
-  selectedNodeId,
+  selectedNodeId, checks,
   executionHighlight,
   changedNodeIds,
   onSourceSelect,
 }: {
   test: ReadableTest
   sourceFile?: string
+  checks?: ReadonlyMap<number, number>
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
   /** English rows backed by source lines that differ from git HEAD. */
@@ -56,7 +57,7 @@ export function ReadableTestView({
           <StorySequence
             steps={steps}
             sourceFile={sourceFile}
-            selectedNodeId={selectedNodeId}
+            selectedNodeId={selectedNodeId} checks={checks}
             executionHighlight={executionHighlight}
             changedNodeIds={changedNodeIds}
             onSourceSelect={onSourceSelect}
@@ -75,7 +76,7 @@ function StorySequence({
   steps,
   parentSequence = [],
   sourceFile,
-  selectedNodeId,
+  selectedNodeId, checks,
   executionHighlight,
   changedNodeIds,
   onSourceSelect,
@@ -83,6 +84,7 @@ function StorySequence({
   steps: ReadableStoryItem[]
   parentSequence?: number[]
   sourceFile?: string
+  checks?: ReadonlyMap<number, number>
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
   changedNodeIds?: ReadonlySet<string>
@@ -104,7 +106,7 @@ function StorySequence({
           step={step}
           sequence={[...parentSequence, index + 1]}
           sourceFile={sourceFile}
-          selectedNodeId={selectedNodeId}
+          selectedNodeId={selectedNodeId} checks={checks}
           executionHighlight={executionHighlight}
           changedNodeIds={changedNodeIds}
           onSourceSelect={onSourceSelect}
@@ -118,7 +120,7 @@ function StoryRow({
   step,
   sequence,
   sourceFile,
-  selectedNodeId,
+  selectedNodeId, checks,
   executionHighlight,
   changedNodeIds,
   onSourceSelect,
@@ -126,6 +128,7 @@ function StoryRow({
   step: ReadableStoryItem
   sequence: number[]
   sourceFile?: string
+  checks?: ReadonlyMap<number, number>
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
   changedNodeIds?: ReadonlySet<string>
@@ -136,6 +139,8 @@ function StoryRow({
   const localSequenceLabel = storyLocalSequenceLabel(sequence)
   const keyword = storyKeyword(step)
   const displayText = storyDisplayText(step)
+  const checked = step.kind === 'flow' && step.flowKind === 'loop' && sourceFile === step.source.file
+    ? checks?.get(step.source.startLine) : undefined
   const selected = selectedNodeId === step.id
   const executionKind = executionHighlight?.nodeId === step.id
     ? executionHighlight.kind
@@ -155,11 +160,11 @@ function StoryRow({
       <button
         type="button"
         data-testid={`readable-story-item-${step.id}`}
-        data-fidelity={step.fidelity}
+        data-fidelity={step.fidelity} data-checked={checked}
         data-execution-highlight={executionKind}
         data-changed-source={changed ? 'true' : undefined}
         aria-pressed={selected}
-        aria-label={`${sequenceLabel}. ${keyword}: ${displayText}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${displayText}. ${checked ? `Checked ×${checked}. ` : ''}${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
         title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${changed ? ' — Modified since the committed test' : ''}${executionKind ? ` — ${executionDescription}` : ''}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
@@ -188,6 +193,7 @@ function StoryRow({
           {localSequenceLabel}
         </span>
         <ReadableStoryText step={step}>
+          {checked && <b className="cl-check-count">Checked ×{checked}</b>}
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
           {changed && (
             <span
@@ -217,7 +223,7 @@ function StoryRow({
           steps={step.children}
           parentSequence={sequence}
           sourceFile={sourceFile}
-          selectedNodeId={selectedNodeId}
+          selectedNodeId={selectedNodeId} checks={checks}
           executionHighlight={executionHighlight}
           changedNodeIds={changedNodeIds}
           onSourceSelect={onSourceSelect}

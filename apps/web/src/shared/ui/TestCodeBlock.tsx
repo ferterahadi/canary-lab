@@ -40,7 +40,7 @@ interface CodeLineHighlight {
 // user input, so innerHTML is safe here.
 export function ShikiCode({
   source,
-  lineHighlight,
+  lineHighlight, checks,
   sourceLocation,
   sourceLineMap,
   changedLines,
@@ -50,6 +50,7 @@ export function ShikiCode({
   numberBySource = false,
 }: {
   source: string
+  checks?: ReadonlyMap<number, number>
   lineHighlight?: CodeLineHighlight
   sourceLocation?: SourceLocation
   /** Explicit display-row to absolute source-row mapping. When absent, rows
@@ -89,6 +90,7 @@ export function ShikiCode({
             <code>
               <FallbackCodeLines
                 source={source}
+                checks={checks}
                 lineHighlight={lineHighlight}
                 startLine={sourceLocation?.startLine}
                 sourceLineMap={sourceLineMap}
@@ -114,7 +116,7 @@ export function ShikiCode({
           // Shiki has already escaped the source it highlighted;
           // decorateShikiLines only adds metadata and presentation wrappers.
           // eslint-disable-next-line no-restricted-syntax
-          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource) }}
+          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, checks, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource) }}
         />
       )}
     </SourceOpenShell>
@@ -123,7 +125,7 @@ export function ShikiCode({
 
 function FallbackCodeLines({
   source,
-  lineHighlight,
+  lineHighlight, checks,
   startLine,
   sourceLineMap,
   changedLines,
@@ -132,6 +134,7 @@ function FallbackCodeLines({
   numberBySource,
 }: {
   source: string
+  checks?: ReadonlyMap<number, number>
   lineHighlight?: CodeLineHighlight
   startLine?: number
   sourceLineMap?: readonly FormattedDisplayLine[]
@@ -148,8 +151,9 @@ function FallbackCodeLines({
       { lineHighlight, startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers, numberBySource },
       shownStorySequences,
     )
+    const checked = checks?.get(mapped.sourceLine ?? 0)
     return (
-      <span
+      <span data-checked={checked}
         key={index}
         className="line"
         data-code-line={number.physical}
@@ -165,6 +169,7 @@ function FallbackCodeLines({
       >
         <span className="cl-code-line-content">
           {line}
+          {checked && <b className="cl-check-count">Checked ×{checked}</b>}
           {executionLabel && <span className="cl-execution-label cl-execution-label-failed">{executionLabel}</span>}
         </span>
       </span>
@@ -225,6 +230,7 @@ export function SourceOpenShell({
 
 function decorateShikiLines(
   html: string,
+  checks?: ReadonlyMap<number, number>,
   lineHighlight?: CodeLineHighlight,
   startLine?: number,
   sourceLineMap?: readonly FormattedDisplayLine[],
@@ -243,8 +249,10 @@ function decorateShikiLines(
       shownStorySequences,
     )
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
+    const checked = checks?.get(mapped.sourceLine ?? 0)
+    const checkAttr = checked ? ` data-checked="${Number(checked)}"` : ''
     const flags = `${changed ? ' data-changed-line="true"' : ''}${active ? ` data-active-line="true" data-execution-highlight="${executionKind}"` : ''}${executionLabel ? ` data-execution-label="${executionLabel}"` : ''}`
-    return `${match}${attrs}${flags}${style ? ` style="background:${style.background};box-shadow:${style.boxShadow}"` : ''}`
+    return `${match}${attrs}${flags}${checkAttr}${style ? ` style="background:${style.background};box-shadow:${style.boxShadow}"` : ''}`
   })
   // A dedicated content cell keeps wrapped source aligned after the number
   // gutter. Shiki keeps each source line on one HTML line, so the final closing
@@ -254,7 +262,9 @@ function decorateShikiLines(
       const executionLabel = opening.includes('data-execution-label="FAILED HERE"')
         ? '<span class="cl-execution-label cl-execution-label-failed">FAILED HERE</span>'
         : ''
-      return `${opening}<span class="cl-code-line-content">${content}${executionLabel}</span>${closing}`
+      const checked = /data-checked="(\d+)"/.exec(opening)?.[1]
+      const checkLabel = checked ? `<b class="cl-check-count">Checked ×${checked}</b>` : ''
+      return `${opening}<span class="cl-code-line-content">${content}${checkLabel}${executionLabel}</span>${closing}`
     })
     // Grid rows make Shiki's separator newlines visible under pre-wrap; the
     // source rows themselves already preserve every authored newline.
