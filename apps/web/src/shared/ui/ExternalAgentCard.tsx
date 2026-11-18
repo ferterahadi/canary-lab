@@ -48,28 +48,32 @@ export function ExternalStatusPill({ label, palette }: { label: string; palette:
 // portify/draft sessionUrl) or a button (onClick, e.g. heal's openAgentApp,
 // which is stateful and reports its own busy/error).
 export function ExternalClientCta(
-  props:
-    | { label: string; href: string }
-    | { label: string; onClick: () => void; busy?: boolean; busyLabel?: string },
+  props: { label: string; compact?: boolean } & (
+    | { href: string }
+    | { onClick: () => void; busy?: boolean; busyLabel?: string }
+  ),
 ) {
-  const className = 'cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]'
+  const className = props.compact
+    ? 'cl-button cl-heal-open-icon'
+    : 'cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px]'
+  const busy = 'onClick' in props && props.busy
+  const label = busy ? (props.busyLabel ?? 'Opening…') : props.label
   const face = (
     <>
-      <span>{props.label}</span>
-      <span aria-hidden>→</span>
+      {!props.compact && <span>{label}</span>}
+      {props.compact ? <span aria-hidden>{busy ? '…' : '>'}</span> : !busy && <span aria-hidden>→</span>}
     </>
   )
   if ('href' in props) {
     return (
-      <a href={props.href} target="_blank" rel="noreferrer" className={className}>
+      <a href={props.href} target="_blank" rel="noreferrer" aria-label={props.compact ? label : undefined} title={props.compact ? label : undefined} className={className}>
         {face}
       </a>
     )
   }
-  const busy = props.busy ?? false
   return (
-    <button type="button" onClick={props.onClick} disabled={busy} className={className}>
-      {busy ? (props.busyLabel ?? 'Opening…') : face}
+    <button type="button" onClick={props.onClick} disabled={busy} aria-label={props.compact ? label : undefined} title={props.compact ? label : undefined} className={className}>
+      {face}
     </button>
   )
 }
@@ -117,7 +121,7 @@ interface ExternalAgentCardProps {
 /** One labelled fact on the card's meta line: a rubric label, then the value. */
 export function ExternalMetaFact({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
   return (
-    <span className="inline-flex min-w-0 items-baseline gap-1.5" title={title}>
+    <span className="inline-flex min-w-0 items-center gap-1.5" title={title}>
       <span className="cl-rubric">{label}</span>
       <span className="min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{children}</span>
     </span>

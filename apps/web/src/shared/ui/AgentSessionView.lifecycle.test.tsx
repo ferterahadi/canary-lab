@@ -163,12 +163,12 @@ describe('AgentSessionView lifecycle presentation', () => {
     expect(mocks.connectAgentSessionStream).not.toHaveBeenCalled()
   })
 
-  it('keeps the live footer visible while the session is waiting for its first event', async () => {
+  it('starts an empty live run with Working as its only output', async () => {
     mocks.getAgentSession.mockResolvedValueOnce(null)
     await render(true)
 
-    expect(container.textContent).toContain(EMPTY_COPY.agentWaiting.title)
-    expect(container.querySelector('[data-testid="agent-session-live-tail"]')).not.toBeNull()
+    expect(container.textContent).not.toContain(EMPTY_COPY.agentWaiting.title)
+    expect(container.querySelector('.agentts-rail > :only-child')?.getAttribute('aria-label')).toBe('Working')
   })
 
   it('treats a live-mode absence like an empty snapshot and still opens the tail', async () => {
@@ -177,7 +177,7 @@ describe('AgentSessionView lifecycle presentation', () => {
     mocks.getAgentSession.mockResolvedValueOnce({ absent: true, reason: 'session-log-missing' })
     await render(true)
 
-    expect(container.textContent).toContain(EMPTY_COPY.agentWaiting.title)
+    expect(container.textContent).not.toContain(EMPTY_COPY.agentWaiting.title)
     expect(mocks.connectAgentSessionStream).toHaveBeenCalledOnce()
   })
 

@@ -26,6 +26,16 @@ describe('runFacts', () => {
     expect(facts[2]?.sub).toBeTruthy()
   })
 
+  it('gives Verify the same timing rows and keeps its configuration fields', () => {
+    const run = manifest({ executionType: 'verify', status: 'queued', healMode: 'auto' })
+    const facts = runFacts(run, null)
+    expect(facts.slice(0, 2)).toMatchObject([
+      { label: 'Configuration', value: 'Unsaved' },
+      { label: 'Playwright envset', value: 'local' },
+    ])
+    expect(facts.slice(2)).toEqual(runFacts(manifest({ status: 'queued' }), null).slice(1))
+  })
+
   it('folds the heal agent and its cycle count into one row', () => {
     const facts = runFacts(manifest({ healMode: 'external', healCycles: 2, externalHealSession: { clientKind: 'codex' } as RunManifest['externalHealSession'] }), null)
 

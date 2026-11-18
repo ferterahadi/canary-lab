@@ -633,7 +633,7 @@ describe('run overview', () => {
     })
 
     expect(container.textContent).toContain('AI Agent')
-    expect(container.textContent).toContain('No external agent session has claimed this run yet')
+    expect(container.textContent).toContain('Claim this run from an MCP-connected agent.')
     expect(container.textContent).not.toContain('terminal')
   })
 
