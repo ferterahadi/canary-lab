@@ -30,7 +30,7 @@ vi.mock('@/features/runs/components/DirtyReviewDialog', async (original) => {
       at: '2026-09-22T15:28:47.000Z', git: { status: 'committed', commit: 'b'.repeat(40) },
       execution: acceptance.status === 'none' ? { status: 'none' } : { status: acceptance.status, runId: 'old' },
     }
-    onAccepted?.('alpha', receipt, { summary: { passed: 7, total: 8 } } as RunDetail)
+    onAccepted?.('alpha', receipt, { manifest: { env: 'local' }, summary: { passed: 7, total: 8 } } as RunDetail)
   }}>Accept fixture</button>,
   }
 })
@@ -114,7 +114,7 @@ it('shows dynamic committed-source feedback, dismisses before normal run action,
   expect(toast.textContent).toContain('Current source: 3 tests. The selected 7/8 run is historical.')
   expect(toast.textContent).toContain('Run latest 3 tests')
   await act(async () => (toast.querySelector('button') as HTMLButtonElement).click())
-  expect(onRunLatestTests).toHaveBeenCalledExactlyOnceWith('alpha')
+  expect(onRunLatestTests).toHaveBeenCalledExactlyOnceWith('alpha', 'old', 'local')
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
   expect(document.body.textContent).not.toContain('Run started')
 })

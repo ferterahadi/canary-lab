@@ -130,6 +130,7 @@ export function startRun(
   feature: string,
   opts?: ClientOptions & {
     env?: string
+    continuationOf?: string
     isolation?: 'worktree' | 'queue'
     mode?: 'test' | 'boot'
     gettingStartedSource?: 'internal' | 'external'
@@ -141,6 +142,7 @@ export function startRun(
 ): Promise<{ runId: string }> {
   const body: Record<string, unknown> = { feature }
   if (opts?.env) body.env = opts.env
+  if (opts?.continuationOf) body.continuationOf = opts.continuationOf
   if (opts?.isolation) body.isolation = opts.isolation
   if (opts?.mode === 'boot') body.mode = 'boot'
   if (opts?.models) body.models = opts.models
@@ -388,4 +390,9 @@ export function createReadableRunLog(
   opts?: ClientOptions,
 ): Promise<{ path: string }> {
   return requestJson<{ path: string }>(`/api/runs/${encodeURIComponent(runId)}/readable-log`, 'POST', { file }, opts)
+}
+
+export function getRunHistory(runId: string, opts?: ClientOptions): Promise<import('@shared/run-collaboration').RunHistoryEntry[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/history`, { method: 'GET' }, fetchImpl)
 }

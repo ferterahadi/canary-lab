@@ -137,7 +137,7 @@ it('reconciles settled journals while preserving cards, scroll and an open raw d
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="journal-raw-entry"]')!.click())
     const modal = document.querySelector('[data-testid="journal-raw-modal"]')
     vi.mocked(runsApi.listJournal).mockResolvedValue([{ ...entry(2, 'newer'), outcome: 'all_tests_passed' }, { ...old, body: '- hypothesis: revised' }])
-    await act(async () => vi.advanceTimersByTimeAsync(14_999))
+    await act(async () => vi.advanceTimersByTimeAsync(4_999))
     expect(runsApi.listJournal).toHaveBeenCalledTimes(1)
     await act(async () => vi.advanceTimersByTimeAsync(1))
     expect(container.querySelectorAll('li')[1]).toBe(card)

@@ -386,9 +386,13 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
   })
 
   it('restarts it, claims the new run, and reports counts read off the summary', async () => {
-    const restartExternalRun = vi.fn(async () => ({ runId: 'run-1', mode: 'remaining' as const }))
+    const records = [runDetail({ status: 'failed' }, { summary })]
+    const restartExternalRun = vi.fn(async () => {
+      records[0] = runDetail({ status: 'running' }, { summary })
+      return { runId: 'run-1', mode: 'remaining' as const }
+    })
     const { call } = harness({
-      store: storeOf([runDetail({ status: 'failed' }, { summary })]),
+      store: storeOf(records),
       restartExternalRun,
     })
 
@@ -414,6 +418,20 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
       { kind: 'external', sessionId: 'sess-1', clientKind: 'claude', conversationName: 'fix checkout', claimable: true },
       'the promo code is case-sensitive',
     )
+  })
+
+  it('does not report old passes when continuation installed an approved source version', async () => {
+    const records = [runDetail({ status: 'failed' }, { summary })]
+    const { call } = harness({
+      store: storeOf(records),
+      restartExternalRun: async () => {
+        records[0] = runDetail({ status: 'running', playwrightExecutions: 2 }, { summary: undefined })
+        return { runId: 'run-1', mode: 'remaining' as const }
+      },
+    })
+    expect(await call('start_run', { ...START, run_ref: 'run-1' })).toMatchObject({
+      status: 'running', counts: { totalKnown: 0, passed: 0, failed: 0 },
+    })
   })
 
   it('defaults the mode, and zeroes the counts, when neither is on record', async () => {

@@ -58,6 +58,7 @@ export type EmitRunEvent = <K extends keyof OrchestratorEventMap>(
 ) => boolean
 
 export interface RunContext {
+  readonly continuationOf?: string
   // ── identity + layout, fixed at construction ──────────────────────────────
   readonly runId: string
   readonly runDir: string
@@ -122,6 +123,8 @@ export interface RunContext {
    *  for what means *the feature* — its config, envsets, overlay, the dir the
    *  heal agent reads. */
   suiteDir: string
+  executionPrepared?: boolean
+  approvedContinuation?: boolean
   /** Replaced by a fresh dependency preflight before each boot/recovery attempt. */
   dependencyProvenance: RunDependencyProvenance[]
   status: RunManifest['status']
@@ -269,6 +272,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
     testReviewApproval: opts.testReviewApproval,
+    continuationOf: opts.continuationOf,
 
     // A restart builds a fresh context over the SAME run dir without calling
     // start(); picking the existing copy up here is what keeps a restart from

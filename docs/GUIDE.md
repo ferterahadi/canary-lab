@@ -174,8 +174,19 @@ external-effect attempt; Canary Lab only reads it. Once claimed, a repair
 signal records the agent's changes and ends that run failed and unverified.
 Canary Lab does not restart its services or rerun its tests. The run's
 **Changes** dialog, opened from the run header, retains the captured patch. After review and the suite's required approval,
-start a fresh run with a new ID; `run_ref` and Restart Heal cannot reuse the
-spent run.
+start a fresh run with a new ID and `continuationOf` naming the spent run; `run_ref` and Restart Heal cannot reuse it. The original receipt remains intact, and another external action still needs its required approval.
+
+After correcting test source, **Accept & commit** on an ended run records approval
+but starts nothing. **Accepted — awaiting execution** clears the pending-review
+notice. Choose **Continue run** to execute the approved source under that run ID.
+Later edits require another review. A historical changed-test pencil remains,
+names its baseline run, and does not mean approval is still pending.
+
+A changed source version executes the full suite. Results & Fixes retains the
+initial failure, acceptance, continuation, and later executions with their source
+versions, results and output. Ordinary app repairs keep targeted-rerun behavior.
+Passed runs stay completed. Explicit successor links group separate contexts
+without copying their journals or changing their individual verdicts.
 
 ### Where edits land
 

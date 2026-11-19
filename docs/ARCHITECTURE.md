@@ -791,13 +791,12 @@ The English viewer compiles shared helpers once per source extraction and rebuil
 them on the next edit. Possible weakening also uses
 an amber advisory cue.
 The footer has two human decisions only: **Restore recorded files** and
-**Accept & commit**. It adds no lifecycle explanation, tooltip, or confirmation.
+**Accept & commit**. After acceptance, the dialog explains that historical differences remain; an eligible ended run offers a separate Continue run action.
 Both the browser and MCP call the same revision-bound server operation. Acceptance
 commits exactly the disclosed files and stores a durable receipt containing the
 review revision, file scope, commit, and execution consequence. For an active run
 it also adopts the revision and requests a rerun; for a terminal passed, failed,
-or aborted run it authorizes those bytes for a new run without changing the old
-snapshot or verdict. Suite-only acceptance records no run action. A failed step
+or aborted run it records approval without executing. Eligible failed/aborted runs can then explicitly continue under the same ID; passed or spent single-attempt runs require a separate context. Approval leaves the old snapshot and verdict unchanged. Suite-only acceptance records no run action. A failed step
 stays visible for recovery. An arbitrary Git commit can clear file dirtiness but
 never creates this human approval receipt. MCP clients can call
 `get_test_review` to display the exact snapshot comparison, then
@@ -831,9 +830,7 @@ wait in a background agent when supported, or in the current turn otherwise.
 Each watcher gets its own wait token. The external client must remain running
 for automatic continuation; Canary never treats a wait or notification as a
 review decision or starts an external request on the client's behalf.
-Active acceptance signals a rerun. Terminal acceptance is carried into fresh-run
-snapshot capture, rechecked before and during the copy, and recorded as provenance
-on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
+Active acceptance signals a rerun. Terminal acceptance is rechecked before and during continuation snapshot capture. An approved source replacement retains prior bytes and results, clears the current summary, and requires a full-suite execution. A legitimate fresh successor records continuationOf; links must stay in the same workspace, suite and environment and cannot cycle. Neither decision changes a verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions
 running; stopping is a separate action.
 
@@ -1824,3 +1821,25 @@ Paused-flight browser readers also reconcile every five seconds and reject reads
 superseded by a pushed update. Feature-change replies carry the same assessment;
 when this reader is configured their wait is bounded to ten seconds. Passive
 agent clients still need a tool response or an active wait to receive it.
+
+
+### Shared collaboration and execution history
+
+The run lifecycle service serializes review, start and continuation per suite,
+with a process lock that refuses a live peer. REST and MCP use the same service;
+RunStore persists manifests before publishing. Its collaboration projection carries
+review, execution, owner, continuation availability and a semantic revision.
+Open run/review/history consumers reconcile every five seconds alongside stream
+invalidation and reconnect recovery. Late reads cannot overwrite newer observations.
+
+Each numbered execution records its source hash, exact selection, result summary
+and output. Authored bytes are retained under the run history, excluding runtime
+inputs with the snapshot rules. Legacy evidence is labelled unavailable rather
+than attributing current source to an old execution. Results & Fixes aggregates
+explicitly linked runs, preserving each run's journal, URLs and verdicts.
+
+MCP wait_for_feature_change accepts afterRunRevision independently of its coverage
+cursor and returns runUpdate. Relevant tool replies include that projection too.
+An idle client without unsolicited delivery catches up on its next call; it cannot
+be awakened automatically. Approval notices live in Notifications, without a
+second app-wide approval banner.

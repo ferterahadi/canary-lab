@@ -35,6 +35,10 @@ Each entry is tagged with the area it touches:
 
 ## 2.3.6 — 2026-11-18
 
+- **[Test Runner]** **Approval and continuation share server-owned state.** Accepting changes on an ended run records approval without starting tests. Eligible failed or aborted runs offer Continue run, preserving the run ID. Historical differences remain labelled separately from pending review.
+- **[Test Runner]** **Results & Fixes retains the repair journey.** Executions preserve source versions, selections, output and results. Approved source changes require a full-suite execution. Explicitly linked successor runs appear together, while spent single-attempt receipts remain intact. A later pass cannot relabel an earlier cancellation or settled review decision.
+- **[General]** **Open views and agents can recover missed run changes.** Run views reconcile every five seconds; agent waits and relevant tool replies include a separate run-state cursor. Notifications is the sole app-wide approval entry point; the duplicate approval banner is removed.
+
 - **[Test Runner]** **Stop a run while it waits for a repair.** The Run panel now offers Stop while a run is healing, not only Stop Heal. Stop ends the run as aborted. Stop Heal still ends it as failed.
 - **[Test Runner]** **A "Stop this run?" question no longer outlives its run.** When the run ends some other way, the question leaves Needs attention, and the waiting agent learns how the run ended instead of asking again. Choosing Keep running also tells the agent not to ask again.
 - **[Test Runner]** **A repair agent can end a heal honestly.** When the failure is a real product result, or a fix can't be tested in this run, the agent ends the heal with a reason. The run ends failed and shows that reason, so it no longer reads as "stopped by you".

@@ -1,3 +1,4 @@
+import { continueRun } from './logic/run-lifecycle-service'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createExternalHealSession, projectExternalHealMetadata } from './logic/heal/external-heal-session'
 // Wiring one live run to the workspace: the pane/runner-log/state-sink stream
@@ -129,7 +130,7 @@ export function makeRestartExternalRun(
   runId: string,
   healAgentReq: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
   guidance?: string,
-): Promise<OrchestratorLike> => {
+): Promise<OrchestratorLike> => continueRun(runStore, runId, async () => {
   // `claimable === false` means an external client *triggered* the restart but
   // may not own the heal loop (CLI / 'other'). The run still re-enters external
   // mode and waits for a Desktop/UI drive — it just gets no session + no broker
@@ -193,8 +194,20 @@ export function makeRestartExternalRun(
     throw httpFailure(err, 500)
   }
 
+  const previousOwner = externalHealBroker.getSession(runId)
   if (canClaim) {
-    externalHealBroker.claim(runId, projectExternalHealMetadata(healAgentReq, 'nonempty'))
+    const claim = externalHealBroker.claim(runId, projectExternalHealMetadata(healAgentReq, 'nonempty'))
+    if (!claim.accepted) {
+      if (backups) restore(backups)
+      throw Object.assign(new Error(claim.reason), { statusCode: 409 })
+    }
+  }
+  try {
+    await orch.prepareContinuation()
+  } catch (error) {
+    if (canClaim && !previousOwner) externalHealBroker.release(runId, healAgentReq.sessionId)
+    if (backups) restore(backups)
+    throw error
   }
 
   attachRunStreams(orch, runnerLog, feature.name, backups)
@@ -204,5 +217,5 @@ export function makeRestartExternalRun(
   registry.set(runId, orch)
   void settleOrchestratorRun(orch.restartTerminalRun(guidance), { orch, registry, broker, runnerLog })
   return orch
-}
+}, () => registry.get(runId)!, undefined, { sessionId: healAgentReq.sessionId, current: () => externalHealBroker.getSession(runId) })
 }

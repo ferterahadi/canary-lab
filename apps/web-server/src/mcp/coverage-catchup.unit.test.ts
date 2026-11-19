@@ -10,7 +10,7 @@ const context = {} as Parameters<CanaryLabToolHandler>[1]
 const json = (body: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(body) }] })
 const read = vi.fn(async () => ({ statusCode: 200, body: { changed: true, change: { feature: 'shop' } } }))
 function deps(extra: Record<string, unknown> = {}) {
-  return { coverageRequest: read, store: { logsDir: '/nonexistent-coverage-unit', get: (id: string) => id === 'run' ? { manifest: { feature: 'shop' } } : null }, ...extra } as unknown as CanaryLabMcpDeps
+  return { coverageRequest: read, store: { logsDir: '/nonexistent-coverage-unit', list: () => [], get: (id: string) => id === 'run' ? { manifest: { feature: 'shop' } } : null }, ...extra } as unknown as CanaryLabMcpDeps
 }
 
 describe('suite-scoped tool catch-up', () => {
@@ -64,7 +64,7 @@ describe('coverage change tool error surface', () => {
   it('names unsupported observation and route errors', async () => {
     expect(await captureTools(registerCoverageChangeTools, {}).text('wait_for_feature_change', { feature: 'shop' })).toContain('unavailable')
     const request = vi.fn(async () => ({ statusCode: 404, body: { error: 'feature not found' } }))
-    expect(await captureTools(registerCoverageChangeTools, { coverageRequest: request }).text('wait_for_feature_change', { feature: 'shop', timeout_ms: 0, afterRevision: 'v1' })).toContain('feature not found')
-    expect(await captureTools(registerCoverageChangeTools, { coverageRequest: request }).text('wait_for_feature_change', { feature: 'shop', timeout_ms: 0 })).toContain('feature not found')
+    expect(await captureTools(registerCoverageChangeTools, { ...deps(), coverageRequest: request }).text('wait_for_feature_change', { feature: 'shop', timeout_ms: 0, afterRevision: 'v1' })).toContain('feature not found')
+    expect(await captureTools(registerCoverageChangeTools, { ...deps(), coverageRequest: request }).text('wait_for_feature_change', { feature: 'shop', timeout_ms: 0 })).toContain('feature not found')
   })
 })

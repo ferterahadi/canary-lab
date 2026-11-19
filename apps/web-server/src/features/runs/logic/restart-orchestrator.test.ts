@@ -13,6 +13,7 @@ const construction = vi.hoisted(() => ({ error: null as Error | null }))
 vi.mock('./runtime/orchestrator', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./runtime/orchestrator')>()),
   RunOrchestrator: class {
+    async prepareContinuation(): Promise<void> {}
     constructor(readonly options: OrchestratorOptions) {
       if (construction.error) throw construction.error
     }
@@ -45,9 +46,9 @@ function fixture(applied: boolean) {
 }
 
 describe('createRestartedOrchestrator', () => {
-  it('attaches the constructed runtime while leaving restoration to run completion', () => {
+  it('attaches the constructed runtime while leaving restoration to run completion', async () => {
     const { options, target, backup } = fixture(true)
-    const result = createRestartedOrchestrator(options)
+    const result = await createRestartedOrchestrator(options)
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('restart failed')
     expect(result.orch).toMatchObject({ options: {
@@ -63,21 +64,21 @@ describe('createRestartedOrchestrator', () => {
     expect(fs.existsSync(backup)).toBe(true)
   })
 
-  it.each([false, true])('reports constructor failure and restores applied inputs (%s)', (applied) => {
+  it.each([false, true])('reports constructor failure and restores applied inputs (%s)', async (applied) => {
     const { options, target, backup, dir } = fixture(applied)
     construction.error = new Error('native binding unavailable')
-    expect(createRestartedOrchestrator(options)).toEqual({ ok: false, reason: 'spawn-failed' })
+    expect(await createRestartedOrchestrator(options)).toEqual({ ok: false, reason: 'spawn-failed' })
     expect(options.attachRunStreams).not.toHaveBeenCalled()
     expect(fs.readFileSync(target, 'utf8')).toBe('ORIGINAL=1\n')
     expect(fs.existsSync(backup)).toBe(false)
     expect(fs.readFileSync(path.join(dir, 'runner.log'), 'utf8')).toContain('Run restart failed: native binding unavailable')
   })
 
-  it('propagates attachment failure without applying constructor rollback', () => {
+  it('propagates attachment failure without applying constructor rollback', async () => {
     const { options, target, backup, dir } = fixture(true)
     const error = new Error('stream unavailable')
     options.attachRunStreams = () => { throw error }
-    expect(() => createRestartedOrchestrator(options)).toThrow(error)
+    await expect(createRestartedOrchestrator(options)).rejects.toThrow(error)
     expect(fs.readFileSync(target, 'utf8')).toBe('APPLIED=1\n')
     expect(fs.existsSync(backup)).toBe(true)
     expect(fs.readFileSync(path.join(dir, 'runner.log'), 'utf8')).not.toContain('restart failed')

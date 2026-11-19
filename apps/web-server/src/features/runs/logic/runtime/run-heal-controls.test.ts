@@ -204,6 +204,7 @@ describe('cancelHeal', () => {
     await cancelHeal(ctx, makeLoopHost())
     expect(h.markStoppedEarly).toHaveBeenCalledWith(ctx, 'user-cancel-heal', 0, 0)
     expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ message: expect.stringContaining('stopped by you') }))
+    expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({ decision: 'cancelled' }))
     expect(h.recordLifecycle).not.toHaveBeenCalled()
   })
 

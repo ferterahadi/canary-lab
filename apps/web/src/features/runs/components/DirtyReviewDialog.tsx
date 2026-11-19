@@ -177,18 +177,20 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const reviewRun = run && reviewStateMatchesRun && (!useRunBaseline || run.runId === comparisonRunId)
     && runReview.value?.files.length
     && normalizedReview.allowedActions
-      .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
+      .some((action) => action === 'adopt-and-rerun' || action === 'approve-continuation' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
   const comparisonAllowsAction = !comparisonRunId || snapshotDir === null || sourceComparison.confirmed
   const reviewRevision = comparisonAllowsAction && runReview.confirmed && reviewRun ? runReview.value?.review_revision : undefined
   const featureReviewRevision = comparisonAllowsAction && featureReview.confirmed && suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
+  const reviewReceipt = runReview.value?.receipt
+  const continueRunId = reviewReceipt?.execution.status === 'continuation-ready' ? reviewReceipt.execution.runId : undefined
   const displayedRunRevision = useRef<string | undefined>(undefined)
   const displayedFeatureReview = useRef(false)
   if (reviewRevision) displayedRunRevision.current = reviewRevision
   if (featureReviewRevision) displayedFeatureReview.current = true
   useEffect(() => {
     const revision = displayedRunRevision.current
-    if (revision && detail?.manifest.specEdits?.reviewDecisions?.some((decision) => decision.revision === revision && decision.receipt)) onClose()
+    if (revision && detail?.manifest.specEdits?.reviewDecisions?.some((decision) => decision.revision === revision && decision.receipt && (decision.decision === 'adopted' || decision.decision === 'restored'))) onClose()
   }, [detail?.manifest.specEdits?.reviewDecisions, onClose])
   useEffect(() => {
     if (suiteReviewAvailable && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
@@ -263,6 +265,11 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
               <button className="cl-icon-button" aria-label="Next test change" disabled={!changes || testIndex >= tests.length - 1 || busy} onClick={() => selectTest(category, tests[testIndex + 1])}><ChevronRightIcon /></button>
             </div>}
           </div>
+          {reviewReceipt?.decision === 'accepted' && <p className="cl-review-action-message text-secondary" role="status">
+            {reviewReceipt.execution.status === 'continuation-ready' ? 'Accepted — awaiting execution. ' : 'These changes were accepted. '}
+            Differences below compare current source with this run’s recorded tests; they are not pending approval.
+            {continueRunId && <button className="cl-button ml-2" disabled={busy} onClick={() => { void act(async () => { await runsApi.restartRun(continueRunId); onClose() }) }}>Continue run</button>}
+          </p>}
           <div className="cl-review-commit-buttons">
             {!suiteUnavailable && (reviewRevision || featureReviewRevision) && <>
               <button className="cl-button px-3 py-1.5 text-xs" disabled={busy || (reviewRun ? !runReview.confirmed : !featureReview.confirmed)} onClick={() => { void act(restoreChanges) }}>Restore recorded files</button>

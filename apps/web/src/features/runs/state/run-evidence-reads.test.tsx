@@ -71,9 +71,9 @@ it('does not let an older journal poll restore pending evidence after accepted c
   expect(element.textContent).not.toContain('Old pending')
   const count = api.listJournal.mock.calls.length
   await act(async () => vi.advanceTimersByTimeAsync(6000))
-  expect(api.listJournal).toHaveBeenCalledTimes(count)
+  expect(api.listJournal).toHaveBeenCalledTimes(count + 1)
 })
-it.each(['failure', 'hang'])('recovers an initial journal %s and stops on empty results', async (mode) => {
+it.each(['failure', 'hang'])('recovers an initial journal %s and reconciles empty results every five seconds', async (mode) => {
   if (mode === 'failure') api.listJournal.mockRejectedValueOnce(new Error('offline'))
   else api.listJournal.mockReturnValueOnce(new Promise(() => {}))
   api.listJournal.mockResolvedValue([])
@@ -81,7 +81,7 @@ it.each(['failure', 'hang'])('recovers an initial journal %s and stops on empty 
   await act(async () => vi.advanceTimersByTimeAsync(2000))
   expect(journal.value).toEqual([])
   await act(async () => vi.advanceTimersByTimeAsync(6000))
-  expect(api.listJournal).toHaveBeenCalledTimes(2)
+  expect(api.listJournal).toHaveBeenCalledTimes(3)
   api.listJournal.mockResolvedValue([entry('event', 'all_tests_passed')])
   await act(async () => invalidate())
   expect(element.textContent).toContain('event')

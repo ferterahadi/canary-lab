@@ -12,12 +12,13 @@ interface StoredRequest extends RunStartRequest {
   payload: Record<string, unknown>
   fingerprint: string
   allocatedRunId: string
+  startingExecution?: number
 }
 
 export interface StartRequestResponse { statusCode: number; body: Record<string, unknown> }
 
 const pendingStates = new Set<RunStartRequest['status']>(['awaiting-review', 'ready', 'starting'])
-const statusAfterReview = (record: StoredRequest, decision: 'restored' | 'adopted' | 'approved-for-new-run') =>
+const statusAfterReview = (record: StoredRequest, decision: 'restored' | 'adopted' | 'approved-for-new-run' | 'approved-for-continuation') =>
   decision === 'restored' && record.owner.kind === 'external' ? 'cancelled' as const : 'ready' as const
 
 export function runStartRequestStore(logsDir: string) {
@@ -53,7 +54,7 @@ export class RunStartRequests {
   }
 
   private public(record: StoredRequest): RunStartRequest {
-    const { payload: _payload, fingerprint: _fingerprint, allocatedRunId: _allocated, ...result } = record
+    const { payload: _payload, fingerprint: _fingerprint, allocatedRunId: _allocated, startingExecution: _execution, ...result } = record
     return result
   }
 
@@ -94,6 +95,12 @@ export class RunStartRequests {
     return this.public(this.save(record, {}))
   }
 
+  private reviewExecution(record: StoredRequest, decision: string): Partial<StoredRequest> {
+    if (decision === 'approved-for-continuation') return { payload: { ...record.payload, continueRunId: record.review.runId }, allocatedRunId: record.review.runId }
+    if (decision === 'approved-for-new-run') return { payload: { ...record.payload, continuationOf: record.review.runId } }
+    return {}
+  }
+
   private refresh(record: StoredRequest): StoredRequest {
     if (record.status !== 'awaiting-review') return record
     const manifest = this.runs.get(record.review.runId)?.manifest
@@ -102,6 +109,7 @@ export class RunStartRequests {
     // An intermediate adoption entry or an empty diff is not a completed
     // decision. The full persisted receipt closes the mutation boundary.
     if (decision) return this.save(record, {
+      ...this.reviewExecution(record, decision.decision),
       status: statusAfterReview(record, decision.decision),
       error: undefined,
     })
@@ -120,7 +128,7 @@ export class RunStartRequests {
         if (current.files.length && current.revision !== record.review.revision) {
           const settled = manifest.specEdits?.reviewDecisions?.find((item) => item.revision === current.revision && item.receipt)
           const status = settled ? statusAfterReview(record, settled.decision) : 'awaiting-review'
-          return this.save(record, { review: { runId: record.review.runId, revision: current.revision }, status })
+          return this.save(record, { review: { runId: record.review.runId, revision: current.revision }, status, ...(settled ? this.reviewExecution(record, settled.decision) : {}) })
         }
       } catch { /* retain the blocker when its source is temporarily unavailable */ }
     }
@@ -153,7 +161,8 @@ export class RunStartRequests {
       const record = this.read(entry.id)
       if (record?.status !== 'starting') continue
       const run = this.runs.get(record.allocatedRunId)
-      this.save(record, run
+      const continued = !record.payload.continueRunId || (run?.manifest.playwrightExecutions ?? 0) > (record.startingExecution ?? 0)
+      this.save(record, run && continued
         ? { status: run.manifest.status === 'queued' ? 'queued' : 'started', runId: record.allocatedRunId }
         : { status: 'failed', error: 'The server restarted while starting this request. No recorded run was found; inspect before requesting another run.' })
     }
@@ -177,7 +186,7 @@ export class RunStartRequests {
       body: { runId: record.runId, status: record.status, reused: true, request: this.public(record) },
     }
     if (record.status !== 'ready') return { statusCode: 409, body: { error: record.error ?? 'This run request is not ready to continue.', request: this.public(record) } }
-    record = this.save(record, { status: 'starting' })
+    record = this.save(record, { status: 'starting', ...(record.payload.continueRunId ? { startingExecution: this.runs.get(record.allocatedRunId)?.manifest.playwrightExecutions ?? 0 } : {}) })
     this.activeDispatches.add(id)
     try {
       const result = await dispatch({ ...record.payload, resumeRequestId: id })

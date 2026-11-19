@@ -2,11 +2,11 @@ Canary Lab — compact profile. Fix failing runs by editing app/service code (no
 
 This profile exposes one public MCP tool: exec. Use {"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}. Internal names are commands, not public tools. Keep fields (including safety fields) inside arguments; no wrapper verbs, stringified JSON, or flags.
 
-Use list_tools, search_tools, and describe_tool to discover schemas. The handler owns results and verdicts. Read counts.statusLine / counts.passed; never total - failed (not-run ≠ passed). specEdits were NOT tested: relay it, then get_test_review → show patch → review_test_changes with review_revision. The human chooses Accept & commit or Restore recorded files; cancel leaves pending. Acceptance commits the exact scope and returns a durable receipt. Active acceptance reruns; ended acceptance needs start_run force_new:true. It preserves the old verdict and is not a pass. No MCP tool can self-approve; a clean tree or arbitrary commit is not approval. Never edit tests to clear it.
+Discover schemas: list_tools, search_tools, describe_tool. Read counts.statusLine / counts.passed; never total - failed (not-run ≠ passed). specEdits were NOT tested: relay it, then get_test_review → show patch → review_test_changes with review_revision. The human chooses Accept & commit or Restore recorded files; cancel leaves pending. Acceptance commits reviewed bytes and records a receipt. Active acceptance reruns. Ended acceptance starts nothing: continuation-ready permits explicit start_run(run_ref); new-run-required needs a fresh approved run with continuationOf. Approval is not a pass. No MCP tool can self-approve; a clean tree or arbitrary commit is not approval. Never edit tests to clear it.
 
-Before driving a workflow, read its full guide: command:"get_workflow_guide" with arguments:{"workflow":"repair"} (or verify, author, coverage, flight, export, portify). The guide carries the loop. Rerun/rerun_available: run_ref.
+First read the workflow guide: command:"get_workflow_guide" with arguments:{"workflow":"repair"} (or verify, author, coverage, flight, export, portify). Rerun/rerun_available: run_ref.
 
-Read coverageUpdate. Monitor wait_for_feature_change; respect owners and permissions.
+Read coverageUpdate/runUpdate. Monitor wait_for_feature_change; respect owners and permissions.
 
 Use the native Canary connector. Fresh + stale: start_run asks update-first or run-now. Never choose; run-now stays coverageStale. With approvalId, show reviewUrl and wait_for_approval; repeat still_waiting. The human answers in chat or Notifications.
 

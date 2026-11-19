@@ -290,6 +290,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                             then flips the row to running/healing on its own. */}
                         {view.actions.restartHeal.enabled && (
                           <RetestIconButton
+                            accepted={details[r.runId]?.collaboration?.review.state === 'accepted'}
                             disabled={isRestarting}
                             spinning={isRestarting}
                             onClick={(e) => {

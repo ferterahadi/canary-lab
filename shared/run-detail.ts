@@ -91,6 +91,8 @@ export interface RunSummary {
 }
 
 export interface RunDetail {
+  collaboration?: import('./run-collaboration').RunCollaborationState
+  executions?: import('./run-collaboration').RunExecutionEvidence[]
   runId: string
   manifest: RunManifest
   /** Read-side recovery hint for runs recorded before singleAttempt existed. */

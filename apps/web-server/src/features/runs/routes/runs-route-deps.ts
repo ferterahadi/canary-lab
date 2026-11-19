@@ -16,6 +16,7 @@ import type { RunStartRequests } from '../logic/run-start-requests'
 
 /** Per-start switches that are neither a heal nor an isolation choice. */
 export interface StartRunOptions {
+  continuationOf?: string
   /** Reserved by a durable request before dispatch, enabling crash readback. */
   runId?: string
   /** Fast-forward the feature's repo checkouts to their upstream tips before
@@ -67,5 +68,6 @@ export interface RunsRouteDeps {
   dirtySpecStore?: DirtySpecStore
   gettingStarted?: GettingStartedSessionStore
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
+  restartExternalRun?(runId: string, healAgent: ExternalHealAgentRequest): Promise<{ runId: string }>
   restartRun?(runId: string): Promise<RestartRunResult>
 }

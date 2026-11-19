@@ -9,8 +9,8 @@ export const PORTIFY_REVIEW_DISPLAY: ApprovalDisplay = {
   title: 'Port changes ready',
   choices: {
     save: { label: 'Save', detail: 'Keeps the port changes for future runs.' },
-    revise: { label: 'Request changes', detail: 'Sends your feedback for another attempt.' },
-    discard: { label: 'Discard', detail: 'Drops the changes. Runs stay one at a time.' },
+    revise: { label: 'Request changes', detail: 'Sends your feedback for another revision.' },
+    discard: { label: 'Discard', detail: 'Drops the port changes. Runs remain sequential.' },
   },
 }
 
@@ -21,7 +21,7 @@ export function repositoryIsolationMessage(conflictingFeature: string): string {
 export const REPOSITORY_ISOLATION_DISPLAY: ApprovalDisplay = {
   title: 'Another suite is using this app',
   choices: {
-    worktree: { label: 'Separate copy', detail: 'Starts now in its own worktree of the app.' },
-    queue: { label: 'Wait', detail: 'Starts automatically when the other suite finishes.' },
+    worktree: { label: 'Separate copy', detail: 'Starts now in an isolated Git worktree.' },
+    queue: { label: 'Wait', detail: 'Queues the run until the conflicting run finishes.' },
   },
 }

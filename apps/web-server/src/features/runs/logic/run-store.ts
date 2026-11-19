@@ -1,4 +1,6 @@
 import fs from 'fs'
+import { runCollaboration } from './run-collaboration'
+import { readExecutionEvidence } from './runtime/run-execution-evidence'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
@@ -203,7 +205,8 @@ export class RunStore extends EventEmitter implements RunStateSink {
   }
 
   get(runId: string): RunDetail | null {
-    return getRunDetail(this.logsDir, runId)
+    const detail = getRunDetail(this.logsDir, runId)
+    return detail ? { ...detail, collaboration: runCollaboration(detail, this.logsDir), executions: readExecutionEvidence(runDirFor(this.logsDir, runId)) } : null
   }
 
   // ─── path helpers ───────────────────────────────────────────────────

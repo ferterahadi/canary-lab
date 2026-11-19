@@ -13,7 +13,7 @@ export function createRunDetailObserver(deps: {
   hidden(): boolean
 }) {
   const entries = new Map<string, ObservedRun>()
-  const cadence = (id: string) => deps.active(id) ? 1000 : 15_000
+  const cadence = (id: string) => deps.active(id) ? 1000 : 5000
   const schedule = (id: string, entry: ObservedRun) => {
     clearTimeout(entry.timer)
     entry.timer = undefined

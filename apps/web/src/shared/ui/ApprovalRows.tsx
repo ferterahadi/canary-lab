@@ -112,7 +112,7 @@ export function PendingApprovalRow({ item, focused, confirmed, answer }: {
             const button = <button key={String(value)} type="button" className={BUTTON} disabled={!confirmed} onClick={() => hold(value)}>
               {choiceLabel(item, value)}{detail && <span className="sr-only">. {detail}</span>}
             </button>
-            return detail ? <Tooltip key={String(value)} label={detail}>{button}</Tooltip> : button
+            return detail ? <Tooltip key={String(value)} label={detail} placement="bottom">{button}</Tooltip> : button
           })
             : <button type="button" className={BUTTON} aria-expanded={formOpen} disabled={!confirmed} onClick={() => setFormOpen((v) => !v)}>{formOpen ? 'Close' : 'Answer'}</button>}
         </div>
@@ -146,10 +146,12 @@ function ApprovalForm({ item, confirmed, submit }: {
         {field.description && !field.enum && <p className="text-[11px] text-secondary">{field.description}</p>}
         {field.enum ? <div className="flex flex-wrap gap-1.5">{field.enum.map((value) => {
           const selected = values[name] === value
-          return <label key={String(value)} className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${selected ? 'border-accent bg-selected' : 'border-line hover:bg-hover'}`}>
+          const detail = item.display?.choices?.[String(value)]?.detail
+          const option = <label key={String(value)} className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${selected ? 'border-accent bg-selected' : 'border-line hover:bg-hover'}`}>
             <input type="radio" name={`${item.id}-${name}`} required={required} checked={selected} onChange={() => set(name, value)} />
-            {choiceLabel(item, value)}
+            {choiceLabel(item, value)}{detail && <span className="sr-only">. {detail}</span>}
           </label>
+          return detail ? <Tooltip key={String(value)} label={detail} placement="bottom">{option}</Tooltip> : option
         })}</div>
           : field.type === 'boolean' ? <input type="checkbox" aria-label={label} checked={values[name] === true} onChange={(e) => set(name, e.target.checked)} />
           : <input className="cl-input w-full" aria-label={label} type={numeric ? 'number' : 'text'} required={required}
