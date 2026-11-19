@@ -97,6 +97,10 @@ it('reads historical names and bodies without executing specs or including new w
     const response = await app.inject('/api/features/merchant/tests?runId=run1')
     expect(response.statusCode).toBe(200)
     expect(response.json()[0].tests.map((test: { name: string }) => test.name)).toEqual(['old test case one', 'old test case two'])
+    for (const test of response.json()[0].tests) {
+      expect(test.readable.graph).toMatchObject({ schemaVersion: 1, case: { file, line: 1, title: test.name },
+        origin: { kind: 'recorded-run', runId: 'run1' }, revisions: { [file]: expect.stringMatching(/^[a-f0-9]{64}$/) } })
+    }
     expect(response.json()[0].tests[0].bodySource).toContain('expect(201)')
     expect(response.body).not.toContain('renamed current test')
     expect(spawner).not.toHaveBeenCalled()

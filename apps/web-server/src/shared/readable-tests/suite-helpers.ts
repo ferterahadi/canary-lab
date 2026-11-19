@@ -53,11 +53,20 @@ export function suiteHelperResolver(root: string): ResolveSuiteHelper {
       symbol = moduleSymbol && context.checker.getExportsOfModule(moduleSymbol).find(item => item.name === exported)
       if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = context.checker.getAliasedSymbol(symbol)
     }
-    const declaration = symbol?.valueDeclaration
-    if (!declaration || declaration.getSourceFile() !== context.sourceFile) return
-    const fn = ts.isVariableDeclaration(declaration) ? declaration.initializer : declaration
-    if (fn && (ts.isFunctionDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && fn.body) {
-      return { body: fn.body, file: context.sourceFile.fileName, semanticContext: context }
-    }
+    return helperFromSymbol(symbol, context)
+  }
+}
+
+/** Resolve against the supplied revision only; a before/after buffer has no
+ * authority to read an imported module from the current working tree. */
+export const localSourceHelper: ResolveSuiteHelper = (name, context) =>
+  helperFromSymbol(context.checker.getSymbolAtLocation(name), context)
+
+function helperFromSymbol(symbol: ts.Symbol | undefined, context: SemanticContext): AuthoredHelper | undefined {
+  const declaration = symbol?.valueDeclaration
+  if (!declaration || declaration.getSourceFile() !== context.sourceFile) return
+  const fn = ts.isVariableDeclaration(declaration) ? declaration.initializer : declaration
+  if (fn && (ts.isFunctionDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && fn.body) {
+    return { body: fn.body, file: context.sourceFile.fileName, semanticContext: context }
   }
 }

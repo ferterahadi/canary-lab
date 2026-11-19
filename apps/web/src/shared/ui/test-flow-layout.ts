@@ -2,12 +2,12 @@ import type { PlaywrightPlaybackEvent } from '@shared/playback'
 import dagre from '@dagrejs/dagre'
 import type { ReadableGroupNode, ReadableNode } from '@shared/readable-tests/types'
 
-type Shape = 'terminal' | 'decision' | 'io' | 'action' | 'check'
-interface Box { id: string; label: string; shape: Shape; source?: ReadableNode; context?: ReadableNode }
+import { buildFlowTopology, flowName, type FlowBox, type FlowTopology, type TestFlowGraph } from '@shared/test-view/flow-graph'
+
+interface Box extends FlowBox { source?: ReadableNode; context?: ReadableNode }
 interface Point { x: number; y: number }
 interface Bounds extends Point { width: number; height: number }
 interface Connection { label: string; points: Point[]; x: number; y: number }
-interface Destinations { end: string; fail: string; breakTo?: string; continueTo?: string }
 
 export function stepVisitKey(location: string, title: string) {
   return JSON.stringify([location, title])
@@ -30,14 +30,9 @@ export function completedStepCounts(events?: readonly PlaywrightPlaybackEvent[])
   return counts
 }
 
-export function flowName(node: ReadableNode) {
-  if (node.kind === 'group' && node.children.some(n => n.kind === 'group' && n.controlRole === 'finally')) return 'Inspect try / finally'
-  const label = (node.flow?.label ?? node.english?.text ?? node.text).replace(/\s+/g, ' ').trim()
-  return label.length > 52 ? label.slice(0, 51).trimEnd() + '…' : label
-}
-export interface FlowSection { id: string; label: string; nodes: ReadableNode[]; implementation?: ReadableGroupNode['implementation'] }
+export interface FlowSection { id: string; label: string; nodes: ReadableNode[]; topology?: FlowTopology; implementation?: ReadableGroupNode['implementation'] }
 
-export function flowSections(nodes: ReadableNode[]): FlowSection[] {
+export function flowSections(nodes: ReadableNode[], graph?: TestFlowGraph): FlowSection[] {
   const sections: FlowSection[] = [{ id: 'test', label: 'Test overview', nodes }]
   const helpers: ReadableGroupNode[] = []
   function visit(node: ReadableNode) {
@@ -50,88 +45,38 @@ export function flowSections(nodes: ReadableNode[]): FlowSection[] {
     sections.push({ id: helper.id, label: flowName(helper), nodes: helper.children, implementation: helper.implementation })
     helper.children.forEach(visit)
   }
-  return sections
+  const byId = new Map(graph?.sections.map(section => [section.id, section]))
+  return sections.map(section => ({ ...section, topology: byId.get(section.id) }))
 }
 
 export function sectionNodes(section: FlowSection): ReadableNode[] {
   function flatten(node: ReadableNode): ReadableNode[] {
     if (node.kind === 'branch') return [node, ...node.paths.flatMap(p => p.children.flatMap(flatten))]
-    if (node.kind === 'loop' || (node.kind === 'group' && node.origin !== 'helper')) return [node, ...node.children.flatMap(flatten)]
+    if (node.kind === 'loop') return [...(node.initializer ? [node.initializer] : []), node, ...node.children.flatMap(flatten), ...(node.increment ? [node.increment] : [])]
+    if (node.kind === 'group' && node.origin !== 'helper') return [node, ...node.children.flatMap(flatten)]
     return [node]
   }
   return section.nodes.flatMap(flatten)
 }
 
-/** Build successors backwards so exits never acquire an edge to the statement
- * that happens to follow them in source. Each helper is its own call boundary. */
-export function layoutTestFlow(nodes: ReadableNode[]) {
+/** Geometry consumes the same structural edges as source inspection. Old
+ * rosters without a graph use the shared compiler on their retained nodes. */
+export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopology(nodes)) {
   const graph = new dagre.graphlib.Graph({ multigraph: true })
   graph.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 23, marginx: 12, marginy: 12 })
+  const sources = new Map(sectionNodes({ id: 'test', label: '', nodes }).map(node => [node.id, node]))
   const boxes = new Map<string, Box>()
-  let edgeId = 0
-  function add(box: Box) {
+  for (const descriptor of topology.boxes) {
+    const box: Box = { ...descriptor, source: descriptor.sourceId ? sources.get(descriptor.sourceId) : undefined,
+      context: descriptor.id === topology.entry ? nodes[0] : nodes.at(-1) }
     boxes.set(box.id, box)
     const lines = Math.ceil(box.label.length / (box.shape === 'decision' ? 14 : 21))
     const height = box.shape === 'terminal' ? 30 : Math.max(44, Math.min(5, lines) * 16 + 16) * (box.shape === 'decision' ? 1.45 : 1)
     graph.setNode(box.id, { width: box.shape === 'terminal' ? 94 : 154, height })
-    return box.id
   }
-  function edge(from: string, to: string, label = '') {
-    graph.setEdge(from, to, { label, width: label.length * 6, height: label ? 12 : 0, labelpos: 'c' }, String(edgeId++))
-  }
-  const end = add({ id: 'end', shape: 'terminal', label: 'End', context: nodes.at(-1) })
-  const fail = 'error-end'
-  function sequence(items: ReadableNode[], next: string, dest: Destinations): string {
-    for (let index = items.length - 1; index >= 0; index--) {
-      const node = items[index], kind = node.flow?.kind
-      const shape: Shape = node.kind === 'loop' || node.kind === 'branch' ? 'decision'
-        : kind === 'io' || kind === 'return-io' ? 'io' : kind === 'check' ? 'check' : 'action'
-      const id = add({ id: node.id, source: node, shape, label: flowName(node) })
-      if (node.kind === 'loop') {
-        const body = sequence(node.children, id, { ...dest, breakTo: next, continueTo: id })
-        for (const back of graph.inEdges(id) ?? []) {
-          const line = graph.edge(back)
-          if (!line.label) Object.assign(line, { label: 'Repeat', width: 36, height: 12 })
-        }
-        edge(id, body, 'Yes')
-        if (node.flow?.label !== 'Repeat') edge(id, next, 'No')
-        next = node.loopKind === 'do-while' ? body : id
-        continue
-      }
-      if (node.kind === 'branch') {
-        let fallthrough = next
-        for (const path of [...node.paths].reverse()) {
-          const isCase = path.role === 'case' || path.role === 'default'
-          const target = sequence(path.children, isCase ? fallthrough : next, isCase ? { ...dest, breakTo: next } : dest)
-          edge(id, target, path.role === 'then' ? 'Yes' : path.role === 'otherwise' ? 'No' : path.text)
-          fallthrough = target
-        }
-        if (!node.paths.some(p => p.role === 'otherwise' || p.role === 'default')) {
-          edge(id, next, node.paths.some(p => p.role === 'then') ? 'No' : 'No match')
-        }
-      } else if (node.kind === 'group' && node.origin !== 'helper') {
-        const handler = node.children.find(n => n.kind === 'group' && n.controlRole === 'catch')
-        const cleanup = node.children.find(n => n.kind === 'group' && n.controlRole === 'finally')
-        // A finally can redirect any pending return or exception. Treat this
-        // compound statement as a source-inspectable operation until modeled.
-        if (cleanup) edge(id, next)
-        else if (handler?.kind === 'group') {
-          const onError = sequence(handler.children, next, dest)
-          edge(id, sequence(node.children.filter(n => n !== handler), next, { ...dest, fail: onError }))
-          edge(id, onError, 'Error')
-        } else edge(id, sequence(node.children, next, dest))
-      } else {
-        const target = kind === 'return' || kind === 'return-io' ? dest.end : kind === 'throw' ? dest.fail
-          : kind === 'break' ? dest.breakTo : kind === 'continue' ? dest.continueTo : kind === 'opaque' ? undefined : next
-        if (target === fail && !boxes.has(fail)) add({ id: fail, shape: 'terminal', label: 'End (error)', context: node })
-        if (target) edge(id, target)
-      }
-      next = id
-    }
-    return next
-  }
-  const entry = sequence(nodes, end, { end, fail })
-  edge(add({ id: 'start', shape: 'terminal', label: 'Start', context: nodes[0] }), entry)
+  topology.edges.forEach(({ from, to, label }, index) => {
+    graph.setEdge(from, to, { label, width: label.length * 6, height: label ? 12 : 0, labelpos: 'c' }, String(index))
+  })
   dagre.layout(graph)
   const placed = [...boxes.values()].map(box => ({ ...box, ...graph.node(box.id) as Bounds }))
   const byId = new Map(placed.map(b => [b.id, b]))

@@ -10,7 +10,9 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
   onSelect: (selection: ReadableSourceSelection) => void
   onHelper: (id: string) => void
 }) {
-  const chart = useMemo(() => layoutTestFlow(section.nodes), [section])
+  const chart = useMemo(() => layoutTestFlow(section.nodes, section.topology), [section])
+  const activeBoxes = active ? chart.nodes.filter(box => box.sourceId === active) : []
+  const activeBox = activeBoxes.length === 1 ? activeBoxes[0].id : undefined
   const marker = useId()
   const [fit, setFit] = useState(false)
   const sheet = useRef<HTMLDivElement>(null)
@@ -25,7 +27,7 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
     else if (card.right > bounds.right) viewport.scrollLeft += card.right - bounds.right
   }, [active, section, fit])
   useEffect(() => { focus.current?.focus({ preventScroll: true }) }, [section, selected])
-  return <><div className="cl-flow-size">
+  return <>{activeBoxes.length > 1 && <p>Running step has no unique box in this view.</p>}<div className="cl-flow-size">
     <button type="button" aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? 'Actual size' : 'Fit to width'}</button>
   </div><div ref={sheet} className="cl-flow-sheet" role="group" aria-label={section.label}>
     <svg viewBox={`0 0 ${chart.width} ${chart.height}`} width={chart.width} height={chart.height}
@@ -41,7 +43,7 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
         const { width: w, height: h } = box
         const node = box.source
         const source = (node ?? box.context)?.source
-        const isActive = active !== undefined && box.id === active
+        const isActive = box.id === activeBox
         const checked = node?.kind === 'loop' ? checks.get(node.source.startLine) : undefined
         const helper = node?.kind === 'group' && node.origin === 'helper' && node.children.length > 0
         const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : box.label
@@ -54,7 +56,7 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
               : <rect width={w} height={h} rx={box.shape === 'terminal' ? h / 2 : 2} />}
           <foreignObject width={w} height={h}>
             <Tooltip label={node ? tooltip : (box.id === 'start' ? 'First statement · ' : 'Boundary · ') + tooltip}
-              snippet={snippet}>
+              snippet={box.reason ? box.reason + '\n' + snippet : snippet}>
               <button type="button" className="cl-flow-node" data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
                 ref={node && selected === box.id ? focus : undefined}
                 onClick={() => { if (node) onSelect({ id: node.id, source: node.source }); else if (box.context) onSelect({ id: box.context.id, source: box.context.source }) }}>
@@ -77,10 +79,11 @@ export function VisualTestView({ section, checks, active, location, selected, on
   onSelect: (selection: ReadableSourceSelection) => void
   onHelper: (id: string) => void
 }) {
+  if (test.graph && test.graph.schemaVersion !== 1) return <p>This flow version requires a newer Canary Lab. Open Code to inspect the source.</p>
   if (!test.nodes.length) return <p>No flow available for this source.</p>
   return <div role="region" aria-label="Test flow" className="cl-test-flow">
     {location && !active && <p>Running step has no unique box in this view.</p>}
-    {test.completeness === 'partial' && <p>Some steps need inspection in Code.</p>}
+    {(test.completeness === 'partial' || test.graph?.completeness === 'partial') && <p>Some steps need inspection in Code.</p>}
     <Chart checks={checks} section={section} active={active} selected={selected} onSelect={onSelect} onHelper={onHelper} />
   </div>
 }

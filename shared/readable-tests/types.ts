@@ -1,3 +1,5 @@
+import type { TestFlowGraph } from '../test-view/flow-graph'
+
 export const READABLE_TEST_VERSION = 2 as const
 
 export type ReadableFidelity = 'exact' | 'derived' | 'unsupported' | 'unresolved'
@@ -67,6 +69,11 @@ export interface ReadableEnglishBlock {
 }
 
 export interface ReadableSource {
+  /** One-based columns; the end column is exclusive. Offsets index the original UTF-16 source. */
+  startColumn?: number
+  endColumn?: number
+  startOffset?: number
+  endOffset?: number
   file: string
   startLine: number
   endLine: number
@@ -132,6 +139,9 @@ export interface ReadableTestStory {
 }
 
 export interface ReadableFlowLabel {
+  reason?: string
+  boundary?: 'declaration' | 'callback'
+  mayThrow?: boolean
   kind: 'action' | 'io' | 'check' | 'decision' | 'try' | 'return' | 'return-io' | 'throw' | 'break' | 'continue' | 'opaque'
   label: string
 }
@@ -179,6 +189,9 @@ export interface ReadableBranchNode extends ReadableNodeBase {
 
 export interface ReadableLoopNode extends ReadableNodeBase {
   kind: 'loop'
+  initializer?: ReadableLeafNode
+  increment?: ReadableLeafNode
+  unconditional?: boolean
   loopKind: ReadableLoopKind
   children: ReadableNode[]
 }
@@ -190,6 +203,7 @@ export type ReadableNode =
   | ReadableLoopNode
 
 export interface ReadableTest {
+  graph?: TestFlowGraph
   version: typeof READABLE_TEST_VERSION
   title: string
   completeness: ReadableCompleteness

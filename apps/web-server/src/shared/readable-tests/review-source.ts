@@ -14,10 +14,10 @@ export function reviewSourceFor(
   file: string,
   source: string,
   semanticRules: ReadableSemanticRuleConfig | undefined,
-  { withTests }: { withTests: boolean },
+  { withTests, side }: { withTests: boolean; side?: 'before' | 'after' },
 ): ReviewSource {
   if (!withTests && !/\.[cm]?[jt]sx?$/.test(file)) return { source, tests: [] }
-  const result = extractTestsFromSource(file, source, semanticRules)
+  const result = extractTestsFromSource(file, source, semanticRules, undefined, side && { kind: side })
   if (result.parseError) return { source, tests: [], parseError: result.parseError }
   const story = translateReadableSource(file, source, semanticRules)
   // `endLine` is optional on ExtractedTest only because the tests route

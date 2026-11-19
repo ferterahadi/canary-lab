@@ -65,11 +65,11 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
     const role: CycleFileRole = rel === null ? 'app' : isSpecFile(rel) ? 'spec' : 'support'
     const { recovery, before, after } = await recoverCycleFile({ file, iteration, tree, diffs, suiteDir })
     const { hunks: _hunks, ...wire } = file
-    const side = (text: string): ReviewSource => readableSide(rel, role, text, feature)
+    const side = (text: string, origin: 'before' | 'after'): ReviewSource => readableSide(rel, role, text, feature, origin)
     return {
       ...wire, role, recovery,
       ...(before !== undefined && after !== undefined ? { sources: {
-        before: side(before), after: side(after),
+        before: side(before, 'before'), after: side(after, 'after'),
         patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
       } } : {}),
       ...(rel !== null && manifest ? { executed: execution(manifest, rel, file.blobs?.after, current) } : {}),
@@ -86,10 +86,10 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
 }
 
 /** English is for the suite's own JavaScript and TypeScript; app code is code. */
-function readableSide(rel: string | null, role: CycleFileRole, source: string, feature: FeatureConfig | undefined): ReviewSource {
+function readableSide(rel: string | null, role: CycleFileRole, source: string, feature: FeatureConfig | undefined, side: 'before' | 'after'): ReviewSource {
   if (rel === null || source === '') return { source, tests: [] }
   if (source.split('\n').length > MAX_ENGLISH_LINES) return { source, tests: [], parseError: `English skipped: file over ${MAX_ENGLISH_LINES} lines` }
-  return reviewSourceFor(rel, source, feature?.semanticRules, { withTests: role === 'spec' })
+  return reviewSourceFor(rel, source, feature?.semanticRules, { withTests: role === 'spec', side })
 }
 
 /** A suite edit ran only when the run executed the live suite, or copied the

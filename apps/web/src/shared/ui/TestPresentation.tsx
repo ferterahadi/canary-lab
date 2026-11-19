@@ -120,7 +120,7 @@ export function TestPresentation(props: TestPresentationProps) {
 function SinglePresentation(props: TestPresentationSingleProps) {
   const mode = usePresentationMode<SingleTestViewMode>(props, 'english')
   const [picked, setPicked] = useState<string>()
-  const sections = useMemo(() => flowSections(props.test.readable.nodes), [props.test.readable.nodes])
+  const sections = useMemo(() => flowSections(props.test.readable.nodes, props.test.readable.graph?.schemaVersion === 1 ? props.test.readable.graph : undefined), [props.test.readable])
   const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
   const live = props.runningLocation && parseSourceLocation(props.runningLocation)
   const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []

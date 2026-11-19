@@ -1,3 +1,5 @@
+import type { GraphOrigin } from '../../../../shared/test-view/flow-graph'
+import { localSourceHelper } from './readable-tests/suite-helpers'
 import type { ResolveSuiteHelper } from './readable-tests/suite-helpers'
 import { readDisplayTestTitle } from './test-title'
 import { unwrapExpression } from './unwrap-expression'
@@ -730,13 +732,14 @@ export function extractTestsFromSource(
   source: string,
   semanticRules?: ReadableSemanticRuleConfig,
   resolveHelper?: ResolveSuiteHelper,
+  graphOrigin?: GraphOrigin,
 ): ExtractResult {
   try {
     const semanticContext = compileSemanticSource(file, source, { semanticRules, absoluteSourceRanges: true })
     const src = semanticContext.sourceFile
     const tests: ExtractedTest[] = []
     const readableHelpers = topLevelReadableHelpers(file, src)
-    const translateAst = createReadableTestAstTranslator({ file, sourceFile: src, helpers: resolveHelper ? [] : readableHelpers, semanticContext, resolveHelper })
+    const translateAst = createReadableTestAstTranslator({ file, sourceFile: src, helpers: resolveHelper || graphOrigin ? [] : readableHelpers, semanticContext, graphOrigin, resolveHelper: resolveHelper ?? (graphOrigin && localSourceHelper) })
     for (const declaration of testDeclarationsFrom(src)) {
       const { call, body, name, line, bodySource, bodyLine } = declaration
       // Playwright tags are primary (R1); comment annotations are the migration
@@ -744,7 +747,7 @@ export function extractTestsFromSource(
       const annotations = testAnnotationsAt(call, src)
       const assertions = body ? collectAssertionSnippets(body, src) : []
       const readable = body && ts.isBlock(body)
-        ? translateAst(name, body)
+        ? translateAst(name, body, line)
         : translateReadableTest({
             file,
             title: name,

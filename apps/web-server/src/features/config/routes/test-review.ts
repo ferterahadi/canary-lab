@@ -129,7 +129,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         ).verdict,
       }
     }
-    const extract = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true })
+    const extract = (source: string, side: 'before' | 'after'): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true, side })
     const beforePredicates = extractTestPredicatesFromSource(file, beforeSource)
     const afterPredicates = extractTestPredicatesFromSource(file, afterSource)
     const pairs = pairTestDeclarations(extractTestMetadataFromSource(file, beforeSource).tests, extractTestMetadataFromSource(file, afterSource).tests)
@@ -142,7 +142,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     const { alignment, ...meaningfulChanges } = await meaningfulChangeLines(pairs)
     const result: TestFileReview = {
       file, currentPath, baseline,
-      before: extract(beforeSource), after: extract(afterSource),
+      before: extract(beforeSource, 'before'), after: extract(afterSource, 'after'),
       patch: await diffSourceText(beforeSource, afterSource, Math.max(beforeSource.split('\n').length, afterSource.split('\n').length)),
       assessment: diffSpecPredicates(pairedBefore, afterPredicates),
       meaningfulChanges, comparisonAlignment: alignment,

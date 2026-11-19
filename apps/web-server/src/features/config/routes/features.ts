@@ -246,6 +246,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
     const helperRoot = recorded ? recorded.dir : feature.featureDir
     const resolveHelper = helperRoot ? suiteHelperResolver(helperRoot) : undefined
+    const graphOrigin = recorded && req.query.runId ? { kind: 'recorded-run' as const, runId: req.query.runId } : { kind: 'working-tree' as const }
     const withCodeDisplay = codeDisplayAttacher()
     const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
     // Playwright module discovery and source enrichment read the same suite
@@ -275,7 +276,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       let source = ''
       if (recorded && !recorded.dir) unavailableSources.add(file)
       else try { source = readSpecSource(file) } catch { if (recorded) unavailableSources.add(file) }
-      const result = extractTestsFromSource(file, source, feature.semanticRules, resolveHelper)
+      const result = extractTestsFromSource(file, source, feature.semanticRules, resolveHelper, graphOrigin)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
@@ -328,7 +329,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules, resolveHelper)
+      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules, resolveHelper, graphOrigin)
       try { if (!recorded) await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
         app.log.warn({ err, file: entry.originFile }, 'test source change markers unavailable')
       }
@@ -372,7 +373,9 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
             bodyLine: fromAst?.bodyLine ?? (isHelperDefined ? entry.originLine : entry.line),
             steps: fromAst?.steps ?? [],
             readable: fromAst
-              ? { ...fromAst.readable, title: entry.title }
+              ? { ...fromAst.readable, title: entry.title, ...(fromAst.readable.graph && { graph: {
+                  ...fromAst.readable.graph, case: { file: entry.file, line: entry.line, title: entry.title },
+                } }) }
               : translateReadableTest({
                   file: isHelperDefined ? entry.originFile : file,
                   title: entry.title,

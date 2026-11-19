@@ -1,7 +1,9 @@
+import { buildTestFlowGraph, type GraphOrigin } from '../../../../../shared/test-view/flow-graph'
 import { renderExpression } from './expression'
 import { flowLabel } from './flow-label'
+import { unwrapExpression } from '../unwrap-expression'
 import type { ResolveSuiteHelper } from './suite-helpers'
-import { authoredStep, callFromStatement } from './call-syntax'
+import { authoredStep, authoredStepLabel, callFromStatement } from './call-syntax'
 import { createHash } from 'node:crypto'
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
@@ -63,6 +65,8 @@ export interface ReadableTestInput {
 }
 
 export interface ReadableTestAstInput {
+  graphOrigin?: GraphOrigin
+  caseLine?: number
   resolveHelper?: ResolveSuiteHelper
   file: string
   title: string
@@ -75,6 +79,7 @@ export interface ReadableTestAstInput {
 }
 
 interface TranslationContext {
+  revisions?: Record<string, string>
   resolveHelper?: ResolveSuiteHelper
   budget?: { remaining: number }
   file: string
@@ -94,7 +99,7 @@ interface ParsedHelper {
   lineOffset: number
 }
 
-function sourceFor(node: ts.Node, sourceFile: ts.SourceFile, file: string, lineOffset: number): ReadableSource {
+function sourceFor(node: ts.Node, sourceFile: ts.SourceFile, file: string, lineOffset: number, precise = false): ReadableSource {
   const start = node.getStart(sourceFile)
   const end = Math.max(start, node.getEnd() - 1)
   const startPosition = sourceFile.getLineAndCharacterOfPosition(start)
@@ -102,6 +107,8 @@ function sourceFor(node: ts.Node, sourceFile: ts.SourceFile, file: string, lineO
 
   return {
     file,
+    ...(precise ? { startOffset: start, endOffset: node.end, startColumn: startPosition.character + 1,
+      endColumn: sourceFile.getLineAndCharacterOfPosition(node.end).character + 1 } : {}),
     startLine: lineOffset + startPosition.line,
     endLine: lineOffset + endPosition.line,
     snippet: formatSourceSnippetForDisplay(node.getText(sourceFile)),
@@ -240,7 +247,7 @@ function branchPath(
   path: number[],
   context: TranslationContext,
 ): ReadableBranchPath {
-  const source = sourceFor(node, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(node, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   return {
     id: stableNodeId(source, path),
     text,
@@ -257,17 +264,25 @@ function translateLoopStatement(
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   let loopKind: ReadableLoopKind
   if (ts.isForStatement(statement)) loopKind = 'for'
   else if (ts.isForInStatement(statement)) loopKind = 'for-in'
   else if (ts.isForOfStatement(statement)) loopKind = statement.awaitModifier ? 'for-await-of' : 'for-of'
   else loopKind = ts.isWhileStatement(statement) ? 'while' : 'do-while'
 
+  function headerPart(expression: ts.Node, position: number): ReadableLeafNode {
+    const part = sourceFor(expression, context.sourceFile, context.file, context.lineOffset, true)
+    return { id: stableNodeId(part, [...path, position]), kind: 'leaf', role: 'action', text: part.snippet,
+      fidelity: 'exact', source: part, flow: { kind: 'action', label: part.snippet, mayThrow: containsThrowingExpression(expression) } }
+  }
   return {
     id: stableNodeId(source, path),
     kind: 'loop',
     loopKind,
+    ...(context.revisions && ts.isForStatement(statement) && statement.initializer ? { initializer: headerPart(statement.initializer, -2) } : {}),
+    ...(context.revisions && ts.isForStatement(statement) && statement.incrementor ? { increment: headerPart(statement.incrementor, -3) } : {}),
+    ...(ts.isForStatement(statement) && !statement.condition ? { unconditional: true } : {}),
     text: renderEnglish(statementHeaderEnglish(statement)),
     english: composeLoopHeader(statement, context.semanticContext),
     fidelity: 'derived',
@@ -283,7 +298,7 @@ function translateIfStatement(
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   const paths: ReadableBranchPath[] = [
     branchPath(
       renderEnglish(ifPathHeaderEnglish(statement, 'then')),
@@ -322,7 +337,7 @@ function translateSwitchStatement(
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   const paths = statement.caseBlock.clauses.map((caseClause, index) => branchPath(
     renderEnglish(switchPathHeaderEnglish(statement, index)),
     composeSwitchPath(caseClause, context.semanticContext),
@@ -352,7 +367,7 @@ function translatedGroup(
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(node, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(node, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   return {
     id: stableNodeId(source, path),
     kind: 'group',
@@ -370,7 +385,7 @@ function translateTryStatement(
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   const children = statement.tryBlock.statements.map(
     (child, index) => translateStatement(child, [...path, index], context),
   )
@@ -442,6 +457,19 @@ function controlledLeaf(
   }
 }
 
+function waitsForCall(statement: ts.Statement): boolean {
+  if (ts.isReturnStatement(statement)) return true
+  const value = ts.isExpressionStatement(statement) ? statement.expression
+    : ts.isVariableStatement(statement) ? statement.declarationList.declarations[0].initializer : undefined
+  return !!value && ts.isAwaitExpression(unwrapExpression(value, { unwrapAwait: false }))
+}
+
+function deferredCall(statement: ts.Statement, source: ReadableSource, path: number[], context: TranslationContext, reason: string) {
+  const leaf = controlledLeaf(statement, source, path, context)
+  leaf.flow = { ...flowLabel(statement, leaf), boundary: 'callback', reason }
+  return leaf
+}
+
 function translateSupportedStatement(
   statement: ts.Statement,
   path: number[],
@@ -474,6 +502,8 @@ function translateSupportedStatement(
 
   const step = authoredStep(statement)
   if (step) {
+    if (context.revisions && !waitsForCall(statement))
+      return deferredCall(statement, source, path, context, 'Step completion is not awaited')
     return {
       id: stableNodeId(source, path),
       kind: 'group',
@@ -492,8 +522,15 @@ function translateSupportedStatement(
   const parsed = name && !context.resolveHelper ? context.helpers.get(name.text) : undefined
   const body = authored?.body ?? parsed?.body
   const semanticContext = authored?.semanticContext ?? parsed?.semanticContext
-  const file = authored?.file ?? parsed?.input.file
+  const file = authored?.semanticContext.sourceFile === context.sourceFile ? context.file : authored?.file ?? parsed?.input.file
   if (body && semanticContext && file) {
+    const fn = body.parent
+    if (context.revisions && ts.isFunctionLike(fn)) {
+      if ('asteriskToken' in fn && fn.asteriskToken)
+        return deferredCall(statement, source, path, context, 'Generator body runs when its iterator advances')
+      if (ts.canHaveModifiers(fn) && ts.getModifiers(fn)?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) && !waitsForCall(statement))
+        return deferredCall(statement, source, path, context, 'Async helper completion is not awaited')
+    }
     const key = authored ? `${file}:${body.pos}` : name!.text
     if (parsed && context.activeHelpers.has(key)) return controlledLeaf(statement, source, path, context)
     if (authored && (context.activeHelpers.has(key) || context.budget?.remaining === 0 || context.activeHelpers.size >= 16)) {
@@ -506,7 +543,8 @@ function translateSupportedStatement(
       ...context, file, semanticContext, sourceFile: semanticContext.sourceFile,
       lineOffset: parsed?.lineOffset ?? 1, activeHelpers: new Set([...context.activeHelpers, key]),
     }
-    const definition = sourceFor(body, helperContext.sourceFile, file, helperContext.lineOffset)
+    if (context.revisions) context.revisions[file] ??= sourceRevision(helperContext.sourceFile)
+    const definition = sourceFor(body, helperContext.sourceFile, file, helperContext.lineOffset, !!context.revisions)
     let children: ReadableNode[]
     let story: ReadableTestStory
     if (ts.isBlock(body)) {
@@ -537,15 +575,51 @@ function translateSupportedStatement(
   return controlledLeaf(statement, source, path, context)
 }
 
+function containsThrowingExpression(node: ts.Node): boolean {
+  if (ts.isFunctionLike(node)) return false
+  if (ts.isCallExpression(node) || ts.isAwaitExpression(node) || ts.isNewExpression(node)
+    || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return true
+  return ts.forEachChild(node, child => containsThrowingExpression(child) || undefined) ?? false
+}
+
+function attachGraphFacts(statement: ts.Statement, node: ReadableNode) {
+  const flow = node.flow!
+  const call = callFromStatement(statement)
+  const declaration = ts.isFunctionDeclaration(statement) || (ts.isVariableStatement(statement)
+    && statement.declarationList.declarations.every(binding => binding.initializer
+      && (ts.isArrowFunction(binding.initializer) || ts.isFunctionExpression(binding.initializer))))
+  const callback = call?.arguments.some(arg => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))
+  if (declaration) flow.boundary = 'declaration'
+  else if (callback) flow.boundary = 'callback'
+  if (callback && node.kind === 'leaf' && authoredStepLabel(call) === undefined)
+    flow.reason = 'Callback execution depends on the callee'
+  if (call && ts.isIdentifier(call.expression) && node.kind === 'leaf')
+    flow.reason ??= 'Helper definition unavailable or expansion limit reached'
+  if (ts.isLabeledStatement(statement) || ts.isWithStatement(statement)) flow.kind = 'opaque'
+  if (call && node.kind === 'leaf' && flow.kind === 'action' && !authoredStepLabel(call)
+    && !node.english?.semanticCategories?.length) flow.reason ??= 'Callee implementation unavailable'
+  if (flow.kind === 'opaque') flow.reason = 'Control transfer requires source inspection'
+  // A compound statement's children own their exceptions. Its condition can
+  // throw before either branch is entered.
+  const expression = ts.isIfStatement(statement) || ts.isSwitchStatement(statement)
+    || ts.isWhileStatement(statement) || ts.isDoStatement(statement) || ts.isForOfStatement(statement)
+    || ts.isForInStatement(statement) ? statement.expression : ts.isForStatement(statement) ? statement.condition : undefined
+  if ((expression && containsThrowingExpression(expression)) || node.kind === 'group' && node.origin === 'helper'
+    || node.kind === 'leaf' && !declaration && flow.kind !== 'throw' && containsThrowingExpression(statement)) flow.mayThrow = true
+}
+
 function translateStatement(
   statement: ts.Statement,
   path: number[],
   context: TranslationContext,
 ): ReadableNode {
-  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
+  const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
   try {
     const node = translateSupportedStatement(statement, path, context, source)
-    if (context.resolveHelper) node.flow = flowLabel(statement, node)
+    if (context.resolveHelper) {
+      node.flow ??= flowLabel(statement, node)
+      if (context.revisions) attachGraphFacts(statement, node)
+    }
     return node
   } catch (error) {
     if (error instanceof UnsupportedSyntaxKindError) return unsupportedLeaf(source, path, error)
@@ -574,7 +648,7 @@ function translateStory(
   function translateCandidate(candidate: Candidate): ReadableStoryItem {
     const source = candidate.sourceRange
       ? sourceForRange(candidate.sourceRange, context.sourceFile, context.file, context.lineOffset)
-      : sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
+      : sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset, !!context.revisions)
     const node = candidate.node
     const headerBody = ts.isIfStatement(node) ? node.thenStatement
       : ts.isForOfStatement(node) || ts.isForInStatement(node) || ts.isForStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isWithStatement(node) ? node.statement
@@ -679,9 +753,9 @@ export function translateReadableTest(input: ReadableTestInput): ReadableTest {
  * leaving an arm no caller can reach. */
 export function createReadableTestAstTranslator(
   input: Omit<ReadableTestAstInput, 'title' | 'body'> & Required<Pick<ReadableTestAstInput, 'helpers' | 'semanticContext'>>,
-): (title: string, body: ts.Block) => ReadableTest {
+): (title: string, body: ts.Block, caseLine?: number) => ReadableTest {
   const helpers = parseHelpers(input.helpers, input.semanticContext.config, input.compilerOptions)
-  return (title, body) => translateReadableTestFromAst({ ...input, title, body }, helpers)
+  return (title, body, caseLine) => translateReadableTestFromAst({ ...input, title, body, caseLine }, helpers)
 }
 
 /** Uses an already-parsed test callback so AST extraction and readable
@@ -711,13 +785,20 @@ export function translateReadableTestFromAst(input: ReadableTestAstInput, prepar
     sourceFile,
     semanticContext,
     compilerOptions: input.compilerOptions,
+    revisions: input.graphOrigin ? { [input.file]: sourceRevision(sourceFile) } : undefined,
     resolveHelper: input.resolveHelper,
     budget: input.resolveHelper ? { remaining: 128 } : undefined,
     helpers: preparedHelpers ?? parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
     activeHelpers: new Set(),
   }
   const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))
-  return translatedTest(input.title, nodes, translateStory(body.statements, context, true), translateStory(body.statements, context))
+  const result = translatedTest(input.title, nodes, translateStory(body.statements, context, true), translateStory(body.statements, context))
+  if (input.graphOrigin && context.revisions) {
+    const definition = sourceFor(body, sourceFile, input.file, 1, true)
+    result.graph = buildTestFlowGraph(nodes, { origin: input.graphOrigin, revisions: context.revisions,
+      case: { file: input.file, title: input.title, line: input.caseLine ?? definition.startLine } }, definition)
+  }
+  return result
 }
 
 function findMatchingBlock(sourceFile: ts.SourceFile, target: ts.Block): ts.Block {
@@ -734,4 +815,14 @@ function findMatchingBlock(sourceFile: ts.SourceFile, target: ts.Block): ts.Bloc
   // Both source files are parsed from the same text, so the target block's
   // positional twin necessarily exists in the checker-owned tree.
   return match as ts.Block
+}
+
+// SourceFile instances are immutable and shared by the cases in one extraction.
+const revisionCache = new WeakMap<ts.SourceFile, string>()
+function sourceRevision(source: ts.SourceFile): string {
+  const cached = revisionCache.get(source)
+  if (cached) return cached
+  const revision = createHash('sha256').update(source.text).digest('hex')
+  revisionCache.set(source, revision)
+  return revision
 }
