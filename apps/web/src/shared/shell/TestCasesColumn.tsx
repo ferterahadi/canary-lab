@@ -1,5 +1,5 @@
 import type { CardInspection, FlowInspection } from '../lib/workspace-view-state'
-import { completedStepCounts } from '../ui/test-flow-layout'
+import { flowAttempts, type FlowAttempt } from '@shared/test-view/flow-execution'
 import type { PlaywrightPlaybackEvent } from '@shared/playback'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { discoveryRepairActive } from '@shared/discovery-repair'
@@ -35,7 +35,7 @@ type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: num
 
 type TestRunEvidence = {
   playbackEvents?: PlaywrightPlaybackEvent[]
-  manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
+  manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId' | 'playwrightExecutions'>
   summary?: RunSummary
   status?: RunStatus
 }
@@ -71,7 +71,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
   const baselineRunStatus = comparisonBaseline?.status
   const activeRunManifest = currentTests ? undefined : runEvidence?.manifest
   const events = currentTests ? undefined : runEvidence?.playbackEvents
-  const completedSteps = useMemo(() => completedStepCounts(events), [events])
+  const attempts = useMemo(() => flowAttempts(activeRunManifest?.runId ?? '', events ?? []), [activeRunManifest?.runId, events])
   const activeRunSummary = currentTests ? undefined : runEvidence?.summary
   const activeRunStatus = currentTests ? undefined : runEvidence?.status
   // The spec list refetches when a `tests-changed` event fires for the selected
@@ -301,6 +301,9 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
                   ? runningTestForTest(activeRunSummary, testIdentity)
                   : undefined
                 const isRunningTest = Boolean(runningTest)
+                const caseAttempts = testIdentity.id ? attempts.get(testIdentity.id) : undefined
+                const latestExecution = activeRunManifest?.playwrightExecutions
+                const liveAttempt = isRunningTest && (!latestExecution || caseAttempts?.at(-1)?.execution === latestExecution)
                 const bodyStartLine = t.bodyLine ?? t.line
                 const executionLine = executionLineHighlightForTest({
                   testName: t.name,
@@ -334,7 +337,8 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
                     showStatus={!currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
-                    stepCounts={testIdentity.id ? completedSteps.get(testIdentity.id) : undefined}
+                    attempts={activeRunManifest && t.readable.graph ? caseAttempts ?? [] : undefined}
+                    liveAttempt={liveAttempt}
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
                     inspection={inspection?.card === key ? inspection : undefined}
@@ -391,9 +395,8 @@ function summaryIdentityForWorkspaceTest(
     const parsed = parseLocation(entry.location)
     return Boolean(parsed && sameSourceFile(parsed.file, file) && matchesName(entry))
   })
-  const known = sameTest.length === 1
-    ? sameTest[0]
-    : sameTest.find((entry) => parseLocation(entry.location)?.line === line)
+  const candidates = sameTest.length <= 1 ? sameTest : sameTest.filter(entry => parseLocation(entry.location)?.line === line)
+  const known = candidates.length === 1 ? candidates[0] : undefined
   if (known?.id) return { name, id: known.id }
   const hasExplicitLegacyResult = summary?.passedNames !== undefined
     || summary?.skippedNames?.includes(summaryEntryName(name))
@@ -467,7 +470,7 @@ function TestCard({
   showStatus,
   showNotRun,
   isRunningTest,
-  runningStep, stepCounts,
+  runningStep, attempts, liveAttempt,
   executionHighlight: nextExecutionHighlight,
   expanded,
   modified,
@@ -486,7 +489,8 @@ function TestCard({
   showStatus: boolean
   showNotRun: boolean
   isRunningTest: boolean
-  stepCounts?: ReadonlyMap<string, number>
+  liveAttempt: boolean
+  attempts?: FlowAttempt[]
   runningStep?: RunSummaryRunningStep
   executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
@@ -628,7 +632,7 @@ function TestCard({
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}
-              stepCounts={stepCounts}
+              attempts={attempts} liveAttempt={liveAttempt}
               runningLocation={runningStep?.location}
               changedLines={changedLines}
             />}

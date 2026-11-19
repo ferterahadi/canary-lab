@@ -1,10 +1,12 @@
+import type { FlowRange } from '@shared/test-view/flow-graph'
+import { projectFlowAttempt, type FlowAttempt, type FlowVisit } from '@shared/test-view/flow-execution'
 import type { FlowInspection } from '../lib/workspace-view-state'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { parseSourceLocation } from '@shared/lib/source-location'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
 import { storyEndLine } from '@shared/readable-tests/source-lines'
-import { storyCodeLineNumbers, storyItemIdForSourceLine } from '@shared/readable-tests/story-source-map'
+import { storyCodeLineNumbers, storyItemIdForExactRange, storyItemIdForSourceLine } from '@shared/readable-tests/story-source-map'
 import { plural } from '@shared/lib/plural'
 import type { ContextRow } from '@shared/test-source-diff'
 import {
@@ -51,6 +53,8 @@ export interface TestPresentationSingleProps extends TestPresentationShellProps<
   inspection?: FlowInspection
   onInspection?: (state: FlowInspection) => void
   view: 'single'
+  attempts?: FlowAttempt[]
+  liveAttempt?: boolean
   stepCounts?: ReadonlyMap<string, number>
   runningLocation?: string
   test: ExtractedTest
@@ -121,6 +125,10 @@ export function TestPresentation(props: TestPresentationProps) {
   return props.view === 'single' ? <SinglePresentation key={JSON.stringify([props.sourceFile, props.test.line, props.test.name])} {...props} /> : <AlignedPresentation {...props} />
 }
 
+function attemptLabel(attempt: FlowAttempt) {
+  return ['Attempt ' + (attempt.retry + 1), attempt.status, attempt.execution && 'execution ' + attempt.execution].filter(Boolean).join(' · ')
+}
+
 function SinglePresentation(props: TestPresentationSingleProps) {
   const [local, setLocal] = useState<FlowInspection>({ mode: 'english' })
   const inspection = props.onInspection ? props.inspection ?? { mode: 'english' as const } : local
@@ -135,14 +143,29 @@ function SinglePresentation(props: TestPresentationSingleProps) {
 
   const sections = useMemo(() => flowSections(props.test.readable.nodes, props.test.readable.graph?.schemaVersion === 1 ? props.test.readable.graph : undefined), [props.test.readable])
   const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
-  const live = props.runningLocation && parseSourceLocation(props.runningLocation)
+  const [pinnedAttempt, setPinnedAttempt] = useState('')
+  const latest = props.attempts?.at(-1)
+  const attempt = props.attempts?.find(a => a.key === pinnedAttempt) ?? latest
+  const overlay = useMemo(() => attempt && projectFlowAttempt(props.test.readable.graph, attempt,
+    Boolean(props.liveAttempt && attempt === latest)), [attempt, latest, props.liveAttempt, props.test.readable.graph])
+  const observed = overlay?.active
+  const location = props.attempts ? observed?.box.range && observed.box.range.file + ':' + observed.box.range.startLine : props.runningLocation
+  const live = location && parseSourceLocation(location)
   const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []
-  const active = matches.length === 1 ? matches[0] : undefined
+  const active = props.attempts ? matches.find(m => m.node.id === observed?.box.sourceId && m.section.id === observed.section.id)
+    : matches.length === 1 ? matches[0] : undefined
   const section = sections.find(s => s.id === picked) ?? (!picked ? active?.section : undefined) ?? sections[0]
   const implementation = section.implementation
   const sourceFile = implementation?.source.file ?? props.sourceFile
   const checks = useMemo(() => {
     const counts = new Map<number, number>()
+    if (overlay) {
+      for (const box of section.topology?.boxes ?? []) {
+        const n = overlay.sections.get(section.id)?.get(box.id)?.checks
+        if (n && box.range?.file === sourceFile) counts.set(box.range.startLine, n)
+      }
+      return counts
+    }
     if (!props.stepCounts?.size) return counts
     const locations = new Map<number, number>()
     for (const { node } of indexed) {
@@ -159,25 +182,39 @@ function SinglePresentation(props: TestPresentationSingleProps) {
       if (count) counts.set(startLine, count)
     }
     return counts
-  }, [indexed, section, sourceFile, props.stepCounts])
+  }, [indexed, section, sourceFile, props.stepCounts, overlay])
   const test = useMemo((): ExtractedTest => implementation ? {
     name: section.label, line: implementation.source.startLine, bodySource: implementation.source.snippet, steps: [],
     readable: { ...props.test.readable, title: section.label, nodes: section.nodes, story: implementation.story },
   } : props.test, [section, implementation, props.test])
   const picker = <div className="cl-flow-picker text-xs">
+    {attempt && <label>Attempt <select aria-label="Execution attempt" value={pinnedAttempt && attempt.key === pinnedAttempt ? pinnedAttempt : ''}
+      onChange={event => setPinnedAttempt(event.target.value)}>
+      <option value="">Latest · {attemptLabel(latest!)}</option>
+      {props.attempts?.map(a => <option key={a.key} value={a.key}>{attemptLabel(a)}</option>)}
+    </select></label>}
+    {mode === 'visual' && props.attempts && <span className="text-muted">{overlay?.reason ?? (!attempt ? 'No attempt recorded.' :
+      ['Unmarked boxes have no mapped observation.', overlay?.incomplete && 'Incomplete event sequence.',
+        overlay?.unavailable ? `${overlay.unavailable} steps without an exact box.` : null].filter(Boolean).join(' '))}</span>}
     {sections.length > 1 && <label className="contents">Flow <select aria-label="Flow" value={section.id} onChange={event => setPicked(event.target.value)}>
       {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
     </select></label>}
     {section.parent && <button type="button" onClick={() => setPicked(section.parent)}>Back to caller</button>}
-    {props.runningLocation && <button type="button" onClick={() => setPicked(picked ? undefined : section.id)}>{picked ? 'Follow run' : 'Pause following'}</button>}
+    {props.runningLocation && <button type="button" onClick={() => {
+      if (picked || pinnedAttempt) { setPinnedAttempt(''); setPicked(undefined) }
+      else setPicked(section.id)
+    }}>{picked || pinnedAttempt ? 'Follow run' : 'Pause following'}</button>}
   </div>
   const helper = section.id !== 'test'
+  const latestFailure = attempt === latest && attempt?.status === 'failed' && !overlay?.reason && props.executionHighlight?.kind === 'failed'
   return <SingleTestView key={section.id} {...props} mode={mode} onModeChange={next => change({ ...inspection, mode: next })}
     inspection={inspection} updateInspection={change} test={test}
     sourceFile={sourceFile}
     changedLines={helper ? undefined : props.changedLines}
-    executionHighlight={helper ? undefined : props.executionHighlight}
-    section={section} checks={checks} picker={picker} active={active?.node.id} onPick={setPicked} />
+    visits={overlay?.sections.get(section.id)} runningLocation={location}
+    verifiedOverlay={props.attempts !== undefined} observedRange={observed?.section.id === section.id ? observed.box.range : undefined}
+    executionHighlight={helper || (props.attempts && !latestFailure) ? undefined : props.executionHighlight}
+    section={section} checks={checks} picker={picker} active={active?.section === section ? active.node.id : undefined} onPick={setPicked} />
 }
 
 function AlignedPresentation(props: TestPresentationAlignedProps) {
@@ -186,7 +223,7 @@ function AlignedPresentation(props: TestPresentationAlignedProps) {
 
 function SingleTestView({
   test,
-  section, checks, picker, active, onPick, inspection, updateInspection,
+  section, checks, picker, active, onPick, inspection, updateInspection, visits, verifiedOverlay, observedRange,
   sourceFile,
   executionHighlight,
   runningLocation,
@@ -197,6 +234,7 @@ function SingleTestView({
   header,
 }: Resolved<TestPresentationSingleProps> & {
   inspection: FlowInspection; updateInspection: (state: FlowInspection) => void
+  visits?: Map<string, FlowVisit>; verifiedOverlay: boolean; observedRange?: FlowRange
   checks: ReadonlyMap<number, number>
   section: FlowSection; picker: ReactNode; active?: string; onPick: (id: string) => void
 }) {
@@ -234,8 +272,8 @@ function SingleTestView({
   })
   const liveSource = runningLocation ? parseSourceLocation(runningLocation) : undefined
   const helper = section.id !== 'test'
-  const useLiveLine = fromVisual || helper
-  const visualLines = useLiveLine && (!helper || active) && liveSource?.file === code.file
+  const useLiveLine = fromVisual || helper || (verifiedOverlay && !executionHighlight)
+  const visualLines = useLiveLine && ((!helper && !verifiedOverlay) || active) && liveSource?.file === code.file
     ? new Set(code.lineMap.flatMap((line, index) => line.sourceLines.includes(Number(liveSource.line)) ? [index + 1] : []))
     : undefined
   const displayedExecutionLines = markedRowIndexes(rows, (marks) => marks.execution !== undefined)
@@ -250,12 +288,13 @@ function SingleTestView({
       code.endLine,
     )
   }, [code.endLine, code.file, code.startLine, test.readable.story?.steps])
-  const executionSourceLine = helper && active && liveSource?.file === sourceFile ? Number(liveSource.line) : executionHighlight
+  const executionSourceLine = (verifiedOverlay || helper) && active && liveSource?.file === sourceFile ? Number(liveSource.line) : executionHighlight
     ? sourceLineForBodyLine(test, executionHighlight.bodyLine)
     : undefined
   const executionStoryNodeId = executionSourceLine == null || !test.readable.story
     ? undefined
-    : storyItemIdForSourceLine(test.readable.story.steps, sourceFile, executionSourceLine)
+    : observedRange ? storyItemIdForExactRange(test.readable.story.steps, observedRange)
+      : storyItemIdForSourceLine(test.readable.story.steps, sourceFile, executionSourceLine)
   const changedStory = useMemo(() => storyChangeMarks(test, sourceFile, changedLines), [changedLines, sourceFile, test])
 
   return (
@@ -294,7 +333,7 @@ function SingleTestView({
       {picker}
       {((inspection.section && inspection.section !== section.id) || (inspection.node && !graphNode)) &&
         <p role="status" className="text-xs text-secondary">This selection is unavailable in this source revision.</p>}
-      {visual ? <VisualTestView checks={checks} section={section} active={active} test={test.readable} location={runningLocation}
+      {visual ? <VisualTestView visits={visits} checks={checks} section={section} active={active} test={test.readable} location={runningLocation}
         selected={inspection.box ?? selectedSource?.id} onSelect={selectSource} onHelper={onPick}
         following={!inspection.section} onInspect={() => onPick(section.id)} collapsed={inspection.collapsed}
         onFold={id => { const folds = inspection.collapsed ?? []; updateInspection({ ...inspection, section: section.id,

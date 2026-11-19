@@ -1,4 +1,4 @@
-import type { ReadableStoryItem } from './types'
+import type { ReadableSource, ReadableStoryItem } from './types'
 
 export interface ReadableStorySequenceEntry {
   item: ReadableStoryItem
@@ -49,6 +49,16 @@ export function readableStorySequenceEntries(
 /** Return the most specific English row that owns one source line. Nested
  * story rows can overlap their parent flow's range, so depth wins first and
  * the narrower source range breaks ties. */
+/** A reporter can observe a call whose arguments and callback share its line.
+ * Match the statement range before assigning an English row to that observation. */
+export function storyItemIdForExactRange(steps: readonly ReadableStoryItem[], range: Omit<ReadableSource, 'snippet'>): string | undefined {
+  const matches = readableStorySequenceEntries(steps).filter(({ item: { source } }) =>
+    source.file === range.file && source.startLine === range.startLine && source.endLine === range.endLine
+    && (range.startOffset === undefined || source.startOffset === range.startOffset)
+    && (range.endOffset === undefined || source.endOffset === range.endOffset))
+  return matches.length === 1 ? matches[0].item.id : undefined
+}
+
 export function storyItemIdForSourceLine(
   steps: readonly ReadableStoryItem[],
   file: string,

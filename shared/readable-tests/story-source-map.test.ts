@@ -3,6 +3,7 @@ import {
   readableStorySequenceEntries,
   storyCodeLineNumbers,
   storyItemIdForSourceLine,
+  storyItemIdForExactRange,
   storyLocalSequenceLabel,
   storySequenceLabel,
 } from './story-source-map'
@@ -82,4 +83,13 @@ describe('storyCodeLineNumbers', () => {
     const siblings = [step('wide', 20, 22), step('narrow', 20), step('wide-again', 20, 24)]
     expect(storyCodeLineNumbers(siblings, FILE, 20, 24).get(20)).toEqual({ sequence: '02', label: '02' })
   })
+})
+
+it('maps an observed call to its exact statement instead of its same-line argument', () => {
+  const arg = step('wait duration', 5)
+  Object.assign(arg.source, { startOffset: 18, endOffset: 24 })
+  const call = flow('wait', 5, 5, [arg])
+  Object.assign(call.source, { startOffset: 10, endOffset: 27 })
+  expect(storyItemIdForExactRange([call], call.source)).toBe('wait')
+  expect(storyItemIdForExactRange([call], { ...call.source, startOffset: undefined, endOffset: undefined })).toBeUndefined()
 })

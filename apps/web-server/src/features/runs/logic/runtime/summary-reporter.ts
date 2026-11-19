@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { createHash, randomUUID } from 'node:crypto'
 import path from 'path'
 import type {
   FullResult,
@@ -22,6 +23,11 @@ import { declaredEnvironments, environmentExclusions, type EnvironmentExclusion 
 import { atomicWriteJson } from '../../../../../../../shared/lib/atomic-write'
 
 class SummaryReporter implements Reporter {
+  private readonly stream = randomUUID()
+  private nextStepId = 0
+  private stepIds = new WeakMap<TestStep, number>()
+  private sequence = new Map<string, number>()
+  private revisions = new WeakMap<TestResult, Map<string, string | undefined>>()
   private readonly environment = process.env.CANARY_LAB_ENV
   private readonly exclusionsAtStart = new Map<string, EnvironmentExclusion>()
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
@@ -64,8 +70,9 @@ class SummaryReporter implements Reporter {
     this.writeSummary(false)
   }
 
-  onTestBegin(test: TestCase): void {
+  onTestBegin(test: TestCase, result?: TestResult): void {
     const known = this.rememberKnownTest(test)
+    this.sequence.set(test.id || known.id, 0)
     this.failedStepLocationsByTest.delete(known.id)
     const running = {
       id: known.id,
@@ -76,6 +83,7 @@ class SummaryReporter implements Reporter {
     this.runningTests.set(known.id, running)
     this.writePlaybackEvent({
       type: 'test-begin',
+      flow: this.flowStamp(test, known.id, result, test.location),
       time: new Date().toISOString(),
       test: {
         id: known.id,
@@ -87,7 +95,7 @@ class SummaryReporter implements Reporter {
     this.writeSummary(false)
   }
 
-  onStepBegin(test: TestCase, _result: TestResult, step: TestStep): void {
+  onStepBegin(test: TestCase, result: TestResult, step: TestStep): void {
     const known = this.rememberKnownTest(test)
     let running = this.runningTests.get(known.id)
     if (!running) {
@@ -105,6 +113,7 @@ class SummaryReporter implements Reporter {
     this.runningTests.set(known.id, { ...running, step: runningStep })
     this.writePlaybackEvent({
       type: 'step-begin',
+      flow: this.flowStamp(test, known.id, result, step.location, step),
       time: new Date().toISOString(),
       test: { id: known.id, name: known.name, title: test.title },
       step: runningStep,
@@ -112,7 +121,7 @@ class SummaryReporter implements Reporter {
     this.writeSummary(false)
   }
 
-  onStepEnd(test: TestCase, _result: TestResult, step: TestStep): void {
+  onStepEnd(test: TestCase, result: TestResult, step: TestStep): void {
     const known = this.rememberKnownTest(test)
     const running = this.runningTests.get(known.id)
     if (!running) return
@@ -130,6 +139,8 @@ class SummaryReporter implements Reporter {
       : { id: running.id, name: running.name, location: running.location })
     this.writePlaybackEvent({
       type: 'step-end',
+      flow: { ...this.flowStamp(test, known.id, result, step.location, step),
+        outcome: step.error ? 'failed' : step.annotations?.some(a => a.type === 'skip') ? 'skipped' : 'completed' },
       time: new Date().toISOString(),
       test: { id: known.id, name: known.name, title: test.title },
       step: ended,
@@ -196,6 +207,7 @@ class SummaryReporter implements Reporter {
     }
     this.writePlaybackEvent({
       type: 'test-end',
+      flow: this.flowStamp(test, known.id, result, test.location),
       time: new Date().toISOString(),
           test: {
             id: known.id,
@@ -497,6 +509,30 @@ class SummaryReporter implements Reporter {
     if (idx < 0) return
     const [removed] = this.results.splice(idx, 1)
     if (removed && isFailureResult(removed)) this.failureCount = Math.max(0, this.failureCount - 1)
+  }
+
+  private flowStamp(test: TestCase, caseId: string, result: TestResult | undefined, location: TestStep['location'], step?: TestStep) {
+    const instance = test.id || caseId
+    const sequence = this.sequence.get(instance) ?? 0
+    this.sequence.set(instance, sequence + 1)
+    // A Playwright retry may load a different source file in a fresh worker.
+    // Keep the read cache within the actual attempt, including negative reads.
+    const revisions = result && this.revisions.get(result) || new Map<string, string | undefined>()
+    if (result) this.revisions.set(result, revisions)
+    let revision = location && revisions.get(location.file)
+    if (location && !revisions.has(location.file)) {
+      try {
+        if (fs.statSync(location.file).isFile()) revision = createHash('sha256').update(fs.readFileSync(location.file)).digest('hex')
+      } catch { /* virtual or unavailable source remains unverified */ }
+      revisions.set(location.file, revision)
+    }
+    let stepId = step && this.stepIds.get(step)
+    if (step && stepId === undefined) {
+      stepId = ++this.nextStepId
+      this.stepIds.set(step, stepId)
+    }
+    return { stream: this.stream, instance, sequence, retry: result?.retry ?? 0, execution: this.execution,
+      revision, column: location?.column, stepId, parentId: step?.parent && this.stepIds.get(step.parent) }
   }
 
   private writePlaybackEvent(event: PlaybackEvent): void {

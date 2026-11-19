@@ -2458,3 +2458,7 @@ body {
   .cl-flow-sheet { scroll-behavior: auto; }
   .cl-lang-switch-thumb { transition: none; }
 }
+
+.cl-flow-shape[data-observation="observed"]:not([data-lit="true"]) { --stroke: var(--running); }
+.cl-flow-shape[data-observation="failed"]:not([data-lit="true"]) { --stroke: var(--danger); }
+.cl-flow-edge[data-observed="true"] polyline { stroke: var(--running); stroke-width: 2; }

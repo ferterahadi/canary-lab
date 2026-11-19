@@ -1,3 +1,4 @@
+import { observedBranches, type FlowVisit } from '@shared/test-view/flow-execution'
 import { useId, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import type { ReadableTest } from '@shared/readable-tests/types'
 import { shortSourceLocation } from '@shared/lib/source-location'
@@ -6,6 +7,7 @@ import { foldedTopology, layoutTestFlow, type FlowSection } from './test-flow-la
 import { Tooltip } from './Tooltip'
 
 interface ChartProps {
+  visits?: Map<string, FlowVisit>
   section: FlowSection
   checks: ReadonlyMap<number, number>
   active?: string
@@ -21,9 +23,10 @@ interface ChartProps {
   onHelper: (id: string) => void
 }
 
-function Chart({ section, checks, active, selected, following, collapsed, onFold, onInspect, fit, onFit, viewport, onSelect, onHelper }: ChartProps) {
+function Chart({ section, visits, checks, active, selected, following, collapsed, onFold, onInspect, fit, onFit, viewport, onSelect, onHelper }: ChartProps) {
   const fold = useMemo(() => foldedTopology(section, collapsed), [section, collapsed])
   const chart = useMemo(() => layoutTestFlow(section.nodes, fold.topology), [section, fold])
+  const branches = useMemo(() => observedBranches(section.topology, visits), [section, visits])
   const activeBoxes = active ? chart.nodes.filter(box => box.sourceId === active) : []
   const activeBox = activeBoxes.length === 1 ? activeBoxes[0].id : undefined
   const marker = useId()
@@ -72,21 +75,29 @@ function Chart({ section, checks, active, selected, following, collapsed, onFold
       <defs><marker id={marker} viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="7" refY="4" orient="auto-start-reverse">
         <path d="M0 0 L8 4 L0 8 z" fill="var(--text-secondary)" />
       </marker></defs>
-      {chart.edges.map((e, i) => <g key={i} className="cl-flow-edge">
-        <polyline points={e.points.map(p => p.x + ',' + p.y).join(' ')} markerEnd={`url(#${marker})`} />
-        {e.label && <text x={e.x} y={e.y} dy=".3em">{e.label}</text>}
-      </g>)}
+      {chart.edges.map((e, i) => {
+        const observed = branches.has(JSON.stringify([e.from, e.to, e.label]))
+        return <g key={i} className="cl-flow-edge" data-observed={observed || undefined}>
+          {observed && <title>{e.label} branch observed in this attempt</title>}
+          <polyline points={e.points.map(p => p.x + ',' + p.y).join(' ')} markerEnd={`url(#${marker})`} />
+          {e.label && <text x={e.x} y={e.y} dy=".3em">{e.label}{observed && ' ✓'}</text>}
+        </g>
+      })}
       {chart.nodes.map(box => {
         const { width: w, height: h } = box
         const node = box.source
         const source = (node ?? box.context)?.source
         const isActive = box.id === activeBox
         const checked = node?.kind === 'loop' ? checks.get(node.source.startLine) : undefined
+        const visit = visits?.get(box.id)
+        const state = visit?.failed ? 'failed' : visit?.completed ? 'observed' : visit?.skipped ? 'skipped' : undefined
+        const badge = isActive ? 'Running now' : state === 'failed' ? 'Step failed' : checked ? 'Checked ×' + checked
+          : state === 'observed' ? 'Observed ×' + visit!.completed : state === 'skipped' ? 'Skipped' : selected === box.id ? 'Selected' : undefined
         const helper = node?.kind === 'group' && node.origin === 'helper' && node.children.length > 0
         const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : 'No single source line for this boundary'
         const snippet = source?.snippet ?? ''
         return <g key={box.id} transform={`translate(${box.x - w / 2},${box.y - h / 2})`}
-          className="cl-flow-shape" data-shape={box.shape} data-selected={selected === box.id || undefined} data-lit={isActive} data-checked={checked}>
+          className="cl-flow-shape" data-shape={box.shape} data-selected={selected === box.id || undefined} data-observation={state} data-lit={isActive} data-checked={checked}>
           {box.shape === 'decision'
             ? <polygon points={`${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}`} />
             : box.shape === 'io' ? <polygon points={`12,0 ${w},0 ${w - 12},${h} 0,${h}`} />
@@ -97,7 +108,7 @@ function Chart({ section, checks, active, selected, following, collapsed, onFold
               <button type="button" className="cl-flow-node" data-box={box.id} aria-current={selected === box.id ? 'location' : undefined} aria-disabled={!source || undefined} data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
                 ref={selected === box.id ? focus : undefined}
                 onClick={() => { remember(); const target = node ?? box.context; if (target) onSelect({ id: target.id, source: target.source }, box.id) }}>
-                <span>{box.shape === 'check' && <small aria-hidden="true">✓ </small>}{box.label}</span>{isActive ? <b>Running now</b> : checked ? <b>Checked ×{checked}</b> : selected === box.id ? <b>Selected</b> : null}
+                <span>{box.shape === 'check' && <small aria-hidden="true">✓ </small>}{box.label}</span>{badge && <b>{badge}</b>}
               </button>
             </Tooltip>
           </foreignObject>

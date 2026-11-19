@@ -67,6 +67,32 @@ describe('SummaryReporter', () => {
     ])
   })
 
+  it('pairs nested steps by instance, captures explicit failure, and rechecks source on retry', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    const file = path.join(LOGS_DIR, 'source.ts')
+    fs.writeFileSync(file, 'initial')
+    const test = mkTest('Nested', file)
+    const reporter = new SummaryReporter()
+    const first = mkResult()
+    reporter.onTestBegin(test, first)
+    const outer = mkStep('outer', 'test.step', file, 1)
+    const inner = { ...mkStep('check', 'expect', file, 1), parent: outer }
+    reporter.onStepBegin(test, first, outer)
+    reporter.onStepBegin(test, first, inner)
+    reporter.onStepEnd(test, first, Object.assign(inner, { error: { message: 'predicate failed' } }))
+    reporter.onStepEnd(test, first, outer)
+    reporter.onTestEnd(test, { ...first, status: 'failed' })
+    fs.writeFileSync(file, 'edited')
+    reporter.onTestBegin(test, mkResult({ retry: 1 }))
+    const stamps = readEvents().map(e => e.flow)
+    expect(stamps.map(s => s.sequence)).toEqual([0, 1, 2, 3, 4, 5, 0])
+    expect(stamps[0].revision).toMatch(/^[a-f0-9]{64}$/)
+    expect(stamps[2].parentId).toBe(stamps[1].stepId)
+    expect(stamps[3]).toMatchObject({ stepId: stamps[2].stepId, outcome: 'failed', revision: stamps[0].revision })
+    expect(stamps[6]).toMatchObject({ retry: 1, stream: stamps[0].stream })
+    expect(stamps[6].revision).not.toBe(stamps[0].revision)
+  })
+
   it('records no execution stamp when spawned without one', () => {
     const reporter = new SummaryReporter()
     reporter.onTestBegin(mkTest('Unstamped', '/specs/unstamped.spec.ts', 3))

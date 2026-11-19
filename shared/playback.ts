@@ -6,7 +6,21 @@ export interface RunSummaryRunningStep {
   locations?: string[]
 }
 
-export type PlaywrightPlaybackEvent =
+/** Optional observations from one reporter process and one Playwright attempt. */
+export interface FlowStamp {
+  stream: string
+  instance?: string
+  sequence: number
+  retry: number
+  execution?: number
+  stepId?: number
+  parentId?: number
+  revision?: string
+  column?: number
+  outcome?: 'completed' | 'failed' | 'skipped'
+}
+
+export type PlaywrightPlaybackEvent = { flow?: FlowStamp } & (
   | {
       type: 'test-begin'
       time: string
@@ -34,3 +48,4 @@ export type PlaywrightPlaybackEvent =
       error?: { message: string; snippet?: string }
       attachments?: Array<{ name: string; contentType?: string; path?: string }>
     }
+)
