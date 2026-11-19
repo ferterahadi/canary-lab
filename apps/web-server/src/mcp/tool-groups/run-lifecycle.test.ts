@@ -475,7 +475,7 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
 
 // Regression (2026-11-14): "rerun now" after this conversation's own failed run
 // made a second run ID and asked the human a start question that looked like it
-// belonged to the old run. A fresh start from that session now stops first.
+// belonged to the old run. A retry from that session must retain the same ID.
 describe('start_run: a fresh start right after this session\'s own ended run', () => {
   const driven = (status: string, sessionId = 'sess-1', over: Record<string, unknown> = {}) => runDetail({
     status, executionType: 'run', externalHealSession: { sessionId, clientKind: 'claude', status: 'disconnected' }, ...over,
@@ -483,28 +483,28 @@ describe('start_run: a fresh start right after this session\'s own ended run', (
   const harnessWith = (details: RunDetail[]) => {
     const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const read = coverageRequest()
-    const tools = harness({ store: storeOf(details, { logsDir: '/logs' }), startRun, coverageRequest: read })
-    return { ...tools, startRun, read }
+    const restartExternalRun = vi.fn(async (runId: string) => ({ runId }))
+    const tools = harness({ store: storeOf(details, { logsDir: '/logs' }), startRun, restartExternalRun, coverageRequest: read })
+    return { ...tools, startRun, restartExternalRun, read }
   }
 
-  it('starts nothing and asks no start question, naming the run to rerun with run_ref', async () => {
-    const { call, startRun, read } = harnessWith([driven('failed')])
-
-    expect(await call('start_run', START)).toMatchObject({
-      type: 'rerun_available',
-      runStarted: false,
-      runId: 'run-1',
-      status: 'failed',
-      nextSteps: ['rerun: start_run with run_ref "run-1" (the default when the user said rerun)', 'new run: start_run with force_new:true'],
-    })
+  it.each(['failed', 'aborted'])('restarts the same %s run without a fresh start question', async (status) => {
+    const { call, startRun, restartExternalRun, read } = harnessWith([driven(status)])
+    expect(await call('start_run', START)).toMatchObject({ restarted: true, reused: true, runId: 'run-1' })
+    expect(restartExternalRun).toHaveBeenCalledOnce()
     expect(startRun).not.toHaveBeenCalled()
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('offers an aborted run the same way', async () => {
-    const { call } = harnessWith([driven('aborted')])
-
-    expect(await call('start_run', START)).toMatchObject({ type: 'rerun_available', runId: 'run-1', status: 'aborted' })
+  it('requires review on the same run when the recorded suite has changed', async () => {
+    const detail = driven('failed')
+    detail.collaboration = { runId: 'run-1', status: 'failed', execution: 1, revision: 'run-revision',
+      review: { state: 'pending', changedFiles: 1, revision: 'source-revision' },
+      continuation: { available: false, requiresNewRun: false, reason: 'test-review-required' } }
+    const { call, startRun, restartExternalRun } = harnessWith([detail])
+    expect(await call('start_run', START)).toMatchObject({ type: 'test_review_required', runStarted: false, runId: 'run-1', review_revision: 'source-revision' })
+    expect(restartExternalRun).not.toHaveBeenCalled()
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   it('goes on to a new run when the caller says force_new', async () => {

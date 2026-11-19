@@ -245,7 +245,7 @@ description, then wait on the same run again.
 
 `start_run` continues a matching active run even with `force_new:true`. Use the
 Run panel for a deliberate concurrent run of the same feature. Resume a stopped
-run with `start_run(run_ref)` to retain its recorded tests and journal. A fresh
+run with `start_run(run_ref)`. When the same agent session retries its latest eligible failed or aborted run, it can omit the reference to retain its recorded tests and journal. A fresh
 start cannot adopt outstanding suite changes without review. Use `get_test_review`
 then `review_test_changes`; the human reviews the exact patch before adoption.
 `abort_run` requests human stop approval. An agent-written `confirm:true` alone

@@ -52,10 +52,14 @@ async function fixture(status: 'passed' | 'aborted' = 'aborted') {
     return { kind: 'started', orch: { runId, stop: async () => {} } as OrchestratorLike }
   }
   const restartRun = vi.fn(async (runId: string) => { store.patchManifest(runId, { status: 'running' }); return { ok: true as const, mode: 'remaining' as const } })
+  const restartExternalRun = vi.fn<NonNullable<RunsRouteDeps['restartExternalRun']>>(async (runId) => {
+    store.patchManifest(runId, { status: 'running' })
+    return { runId }
+  })
   const events: WorkspaceEvent[] = []
   const app = Fastify()
   apps.push(app)
-  await app.register(runsRoutes, { featuresDir, store, startRun, restartRun, workspaceEvents: captureEvents(events) })
+  await app.register(runsRoutes, { featuresDir, store, startRun, restartRun, restartExternalRun, workspaceEvents: captureEvents(events) })
   const begin = async (payload: Record<string, unknown> = {}) => {
     const result = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'checkout', env: 'dev', ...payload } })
     expect(result.statusCode).toBe(409)
@@ -63,7 +67,7 @@ async function fixture(status: 'passed' | 'aborted' = 'aborted') {
   }
   const read = async (id: string) => (await app.inject(`/api/run-requests/${id}`)).json<RunStartRequest>()
   const decide = (revision: string, action = 'accept-test-review') => app.inject({ method: 'POST', url: `/api/runs/source/${action}`, payload: { expectedRevision: revision } })
-  return { app, store, root, logsDir, featureDir, snapshot, starts, restartRun, events, begin, read, decide }
+  return { app, store, root, logsDir, featureDir, snapshot, starts, restartRun, restartExternalRun, events, begin, read, decide }
 }
 
 describe('blocked run request ownership', () => {
@@ -136,6 +140,23 @@ describe('blocked run request ownership', () => {
     expect(starts).toHaveLength(1)
     expect(starts[0][2]).toEqual(healAgent)
     expect(starts[0][3]).toBe('queue')
+  })
+
+  it('resumes an approved external repair under its original run ID exactly once', async () => {
+    const { app, begin, read, decide, starts, restartExternalRun, store } = await fixture()
+    const healAgent = { kind: 'external', sessionId: 'repair', clientKind: 'claude', claimable: true }
+    const blocked = await begin({ healAgent })
+    const review = await decide(blocked.review_revision)
+    expect(review.json().execution).toEqual({ status: 'continuation-ready', runId: 'source' })
+    expect(await read(blocked.request.requestId)).toMatchObject({ status: 'ready' })
+    expect(restartExternalRun).not.toHaveBeenCalled()
+    const resume = () => app.inject({ method: 'POST' as const, url: `/api/run-requests/${blocked.request.requestId}/resume`,
+      headers: { 'x-canary-origin': 'mcp' }, payload: { sessionId: 'repair' } })
+    const replies = await Promise.all([resume(), resume()])
+    expect(replies.map((reply) => reply.json().runId)).toEqual(['source', 'source'])
+    expect(restartExternalRun).toHaveBeenCalledExactlyOnceWith('source', expect.objectContaining(healAgent))
+    expect(starts).toHaveLength(0)
+    expect(store.list().map((entry) => entry.runId)).toEqual(['source'])
   })
 
   it('keeps an ended failed-run approval ready until an explicit continuation request', async () => {

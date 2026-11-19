@@ -81,8 +81,8 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   frames.length = 0
   const accepted = await app.inject({ method: 'POST', url: `/api/runs/${runId}/accept-test-review`, payload: { expectedRevision: current.review_revision } })
   expect(accepted.statusCode).toBe(202)
-  expect(accepted.json()).toMatchObject({ decision: 'accepted', review_revision: current.review_revision, git: { status: 'committed' }, execution: { status: 'new-run-required' } })
-  expect(await waiting).toMatchObject({ result: { status: 'approved-for-new-run', review_revision: current.review_revision } })
+  expect(accepted.json()).toMatchObject({ decision: 'accepted', review_revision: current.review_revision, git: { status: 'committed' }, execution: { status: 'continuation-ready', runId } })
+  expect(await waiting).toMatchObject({ result: { status: 'approved-for-continuation', review_revision: current.review_revision } })
   expect(pendingRunReview(runStore, 'shop', featureDir)).toBeUndefined()
   expect(git(featureDir, 'show', 'HEAD:e2e/contract.spec.ts')).toContain('second candidate')
   const saved = JSON.parse(fs.readFileSync(path.join(runDirFor(logsDir, runId), 'manifest.json'), 'utf8'))
@@ -96,6 +96,6 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   expect(recovered).toMatchObject({ review_revision: current.review_revision, reviewState: 'settled', receipt: accepted.json() })
   expect(await call(reconnected, 'review_test_changes', {
     runId, review_revision: recovered.review_revision, browser_wait_token: recovered.browser_wait_token, wait_for_decision: true,
-  })).toMatchObject({ status: 'approved-for-new-run' })
+  })).toMatchObject({ status: 'approved-for-continuation' })
   expect(ptyFactory).not.toHaveBeenCalled()
 })

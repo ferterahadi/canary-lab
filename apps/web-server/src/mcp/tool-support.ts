@@ -115,10 +115,7 @@ export function findContinuingRunForFeature(
   )
 }
 
-/** The suite's latest run when THIS session drove it and it can be rerun in
- *  place. A fresh start from the same conversation right after such a run is
- *  usually a "rerun", so start_run asks the agent to choose run_ref or
- *  force_new instead of silently opening a second run ID. */
+/** Infer a retry only for the session that drove the latest run in this environment. */
 export function findSessionRerunCandidate(
   deps: CanaryLabMcpDeps,
   feature: string,

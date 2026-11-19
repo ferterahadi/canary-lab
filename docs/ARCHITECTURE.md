@@ -332,7 +332,7 @@ to the task identity, so reconnects cannot overwrite edits or navigate twice.
 
 Test-source comparisons in the Tests column and review dialog share
 `apps/web/src/shared/state/use-test-source-comparison.ts`. Both reconcile every
-10 seconds while mounted, retain evidence through transient failures, and clear
+five seconds while mounted, retain evidence through transient failures, and clear
 it on authoritative missing-suite or missing-snapshot responses. Comparison
 freshness does not grant review permission; review actions still require a
 confirmed review revision.

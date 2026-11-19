@@ -28,7 +28,7 @@ it('updates the Tests comparison after an empty result without a parent revision
   expect(live.comparison.files).toEqual([])
   const next: TestSourceComparison = { ...empty, files: ['added.spec.ts'] }
   vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue(next)
-  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
   expect(live.comparison.files).toEqual(['added.spec.ts'])
   expect(featuresApi.getTestSourceComparison).toHaveBeenCalledTimes(2)
 })

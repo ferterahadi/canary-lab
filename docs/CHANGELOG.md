@@ -37,7 +37,7 @@ Each entry is tagged with the area it touches:
 
 > After upgrading, run `npx canary-lab upgrade` in your workspace and restart connected agent apps to pick up the updated repair instructions.
 
-- **[Test Runner]** **Continue an eligible failed or aborted run.** Accepting test changes records your approval. Choose Continue run when you are ready to execute them under the same run ID.
+- **[Test Runner]** **Continue an eligible failed or aborted run.** Accepting test changes records your approval. Choose Continue run when you are ready to execute them under the same run ID. Retrying from the same agent session also reuses that ID.
 - **[Test Runner]** **See what ran on each repair attempt.** Results & Fixes keeps the source version, selected tests, output, and results for each recorded execution. Earlier failures and cancellations keep their original outcomes.
 - **[General]** **Browsers and agents catch up on run changes.** Open run views recover missed updates automatically. Connected agents receive the latest run state when they wait for changes or make a relevant tool call.
 - **[General]** **Review approval choices in Notifications.** Hover over or focus a choice to see what it does. Pending approvals appear in Notifications without a second banner.
