@@ -133,7 +133,10 @@ export function App() {
     openFeatureStage(feature, 'evaluation-export')
   }, [openFeatureStage])
 
+  // Preserve the link the reader opened on their first visit to this workspace.
+  const [allowDemoOnArrival] = useState(() => !nav.inspection && !nav.routedDialog)
   const { demo, openDemo, launchDemo, openTarget, actionBlockers } = useGettingStarted({
+    allowAutoOpen: allowDemoOnArrival,
     allRuns, flights, setDemoOpen, setSelectedFeature, navigateToRun,
     navigateToCoverage, openFlight, openFlightStage, openFeatureStage,
   })
@@ -282,6 +285,7 @@ export function App() {
     ),
     tests: (
       <TestCasesColumn
+        inspection={nav.inspection} onInspection={nav.setInspection}
         feature={selectedFeature}
         isAuthoringTests={selectedFeatureActivity?.kind === 'authoring'}
         runEvidence={selectedRunEvidence}

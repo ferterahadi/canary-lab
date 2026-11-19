@@ -30,20 +30,20 @@ export function completedStepCounts(events?: readonly PlaywrightPlaybackEvent[])
   return counts
 }
 
-export interface FlowSection { id: string; label: string; nodes: ReadableNode[]; topology?: FlowTopology; implementation?: ReadableGroupNode['implementation'] }
+export interface FlowSection { id: string; label: string; parent?: string; nodes: ReadableNode[]; topology?: FlowTopology; implementation?: ReadableGroupNode['implementation'] }
 
 export function flowSections(nodes: ReadableNode[], graph?: TestFlowGraph): FlowSection[] {
   const sections: FlowSection[] = [{ id: 'test', label: 'Test overview', nodes }]
-  const helpers: ReadableGroupNode[] = []
-  function visit(node: ReadableNode) {
-    if (node.kind === 'group' && node.origin === 'helper') helpers.push(node)
-    else if (node.kind === 'branch') node.paths.forEach(path => path.children.forEach(visit))
-    else if (node.kind !== 'leaf') node.children.forEach(visit)
+  const helpers: { node: ReadableGroupNode; parent: string }[] = []
+  function visit(node: ReadableNode, parent: string) {
+    if (node.kind === 'group' && node.origin === 'helper') helpers.push({ node, parent })
+    else if (node.kind === 'branch') node.paths.forEach(path => path.children.forEach(n => visit(n, parent)))
+    else if (node.kind !== 'leaf') node.children.forEach(n => visit(n, parent))
   }
-  nodes.forEach(visit)
-  for (const helper of helpers) {
-    sections.push({ id: helper.id, label: flowName(helper), nodes: helper.children, implementation: helper.implementation })
-    helper.children.forEach(visit)
+  nodes.forEach(n => visit(n, 'test'))
+  for (const { node: helper, parent } of helpers) {
+    sections.push({ parent, id: helper.id, label: flowName(helper), nodes: helper.children, implementation: helper.implementation })
+    helper.children.forEach(n => visit(n, helper.id))
   }
   const byId = new Map(graph?.sections.map(section => [section.id, section]))
   return sections.map(section => ({ ...section, topology: byId.get(section.id) }))
@@ -59,6 +59,51 @@ export function sectionNodes(section: FlowSection): ReadableNode[] {
   return section.nodes.flatMap(flatten)
 }
 
+/** Fold the existing graph at the group's boundary. An early exit keeps
+ * its original destination even when its source is inside a folded group. */
+export function foldedTopology(section: FlowSection, collapsed: readonly string[] = []) {
+  const topology = section.topology ?? buildFlowTopology(section.nodes)
+  const counts = new Map<string, number>()
+  const owners = new Map<string, string>()
+  function visit(node: ReadableNode, owner?: string): number {
+    if (owner) owners.set(node.id, owner)
+    if (node.kind === 'leaf' || (node.kind === 'group' && node.origin === 'helper')) return 1
+    const children = node.kind === 'branch' ? node.paths.flatMap(path => path.children) : node.children
+    const next = owner ?? (collapsed.includes(node.id) ? node.id : undefined)
+    let count = 0
+    for (const child of children) count += visit(child, next)
+    if (node.kind === 'loop') {
+      for (const part of [node.initializer, node.increment]) if (part) count += visit(part, next)
+    }
+    if (count) counts.set(node.id, count)
+    return count + 1
+  }
+  section.nodes.forEach(n => visit(n))
+  if (!owners.size) return { topology, counts }
+  const redirected = new Map<string, string>()
+  for (const box of topology.boxes) {
+    const owner = box.sourceId && owners.get(box.sourceId)
+    if (owner && box.sourceId) redirected.set(box.id, owner + box.id.slice(box.sourceId.length))
+  }
+  const visible = new Set(topology.boxes.filter(b => !redirected.has(b.id)).map(b => b.id))
+  // Cleanup paths may have more specialized suffixes than their outer group.
+  for (const [id, target] of redirected) {
+    let owner = target
+    while (!visible.has(owner) && owner.includes('/')) owner = owner.slice(0, owner.lastIndexOf('/'))
+    redirected.set(id, owner)
+  }
+  const seen = new Set<string>()
+  const edges = topology.edges.flatMap(edge => {
+    const from = redirected.get(edge.from) ?? edge.from
+    const to = redirected.get(edge.to) ?? edge.to
+    const key = JSON.stringify([from, to, edge.kind, edge.label])
+    if ((from === to && (redirected.has(edge.from) || redirected.has(edge.to))) || seen.has(key)) return []
+    seen.add(key)
+    return [{ ...edge, from, to }]
+  })
+  return { topology: { ...topology, boxes: topology.boxes.filter(box => visible.has(box.id)), edges }, counts }
+}
+
 /** Geometry consumes the same structural edges as source inspection. Old
  * rosters without a graph use the shared compiler on their retained nodes. */
 export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopology(nodes)) {
@@ -67,8 +112,14 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
   const sources = new Map(sectionNodes({ id: 'test', label: '', nodes }).map(node => [node.id, node]))
   const boxes = new Map<string, Box>()
   for (const descriptor of topology.boxes) {
-    const box: Box = { ...descriptor, source: descriptor.sourceId ? sources.get(descriptor.sourceId) : undefined,
-      context: descriptor.id === topology.entry ? nodes[0] : nodes.at(-1) }
+    const source = descriptor.sourceId ? sources.get(descriptor.sourceId) : undefined
+    const box: Box = { ...descriptor, source }
+    if (!source && descriptor.shape === 'terminal') {
+      const adjacent = topology.edges.flatMap(edge => descriptor.id === topology.entry && edge.from === descriptor.id
+        ? [edge.to] : edge.to === descriptor.id ? [edge.from] : [])
+      const neighbor = adjacent.length === 1 ? topology.boxes.find(item => item.id === adjacent[0]) : undefined
+      if (neighbor?.sourceId) box.context = sources.get(neighbor.sourceId)
+    }
     boxes.set(box.id, box)
     const lines = Math.ceil(box.label.length / (box.shape === 'decision' ? 14 : 21))
     const height = box.shape === 'terminal' ? 30 : Math.max(44, Math.min(5, lines) * 16 + 16) * (box.shape === 'decision' ? 1.45 : 1)
@@ -79,6 +130,8 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
   })
   dagre.layout(graph)
   const placed = [...boxes.values()].map(box => ({ ...box, ...graph.node(box.id) as Bounds }))
+  // Geometry also sets keyboard reading order. The compiler emits continuations backwards.
+  placed.sort((a, b) => a.y - b.y || a.x - b.x)
   const byId = new Map(placed.map(b => [b.id, b]))
   // Dagre clips to rectangles. Extend the actual arrow to the diamond or
   // slanted input/output perimeter, otherwise it appears to stop in mid-air.

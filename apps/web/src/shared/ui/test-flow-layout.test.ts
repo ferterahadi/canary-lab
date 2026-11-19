@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { ReadableNode } from '@shared/readable-tests/types'
-import { completedStepCounts, layoutTestFlow, stepVisitKey } from './test-flow-layout'
+import { foldedTopology, completedStepCounts, layoutTestFlow, stepVisitKey } from './test-flow-layout'
 
 const base = { text: '', fidelity: 'exact' as const, source: { file: 'suite.ts', startLine: 2, endLine: 2, snippet: 'return' } }
 const exit: ReadableNode = { ...base, kind: 'leaf', role: 'action', id: 'exit', flow: { kind: 'return', label: 'Return' } }
@@ -31,4 +31,19 @@ it('counts completed named steps per test and starts fresh on retry', () => {
   ])
   expect(counts.get('a')?.get(stepVisitKey(step.location, step.title))).toBe(2)
   expect(counts.get('b')?.size).toBe(0)
+})
+
+it('folds nested groups without losing an early return or the normal successor', () => {
+  const loop: ReadableNode = { ...base, id: 'deadline', kind: 'loop', loopKind: 'while', children: [decision] }
+  const after: ReadableNode = { ...base, kind: 'leaf', role: 'check', id: 'after' }
+  const section = { id: 'test', label: 'Overview', nodes: [loop, after] }
+  const full = foldedTopology(section)
+  const fold = foldedTopology(section, ['deadline'])
+  expect(fold.counts.get('deadline')).toBe(2)
+  expect(fold.topology.boxes.map(box => box.id)).not.toContain('exit')
+  expect(fold.topology.edges.map(edge => [edge.from, edge.to])).toEqual(expect.arrayContaining([
+    ['start', 'deadline'], ['deadline', 'end'], ['deadline', 'after'],
+  ]))
+  expect(foldedTopology(section, []).topology).toEqual(full.topology)
+  expect(layoutTestFlow(section.nodes, full.topology).nodes[0].id).toBe('start')
 })

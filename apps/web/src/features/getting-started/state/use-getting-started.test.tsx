@@ -57,16 +57,16 @@ let container: HTMLDivElement
 let controller: ReturnType<typeof useGettingStarted>
 let invalidate: ReturnType<typeof useInvalidation>['invalidate']
 let runs: RunIndexEntry[]
-function Probe() {
+function Probe({ allowAutoOpen = true }) {
   invalidate = useInvalidation().invalidate
-  controller = useGettingStarted({ allRuns: runs, flights: [], ...navigation })
+  controller = useGettingStarted({ allowAutoOpen, allRuns: runs, flights: [], ...navigation })
   const { demo } = controller
   return <DemoDialog open onClose={() => {}} workflows={demo.workflows} session={demo.session}
     actionBlockers={controller.actionBlockers} onInternalAction={controller.launchDemo}
     onOpenTarget={controller.openTarget} showDemo={demo.showDemo} onShowDemoChange={demo.setShowDemo} />
 }
-async function render() {
-  await act(async () => { root.render(<InvalidationProvider><Probe /></InvalidationProvider>) })
+async function render(allowAutoOpen = true) {
+  await act(async () => { root.render(<InvalidationProvider><Probe allowAutoOpen={allowAutoOpen} /></InvalidationProvider>) })
 }
 async function launch(action: OnboardingWorkflowAction) {
   await act(async () => { await controller.launchDemo(action) })
@@ -97,6 +97,12 @@ describe('Getting Started controller', () => {
     expect(navigation.setDemoOpen).toHaveBeenCalledTimes(1)
     act(() => controller.openDemo())
     expect(navigation.setDemoOpen).toHaveBeenCalledTimes(2)
+  })
+  it('keeps a cold inspection link visible on first arrival', async () => {
+    await render(false)
+    expect(navigation.setDemoOpen).not.toHaveBeenCalled()
+    act(() => controller.openDemo())
+    expect(navigation.setDemoOpen).toHaveBeenCalledExactlyOnceWith(true)
   })
   it.each(['run', 'heal'] as const)('launches %s with its own attribution before navigating', async (kind) => {
     await render()

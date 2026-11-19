@@ -3,6 +3,7 @@ import {
   onViewChangedInOtherTab,
   persistView,
   readPersistedView,
+  type CardInspection,
   type ReviewFocus,
   type ConfigTab,
   type ModelsAgent,
@@ -32,6 +33,8 @@ const PERSISTED = readPersistedView()
 const SEED = initialNavState(PERSISTED)
 
 export interface WorkspaceNavigation {
+  inspection?: CardInspection
+  setInspection: (value?: CardInspection) => void
   currentTests: boolean
   setCurrentTests: (current: boolean) => void
   view: WorkspaceView
@@ -181,12 +184,17 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [approval, setApproval] = useState<string | null>(SEED.approval ?? null)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
   const [bootFailureFor, setBootFailureFor] = useState<string | null>(SEED.bootFailureFor)
-  const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
+  const [reviewFocus, storeReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
+  const pushInspection = useRef(false)
+  const setReviewFocus = useCallback((next: ReviewFocus | undefined) => {
+    if (next?.flow || reviewFocus?.flow) pushInspection.current = true
+    storeReviewFocus(next)
+  }, [reviewFocus?.flow])
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const openReview = useCallback((focus?: ReviewFocus) => {
     setReviewFocus(focus)
     setSpecReviewOpen(true)
-  }, [])
+  }, [setReviewFocus])
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
@@ -229,6 +237,13 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   useEffect(() => { selectedFeatureRef.current = selectedFeature }, [selectedFeature])
   useEffect(() => { selectedRunIdRef.current = selectedRunId }, [selectedRunId])
   const currentTests = !recordedSelection || recordedSelection.run !== selectedRunId || recordedSelection.feature !== selectedFeature
+  const scope = JSON.stringify([selectedFeature, selectedRunId, currentTests])
+  const [cardRoute, setCardRoute] = useState(() => ({ scope, value: PERSISTED.inspection }))
+  const inspection = cardRoute.scope === scope ? cardRoute.value : undefined
+  const setInspection = useCallback((value?: CardInspection) => {
+    pushInspection.current = true
+    setCardRoute({ scope, value })
+  }, [scope])
   const setCurrentTests = useCallback(
     (current: boolean) => { setRecordedSelection(!current && selectedRunId ? { feature: selectedFeature, run: selectedRunId } : null) },
     [selectedFeature, selectedRunId],
@@ -262,11 +277,31 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     returnFlight,
   }
   const dialog = routedDialog(state)
+  useEffect(() => {
+    function restore() {
+      const target = readPersistedView()
+      // The rest of the workspace navigation is replace-only. Reload its normal
+      // cold-link path if history crosses into a different owning workspace.
+      if (target.view !== view || target.feature !== selectedFeature || target.run !== selectedRunId
+        || (target.currentTests !== false) !== currentTests || target.dialog !== dialog) {
+        window.location.reload()
+        return
+      }
+      pushInspection.current = false
+      storeReviewFocus(target.reviewFocus)
+      setCardRoute({ scope, value: target.inspection })
+    }
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
+  }, [view, selectedFeature, selectedRunId, currentTests, scope, dialog])
 
   // Persist the full route to the URL on every change (durable tier also mirrors
   // to localStorage for cross-tab sync).
   useEffect(() => {
-    persistView({ ...navToPersistedView(state), reviewFocus, ...(!currentTests ? { currentTests: false } : {}) })
+    const route = { ...navToPersistedView(state), reviewFocus, inspection, ...(!currentTests ? { currentTests: false as const } : {}) }
+    if (pushInspection.current) persistView(route, true)
+    else persistView(route)
+    pushInspection.current = false
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
     // configTab is listed explicitly: the `dialog` value stays 'config' while
@@ -278,7 +313,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
     // runLocation is the same case again, and keeps its identity while unchanged.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, runLocation, returnFlight, reviewFocus, currentTests, approval])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, flightLog, configTab, modelsFor, focusTest, runTab, runLocation, returnFlight, reviewFocus, inspection, currentTests, approval])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -330,7 +365,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [])
 
   return {
-    currentTests,
+    inspection, setInspection, currentTests,
     setCurrentTests,
     view,
     selectedFeature,

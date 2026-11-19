@@ -1,4 +1,5 @@
-import { useMemo, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
+import type { FlowInspection } from '../lib/workspace-view-state'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { parseSourceLocation } from '@shared/lib/source-location'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest } from '@shared/extracted-test'
@@ -47,6 +48,8 @@ interface TestPresentationShellProps<M extends SingleTestViewMode = TestViewMode
 
 /** One test's story and body: the Tests column and the coverage cards. */
 export interface TestPresentationSingleProps extends TestPresentationShellProps<SingleTestViewMode> {
+  inspection?: FlowInspection
+  onInspection?: (state: FlowInspection) => void
   view: 'single'
   stepCounts?: ReadonlyMap<string, number>
   runningLocation?: string
@@ -64,6 +67,7 @@ export interface TestPresentationSingleProps extends TestPresentationShellProps<
  * each side's English folding, and the review's edit navigation. */
 export interface TestPresentationAlignedProps extends TestPresentationShellProps {
   view: 'aligned'
+  onVisual?: () => void
   review: AlignedReview
   rows: ContextRow[]
   /** Column headings; absent, they name the review's baseline. */
@@ -118,14 +122,23 @@ export function TestPresentation(props: TestPresentationProps) {
 }
 
 function SinglePresentation(props: TestPresentationSingleProps) {
-  const mode = usePresentationMode<SingleTestViewMode>(props, 'english')
-  const [picked, setPicked] = useState<string>()
+  const [local, setLocal] = useState<FlowInspection>({ mode: 'english' })
+  const inspection = props.onInspection ? props.inspection ?? { mode: 'english' as const } : local
+  const picked = inspection.section
+  function change(next: FlowInspection) {
+    setLocal(next)
+    props.onInspection?.(next)
+    if (next.mode !== (props.mode ?? inspection.mode)) props.onModeChange?.(next.mode)
+  }
+  const mode = props.mode ?? inspection.mode
+  const setPicked = (id?: string) => change({ mode, section: id, fit: inspection.fit })
+
   const sections = useMemo(() => flowSections(props.test.readable.nodes, props.test.readable.graph?.schemaVersion === 1 ? props.test.readable.graph : undefined), [props.test.readable])
   const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
   const live = props.runningLocation && parseSourceLocation(props.runningLocation)
   const matches = live ? indexed.filter(({ node }) => node.source.file === live.file && node.source.startLine === Number(live.line)) : []
   const active = matches.length === 1 ? matches[0] : undefined
-  const section = sections.find(s => s.id === picked) ?? active?.section ?? sections[0]
+  const section = sections.find(s => s.id === picked) ?? (!picked ? active?.section : undefined) ?? sections[0]
   const implementation = section.implementation
   const sourceFile = implementation?.source.file ?? props.sourceFile
   const checks = useMemo(() => {
@@ -151,14 +164,16 @@ function SinglePresentation(props: TestPresentationSingleProps) {
     name: section.label, line: implementation.source.startLine, bodySource: implementation.source.snippet, steps: [],
     readable: { ...props.test.readable, title: section.label, nodes: section.nodes, story: implementation.story },
   } : props.test, [section, implementation, props.test])
-  const picker = sections.length > 1 && <div className="cl-flow-picker text-xs">
-    <label className="contents">Flow <select value={section.id} onChange={event => setPicked(event.target.value)}>
+  const picker = <div className="cl-flow-picker text-xs">
+    {sections.length > 1 && <label className="contents">Flow <select aria-label="Flow" value={section.id} onChange={event => setPicked(event.target.value)}>
       {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-    </select></label>
-    {picked && props.runningLocation && <button type="button" onClick={() => setPicked(undefined)}>Follow run</button>}
+    </select></label>}
+    {section.parent && <button type="button" onClick={() => setPicked(section.parent)}>Back to caller</button>}
+    {props.runningLocation && <button type="button" onClick={() => setPicked(picked ? undefined : section.id)}>{picked ? 'Follow run' : 'Pause following'}</button>}
   </div>
   const helper = section.id !== 'test'
-  return <SingleTestView key={section.id} {...props} {...mode} test={test}
+  return <SingleTestView key={section.id} {...props} mode={mode} onModeChange={next => change({ ...inspection, mode: next })}
+    inspection={inspection} updateInspection={change} test={test}
     sourceFile={sourceFile}
     changedLines={helper ? undefined : props.changedLines}
     executionHighlight={helper ? undefined : props.executionHighlight}
@@ -171,7 +186,7 @@ function AlignedPresentation(props: TestPresentationAlignedProps) {
 
 function SingleTestView({
   test,
-  section, checks, picker, active, onPick,
+  section, checks, picker, active, onPick, inspection, updateInspection,
   sourceFile,
   executionHighlight,
   runningLocation,
@@ -181,21 +196,31 @@ function SingleTestView({
   onModeChange,
   header,
 }: Resolved<TestPresentationSingleProps> & {
+  inspection: FlowInspection; updateInspection: (state: FlowInspection) => void
   checks: ReadonlyMap<number, number>
   section: FlowSection; picker: ReactNode; active?: string; onPick: (id: string) => void
 }) {
   const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
     ? new Set(test.sourceChanges.changedLines.map((line) => bodyLineForSourceLine(test, line)))
     : undefined), [suppliedChangedLines, test])
-  const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
-
-  const [fromVisual, setFromVisual] = useState(false)
+  const [storySelection, setStorySelection] = useState<ReadableSourceSelection | null>(null)
+  const graphNode = useMemo(() => inspection.node ? sectionNodes(section).find(n => n.id === inspection.node) : undefined, [section, inspection.node])
+  const definition = graphNode?.kind === 'group' && graphNode.implementation?.source
+  const selectedSource = graphNode ? { id: graphNode.id, source: inspection.definition && definition ? definition : graphNode.source } : storySelection
+  const fromVisual = Boolean(graphNode)
   const visual = mode === 'visual'
-  const selectSource = (selection: ReadableSourceSelection) => {
-    onPick(section.id)
-    setFromVisual(visual)
-    setSelectedSource(selection)
-    onModeChange('code')
+  const listing = useRef<HTMLDivElement>(null)
+  const viewport = useRef<{ left: number; top: number; ancestors: [HTMLElement, number, number][] } | null>(null)
+  useLayoutEffect(() => {
+    if (mode !== 'code' || !selectedSource) return
+    const line = listing.current?.querySelector<HTMLElement>('[data-selected-line="true"]')
+    line?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    if (line) { line.tabIndex = -1; line.focus({ preventScroll: true }) }
+  }, [mode, selectedSource?.id, inspection.definition])
+  const selectSource = (selection: ReadableSourceSelection, box?: string) => {
+    setStorySelection(visual ? null : selection)
+    updateInspection({ ...inspection, mode: 'code', section: section.id,
+      node: visual ? selection.id : undefined, box: visual ? box ?? selection.id : undefined, definition: undefined })
   }
   const code = testViewSource(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
@@ -234,9 +259,9 @@ function SingleTestView({
   const changedStory = useMemo(() => storyChangeMarks(test, sourceFile, changedLines), [changedLines, sourceFile, test])
 
   return (
-    <div data-testid="test-presentation">
+    <div ref={listing} data-testid="test-presentation">
       <div className="mb-2 flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--border-subtle)' }}>
-        <TestLanguageSwitch mode={mode} onVisual={() => onModeChange('visual')} onChange={next => { setFromVisual(false); onModeChange(next) }} />
+        <TestLanguageSwitch mode={mode} onVisual={() => onModeChange('visual')} onChange={onModeChange} />
         {header}
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
@@ -252,12 +277,14 @@ function SingleTestView({
             ? shortSourceLabel(visibleRange.file, visibleRange.startLine, visibleRange.endLine)
             : shortSourceLabel(fullTestRange.file, fullTestRange.startLine, fullTestRange.endLine)}
         </span>
+        {mode === 'code' && definition && <button type="button" className="text-xs text-accent"
+          onClick={() => updateInspection({ ...inspection, definition: !inspection.definition })}>{inspection.definition ? 'Call site' : 'Definition'}</button>}
         {mode === 'code' && selectedSource && (
           <button
             type="button"
             className="shrink-0 text-[10px]"
             style={{ color: 'var(--accent)' }}
-            onClick={() => { setSelectedSource(null); onPick('test') }}
+            onClick={() => { setStorySelection(null); onPick('test') }}
           >
             Full test
           </button>
@@ -265,8 +292,14 @@ function SingleTestView({
       </div>
 
       {picker}
+      {((inspection.section && inspection.section !== section.id) || (inspection.node && !graphNode)) &&
+        <p role="status" className="text-xs text-secondary">This selection is unavailable in this source revision.</p>}
       {visual ? <VisualTestView checks={checks} section={section} active={active} test={test.readable} location={runningLocation}
-        selected={selectedSource?.id} onSelect={selectSource} onHelper={onPick} /> : helper && !section.implementation && !(mode === 'code' && selectedSource) ? (
+        selected={inspection.box ?? selectedSource?.id} onSelect={selectSource} onHelper={onPick}
+        following={!inspection.section} onInspect={() => onPick(section.id)} collapsed={inspection.collapsed}
+        onFold={id => { const folds = inspection.collapsed ?? []; updateInspection({ ...inspection, section: section.id,
+          collapsed: folds.includes(id) ? folds.filter(f => f !== id) : [...folds, id] }) }} viewport={viewport} fit={!!inspection.fit}
+        onFit={fit => updateInspection({ ...inspection, mode, fit, section: section.id })} /> : helper && !section.implementation && !(mode === 'code' && selectedSource) ? (
         <p>This saved flow has no function definition. Open Visual to inspect its recorded steps.</p>
       ) : mode === 'english' ? (
         <div data-testid="test-presentation-english">
@@ -344,7 +377,7 @@ function SingleTestView({
  * translated here: both sides arrive as the server reviewed them. */
 function AlignedTestView({
   review, rows, mode, onModeChange, header, change, emptySide, emptySideLabel, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
-  labels, marks, codeOnly, lang, ariaLabel = 'Full test comparison',
+  labels, marks, codeOnly, lang, onVisual, ariaLabel = 'Full test comparison',
 }: Resolved<TestPresentationAlignedProps>) {
   const englishAvailable = !codeOnly && alignedEnglishAvailable(review)
   const shownMode = englishAvailable ? mode : 'code'
@@ -404,7 +437,7 @@ function AlignedTestView({
       {codeOnly
         ? <TestLanguageSwitch mode="code" onChange={onModeChange} disabled={codeOnly} />
         : englishAvailable
-          ? <TestLanguageSwitch mode={mode} onChange={onModeChange} />
+          ? <TestLanguageSwitch mode={mode} onChange={onModeChange} onVisual={onVisual} />
           : <span className="text-xs text-secondary">Supporting file · Code</span>}
       {header}
     </div>

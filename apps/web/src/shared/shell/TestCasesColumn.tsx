@@ -1,3 +1,4 @@
+import type { CardInspection, FlowInspection } from '../lib/workspace-view-state'
 import { completedStepCounts } from '../ui/test-flow-layout'
 import type { PlaywrightPlaybackEvent } from '@shared/playback'
 import { shortSourceLocation } from '@shared/lib/source-location'
@@ -40,6 +41,8 @@ type TestRunEvidence = {
 }
 
 interface Props {
+  inspection?: CardInspection
+  onInspection?: (value?: CardInspection) => void
   currentTests?: boolean
   /** Present while a run is selected, including while its details are loading. */
   onCurrentTestsChange?: (current: boolean) => void
@@ -62,7 +65,7 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence, comparisonBaseline, onTotalTestsChange, onReviewTest, onOpenResult, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ inspection, onInspection, feature, isAuthoringTests = false, runEvidence, comparisonBaseline, onTotalTestsChange, onReviewTest, onOpenResult, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
   const baselineRun = comparisonBaseline?.manifest
   const baselineRunSummary = comparisonBaseline?.summary
   const baselineRunStatus = comparisonBaseline?.status
@@ -140,6 +143,8 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   }
 
   const displaySpecs = specs
+  const missingCard = inspection && roster.confirmed && displaySpecs && !displaySpecs.some(spec =>
+    spec.tests.some(test => workspaceTestKey(spec.file, test) === inspection.card))
   const incompleteSpecs = roster.incomplete
   const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
   const discoveryError = loadError?.message || repairFailure
@@ -242,6 +247,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
             ? <p className="mb-3 text-[11px] text-muted">Recorded results are still in the Playwright tab. Current tests can’t stand in for this run’s evidence.</p>
             : displaySpecs && <p className="mb-3 text-[11px] text-muted">Showing the last list that loaded.</p>}
         </>}
+        {missingCard && <p role="status" className="text-xs text-secondary">The linked test is unavailable in this source revision.</p>}
         {!displaySpecs ? (
           // The list is arriving, so the placeholder is the list: the same cards
           // the fetch resolves into, rather than a one-line "Loading..." that
@@ -283,7 +289,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                 // the mirror declared a field the server does not send.
                 const sourceFile = t.sourceFile ?? spec.file
                 const key = workspaceTestKey(spec.file, t)
-                const isExpanded = expandedKey === key
+                const isExpanded = (inspection?.card ?? expandedKey) === key
                 const testIdentity = summaryIdentityForWorkspaceTest(
                   t.name,
                   t.line,
@@ -331,11 +337,16 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     stepCounts={testIdentity.id ? completedSteps.get(testIdentity.id) : undefined}
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
+                    inspection={inspection?.card === key ? inspection : undefined}
+                    onInspection={onInspection && (value => onInspection({ ...value, card: key }))}
                     expanded={isExpanded}
                     modified={modified}
                     modifiedLabel={baselineRunId ? 'Changed since this run' : 'Modified since the committed test'}
                     changedLines={changedLines}
-                    onToggle={() => setExpandedBySource((current) => new Map(current).set(sourceKey, isExpanded ? null : key))}
+                    onToggle={() => {
+                      onInspection?.(isExpanded ? undefined : { card: key, mode: 'english' })
+                      setExpandedBySource((current) => new Map(current).set(sourceKey, isExpanded ? null : key))
+                    }}
                     {...(resultTarget && runId ? { onOpenResult: () => onOpenResult?.(runId, resultTarget) } : {})}
                   />
                 )
@@ -447,6 +458,7 @@ function TestCardSkeleton({ width, row }: { width: string; row: number }) {
 const SKELETON_NAME_WIDTHS = ['58%', '41%', '69%'] as const
 
 function TestCard({
+  inspection, onInspection,
   sourceFile,
   testNumber,
   test,
@@ -464,6 +476,8 @@ function TestCard({
   onToggle,
   onOpenResult,
 }: {
+  inspection?: FlowInspection
+  onInspection?: (value: FlowInspection) => void
   sourceFile: string
   testNumber?: number
   test: ExtractedTest
@@ -610,7 +624,7 @@ function TestCard({
             }
           >
             {sourceUnavailable ? <p className="text-xs text-secondary">Source was not retained for this test. Its status comes from the recorded run.</p> : <TestPresentation
-              view="single"
+              view="single" inspection={inspection} onInspection={onInspection}
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}

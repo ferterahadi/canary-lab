@@ -1,35 +1,72 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import type { ReadableTest } from '@shared/readable-tests/types'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import type { ReadableSourceSelection } from './ReadableTestView'
-import { layoutTestFlow, type FlowSection } from './test-flow-layout'
+import { foldedTopology, layoutTestFlow, type FlowSection } from './test-flow-layout'
 import { Tooltip } from './Tooltip'
 
-function Chart({ section, checks, active, selected, onSelect, onHelper }: {
-  section: FlowSection; checks: ReadonlyMap<number, number>; active?: string; selected?: string
-  onSelect: (selection: ReadableSourceSelection) => void
+interface ChartProps {
+  section: FlowSection
+  checks: ReadonlyMap<number, number>
+  active?: string
+  selected?: string
+  following: boolean
+  collapsed?: string[]
+  onFold: (id: string) => void
+  onInspect: () => void
+  fit: boolean
+  onFit: (fit: boolean) => void
+  viewport: RefObject<{ left: number; top: number; ancestors: [HTMLElement, number, number][] } | null>
+  onSelect: (selection: ReadableSourceSelection, box: string) => void
   onHelper: (id: string) => void
-}) {
-  const chart = useMemo(() => layoutTestFlow(section.nodes, section.topology), [section])
+}
+
+function Chart({ section, checks, active, selected, following, collapsed, onFold, onInspect, fit, onFit, viewport, onSelect, onHelper }: ChartProps) {
+  const fold = useMemo(() => foldedTopology(section, collapsed), [section, collapsed])
+  const chart = useMemo(() => layoutTestFlow(section.nodes, fold.topology), [section, fold])
   const activeBoxes = active ? chart.nodes.filter(box => box.sourceId === active) : []
   const activeBox = activeBoxes.length === 1 ? activeBoxes[0].id : undefined
   const marker = useId()
-  const [fit, setFit] = useState(false)
   const sheet = useRef<HTMLDivElement>(null)
   const focus = useRef<HTMLButtonElement>(null)
+  function remember() {
+    const el = sheet.current
+    if (!el) return
+    const ancestors: [HTMLElement, number, number][] = []
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth)
+        ancestors.push([parent, parent.scrollLeft, parent.scrollTop])
+    }
+    viewport.current = { left: el.scrollLeft, top: el.scrollTop, ancestors }
+  }
   useLayoutEffect(() => {
-    const viewport = sheet.current
-    const running = viewport?.querySelector('[data-running="true"]')
-    if (!viewport || !running) return
+    const saved = viewport.current
+    const el = sheet.current
+    if (!el) return
+    if (saved) {
+      el.scrollLeft = saved.left
+      el.scrollTop = saved.top
+      for (const [parent, x, y] of saved.ancestors) {
+        if (parent.isConnected) { parent.scrollLeft = x; parent.scrollTop = y }
+      }
+    } else if (focus.current) focus.current.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    focus.current?.focus({ preventScroll: true })
+  }, [viewport])
+  useLayoutEffect(() => {
+    if (!following || !activeBox) return
+    const el = sheet.current
+    const running = el?.querySelector('[data-running="true"]')
+    if (!el || !running) return
     const card = running.getBoundingClientRect()
-    const bounds = viewport.getBoundingClientRect()
-    if (card.left < bounds.left) viewport.scrollLeft += card.left - bounds.left
-    else if (card.right > bounds.right) viewport.scrollLeft += card.right - bounds.right
-  }, [active, section, fit])
-  useEffect(() => { focus.current?.focus({ preventScroll: true }) }, [section, selected])
+    const bounds = el.getBoundingClientRect()
+    if (card.left < bounds.left) el.scrollLeft += card.left - bounds.left
+    else if (card.right > bounds.right) el.scrollLeft += card.right - bounds.right
+    if (card.top < bounds.top) el.scrollTop += card.top - bounds.top
+    else if (card.bottom > bounds.bottom) el.scrollTop += card.bottom - bounds.bottom
+  }, [activeBox, following, fit])
   return <>{activeBoxes.length > 1 && <p>Running step has no unique box in this view.</p>}<div className="cl-flow-size">
-    <button type="button" aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? 'Actual size' : 'Fit to width'}</button>
-  </div><div ref={sheet} className="cl-flow-sheet" role="group" aria-label={section.label}>
+    <button type="button" aria-pressed={fit} onClick={() => onFit(!fit)}>{fit ? 'Actual size' : 'Fit to width'}</button>
+  </div><div ref={sheet} onScroll={remember} onFocusCapture={() => { if (following && active) onInspect() }} className="cl-flow-sheet" role="group" aria-label={section.label}>
     <svg viewBox={`0 0 ${chart.width} ${chart.height}`} width={chart.width} height={chart.height}
       style={{ maxWidth: fit ? '100%' : 'none' }} aria-label={section.label + ' flowchart'}>
       <defs><marker id={marker} viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="7" refY="4" orient="auto-start-reverse">
@@ -46,10 +83,10 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
         const isActive = box.id === activeBox
         const checked = node?.kind === 'loop' ? checks.get(node.source.startLine) : undefined
         const helper = node?.kind === 'group' && node.origin === 'helper' && node.children.length > 0
-        const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : box.label
+        const tooltip = source ? shortSourceLocation(`${source.file}:${source.startLine}`) : 'No single source line for this boundary'
         const snippet = source?.snippet ?? ''
         return <g key={box.id} transform={`translate(${box.x - w / 2},${box.y - h / 2})`}
-          className="cl-flow-shape" data-shape={box.shape} data-lit={isActive} data-checked={checked}>
+          className="cl-flow-shape" data-shape={box.shape} data-selected={selected === box.id || undefined} data-lit={isActive} data-checked={checked}>
           {box.shape === 'decision'
             ? <polygon points={`${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}`} />
             : box.shape === 'io' ? <polygon points={`12,0 ${w},0 ${w - 12},${h} 0,${h}`} />
@@ -57,16 +94,21 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
           <foreignObject width={w} height={h}>
             <Tooltip label={node ? tooltip : (box.id === 'start' ? 'First statement · ' : 'Boundary · ') + tooltip}
               snippet={box.reason ? box.reason + '\n' + snippet : snippet}>
-              <button type="button" className="cl-flow-node" data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
-                ref={node && selected === box.id ? focus : undefined}
-                onClick={() => { if (node) onSelect({ id: node.id, source: node.source }); else if (box.context) onSelect({ id: box.context.id, source: box.context.source }) }}>
-                <span>{box.label}</span>{isActive ? <b>Running now</b> : checked ? <b>Checked ×{checked}</b> : null}
+              <button type="button" className="cl-flow-node" data-box={box.id} aria-current={selected === box.id ? 'location' : undefined} aria-disabled={!source || undefined} data-running={isActive} data-source={source && `${source.file}:${source.startLine}`}
+                ref={selected === box.id ? focus : undefined}
+                onClick={() => { remember(); const target = node ?? box.context; if (target) onSelect({ id: target.id, source: target.source }, box.id) }}>
+                <span>{box.shape === 'check' && <small aria-hidden="true">✓ </small>}{box.label}</span>{isActive ? <b>Running now</b> : checked ? <b>Checked ×{checked}</b> : selected === box.id ? <b>Selected</b> : null}
               </button>
             </Tooltip>
           </foreignObject>
-          {helper && <foreignObject x={w - 18} y={-6} width={23} height={23}>
+          {node && fold.counts.has(node.id) && <foreignObject x={w - 34} y={-6} width={42} height={23}>
+            <button className="cl-flow-open" type="button" aria-expanded={!collapsed?.includes(node.id)}
+              aria-label={`${collapsed?.includes(node.id) ? 'Expand' : 'Collapse'} ${box.label}, ${fold.counts.get(node.id)} steps`}
+              onClick={() => onFold(node.id)}>{collapsed?.includes(node.id) ? '+' : '−'} {fold.counts.get(node.id)}</button>
+          </foreignObject>}
+          {helper && <foreignObject x={w - 34} y={-6} width={42} height={23}>
             <button className="cl-flow-open" type="button" aria-label={'Show flow for ' + box.label}
-              onClick={() => onHelper(box.id)}>↳</button>
+              title={`Expand ${box.collapsedCount ?? node.children.length} steps`} onClick={() => onHelper(node.id)}>↳ {box.collapsedCount ?? node.children.length}</button>
           </foreignObject>}
         </g>
       })}
@@ -74,16 +116,12 @@ function Chart({ section, checks, active, selected, onSelect, onHelper }: {
   </div></>
 }
 
-export function VisualTestView({ section, checks, active, location, selected, onSelect, onHelper, test }: {
-  section: FlowSection; checks: ReadonlyMap<number, number>; active?: string; location?: string; selected?: string; test: ReadableTest
-  onSelect: (selection: ReadableSourceSelection) => void
-  onHelper: (id: string) => void
-}) {
+export function VisualTestView({ location, test, ...chart }: ChartProps & { location?: string; test: ReadableTest }) {
   if (test.graph && test.graph.schemaVersion !== 1) return <p>This flow version requires a newer Canary Lab. Open Code to inspect the source.</p>
   if (!test.nodes.length) return <p>No flow available for this source.</p>
   return <div role="region" aria-label="Test flow" className="cl-test-flow">
-    {location && !active && <p>Running step has no unique box in this view.</p>}
+    {location && !chart.active && <p>Running step has no unique box in this view.</p>}
     {(test.completeness === 'partial' || test.graph?.completeness === 'partial') && <p>Some steps need inspection in Code.</p>}
-    <Chart checks={checks} section={section} active={active} selected={selected} onSelect={onSelect} onHelper={onHelper} />
+    <Chart {...chart} />
   </div>
 }

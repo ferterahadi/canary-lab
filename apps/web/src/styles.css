@@ -2292,10 +2292,10 @@ body {
 .cl-lang-switch[data-mode="visual"] .cl-lang-switch-thumb { transform: translateX(200%); }
 /* Flow geometry follows the source; only the running outline carries verdict-related colour. */
 .cl-test-flow { min-width: 0; font-size: 12px; }
-.cl-flow-picker { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--text-secondary); }
+.cl-flow-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--text-secondary); }
 .cl-flow-picker select { max-width: 65%; padding: 2px 6px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-surface); }
 .cl-flow-picker button, .cl-flow-open { color: var(--accent); }
-.cl-flow-sheet { overflow: auto; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); }
+.cl-flow-sheet { max-height: 60vh; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); }
 .cl-flow-sheet svg { display: block; max-width: 100%; height: auto; margin: auto; }
 .cl-flow-size { text-align: right; color: var(--accent); margin-bottom: 3px; font-size: 11px; }
 .cl-flow-edge polyline { fill: none; stroke: var(--text-secondary); stroke-width: 1.1; }
@@ -2311,7 +2311,7 @@ body {
 .cl-flow-node span { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
 .cl-flow-shape[data-shape="decision"] .cl-flow-node { padding-inline: 24%; }
 .cl-flow-node b { font: 600 10px var(--font-mono); }
-.cl-flow-open { width: 21px; height: 21px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 5px; }
+.cl-flow-open { width: 40px; height: 21px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: 5px; }
 .cl-flow-snippet { font: 11px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48vh; overflow: auto; margin: 4px 0 0; }
 
 .cl-flow-shape[data-checked] { --stroke: var(--running); stroke-width: 2; }
@@ -2448,4 +2448,13 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .cl-heal-tab *, .cl-heal-tab *::before, .cl-heal-tab *::after { transition-duration: 0s; animation-duration: 0s; }
+}
+
+
+.cl-flow-shape[data-selected="true"] { --stroke: var(--accent); stroke-width: 2; }
+.cl-flow-node:focus-visible, .cl-flow-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.cl-flow-shape[data-shape="check"] { --stroke: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .cl-flow-sheet { scroll-behavior: auto; }
+  .cl-lang-switch-thumb { transition: none; }
 }

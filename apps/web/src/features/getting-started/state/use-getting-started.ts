@@ -10,6 +10,7 @@ import type { FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './demo-launcher'
 
 interface GettingStartedInput {
+  allowAutoOpen?: boolean
   allRuns: RunIndexEntry[]
   flights: FlightIndexEntry[]
   setDemoOpen: (open: boolean) => void
@@ -23,7 +24,7 @@ interface GettingStartedInput {
 
 /** Owns demo launches while the shell retains URL state and navigation. */
 export function useGettingStarted({
-  allRuns, flights, setDemoOpen, setSelectedFeature, navigateToRun,
+  allowAutoOpen = true, allRuns, flights, setDemoOpen, setSelectedFeature, navigateToRun,
   navigateToCoverage, openFlight, openFlightStage, openFeatureStage,
 }: GettingStartedInput) {
   const demo = useDemoLauncher(allRuns, flights)
@@ -38,9 +39,9 @@ export function useGettingStarted({
   // `markSeen` flips `autoOpen` false, so this fires at most once per browser
   // and never reopens over a user who closed it.
   useEffect(() => {
-    if (!demo.autoOpen) return
+    if (!allowAutoOpen || !demo.autoOpen) return
     openDemo()
-  }, [demo.autoOpen, openDemo])
+  }, [allowAutoOpen, demo.autoOpen, openDemo])
   const demoExportRun = useMemo(() => {
     const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
     if (!feature || feature.kind !== 'export') return null

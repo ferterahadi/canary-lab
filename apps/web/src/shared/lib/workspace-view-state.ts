@@ -124,7 +124,34 @@ export interface RunOpenTarget {
   tab?: RunArrivalTab
 }
 
-export interface ReviewFocus { file?: string; line?: number; mode?: 'english' | 'code'; baseline?: 'run'; change?: 'added' | 'changed' | 'removed'; test?: string }
+/** Node and section IDs resolve against the loaded case. A URL never supplies a file to open. */
+export interface FlowInspection {
+  mode: 'english' | 'code' | 'visual'
+  section?: string
+  node?: string
+  box?: string
+  definition?: boolean
+  collapsed?: string[]
+  fit?: boolean
+}
+export interface CardInspection extends FlowInspection { card: string }
+export interface ReviewFocus { file?: string; line?: number; mode?: FlowInspection['mode']; baseline?: 'run'; change?: 'added' | 'changed' | 'removed'; test?: string; side?: 'before' | 'after'; comparisonMode?: 'code' | 'english'; flow?: CardInspection; cursor?: number }
+
+function readInspection(params: URLSearchParams, prefix: string): CardInspection | undefined {
+  const card = params.get(prefix + 'Case')
+  const mode = params.get(prefix + 'Mode')
+  if (!card || !['code', 'visual', 'english'].includes(mode ?? '')) return
+  const id = (key: string) => params.get(prefix + key) || undefined
+  return { card, mode: mode as FlowInspection['mode'], section: id('Section'), node: id('Node'), box: id('Box'),
+    collapsed: id('Fold')?.split(',').filter(Boolean), definition: params.get(prefix + 'Def') === '1' || undefined, fit: params.get(prefix + 'Fit') === '1' || undefined }
+}
+
+function writeInspection(params: URLSearchParams, prefix: string, state?: CardInspection) {
+  for (const [key, value] of Object.entries({ Case: state?.card, Mode: state?.mode, Section: state?.section,
+    Fold: state?.collapsed?.join(','), Node: state?.node, Box: state?.box, Def: state?.definition && '1', Fit: state?.fit && '1' })) {
+    setOrDelete(params, prefix + key, value || null)
+  }
+}
 
 /** URL-mode MCP elicitation explicitly invites the human to answer this
  * checkpoint in the existing UI. The token is the fact and the review flag is
@@ -149,6 +176,7 @@ export interface PersistedView {
    *  recorded tests (URL only). True remains supported for older links. */
   currentTests?: boolean
   approval?: string | null
+  inspection?: CardInspection
   reviewFocus?: ReviewFocus
   view: WorkspaceView
   feature: string | null
@@ -322,9 +350,16 @@ export function readPersistedView(): PersistedView {
     // view itself, dropped there.
     const returnFlight = v === 'flights' ? null : params.get('from') || null
     const change = params.get('reviewChange')
-    const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && (params.get('reviewFile') || params.get('reviewBase') === 'run' || params.get('reviewMode')) ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), ...(params.get('reviewFile') ? { file: params.get('reviewFile')! } : {}), line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
+    const reviewFlow = readInspection(params, 'reviewFlow')
+    const comparisonMode = params.get('reviewReturn')
+    const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && (params.get('reviewFile') || params.get('reviewBase') === 'run' || params.get('reviewMode')) ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), ...(params.get('reviewFile') ? { file: params.get('reviewFile')! } : {}), line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, ...(params.get('reviewSide') === 'before' || params.get('reviewSide') === 'after' ? { side: params.get('reviewSide') as 'before' | 'after' } : {}),
+      ...(reviewFlow && { flow: reviewFlow }),
+      ...(comparisonMode === 'code' || comparisonMode === 'english' ? { comparisonMode } : {}),
+      ...(/^\d+$/.test(params.get('reviewCursor') ?? '') ? { cursor: Number(params.get('reviewCursor')) } : {}),
+      mode: params.get('reviewMode') === 'visual' ? 'visual' as const : params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
     const approval = dialog === 'notifications' && params.get('approval') ? { approval: params.get('approval') } : {}
-    const review = reviewFocus ? { reviewFocus } : {}
+    const inspection = feature && (!v || v === 'workspace') ? readInspection(params, 'flow') : undefined
+    const review = { ...(reviewFocus && { reviewFocus }), ...(inspection && { inspection }) }
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
     const source = params.get('tests')
@@ -348,13 +383,14 @@ export function readPersistedView(): PersistedView {
 
 /** Persist to the URL (replaceState — no history spam) and mirror the durable
  *  tier to localStorage (which fires a `storage` event in other tabs). */
-export function persistView(state: PersistedView): void {
+export function persistView(state: PersistedView, push = false): void {
   try {
     const params = new URLSearchParams(window.location.search)
     writeViewParams(params, state)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
-    window.history.replaceState(null, '', url)
+    if (push && url !== window.location.pathname + window.location.search + window.location.hash) window.history.pushState(null, '', url)
+    else window.history.replaceState(null, '', url)
   } catch { /* ignore */ }
   try {
     // Durable tier only — see the header note on why run/dialog stay URL-local.
@@ -408,6 +444,12 @@ function writeViewParams(params: URLSearchParams, state: PersistedView): void {
   setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
   // `models` only qualifies the settings dialog — drop it otherwise, so a
   // matrix pick can't outlive the settings dialog it was stacked over.
+  writeInspection(params, 'flow', state.view === 'workspace' && state.feature ? state.inspection : undefined)
+  const review = state.dialog === 'tests-review' ? state.reviewFocus : undefined
+  writeInspection(params, 'reviewFlow', review?.flow)
+  setOrDelete(params, 'reviewReturn', review?.comparisonMode ?? null)
+  setOrDelete(params, 'reviewSide', review?.side ?? null)
+  setOrDelete(params, 'reviewCursor', review?.cursor == null ? null : String(review.cursor))
   setOrDelete(params, 'reviewBase', state.dialog === 'tests-review' ? state.reviewFocus?.baseline ?? null : null)
   setOrDelete(params, 'reviewChange', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' ? state.reviewFocus.change ?? null : null)
   setOrDelete(params, 'reviewTest', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' && state.reviewFocus.change ? state.reviewFocus.test ?? null : null)

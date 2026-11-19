@@ -757,3 +757,21 @@ it('keeps completed loop checks separate from the running wait across all three 
   expect(container.querySelector('[data-checked="3"]')?.textContent).toContain('Checked ×3')
   expect(container.querySelector('[data-running="true"]')?.textContent).toContain('Wait 3 s')
 })
+
+it('pins an inspected source line across execution updates and restores its diagram focus', async () => {
+  const sourceFile = '/repo/e2e/checkout.spec.ts'
+  const render = (line: number) => act(async () => root.render(<TestPresentation view="single" test={TEST}
+    sourceFile={sourceFile} runningLocation={sourceFile + ':' + line} />))
+  const visual = () => container.querySelector<HTMLButtonElement>('[aria-label="Visual"]')!
+  await render(10)
+  await act(async () => visual().click())
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-box="open-checkout"]')!.click())
+  await render(11)
+  expect(container.querySelector('[data-selected-line="true"]')?.getAttribute('data-source-line')).toBe('11')
+  await act(async () => visual().click())
+  expect(document.activeElement?.getAttribute('data-box')).toBe('open-checkout')
+  await render(10)
+  expect(document.activeElement?.getAttribute('data-box')).toBe('open-checkout')
+  expect(container.querySelector('[data-running="true"]')?.getAttribute('data-box')).toBe('checkout-step')
+  expect(container.textContent).toContain('Follow run')
+})
