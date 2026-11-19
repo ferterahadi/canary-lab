@@ -61,7 +61,7 @@ describe('coverage changes delivered into agent tool context', () => {
       const first = texts(await call('get_feature_coverage', { feature: 'shop' }))
       const update = first.find((item) => item.coverageUpdate)?.coverageUpdate
       expect(update.change).toMatchObject({ feature: 'shop', freshness: { state: 'current' }, delivery: 'tool-response-and-wait' })
-      const cursor = update.change.freshness.revision
+      let cursor = update.change.freshness.revision
       const initialNotifications = first.find((item) => item.notificationUpdate)?.notificationUpdate
       expect(initialNotifications.items[0]).toMatchObject({ state: 'attention', action: { kind: 'flight', flightId: 'flight-shop' } })
       const notificationWait = call('wait_for_feature_change', { feature: 'shop', afterRevision: cursor, timeout_ms: 100 })
@@ -77,6 +77,17 @@ describe('coverage changes delivered into agent tool context', () => {
       client = await connect()
       const caughtUp = texts(await call('wait_for_feature_change', { feature: 'shop', timeout_ms: 0 }))[0]
       expect(caughtUp.notificationUpdate.revision).toBe(settled.notificationUpdate.revision)
+      store.bootstrap({ runId: 'collaborative-run', feature: 'shop', status: 'failed', startedAt: '2026-01-01T00:00:00Z', services: [], healCycles: 0 })
+      const state = texts(await call('wait_for_feature_change', { feature: 'shop', timeout_ms: 0 }))[0]
+      cursor = state.change.freshness.revision
+      const runWait = call('wait_for_feature_change', { feature: 'shop', runId: 'collaborative-run', afterRevision: cursor, afterRunRevision: state.runUpdate.revision, timeout_ms: 2000 })
+      store.patchManifest('collaborative-run', { playwrightExecutions: 2 })
+      const runChanged = texts(await runWait)[0]
+      expect(runChanged.runUpdate.revision).not.toBe(state.runUpdate.revision)
+      expect(runChanged.runUpdate.runs).toContainEqual(expect.objectContaining({ runId: 'collaborative-run', execution: 2 }))
+      expect(runChanged.change.freshness.revision).toBe(cursor)
+      const nextTool = texts(await call('get_feature_coverage', { feature: 'shop' }))
+      expect(nextTool.find((item) => item.runUpdate)?.runUpdate.revision).toBe(runChanged.runUpdate.revision)
       const waiting = call('wait_for_feature_change', { feature: 'shop', afterRevision: cursor, timeout_ms: 1000 })
       fs.appendFileSync(fixture.doc, '\nNew requirement wording.')
       await monitor.reconcile()

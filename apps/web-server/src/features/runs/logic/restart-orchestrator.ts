@@ -8,7 +8,7 @@ import type { makeAttachRunStreams } from '../run-stream-wiring'
 type RestartModeOptions = Pick<OrchestratorOptions,
   'autoHeal' | 'manualHeal' | 'externalHeal' | 'externalHealSession' | 'models' | 'projectRoot'>
 
-export function createRestartedOrchestrator(options: {
+export async function createRestartedOrchestrator(options: {
   feature: OrchestratorOptions['feature']
   env: OrchestratorOptions['env']
   runId: string
@@ -22,7 +22,8 @@ export function createRestartedOrchestrator(options: {
   attachRunStreams: ReturnType<typeof makeAttachRunStreams>
   modeOptions: RestartModeOptions
   failureLogPrefix: string
-}): { ok: true; orch: RunOrchestrator } | { ok: false; reason: 'spawn-failed' } {
+  serviceStatus?: 'starting' | 'stopped'
+}): Promise<{ ok: true; orch: RunOrchestrator } | { ok: false; reason: 'spawn-failed' }> {
   const { feature, env, runId, runDir, initialHealCycles, resources, ptyFactory,
     runnerLog, runStateSink, dirtySpecHooks, attachRunStreams, modeOptions, failureLogPrefix } = options
   let orch: RunOrchestrator
@@ -38,6 +39,12 @@ export function createRestartedOrchestrator(options: {
     if (resources.backups) restore(resources.backups)
     runnerLog.warn(`${failureLogPrefix}: ${(error as Error).message}`)
     return { ok: false, reason: 'spawn-failed' }
+  }
+  try {
+    await orch.prepareContinuation(options.serviceStatus)
+  } catch (error) {
+    if (resources.backups) restore(resources.backups)
+    throw error
   }
   // Once attached, run completion owns restoration. An attachment error must
   // propagate rather than masquerade as a constructor failure.

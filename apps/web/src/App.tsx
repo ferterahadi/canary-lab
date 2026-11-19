@@ -44,7 +44,6 @@ import type { TestReviewRequired } from './shared/api/runs'
 import type { RunOpenTarget } from './shared/lib/workspace-view-state'
 import type { ModelStageKey } from '@shared/agent-models'
 import type { NotificationTarget } from '@shared/notifications/types'
-import { plural } from '@shared/lib/plural'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
@@ -202,8 +201,8 @@ export function App() {
     openPendingReview(review.feature, review.runId)
   }, [openPendingReview])
 
-  const runLatestTests = useCallback((feature: string): void => {
-    void handleStartRun(undefined, 'test', feature)
+  const runLatestTests = useCallback((feature: string, continuationOf?: string, env?: string): void => {
+    void handleStartRun(env, 'test', feature, continuationOf)
   }, [handleStartRun])
 
   const navigateCleanupRun = useCallback((feature: string, runId: string): void => {
@@ -353,7 +352,6 @@ export function App() {
   }
 
   const approvals = useApprovals()
-  const pendingApprovals = approvals.items.filter((item) => item.status === 'pending')
   const review = {
     features,
     onFeaturesChanged: refreshFeatures,
@@ -381,12 +379,6 @@ export function App() {
         returnToFlight={returnFlight ? { flightId: returnFlight, label: returnFlightLabel, onOpen: openFlight } : null}
         notificationControl={<NotificationCenter approvals={approvals} approvalFocus={nav.approval} open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
       />
-      {(pendingApprovals.length > 0 || approvals.error) && <div role="status" className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2 text-xs">
-        <span>{approvals.error ? 'Approval status unavailable. Retrying…' : `${plural(pendingApprovals.length, 'approval')} waiting for you`}</span>
-        {pendingApprovals.map((item) => <button key={item.id} className="cl-button px-2 py-1" onClick={() => { nav.setApproval(item.id); nav.setNotificationsOpen(true) }}>
-          Review approval{item.feature ? ` · ${item.feature}` : ''}
-        </button>)}
-      </div>}
       {pendingStarts.map((pending) => <PendingRunStartNotice key={pending.requestId} pending={pending}
         onDismiss={dismissPendingStart} onRunStarted={(runId) => navigateToRun(pending.feature, runId)}
         onReview={openPendingReview} />)}

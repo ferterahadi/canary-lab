@@ -51,6 +51,11 @@ export function deriveRunViewModel(
     : agentEndedHeal ? { tone: 'error' as const, message: healEnd.message }
     : primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 
+  const actions = deriveRunActionAvailability(status, transient, { executionType, newRunRequired })
+  if (detail?.collaboration && !transient) {
+    const continuation = detail.collaboration.continuation
+    actions.restartHeal = { enabled: continuation.available, ...(continuation.reason ? { reason: continuation.reason } : {}) }
+  }
   return {
     displayStatus,
     ...(waiting ? { waiting } : {}),
@@ -58,7 +63,7 @@ export function deriveRunViewModel(
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),
-    actions: deriveRunActionAvailability(status, transient, { executionType, newRunRequired }),
+    actions,
     recoveryTimeline: events.length > 0 ? events : lifecycle ? [{ ...lifecycle, severity: severityForStatus(status) }] : [],
   }
 }

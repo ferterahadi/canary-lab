@@ -3,6 +3,7 @@
 // derived from the summary it wrote. Split out of orchestrator.ts; the bodies
 // are unchanged.
 import { type RunContext } from './run-context'
+import { beginExecutionEvidence, finishExecutionEvidence, retainLegacyExecution } from './run-execution-evidence'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -29,7 +30,8 @@ import { errorMessage } from '../../../../../../../shared/lib/error-message'
 // Spawns Playwright through the same ptyFactory used for services so tests
 // inject a fake. Returns the exit code after the pty exits.
 export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] | PlaywrightRerunSelection): Promise<number> {
-  const rerunSelection = normalizeRerunSelection(rerun)
+  const rerunSelection = normalizeRerunSelection(ctx.approvedContinuation ? undefined : rerun)
+  ctx.approvedContinuation = false
   const rerunTargets = rerunSelection?.kind === 'targets' ? rerunSelection.targets : undefined
   const rerunGrep = rerunSelection?.kind === 'grep' ? rerunSelection.grep : undefined
   const feature = featureWithLatestHealThreshold(ctx)
@@ -50,7 +52,9 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
         reason: rerunSelection.reason,
       } satisfies RunLifecycleTargetedRerun
     : undefined
+  retainLegacyExecution(ctx)
   const execution = nextExecution(ctx)
+  const evidence = beginExecutionEvidence(ctx, execution.index, rerunSelection)
   ctx.emit('playwright-started', { command: inv.command })
   recordLifecycle(ctx, targetedRerun ? 'rerunning-tests' : 'running-tests', targetedRerun ? 'Rerunning Playwright tests' : 'Running Playwright tests', {
     detail: targetedRerun
@@ -83,13 +87,22 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
   fs.mkdirSync(path.dirname(ctx.paths.playwrightStdoutPath), { recursive: true })
   fs.writeFileSync(ctx.paths.playwrightStdoutPath, '')
   pty.onData((chunk) => {
-    try { fs.appendFileSync(ctx.paths.playwrightStdoutPath, chunk) } catch { /* ignore */ }
+    try {
+      fs.appendFileSync(ctx.paths.playwrightStdoutPath, chunk)
+      fs.appendFileSync(path.join(ctx.runDir, evidence.outputPath), chunk)
+    } catch (error) { ctx.runnerLog?.warn(`Execution output persistence failed: ${errorMessage(error)}`) }
     ctx.emit('playwright-output', { chunk })
   })
-  return new Promise<number>((resolve) => {
+  return new Promise<number>((resolve, reject) => {
     pty.onExit(({ exitCode, signal }) => {
       ctx.playwrightPty = null
-      persistPlaywrightArtifacts(ctx)
+      const waiter = ctx.playwrightExitWaiter
+      ctx.playwrightExitWaiter = null
+      if (waiter) waiter({ exitCode, signal })
+      try {
+        persistPlaywrightArtifacts(ctx)
+        finishExecutionEvidence(ctx, evidence, exitCode)
+      } catch (error) { reject(error); return }
       // Before the verdict is read: whoever decides the status (and whoever
       // reads the run over MCP right after) sees which live edits did not run.
       recordSpecEdits(ctx)
@@ -100,9 +113,6 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
         severity: ctx.serviceFailure ? 'error' : exitCode === 0 ? 'success' : 'warning',
         execution,
       })
-      const waiter = ctx.playwrightExitWaiter
-      ctx.playwrightExitWaiter = null
-      if (waiter) waiter({ exitCode, signal })
       resolve(exitCode)
     })
   })

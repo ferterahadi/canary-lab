@@ -752,7 +752,7 @@ it('notices a suite removed while its comparison stays open', async () => {
   const intervals = vi.spyOn(globalThis, 'setInterval')
   try {
     await render({ features: [feature()], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail })
-    const reconcile = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0] as (() => void) | undefined
+    const reconcile = intervals.mock.calls.find(([, delay]) => delay === 5000)?.[0] as (() => void) | undefined
     expect(reconcile).toBeDefined()
     vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
     await act(async () => { reconcile?.(); await Promise.resolve() })
@@ -824,11 +824,11 @@ it('reconciles comparison files without events and withdraws actions on transien
     await render({ pendingRuns: [run], focusFeature: 'alpha', focusRunId: run.runId, focusRunDetail: detail, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
     expect(button('Accept & commit')).toBeDefined()
     vi.mocked(featuresApi.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(button('Accept & commit')).toBeUndefined()
     expect(document.body.textContent).toContain('Could not list all comparison files')
     vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts'], differences: [], changes: { added: [], changed: [], removed: [] } })
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(button('Accept & commit')).toBeDefined()
     expect(document.body.textContent).not.toContain('Could not list all comparison files')
   } finally { vi.useRealTimers() }

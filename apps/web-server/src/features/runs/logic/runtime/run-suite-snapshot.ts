@@ -1,4 +1,5 @@
 import { readLiveSource } from '../read-live-source'
+import { retainRunSource, retainLegacyExecution } from './run-execution-evidence'
 import { SPEC_INVENTORY_VERSION } from '../../../../../../../shared/spec-files'
 import type { AdoptSpecEditsResult, RestoreSpecEditsResult } from '../run-control-results'
 // The run-start suite snapshot (D9). Canary Lab's verdict must stay outside the
@@ -230,9 +231,11 @@ type AdoptCoreResult =
 
 /** Re-take the snapshot over the live suite, re-baseline the dirty record and
  *  record the adoption. No signal: who reruns, and how, is the caller's. */
-async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptCoreResult> {
+export async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptCoreResult> {
   const live = ctx.feature.featureDir
   const hadSnapshot = ctx.suiteDir !== live
+  if (hadSnapshot) retainRunSource(ctx.runDir, ctx.suiteDir)
+  retainLegacyExecution(ctx)
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
   const reviewed = hadSnapshot && by === 'human' && expectedRevision !== undefined
     ? await buildSuiteReview(ctx.suiteDir, live, suiteRuntimeInputTargets(ctx)) : undefined
@@ -269,6 +272,8 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
   } else snapshotSuite(ctx)
   if (ctx.suiteDir === live) return { ok: false, reason: 'snapshot-failed' }
   if (expectedRevision === undefined) ctx.stateSink.patchManifest(ctx.runId, adoptionPatch())
+  ctx.approvedContinuation = true
+  fs.rmSync(ctx.paths.summaryPath, { force: true })
   await captureDirtySpecBaseline(ctx)
   // Re-baselining awaits external hooks. Any edits made in that window remain
   // pending against the installed copy; the completed receipt is preserved.

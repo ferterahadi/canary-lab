@@ -51,6 +51,7 @@ vi.mock('./logic/runtime/orchestrator', async (importOriginal) => {
   class FakeRunOrchestrator {
     readonly runId: string
 
+    async prepareContinuation(): Promise<void> {}
     constructor(readonly opts: Record<string, unknown>) {
       if (orchHarness.constructFails) throw new Error(orchHarness.constructFails)
       this.runId = opts.runId as string

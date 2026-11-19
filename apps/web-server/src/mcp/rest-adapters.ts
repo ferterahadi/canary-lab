@@ -56,7 +56,7 @@ export function createMcpRestAdapters({
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
       return { statusCode: resp.statusCode, body }
     },
-    startRun: async (feature, env, healAgent, isolation, executionType, updateRepos) => {
+    startRun: async (feature, env, healAgent, isolation, executionType, updateRepos, continuationOf) => {
       const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
       const resp = await inject({
         method: 'POST',
@@ -67,6 +67,7 @@ export function createMcpRestAdapters({
           ...(healAgent ? { healAgent } : {}),
           ...(isolation ? { isolation } : {}),
           ...(executionType === 'boot' ? { mode: 'boot' } : {}),
+          ...(continuationOf ? { continuationOf } : {}),
           ...(updateRepos !== undefined ? { updateRepos } : {}),
           ...(demoWorkflow
             ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }

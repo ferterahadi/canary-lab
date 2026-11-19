@@ -11,13 +11,13 @@ function runReviewGate(store: Pick<RunStore, 'list' | 'get'>, feature: string, l
   const detail = store.get(latest.runId)
   const manifest = detail?.manifest
   if (!manifest || manifest.suiteSnapshot?.kind !== 'taken') return
-  if (manifest.status === 'passed' && !manifest.specEdits?.pending.length) return
+  if (manifest.status === 'passed' && !manifest.specEdits?.pending.length && !manifest.specEdits?.reviewDecisions?.length) return
   const snapshot = manifest.suiteSnapshot.dir
   const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot)
   const { executionChanged, revision, files } = suiteReviewAssessment(snapshot, liveDir, runtimeInputs)
   if (!executionChanged) return undefined
   const approval = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) =>
-    item.revision === revision && item.decision === 'approved-for-new-run',
+    item.revision === revision && (item.decision === 'approved-for-new-run' || item.decision === 'approved-for-continuation'),
   )
   if (approval) return { sourceRunId: manifest.runId, revision, approvedAt: approval.at }
   return {
@@ -39,6 +39,6 @@ export function assertNoPendingRunReview(store: Pick<RunStore, 'list' | 'get'>, 
   const gate = runReviewGate(store, feature, liveDir, startingRunId)
   if (!gate || !('type' in gate)) return gate
   throw Object.assign(new Error(
-    `test_review_required: run ${gate.runId} has suite changes that a fresh run would adopt without review. Use get_test_review and review_test_changes on that run. An active run may adopt and rerun; an ended run may approve the exact bytes for a new run or restore them.`,
+    `test_review_required: run ${gate.runId} has suite changes that a fresh run would adopt without review. Use get_test_review and review_test_changes on that run. An active run may adopt and rerun; an ended run records approval without executing, then allows explicit same-run continuation when eligible or a linked fresh run when required.`,
   ), { statusCode: 409, testReviewRequired: gate })
 }

@@ -24,7 +24,7 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close()
 })
 
-async function fixture() {
+async function fixture(status: 'passed' | 'aborted' = 'aborted') {
   const root = tempDir()
   const featuresDir = path.join(root, 'features')
   const featureDir = path.join(featuresDir, 'checkout')
@@ -38,7 +38,7 @@ async function fixture() {
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
   const store = new RunStore(logsDir, createRegistry())
   store.bootstrap({ runId: 'source', feature: 'checkout', featureDir, env: 'dev', startedAt: '2026-01-01',
-    status: 'aborted', services: [], healCycles: 0,
+    status, services: [], healCycles: 0,
     suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01', digest: 'initial' },
     specEdits: { checkedAt: 'now', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] },
   })
@@ -51,10 +51,15 @@ async function fixture() {
     store.bootstrap({ runId, feature, featureDir, env, startedAt: new Date().toISOString(), status: 'running', services: [], healCycles: 0 })
     return { kind: 'started', orch: { runId, stop: async () => {} } as OrchestratorLike }
   }
+  const restartRun = vi.fn(async (runId: string) => { store.patchManifest(runId, { status: 'running' }); return { ok: true as const, mode: 'remaining' as const } })
+  const restartExternalRun = vi.fn<NonNullable<RunsRouteDeps['restartExternalRun']>>(async (runId) => {
+    store.patchManifest(runId, { status: 'running' })
+    return { runId }
+  })
   const events: WorkspaceEvent[] = []
   const app = Fastify()
   apps.push(app)
-  await app.register(runsRoutes, { featuresDir, store, startRun, workspaceEvents: captureEvents(events) })
+  await app.register(runsRoutes, { featuresDir, store, startRun, restartRun, restartExternalRun, workspaceEvents: captureEvents(events) })
   const begin = async (payload: Record<string, unknown> = {}) => {
     const result = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'checkout', env: 'dev', ...payload } })
     expect(result.statusCode).toBe(409)
@@ -62,7 +67,7 @@ async function fixture() {
   }
   const read = async (id: string) => (await app.inject(`/api/run-requests/${id}`)).json<RunStartRequest>()
   const decide = (revision: string, action = 'accept-test-review') => app.inject({ method: 'POST', url: `/api/runs/source/${action}`, payload: { expectedRevision: revision } })
-  return { app, store, root, logsDir, featureDir, snapshot, starts, events, begin, read, decide }
+  return { app, store, root, logsDir, featureDir, snapshot, starts, restartRun, restartExternalRun, events, begin, read, decide }
 }
 
 describe('blocked run request ownership', () => {
@@ -94,7 +99,7 @@ describe('blocked run request ownership', () => {
   })
 
   it('reports unexpected dispatcher persistence failures without an unhandled background rejection', async () => {
-    const { app, begin, decide } = await fixture()
+    const { app, begin, decide } = await fixture('passed')
     const blocked = await begin()
     const error = vi.spyOn(app.log, 'error')
     vi.spyOn(RunStartRequests.prototype, 'resume').mockRejectedValue(new Error('request store unavailable'))
@@ -102,7 +107,7 @@ describe('blocked run request ownership', () => {
     await vi.waitFor(() => expect(error).toHaveBeenCalled())
   })
   it('persists an internal request and automatically starts its original options once after browser approval', async () => {
-    const { begin, read, decide, starts, events, store } = await fixture()
+    const { begin, read, decide, starts, events, store } = await fixture('passed')
     const models = { heal: { model: 'test-model' } }
     const blocked = await begin({ isolation: 'worktree', models, updateRepos: false })
     expect(blocked).toMatchObject({ type: 'test_review_required', changedFileCount: 1, reviewUrl: expect.stringContaining('reviewBase=run'), request: { owner: { kind: 'internal' }, status: 'awaiting-review' } })
@@ -118,7 +123,7 @@ describe('blocked run request ownership', () => {
   })
 
   it('keeps external requests ready until the same external session resumes, and deduplicates concurrent resumes', async () => {
-    const { app, begin, read, decide, starts } = await fixture()
+    const { app, begin, read, decide, starts } = await fixture('passed')
     const healAgent = { kind: 'external', sessionId: 'external-session', clientKind: 'codex', claimable: true, conversationName: 'Checkout repair' }
     const blocked = await begin({ healAgent, isolation: 'queue', updateRepos: false })
     expect((await begin({ healAgent, isolation: 'queue', updateRepos: false })).request.requestId).toBe(blocked.request.requestId)
@@ -135,6 +140,38 @@ describe('blocked run request ownership', () => {
     expect(starts).toHaveLength(1)
     expect(starts[0][2]).toEqual(healAgent)
     expect(starts[0][3]).toBe('queue')
+  })
+
+  it('resumes an approved external repair under its original run ID exactly once', async () => {
+    const { app, begin, read, decide, starts, restartExternalRun, store } = await fixture()
+    const healAgent = { kind: 'external', sessionId: 'repair', clientKind: 'claude', claimable: true }
+    const blocked = await begin({ healAgent })
+    const review = await decide(blocked.review_revision)
+    expect(review.json().execution).toEqual({ status: 'continuation-ready', runId: 'source' })
+    expect(await read(blocked.request.requestId)).toMatchObject({ status: 'ready' })
+    expect(restartExternalRun).not.toHaveBeenCalled()
+    const resume = () => app.inject({ method: 'POST' as const, url: `/api/run-requests/${blocked.request.requestId}/resume`,
+      headers: { 'x-canary-origin': 'mcp' }, payload: { sessionId: 'repair' } })
+    const replies = await Promise.all([resume(), resume()])
+    expect(replies.map((reply) => reply.json().runId)).toEqual(['source', 'source'])
+    expect(restartExternalRun).toHaveBeenCalledExactlyOnceWith('source', expect.objectContaining(healAgent))
+    expect(starts).toHaveLength(0)
+    expect(store.list().map((entry) => entry.runId)).toEqual(['source'])
+  })
+
+  it('keeps an ended failed-run approval ready until an explicit continuation request', async () => {
+    const { app, begin, read, decide, starts, restartRun, store } = await fixture()
+    const blocked = await begin()
+    await decide(blocked.review_revision)
+    expect(await read(blocked.request.requestId)).toMatchObject({ status: 'ready' })
+    expect(starts).toHaveLength(0)
+    expect(restartRun).not.toHaveBeenCalled()
+    expect(store.get('source')?.manifest.status).toBe('aborted')
+    const url = `/api/run-requests/${blocked.request.requestId}/resume`
+    const results = await Promise.all([app.inject({ method: 'POST', url }), app.inject({ method: 'POST', url })])
+    expect(results.map((r) => r.json().runId)).toEqual(['source', 'source'])
+    expect(restartRun).toHaveBeenCalledExactlyOnceWith('source')
+    expect(starts).toHaveLength(0)
   })
 
   it('cancels execution intent without cancelling the shared review', async () => {
@@ -171,7 +208,7 @@ describe('blocked run request ownership', () => {
   })
 
   it('follows a superseding review revision and cannot resume from the stale question', async () => {
-    const { begin, read, decide, starts, featureDir } = await fixture()
+    const { begin, read, decide, starts, featureDir } = await fixture('passed')
     const blocked = await begin()
     fs.appendFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'new change\n')
     const current = await read(blocked.request.requestId)

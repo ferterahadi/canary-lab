@@ -1,5 +1,6 @@
 import { deriveRunCaptureState } from '../../../../../../shared/run-capture-state'
-import { isPathUnder } from '../../../shared/path-containment'
+import { readRunHistory } from '../logic/run-history'
+import { confinedFile, isPathUnder } from '../../../shared/path-containment'
 import { resolveRunAgentSessionRef } from '../../agent-sessions/logic/run-agent-session-ref'
 import { proposalRecord } from '../logic/pr/proposal-record'
 // Runs REST — reads: index, detail, verification report, agent session, and the
@@ -35,6 +36,24 @@ import { buildRunCycleReview } from '../logic/cycle-recovery/cycle-review-builde
 const READABLE_LOGS_DIR = 'readable-logs'
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/history', async (req, reply) => {
+    if (!/^[\w.-]+$/.test(req.params.runId) || ['.', '..'].includes(req.params.runId)) return reply.code(400).send({ error: 'Invalid run' })
+    if (!deps.store.get(req.params.runId)) return notFound(reply, 'run')
+    return readRunHistory(deps.store, req.params.runId)
+  })
+  app.get<{ Params: { runId: string; execution: string; kind: string } }>('/api/runs/:runId/executions/:execution/:kind', async (req, reply) => {
+    if (!/^[\w.-]+$/.test(req.params.runId) || ['.', '..'].includes(req.params.runId)) return reply.code(400).send({ error: 'Invalid run' })
+    const detail = deps.store.get(req.params.runId)
+    const execution = detail?.executions?.find((e) => String(e.index) === req.params.execution)
+    if (!execution) return notFound(reply, 'execution')
+    const relative = req.params.kind === 'output' ? execution.outputPath : req.params.kind === 'summary' ? execution.summaryPath : undefined
+    if (!relative) return notFound(reply, 'execution evidence')
+    const root = runDirFor(deps.store.logsDir, req.params.runId)
+    let target: string
+    try { target = confinedFile(root, relative) } catch { return notFound(reply, 'execution evidence') }
+    if (!fs.existsSync(target)) return notFound(reply, 'execution evidence')
+    return reply.type(req.params.kind === 'summary' ? 'application/json' : 'text/plain').send(fs.readFileSync(target, 'utf8'))
+  })
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
     return withSingleAttemptIndexState(deps.store.list({ feature: req.query.feature }), deps.store.logsDir, deps.featuresDir)
   })
