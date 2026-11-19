@@ -43,7 +43,9 @@ async function harness() {
   registry.set(RUN_ID, orch as never)
   const broker = new ExternalHealBroker({ now: Date.now, emit: () => {}, patchManifest: (id, patch) => store.patchManifest(id, patch), audit: () => {} })
   const app = Fastify()
-  await app.register(registerMcpRoutes, { projectRoot, featuresDir, store, broker })
+  await app.register(registerMcpRoutes, { projectRoot, featuresDir, store, broker,
+    startRun: async () => { throw new Error('This approval test must not start a run') },
+  })
   const address = await app.listen({ host: '127.0.0.1', port: 0 })
   cleanups.push(async () => { await app.close() })
   const client = new Client({ name: 'declining-desktop', version: '1' }, { capabilities: { elicitation: { form: {} } } })
