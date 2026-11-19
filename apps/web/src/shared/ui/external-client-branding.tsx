@@ -4,7 +4,7 @@
 // shortener, and brand monogram live here once instead of being copied per
 // panel.
 
-import type { ClientKind } from '@shared/run-mode'
+import { clientKindLabel, type ClientKind } from '@shared/run-mode'
 
 export type ExternalClientKind = ClientKind
 
@@ -13,13 +13,7 @@ export type ExternalClientKind = ClientKind
 // "AI Agent", while other surfaces use "External agent" (the default).
 // Callers pass `otherLabel` to keep their copy.
 export function clientLabel(kind: ExternalClientKind, otherLabel = 'External agent'): string {
-  switch (kind) {
-    case 'claude': return 'Claude'
-    case 'codex': return 'Codex'
-    case 'claude-pty': return 'Claude (runner)'
-    case 'codex-pty': return 'Codex (runner)'
-    case 'other': return otherLabel
-  }
+  return clientKindLabel(kind, otherLabel)
 }
 
 export function clientTint(kind: ExternalClientKind): string {

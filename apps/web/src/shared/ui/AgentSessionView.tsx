@@ -441,6 +441,10 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
   const liveSegment = segments.find((segment) => segment.source.live)
   const failure = segments.map((segment) => loaded[sourceIdentityKey(segment.source)]?.error).find(Boolean)
   const loading = segments.some((segment) => !loaded[sourceIdentityKey(segment.source)] || loaded[sourceIdentityKey(segment.source)].loading)
+  const emptyCopy = failure ? EMPTY_COPY.agentUnreadable : loading ? EMPTY_COPY.agentLoading : liveSegment ? EMPTY_COPY.agentWaiting : empty ?? EMPTY_COPY.agentNone
+  const compactWait = source?.kind === 'run' && !failure && !empty?.detail && (loading || !!liveSegment)
+  // An empty live run already has a status row at the head of its timeline.
+  const showEmptyState = !rows.length && (liveSegment?.source.kind !== 'run' || !!failure)
   let previousDate: string | undefined
   return (
     // The recessed `--bg-base` well belongs to the transcript, not the pane. An
@@ -450,7 +454,10 @@ function ChronologicalSessionView({ source, sessionSources, systemRows, external
       <style>{TIMELINE_CSS}</style>
       {segments.map((segment) => <SessionLoader key={sourceIdentityKey(segment.source)} source={segment.source} report={report} />)}
       <div ref={scrollerRef} onScroll={onScroll} className="h-full min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
-        {rows.length === 0 && <EmptyState {...(failure ? EMPTY_COPY.agentUnreadable : loading ? EMPTY_COPY.agentLoading : liveSegment ? EMPTY_COPY.agentWaiting : empty ?? EMPTY_COPY.agentNone)} detail={failure ?? empty?.detail} />}
+        {showEmptyState && (compactWait
+          ? <EmptyState compact reason={emptyCopy.reason} title={emptyCopy.title} />
+          : <EmptyState {...emptyCopy} detail={failure ?? empty?.detail} />
+        )}
         {/* No rail under a settled empty state: its bottom padding would overflow
             the scroller and follow-latest would nudge the card off centre. */}
         {(rows.length > 0 || liveSegment) && <ol className="agentts-rail">

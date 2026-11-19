@@ -48,7 +48,7 @@ describe('deriveFeatureActivity', () => {
     const review = run({ runId: 'review', status: 'healing', pendingSpecEdits: 1, startedAt: '2026-01-01T00:00:00Z' })
     expect(displayedActiveRuns([...runs, review]).get('checkout')?.runId).toBe('review')
     const agent = run({ runId: 'agent', status: 'healing', startedAt: '2026-01-01T00:06:00Z' })
-    const details = { agent: { manifest: { status: 'healing', externalHealSession: { status: 'waiting' } } } } as never
+    const details = { agent: { manifest: { status: 'healing', externalHealSession: { status: 'disconnected', clientKind: 'claude', lastHeartbeatAt: '2026-01-01T00:06:00Z' } } } } as never
     expect(displayedActiveRuns([...runs, review, agent], details).get('checkout')?.runId).toBe('agent')
     expect(displayedActiveRuns([run({ runId: 'a' }), run({ runId: 'b' })]).get('checkout')?.runId).toBe('b')
   })

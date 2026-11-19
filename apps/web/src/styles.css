@@ -2287,3 +2287,133 @@ body {
   .cl-review-footer-navigation { grid-column: 1; grid-row: 1; }
   .cl-review-commit-buttons { grid-column: 1; grid-row: 2; justify-content: flex-start; }
 }
+
+/* Run detail owns the container width: even on a large monitor this tab can
+   be a narrow split pane. Keep the signal paths readable at that width. */
+.cl-heal-tab { container-type: inline-size; }
+.cl-heal-stack {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cl-heal-output { display: flex; flex: 1 0 160px; min-height: 0; flex-direction: column; overflow: hidden; }
+/* Manual mode has no local agent to narrate the handoff. Keep the socket
+   mounted so replayed bytes or a connection notice still reveal the pane. */
+.cl-manual-heal + .cl-heal-output:has(> [data-pane-idle="true"]) {
+  visibility: hidden;
+  flex: 0 0 0;
+}
+.cl-manual-heal {
+  flex: none;
+  margin: 8px 16px 16px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.cl-heal-handoff, .cl-heal-signals { padding: 16px 18px; }
+.cl-heal-handoff {
+  background: linear-gradient(110deg, color-mix(in srgb, var(--warning) 5%, var(--bg-surface)), var(--bg-surface) 70%);
+}
+.cl-heal-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; font: 11px var(--font-mono); color: var(--text-muted); }
+.cl-heal-meta { margin-bottom: 10px; }
+.cl-heal-meta h3 { display: flex; align-items: center; gap: 8px; font: 600 16px/1.3 var(--font-sans); color: var(--text-primary); letter-spacing: -.02em; }
+.cl-heal-meta h3::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.cl-manual-heal p { color: var(--text-secondary); line-height: 1.6; }
+.cl-heal-failure { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-block: 12px; padding-block: 9px; border-block: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.cl-heal-failure > span { font-size: 11px; color: var(--danger); }
+.cl-heal-failure > div { flex: 1 1 220px; min-width: 0; }
+.cl-heal-failure strong { font-size: 12px; font-weight: 500; }
+.cl-heal-failure p { font-size: 11px; }
+.cl-heal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; }
+.cl-heal-actions button { padding: 5px 10px; }
+.cl-heal-actions .cl-heal-cancel { margin-inline-start: auto; border-color: transparent; background: transparent; }
+.cl-heal-actions .cl-heal-cancel:is(:hover,:focus-visible) { color: var(--danger); background: var(--bg-hover); }
+.cl-heal-signals { border-top: 1px solid var(--border-default); background: color-mix(in srgb, var(--bg-elevated) 40%, var(--bg-surface)); }
+.cl-manual-heal h4 { font-size: 13px; font-weight: 600; }
+.cl-heal-prompt-block {
+  display: flex;
+  height: 96px;
+  min-height: 56px;
+  margin-top: 8px;
+  resize: vertical;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+.cl-heal-prompt {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  resize: none;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--text-secondary);
+  background: transparent;
+}
+.cl-heal-prompt-copy {
+  flex: none;
+  align-self: flex-start;
+  width: 28px;
+  height: 28px;
+  margin: 4px;
+}
+.cl-heal-prompt-copy[data-copied="true"] { color: var(--success); }
+.cl-manual-heal .cl-heal-error { margin: 0; padding: 8px 18px; border-top: 1px solid var(--border-default); color: var(--danger); }
+.cl-heal-session-facts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: minmax(0, max-content);
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
+}
+.cl-heal-session-facts > span {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.cl-heal-session-facts > span > :last-child {
+  max-width: 100%;
+  font: 500 12px/16px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.cl-card-body:has(> .cl-heal-session-launcher) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+.cl-heal-session-launcher {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+.cl-heal-open-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font: 500 14px var(--font-mono);
+}
+@media (pointer: coarse) {
+  .cl-heal-open-icon { width: 40px; height: 40px; }
+}
+.cl-heal-session-launcher + [role="alert"] { grid-column: 1 / -1; }
+.cl-heal-tab button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.cl-heal-tab [data-empty-reason="nothing-to-report"] > span:first-child { box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 6%, transparent); }
+.cl-heal-output > [data-pane-idle="false"] { border-top: 1px solid var(--border-subtle); }
+.cl-heal-output .cl-card-head { background: color-mix(in srgb, var(--bg-elevated) 65%, var(--bg-surface)); }
+@container (max-width: 480px) {
+  .cl-manual-heal { margin-inline: 10px; }
+  .cl-heal-handoff, .cl-heal-signals { padding: 12px; }
+}
+@media (pointer: coarse) {
+  .cl-heal-actions button { min-height: 40px; }
+  .cl-heal-prompt-copy { width: 40px; height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-heal-tab *, .cl-heal-tab *::before, .cl-heal-tab *::after { transition-duration: 0s; animation-duration: 0s; }
+}

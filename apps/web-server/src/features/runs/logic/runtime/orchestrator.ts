@@ -1,4 +1,4 @@
-import type { InterjectResult } from '../run-control-results'
+import type { HealEnding, InterjectResult } from '../run-control-results'
 import { createRunContext, type RunContext } from './run-context'
 import { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 import { recordFullSuiteTerminalRestartFallback, runPlaywright, runVerification, verificationPlanForSummary } from './run-playwright'
@@ -98,8 +98,8 @@ export class RunOrchestrator extends EventEmitter {
     return pauseAndHeal(this.ctx, this)
   }
 
-  async cancelHeal(): ReturnType<typeof cancelHeal> {
-    return cancelHeal(this.ctx, this)
+  async cancelHeal(ending?: HealEnding): ReturnType<typeof cancelHeal> {
+    return cancelHeal(this.ctx, this, ending)
   }
 
   async adoptSpecEdits(expectedRevision?: string, git?: TestReviewGitReceipt): ReturnType<typeof adoptSpecEdits> {

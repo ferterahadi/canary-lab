@@ -89,6 +89,7 @@ function mapExternalAction(action: string): { headline: string; severity: RunLif
     case 'claim-reconnect': return { headline: 'Reconnected to the heal', severity: 'success' }
     case 'claim-rejected': return { headline: 'Heal claim rejected', severity: 'error' }
     case 'stale-disconnect': return { headline: 'Went stale — disconnected', severity: 'warning' }
+    case 'end-heal': return { headline: 'Ended the heal — no fix', severity: 'warning' }
     case 'release': return { headline: 'Released the heal', severity: 'info' }
     case 'handoff': return { headline: 'Handed off the heal', severity: 'info' }
     default: return { headline: capitalize(action), severity: 'info' }

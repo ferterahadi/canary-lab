@@ -230,6 +230,20 @@ export class ExternalHealBroker {
     return { ok: true, session: next }
   }
 
+  /** Audit the claim holder ending the heal on purpose with its reason — the
+   *  Heal Agent timeline's "Ended the heal" row. The run's own record (healEnd,
+   *  lifecycle, journal) is written by the orchestrator's cancelHeal. */
+  recordHealEnded(runId: string, sessionId: string, reason: string): void {
+    const existing = this.sessions.get(runId)
+    this.deps.audit(runId, {
+      ts: new Date(this.deps.now()).toISOString(),
+      sessionId,
+      clientKind: existing?.clientKind ?? null,
+      action: 'end-heal',
+      args: { reason },
+    })
+  }
+
   /** Increment the cycle counter on the active session. No-op when no claim. */
   bumpCycle(runId: string): void {
     const existing = this.sessions.get(runId)

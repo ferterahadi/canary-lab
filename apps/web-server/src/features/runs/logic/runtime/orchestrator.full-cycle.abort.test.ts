@@ -312,6 +312,26 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('passed')
   }, 15000)
 
+  it('Stop while an external heal waits for its signal ends the run aborted, not failed', async () => {
+    // The Run panel used to offer only Stop Heal here, which records a failed
+    // run. Stop is the human ending the run, and must read as aborted.
+    const f = makeFakePtyFactory()
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1], externalHeal: true })
+    const promise = orch.runFullCycle()
+    while (f.spawned.length < 2) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(1)
+    while (readManifest(orch.paths.manifestPath)?.lifecycle?.phase !== 'waiting-for-signal') {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    await orch.stop('aborted')
+    await promise
+    const manifest = readManifest(orch.paths.manifestPath)
+    expect(manifest).toMatchObject({ status: 'aborted', lifecycle: { phase: 'aborted', headline: 'Run aborted' } })
+    expect(manifest?.stoppedEarly).toBeUndefined()
+    expect(manifest?.healEnd?.reason).not.toBe('cancelled')
+    expect(readRunsIndex(path.join(tmpDir, 'logs'))[0].status).toBe('aborted')
+  }, 15000)
+
   it('manual heal mode: gives up if user cancels via cancelHeal()', async () => {
     const f = makeFakePtyFactory()
     const orch = bootForFullCycle({

@@ -15,50 +15,44 @@ describe('KNOWN_MODELS', () => {
 })
 
 describe('RECOMMENDED_BY_STAGE', () => {
-  // The Codex column mirrors Claude's: Opus high → Sol high, Sonnet high →
-  // Luna max, Sonnet medium → Luna high.
-  const CODEX_EFFORT = { opus: 'high', sonnetHigh: 'max', sonnetMedium: 'high' } as const
-  const codexEffort = (stage: (typeof MODEL_STAGE_KEYS)[number]) => {
-    const claude = RECOMMENDED_BY_STAGE.claude[stage]
-    if (claude.model === 'opus') return CODEX_EFFORT.opus
-    return claude.effort === 'medium' ? CODEX_EFFORT.sonnetMedium : CODEX_EFFORT.sonnetHigh
-  }
-
-  it('prefers GPT-6.1 Sol over older Sol models regardless of catalog order', () => {
+  it('prefers GPT-6.2 Sol over older Sol models regardless of catalog order', () => {
     const models = [
       { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
       { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
       { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+      { value: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' },
     ]
     for (const catalog of [models, [...models].reverse()]) {
       for (const stage of MODEL_STAGE_KEYS) {
-        expect(recommendedChoice('codex', stage, catalog)).toEqual({ model: 'gpt-6.1-sol', effort: codexEffort(stage) })
+        expect(recommendedChoice('codex', stage, catalog)).toEqual({ model: 'gpt-6.2-sol', effort: 'high' })
       }
     }
   })
 
-  it('pairs Opus stages with GPT-6.1 Sol and Sonnet stages with GPT-6 Luna', () => {
+  it('selects Terra 6.1, Sol 6.2, and Luna for their respective stages', () => {
     const available = [
       { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
       { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+      { value: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' },
+      { value: 'gpt-6.2-astra', label: 'GPT-6.2-Astra' },
       { value: 'gpt-6-luna', label: 'GPT-6-Luna' },
+      { value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
     ]
     expect(Object.fromEntries(MODEL_STAGE_KEYS.map((stage) => [stage, recommendedChoice('codex', stage, available)])))
       .toEqual({
-        scout: { model: 'gpt-6-luna', effort: 'max' },
-        docs: { model: 'gpt-6-luna', effort: 'max' },
-        prd: { model: 'gpt-6.1-sol', effort: 'high' },
-        gen: { model: 'gpt-6.1-sol', effort: 'high' },
-        mapping: { model: 'gpt-6.1-sol', effort: 'high' },
-        heal: { model: 'gpt-6.1-sol', effort: 'high' },
-        portify: { model: 'gpt-6-luna', effort: 'max' },
-        report: { model: 'gpt-6-luna', effort: 'max' },
+        scout: { model: 'gpt-6.1-terra', effort: 'high' },
+        docs: { model: 'gpt-6.1-terra', effort: 'high' },
+        prd: { model: 'gpt-6.2-sol', effort: 'high' },
+        gen: { model: 'gpt-6.2-sol', effort: 'high' },
+        mapping: { model: 'gpt-6.2-sol', effort: 'high' },
+        heal: { model: 'gpt-6.2-sol', effort: 'high' },
+        portify: { model: 'gpt-6.1-terra', effort: 'high' },
+        report: { model: 'gpt-6.1-terra', effort: 'high' },
         commit: { model: 'gpt-6-luna', effort: 'high' },
       })
   })
 
-  it('uses GPT-6 Luna for Sonnet stages and GPT-6 Sol for Opus stages until GPT-6.1 Sol ships', () => {
-    // The catalog the installed codex-cli 0.158.0 lists.
+  it('uses GPT-6 Luna and GPT-6 Sol on an older Codex catalog', () => {
     const available = [
       { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
       { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
@@ -66,22 +60,22 @@ describe('RECOMMENDED_BY_STAGE', () => {
       { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
       { value: 'gpt-6-luna', label: 'GPT-6-Luna' },
     ]
-    expect(recommendedChoice('codex', 'scout', available)).toEqual({ model: 'gpt-6-luna', effort: 'max' })
+    expect(recommendedChoice('codex', 'scout', available)).toEqual({ model: 'gpt-6-luna', effort: 'high' })
     expect(recommendedChoice('codex', 'commit', available)).toEqual({ model: 'gpt-6-luna', effort: 'high' })
     expect(recommendedChoice('codex', 'gen', available)).toEqual({ model: 'gpt-6-sol', effort: 'high' })
     expect(recommendedChoice('codex', 'heal', available)).toEqual({ model: 'gpt-6-sol', effort: 'high' })
   })
 
-  it('climbs a Luna stage to Sol, at the same effort, when GPT-6 Luna is not installed', () => {
+  it('falls back to Sol when Terra 6.1 and Luna 6 are unavailable', () => {
     const available = [
       { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
       { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
     ]
-    expect(recommendedChoice('codex', 'report', available)).toEqual({ model: 'gpt-6-sol', effort: 'max' })
+    expect(recommendedChoice('codex', 'report', available)).toEqual({ model: 'gpt-6-sol', effort: 'high' })
     expect(recommendedChoice('codex', 'commit', available)).toEqual({ model: 'gpt-6-sol', effort: 'high' })
   })
 
-  it('uses an installed older Sol rather than Astra when GPT-6 Sol is unavailable', () => {
+  it('uses an installed older Sol when GPT-6 Astra is the only Astra in the catalog', () => {
     expect(recommendedChoice('codex', 'heal', [
       { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
       { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },

@@ -10,11 +10,13 @@ import {
   type RunStatus,
   type TransientAction,
 } from '@shared/run-state'
-import { runWaitingState, type RunWaitingState } from './run-waiting-state'
+import { runAgentTurn, runWaitingState, type RunAgentTurn, type RunWaitingState } from './run-waiting-state'
 import type { RunActionAvailabilitySet } from '@shared/run-state'
 
 export interface RunViewModel {
   waiting?: RunWaitingState
+  /** A connected external agent holds the repair (never set with `waiting`). */
+  agentTurn?: RunAgentTurn
   displayStatus: DisplayStatus
   headline: string
   subtext?: string
@@ -37,15 +39,22 @@ export function deriveRunViewModel(
   const events = detail?.lifecycleEvents ?? []
   const displayStatus = deriveDisplayStatus(status, transient)
   const waiting = transient ? undefined : runWaitingState(input)
-  const headline = newRunRequired ? 'New run required to verify repair' : (waiting?.kind === 'queued' ? undefined : waiting?.label) ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
-  const subtext = newRunRequired ? detail?.manifest.healEnd?.message : waiting?.detail ?? lifecycle?.detail
+  const agentTurn = transient || waiting ? undefined : runAgentTurn(input)
+  const headline = newRunRequired ? 'New run required to verify repair' : (waiting?.kind === 'queued' ? undefined : waiting?.label) ?? agentTurn?.label ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
+  const subtext = newRunRequired ? detail?.manifest.healEnd?.message : waiting?.detail ?? agentTurn?.detail ?? lifecycle?.detail
+  const healEnd = detail?.manifest.healEnd
+  // An agent's conclusion or an agent that went away is WHY this run failed;
+  // the generic "failing tests" line would hide that the repair never finished.
+  const agentEndedHeal = status === 'failed' && healEnd && (healEnd.reason === 'agent-ended' || healEnd.agentWait === 'agent-disconnected')
   const alert = newRunRequired
-    ? { tone: 'warning' as const, message: detail?.manifest.healEnd?.message ?? 'This run cannot verify another attempt. Start a fresh run after approval.' }
+    ? { tone: 'warning' as const, message: healEnd?.message ?? 'This run cannot verify another attempt. Start a fresh run after approval.' }
+    : agentEndedHeal ? { tone: 'error' as const, message: healEnd.message }
     : primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 
   return {
     displayStatus,
     ...(waiting ? { waiting } : {}),
+    ...(agentTurn ? { agentTurn } : {}),
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),

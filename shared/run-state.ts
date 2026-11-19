@@ -152,6 +152,9 @@ export interface RunServiceFailure {
  * - `no-progress` — the same failing set survived the no-progress limit of
  *                   consecutive fix attempts, or a fixless rerun made no gain.
  * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ * - `agent-ended` — the claimed external agent ended the heal on purpose with
+ *                   a recorded reason (a genuine product result, or nothing it
+ *                   can heal in this run). The agent's conclusion, not a fix.
  * - `foreign-abort` — a DIFFERENT process wrote a terminal status onto this
  *                   run's manifest while this one was still repairing (a second
  *                   server booting against the same logs dir is how this
@@ -165,9 +168,11 @@ export interface RunServiceFailure {
  * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort' | 'new-run-required'
-  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
-  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'agent-ended' | 'foreign-abort' | 'new-run-required'
+  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`.
+   *  `agent-disconnected`: a claimed external agent stopped heartbeating for
+   *  `EXTERNAL_AGENT_GONE_MS`. */
+  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died' | 'agent-disconnected'
   /** Best-effort classification of why the agent went quiet, from its output
    *  tail plus (claude) the text its session log ended on. Set only when
    *  `reason === 'no-signal'`. `unknown` = tail captured
@@ -318,6 +323,12 @@ export type UnsettledRunStatus = typeof UNSETTLED_RUN_STATUSES[number]
 
 export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
 
+/** A claimed external heal agent silent this long (since its last heartbeat)
+ *  is gone: the run stops waiting for its signal and ends failed with
+ *  `healEnd.agentWait: 'agent-disconnected'`. The claim reads `disconnected`
+ *  after `HEARTBEAT_STALE_MS`; the extra 30 minutes is the reconnect grace. */
+export const EXTERNAL_AGENT_GONE_MS = HEARTBEAT_STALE_MS + 30 * 60 * 1000
+
 export function isTerminalRunStatus(status: string | null | undefined): status is TerminalRunStatus {
   return status === 'passed' || status === 'failed' || status === 'aborted'
 }
@@ -374,6 +385,8 @@ export function deriveDisplayStatus(
   return transient ?? status
 }
 
+const isStoppableStatus = (status: RunStatus): boolean => status === 'running' || status === 'queued' || status === 'healing'
+
 export function deriveRunActionAvailability(
   status: RunStatus,
   transient: TransientAction | null = null,
@@ -381,7 +394,10 @@ export function deriveRunActionAvailability(
 ): RunActionAvailabilitySet {
   const base = {
     pauseHeal: availability(status === 'running' && !transient, disabledReason('pauseHeal', status, transient)),
-    stop: availability((status === 'running' || status === 'queued') && !transient, disabledReason('stop', status, transient)),
+    // Stop stays offered while healing. Without it the run's only stop control
+    // was Stop Heal, which ends the run as failed, so a human stopping a run
+    // that waited on a repair saw "Run failed" instead of "Run aborted".
+    stop: availability(isStoppableStatus(status) && !transient, disabledReason('stop', status, transient)),
     cancelHeal: availability(status === 'healing' && !transient, disabledReason('cancelHeal', status, transient)),
     delete: availability(isTerminalRunStatus(status) && !transient, disabledReason('delete', status, transient)),
     restartHeal: availability(isRestartableRunStatus(status) && !transient, disabledReason('restartHeal', status, transient)),
@@ -513,7 +529,7 @@ function disabledReason(
 ): string | undefined {
   if (transient) return `Action unavailable while ${transient.replace(/-/g, ' ')} is in progress.`
   if (action === 'pauseHeal') return status === 'running' ? undefined : 'Pause & Heal is available only while tests are running.'
-  if (action === 'stop') return (status === 'running' || status === 'queued') ? undefined : 'Stop is available only while a run is queued or its tests are running.'
+  if (action === 'stop') return isStoppableStatus(status) ? undefined : 'Stop is available only while a run is queued, running, or healing.'
   if (action === 'cancelHeal') return status === 'healing' ? undefined : 'Cancel Heal is available only while an agent is healing.'
   if (action === 'delete') return isTerminalRunStatus(status) ? undefined : 'Delete is available after the run finishes.'
   // `restartHeal` is the last remaining member of RunActionAvailabilitySet, so

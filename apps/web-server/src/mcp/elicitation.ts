@@ -225,7 +225,8 @@ function openUserInput<T>(
     ...(spec.mode === 'url' ? { url: { spec, complete: () => apply!(undefined as T) } } : {}),
   })
   if (browser && url && spec.mode === 'form') {
-    if (!existing) browser.store.open({ id, reviewUrl: url, command: browser.command, feature: browser.feature, message: spec.message,
+    if (!existing) browser.store.open({ id, reviewUrl: url, command: browser.command, feature: browser.feature,
+      ...(browser.runId ? { runId: browser.runId } : {}), message: spec.message,
       ...(spec.display ? { display: spec.display } : {}),
       schema: z.toJSONSchema(spec.schema) as Approval['schema'], status: 'pending', startedAt: new Date(now).toISOString(),
       expiresAt: new Date(now + INPUT_TTL_MS).toISOString(),

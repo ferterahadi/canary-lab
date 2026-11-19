@@ -1,7 +1,7 @@
 import type { DisplayStatus } from '@shared/run-state'
 import type { ExecutionType } from '@shared/verification'
 import type { StatusDotState } from '@/shared/ui/atoms'
-import type { RunWaitingState } from './run-waiting-state'
+import type { RunAgentTurn, RunWaitingState } from './run-waiting-state'
 
 export interface RunPresentation {
   label: string
@@ -34,12 +34,17 @@ const BOOT_PRESENTATION: Partial<Record<DisplayStatus, RunPresentation>> = {
 }
 
 /** The display contract for one run, independent of the surface rendering it. */
-export function presentRunStatus({ status, executionType, waiting }: {
+export function presentRunStatus({ status, executionType, waiting, agentTurn }: {
   status: DisplayStatus
   executionType?: ExecutionType | null
   waiting?: RunWaitingState
+  /** A connected agent holds the repair: name whose turn it is, keep the live look. */
+  agentTurn?: RunAgentTurn
 }): RunPresentation {
   const base = (executionType === 'boot' ? BOOT_PRESENTATION[status] : undefined) ?? RUN_PRESENTATION[status]
+  if (!waiting && agentTurn && status === 'healing' && executionType !== 'boot') {
+    return { ...base, label: agentTurn.label, chipWidth: 120, title: agentTurn.detail }
+  }
   if (!waiting || executionType === 'boot' || status !== 'healing' && status !== 'queued') return base
   const queued = waiting.kind === 'queued'
   return {

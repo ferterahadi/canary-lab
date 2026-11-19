@@ -7,6 +7,8 @@ import { classifyWaitForHealTask } from './heal-task-wait'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import {
   EXTERNAL_HEAL_NEXT_STEPS,
+  HEAL_HONEST_EXIT_RULE,
+  slimRepeatHealContext,
   buildSpecEditsWarning,
 } from '../features/runs/logic/heal/external-heal-surface'
 import { normalizeRunCounts } from '../../../../shared/run-counts'
@@ -167,6 +169,18 @@ describe('repair guardrail — delivery, not just presence', () => {
     const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
     expect(steps).toMatch(/not tests, unless a test is provably wrong/i)
     expect(steps).toMatch(/never delete, skip, weaken, or loosen an assertion/i)
+  })
+
+  // Evidence: run 2026-11-14T0719-gxh7 — a real latency failure on a suite with
+  // no editable repo and a spent one-send guard. nextSteps named only fix +
+  // signal, so the agent had no documented way to end honestly.
+  it('the honest no-fix exit rides the heal result, on every cycle, without loosening the repair rule', () => {
+    for (const steps of [EXTERNAL_HEAL_NEXT_STEPS.join('\n'), HEAL_HONEST_EXIT_RULE]) {
+      expect(steps).toContain('cancel_heal')
+      expect(steps).toMatch(/session_id and a one-sentence reason/)
+      expect(steps).toMatch(/never edit or weaken a test to avoid it/i)
+    }
+    expect(slimRepeatHealContext({ nextSteps: [] } as never).guidance).toContain('cancel_heal')
   })
 
   it('runner-owned verification rides the heal result', () => {

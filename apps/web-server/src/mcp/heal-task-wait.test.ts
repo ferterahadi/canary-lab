@@ -477,6 +477,19 @@ describe('waitForHealTask', () => {
     expect(result).toMatchObject({ ok: true, value: { type: 'failed', status: 'aborted', serverExited: expect.any(Object) } })
   })
 
+  // A delivered task means the agent is now working on it. Leaving the claim
+  // at `waiting` made the UI say the session was "waiting or disconnected"
+  // while the agent was actually repairing.
+  it('marks the claim healing once the task is handed to the agent', async () => {
+    const store = fakeStore(() => needsHealDetail())
+    const broker = ownedBroker()
+
+    const result = await waitForHealTask(asDeps({ store, broker }), 'run-1', 'sess-1', 'claude', 5000)
+
+    expect(result).toMatchObject({ ok: true, value: { type: 'needs_heal' } })
+    expect(broker.heartbeat).toHaveBeenLastCalledWith('run-1', 'sess-1', 'healing')
+  })
+
   it('waits through the transient failed verdict into the next heal task', async () => {
     let detail = runDetail({ status: 'running', healMode: 'external' })
     const store = fakeStore(() => detail)
@@ -704,7 +717,8 @@ describe('waitForHealTask', () => {
     // Three interval periods past the answer, still that one beat. The run is
     // deliberately left non-terminal, so a surviving interval WOULD get through
     // beat()'s terminal guard and touch the claim again.
+    // The only other beat is the single hand-over that marks the claim healing.
     vi.advanceTimersByTime(15_000)
-    expect(broker.heartbeat).toHaveBeenCalledTimes(1)
+    expect(broker.heartbeat.mock.calls.map((call) => (call as unknown[])[2])).toEqual(['waiting', 'healing'])
   })
 })

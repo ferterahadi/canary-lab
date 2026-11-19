@@ -21,6 +21,19 @@ export type ClientKind =
   | 'codex-pty'
   | 'other'
 
+/** Display name of a client kind. The four named clients read the same on
+ *  every surface (server messages, UI); only the unknown `other` label is
+ *  surface-specific, so callers pass their own. */
+export function clientKindLabel(kind: ClientKind, otherLabel = 'External agent'): string {
+  switch (kind) {
+    case 'claude': return 'Claude'
+    case 'codex': return 'Codex'
+    case 'claude-pty': return 'Claude (runner)'
+    case 'codex-pty': return 'Codex (runner)'
+    case 'other': return otherLabel
+  }
+}
+
 /** Who drives a feature run. `internal` = app-spawned agent; `external` = the
  *  user's own client via MCP. (Portify historically called `internal` "local".) */
 export type RunProducer = 'internal' | 'external'

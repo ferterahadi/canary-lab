@@ -104,10 +104,8 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // ── Recommendation policy ────────────────────────────────────────────────────
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
-// Claude's stable aliases resolve to the latest family member. Codex mirrors
-// Claude stage for stage: Opus high → GPT-6.1 Sol high, Sonnet high → GPT-6
-// Luna max, Sonnet medium → GPT-6 Luna high. A CLI without those ids falls back
-// to GPT-6 Sol, then any installed Sol, at the same effort.
+// Claude's stable aliases resolve to the latest family member. Codex resolves
+// recommendations against the models visible in the installed CLI's catalog.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
@@ -136,7 +134,14 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-type CodexModelRole = 'sol' | 'luna'
+type CodexModelRole = 'terra' | 'sol' | 'luna'
+
+const CODEX_SOL_IDS = ['gpt-6.2-sol', 'gpt-6.1-sol', 'gpt-6-sol']
+const CODEX_PREFERRED_IDS: Record<CodexModelRole, readonly string[]> = {
+  terra: ['gpt-6.1-terra', 'gpt-6-luna', ...CODEX_SOL_IDS],
+  sol: CODEX_SOL_IDS,
+  luna: ['gpt-6-luna', ...CODEX_SOL_IDS],
+}
 
 interface StageModelRecommendation<TModel extends string = string> {
   model: TModel
@@ -161,17 +166,17 @@ export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
     heal: { model: 'opus', effort: 'high' },
     portify: { model: 'sonnet', effort: 'high' },
     report: { model: 'sonnet', effort: 'high' },
-    commit: { model: 'sonnet', effort: 'medium' },
+    commit: { model: 'haiku', effort: 'high' },
   },
   codex: {
-    scout: { model: 'luna', effort: 'max' },
-    docs: { model: 'luna', effort: 'max' },
+    scout: { model: 'terra', effort: 'high' },
+    docs: { model: 'terra', effort: 'high' },
     prd: { model: 'sol', effort: 'high' },
     gen: { model: 'sol', effort: 'high' },
     mapping: { model: 'sol', effort: 'high' },
     heal: { model: 'sol', effort: 'high' },
-    portify: { model: 'luna', effort: 'max' },
-    report: { model: 'luna', effort: 'max' },
+    portify: { model: 'terra', effort: 'high' },
+    report: { model: 'terra', effort: 'high' },
     commit: { model: 'luna', effort: 'high' },
   },
 }
@@ -183,14 +188,10 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // Prefer the exact id regardless of catalog order. A Luna stage without
-  // GPT-6 Luna climbs to Sol rather than an older Luna; older CLIs can still use
-  // an installed Sol. Without a matching model, keep the effort-only choice.
+  // Exact ids keep recommendations independent of the CLI's catalog order.
+  // The Sol family fallback keeps older catalogs usable at the same effort.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const preferredIds = recommendation.model === 'luna'
-    ? ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-sol']
-    : ['gpt-6.1-sol', 'gpt-6-sol']
-  for (const id of preferredIds) {
+  for (const id of CODEX_PREFERRED_IDS[recommendation.model]) {
     const preferred = availableModels.find(({ value }) => value.toLowerCase() === id)
     if (preferred) return { model: preferred.value, effort: recommendation.effort }
   }

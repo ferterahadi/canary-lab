@@ -1,19 +1,36 @@
 import { useState } from 'react'
+import type { LocalHealAgent } from '@shared/run-manifest'
+import type { RunSummary } from '@shared/run-detail'
+import { firstLineOf } from '@/shared/lib/format'
 import { useOpenAgentApp } from '@/shared/state/use-open-agent-app'
 import * as runsApi from '@/shared/api/runs'
 import { displayError } from '@/shared/api/error-message'
-import { CopyField } from '@/shared/ui/CopyField'
+import { useClipboardCopy } from '@/shared/state/use-clipboard-copy'
+import { CheckIcon, CopyIcon } from '@/shared/ui/Icons'
+import manualRepairTemplate from '../../../../../web-server/prompts/manual-repair-handoff.md?raw'
 
 interface Props {
+  primaryAgent?: LocalHealAgent | null
+  summary?: RunSummary
+  cycle?: number
   runId: string
   signalPaths: { rerun: string; restart: string }
 }
 
-export function ManualHealBanner({ runId, signalPaths }: Props) {
+export function ManualHealBanner({ runId, signalPaths, cycle, summary, primaryAgent = 'claude' }: Props) {
   const { opening, error: err, setError: setErr, open: onOpen } = useOpenAgentApp()
   const [cancelling, setCancelling] = useState(false)
 
-  const onCopyFailed = (): void => setErr('Could not copy to clipboard')
+  const { copy, copiedKey } = useClipboardCopy()
+  const prompt = [
+    `Self heal Canary Lab run ${runId} in this project.`,
+    manualRepairTemplate.trim(),
+    `Restart: ${signalPaths.restart}\nRerun: ${signalPaths.rerun}`,
+  ].join('\n\n')
+  const copyPrompt = async (): Promise<void> => {
+    if (!await copy(prompt)) setErr('Could not copy to clipboard')
+    else if (err === 'Could not copy to clipboard') setErr(null)
+  }
 
   const onCancel = async (): Promise<void> => {
     setCancelling(true)
@@ -27,74 +44,66 @@ export function ManualHealBanner({ runId, signalPaths }: Props) {
     }
   }
 
+  const failures = summary?.failed
+  const singleFailure = failures?.length === 1 ? failures[0] : undefined
+
   return (
-    <div
-      className="mx-3 mt-3 mb-2 rounded-md p-3 text-xs"
-      style={{
-        background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
-        border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
-        color: 'var(--text-primary)',
-      }}
-    >
-      <div className="font-semibold" style={{ color: 'var(--warning)' }}>
-        Tests failed — auto-heal is set to <strong>Manual</strong>
+    <section className="cl-manual-heal cl-card" aria-label="Manual repair">
+      <div className="cl-heal-handoff">
+        <div className="cl-heal-meta">
+          <h3>Manual repair</h3>
+          {cycle !== undefined && cycle > 0 && <span>Cycle {cycle}</span>}
+        </div>
+        {failures && failures.length > 0 && (
+          <div className="cl-heal-failure">
+            <span>{singleFailure ? 'Failed test' : `${failures.length} failed tests`}</span>
+            {singleFailure && <div>
+              <strong>{singleFailure.name}</strong>
+              {singleFailure.error?.message && <p>{firstLineOf(singleFailure.error.message)}</p>}
+            </div>}
+          </div>
+        )}
+        <h4>1. Start the repair</h4>
+        <p>Open this project in Claude or Codex.</p>
+        <div className="cl-heal-actions">
+          {(['claude', 'codex'] as const).map((agent) => (
+            <button
+              key={agent}
+              type="button"
+              className={agent === primaryAgent ? 'cl-button-primary' : 'cl-button'}
+              disabled={opening !== null}
+              onClick={() => onOpen(agent)}
+            >
+              {opening === agent ? 'Opening…' : agent === 'claude' ? 'Open Claude' : 'Open Codex'}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="cl-button cl-heal-cancel"
+            disabled={cancelling}
+            onClick={onCancel}
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </button>
+        </div>
       </div>
-      <div className="mt-1.5" style={{ color: 'var(--text-secondary)' }}>
-        Open Claude or Codex in this project, type <code>self heal</code>, and
-        when done write to one of the per-run signal files below.
+      <div className="cl-heal-signals">
+        <h4>2. Paste the prompt into your chat</h4>
+        <div className="cl-heal-prompt-block">
+          <textarea className="cl-heal-prompt" aria-label="Repair prompt" readOnly value={prompt} />
+          <button
+            type="button"
+            className="cl-icon-button cl-heal-prompt-copy"
+            data-copied={copiedKey === prompt}
+            title={copiedKey === prompt ? 'Copied' : 'Copy prompt'}
+            onClick={copyPrompt}
+          >
+            {copiedKey === prompt ? <CheckIcon size={14} /> : <CopyIcon />}
+            <span className="sr-only" aria-live="polite">{copiedKey === prompt ? 'Copied' : 'Copy prompt'}</span>
+          </button>
+        </div>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={() => onOpen('claude')}
-          disabled={opening !== null}
-          className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-          style={{
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-default)',
-            opacity: opening === 'claude' ? 0.6 : 1,
-          }}
-        >
-          {opening === 'claude' ? 'Opening…' : 'Open Claude'}
-        </button>
-        <button
-          type="button"
-          onClick={() => onOpen('codex')}
-          disabled={opening !== null}
-          className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-          style={{
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-default)',
-            opacity: opening === 'codex' ? 0.6 : 1,
-          }}
-        >
-          {opening === 'codex' ? 'Opening…' : 'Open Codex'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={cancelling}
-          className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-          style={{ color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)' }}
-        >
-          {cancelling ? 'Cancelling…' : 'Cancel'}
-        </button>
-      </div>
-      <div className="mt-2.5 flex flex-col gap-1">
-        <CopyField
-          label="Rerun (test/config-only fix)"
-          labelPlacement="inline"
-          value={signalPaths.rerun}
-          onCopyFailed={onCopyFailed}
-        />
-        <CopyField
-          label="Restart (service/app fix)"
-          labelPlacement="inline"
-          value={signalPaths.restart}
-          onCopyFailed={onCopyFailed}
-        />
-      </div>
-      {err && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{err}</div>}
-    </div>
+      {err && <p className="cl-heal-error" role="alert">{err}</p>}
+    </section>
   )
 }

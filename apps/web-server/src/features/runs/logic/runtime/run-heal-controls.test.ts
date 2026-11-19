@@ -199,6 +199,56 @@ describe('cancelHeal', () => {
     expect(h.scheduleSigkillFallback).toHaveBeenCalledTimes(2)
   })
 
+  it('records who stopped a heal by default: the user', async () => {
+    const { ctx } = ctxFor({ status: 'healing' })
+    await cancelHeal(ctx, makeLoopHost())
+    expect(h.markStoppedEarly).toHaveBeenCalledWith(ctx, 'user-cancel-heal', 0, 0)
+    expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ message: expect.stringContaining('stopped by you') }))
+    expect(h.recordLifecycle).not.toHaveBeenCalled()
+  })
+
+  // The agent's honest exit: a genuine product failure it cannot heal in this
+  // run must read as the agent's conclusion, never as "stopped by you".
+  it('records an agent-ended heal with the agent reason in heal end, journal and lifecycle', async () => {
+    const { ctx } = ctxFor({ status: 'healing', healCycles: 1 })
+    const result = await cancelHeal(ctx, makeLoopHost(), {
+      kind: 'agent-ended',
+      reason: 'Latency 1104 ms is a real staging result; nothing editable to fix.',
+      client: 'Claude',
+    })
+
+    expect(result).toEqual({ ok: true })
+    expect(ctx.healCancelled).toBe(true)
+    expect(h.markStoppedEarly).toHaveBeenCalledWith(ctx, 'agent-ended-heal', 0, 0)
+    expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({
+      reason: 'agent-ended',
+      cycle: 1,
+      message: 'Claude ended the heal without a fix: Latency 1104 ms is a real staging result; nothing editable to fix.',
+    }))
+    expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({
+      signal: 'none',
+      hypothesis: 'Latency 1104 ms is a real staging result; nothing editable to fix.',
+    }))
+    expect(h.recordLifecycle).toHaveBeenCalledWith(ctx, 'failed', 'Agent ended the heal — no fix', expect.objectContaining({
+      detail: 'Latency 1104 ms is a real staging result; nothing editable to fix.',
+      severity: 'warning',
+    }))
+  })
+
+  it('records an agent that went away as a no-signal end, distinct from a stop', async () => {
+    const { ctx } = ctxFor({ status: 'healing', healCycles: 2 })
+    await cancelHeal(ctx, makeLoopHost(), { kind: 'agent-disconnected', client: 'Codex', lastHeartbeatAt: '2026-11-14T05:25:14.757Z' })
+
+    expect(h.markStoppedEarly).toHaveBeenCalledWith(ctx, 'agent-disconnected', 0, 0)
+    expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({
+      reason: 'no-signal',
+      agentWait: 'agent-disconnected',
+      cycle: 2,
+      message: expect.stringContaining('Codex stopped responding'),
+    }))
+    expect(h.recordLifecycle).toHaveBeenCalledWith(ctx, 'failed', 'Repair agent disconnected — heal ended', expect.objectContaining({ severity: 'warning' }))
+  })
+
   it('still cancels when the best-effort journal append throws', async () => {
     const { ctx } = ctxFor({ status: 'healing' })
     h.appendJournalIteration.mockImplementation(() => { throw new Error('disk full') })

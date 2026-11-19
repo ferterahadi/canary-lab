@@ -142,7 +142,7 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
       const execution = (body.execution as { status?: string } | undefined)?.status
       const status = body.decision === 'restored' ? 'restored' : execution === 'new-run-required' ? 'approved-for-new-run' : 'adopted'
       return asJsonResult(await continuation(request_id, runId, { ...body, status, runId, review_revision, ...(execution === 'new-run-required'
-        ? { next: 'Call start_run without run_ref. The old run remains unchanged; only the new run can produce a verdict.', nextSteps: ['start_run'] }
+        ? { next: 'Call start_run with force_new:true and without run_ref. The old run remains unchanged; only the new run can produce a verdict.', nextSteps: ['start_run'] }
         : healWaitNext()) }))
     })
   })

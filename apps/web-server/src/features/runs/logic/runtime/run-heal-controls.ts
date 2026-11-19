@@ -4,10 +4,11 @@
 // the pause / cancel / restart controls the UI drives into it. Split out of
 // orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
-import type { CancelHealResult, PauseResult } from '../run-control-results'
+import type { CancelHealResult, HealEnding, PauseResult } from '../run-control-results'
 import { waitForPlaywrightExit } from './run-playwright'
 import { recordHealEnd } from './run-heal-agent'
-import type { RunManifest } from '../../../../../../../shared/run-manifest'
+import type { RunManifest, StoppedEarlyReason } from '../../../../../../../shared/run-manifest'
+import type { HealEnd } from '../../../../../../../shared/run-state'
 import { summarizeFailures } from './run-verdict'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import { appendJournalIteration, markStoppedEarly, recordLifecycle } from './run-manifest-writer'
@@ -79,36 +80,29 @@ export async function pauseAndHeal(ctx: RunContext, host: RunLoopHost): Promise<
  *
  * Returns `409 not-healing` only when the run isn't inside the heal loop
  * at all (initial Playwright phase, terminal status). Use Abort there.
+ *
+ * `ending` names who ended it when that was not the user: the claimed
+ * external agent concluding there is nothing to heal (`cancel_heal` with a
+ * reason), or the server's agent-gone watchdog. Same teardown, distinct record.
  */
-export async function cancelHeal(ctx: RunContext, host: RunLoopHost): Promise<CancelHealResult> {
+export async function cancelHeal(ctx: RunContext, host: RunLoopHost, ending?: HealEnding): Promise<CancelHealResult> {
   const inHealLoop = ctx.status === 'healing'
     || (ctx.status === 'running' && ctx.healCycles > 0)
   if (!inHealLoop) return { ok: false, reason: 'not-healing' }
 
   ctx.healCancelled = true
-  markStoppedEarly(ctx, 'user-cancel-heal', 0, 0)
+  const record = healEndRecord(ctx, ending)
+  markStoppedEarly(ctx, record.stoppedEarly, 0, 0)
   // Record the give-up reason at its source — every healCancelled break in
   // the loop funnels through this one flag, so the manifest carries a typed
-  // "stopped by user" instead of a bare failed status.
-  recordHealEnd(ctx, {
-    reason: 'cancelled',
-    cycle: ctx.healCycles,
-    message: 'Auto-repair was stopped by you before the suite passed.',
-    at: new Date().toISOString(),
-  })
+  // reason (user stop, agent conclusion, agent gone) instead of a bare failed.
+  recordHealEnd(ctx, { ...record.healEnd, cycle: ctx.healCycles, at: new Date().toISOString() })
+  if (record.lifecycle) recordLifecycle(ctx, 'failed', record.lifecycle.headline, { detail: record.lifecycle.detail, severity: 'warning' })
 
   // Best-effort journal note BEFORE we tear down the pty so the entry
   // lands even if the user-cancel races a fast agent exit.
   try {
-    appendJournalIteration(ctx, {
-      // Logged as a `.rerun`-shaped entry for journal-parser compatibility,
-      // even though no rerun actually happens. Hypothesis text makes the
-      // intent explicit for downstream readers (heal-index, future agent
-      // contexts).
-      signal: '.rerun',
-      hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
-      fixDescription: 'Cancelled by user — no changes were made.',
-    })
+    appendJournalIteration(ctx, record.journal)
   } catch { /* journal append is best-effort */ }
 
   // Kill whichever pty is currently in flight. The loop is awaiting either
@@ -124,6 +118,46 @@ export async function cancelHeal(ctx: RunContext, host: RunLoopHost): Promise<Ca
     scheduleSigkillFallback(ctx.playwrightPty)
   }
   return { ok: true }
+}
+
+interface HealEndRecord {
+  stoppedEarly: StoppedEarlyReason
+  healEnd: Omit<HealEnd, 'cycle' | 'at'>
+  journal: Parameters<typeof appendJournalIteration>[1]
+  lifecycle?: { headline: string; detail: string }
+}
+
+function healEndRecord(ctx: RunContext, ending: HealEnding | undefined): HealEndRecord {
+  if (!ending) {
+    return {
+      stoppedEarly: 'user-cancel-heal',
+      healEnd: { reason: 'cancelled', message: 'Auto-repair was stopped by you before the suite passed.' },
+      // Logged as a `.rerun`-shaped entry for journal-parser compatibility,
+      // even though no rerun actually happens. Hypothesis text makes the
+      // intent explicit for downstream readers (heal-index, future agent
+      // contexts).
+      journal: {
+        signal: '.rerun',
+        hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
+        fixDescription: 'Cancelled by user — no changes were made.',
+      },
+    }
+  }
+  if (ending.kind === 'agent-ended') {
+    return {
+      stoppedEarly: 'agent-ended-heal',
+      healEnd: { reason: 'agent-ended', message: `${ending.client} ended the heal without a fix: ${ending.reason}` },
+      journal: { signal: 'none', hypothesis: ending.reason, fixDescription: 'Agent ended the heal — no fix applied.' },
+      lifecycle: { headline: 'Agent ended the heal — no fix', detail: ending.reason },
+    }
+  }
+  const message = `${ending.client} stopped responding (last heartbeat ${ending.lastHeartbeatAt}), so the heal ended without a fix. Start a new run, or restart this one, to repair again.`
+  return {
+    stoppedEarly: 'agent-disconnected',
+    healEnd: { reason: 'no-signal', agentWait: 'agent-disconnected', message },
+    journal: { signal: 'none', hypothesis: `The repair agent disconnected in cycle ${ctx.healCycles} and never signalled.`, fixDescription: 'No fix verified — the agent went away.' },
+    lifecycle: { headline: 'Repair agent disconnected — heal ended', detail: message },
+  }
 }
 
 export async function continueAfterTestRun(ctx: RunContext, host: RunLoopHost, finalStatus: RunManifest['status']): Promise<RunManifest['status']> {

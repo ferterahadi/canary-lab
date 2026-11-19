@@ -191,7 +191,8 @@ describe('ModelMatrixDialog', () => {
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all')!.click() })
     expect(select('Auto-repair model').value).toBe(recommendedChoice('claude', 'heal').model)
-    expect(select('Commit message model').value).toBe(recommendedChoice('claude', 'commit').model)
+    expect(select('Commit message model').value).toBe('haiku')
+    expect(select('Commit message reasoning effort').value).toBe('high')
     expect(document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.disabled).toBe(false)
   })
 
@@ -200,18 +201,17 @@ describe('ModelMatrixDialog', () => {
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all')!.click() })
 
-    // Sonnet-high stages keep Luna's `max` effort when they climb to Sol.
     expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
-    expect(select('Repo scan reasoning effort').value).toBe('max')
+    expect(select('Repo scan reasoning effort').value).toBe('high')
     expect(select('Doc collection model').value).toBe('gpt-5.6-sol')
-    expect(select('Doc collection reasoning effort').value).toBe('max')
+    expect(select('Doc collection reasoning effort').value).toBe('high')
     expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
     expect(select('Report model').value).toBe('gpt-5.6-sol')
-    expect(select('Report reasoning effort').value).toBe('max')
+    expect(select('Report reasoning effort').value).toBe('high')
   })
 
-  it('Reset all selects GPT-6 Luna for Sonnet stages and Sol for Opus stages', async () => {
+  it('Reset all uses Luna and Sol on an older Codex catalog', async () => {
     vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
@@ -229,7 +229,7 @@ describe('ModelMatrixDialog', () => {
     expect(select('Auto-repair model').value).toBe('gpt-6-sol')
     expect(select('Coverage mapping model').value).toBe('gpt-6-sol')
     expect(select('Repo scan model').value).toBe('gpt-6-luna')
-    expect(select('Repo scan reasoning effort').value).toBe('max')
+    expect(select('Repo scan reasoning effort').value).toBe('high')
     expect(select('Commit message model').value).toBe('gpt-6-luna')
     expect(select('Commit message reasoning effort').value).toBe('high')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
@@ -238,19 +238,22 @@ describe('ModelMatrixDialog', () => {
       codex: expect.objectContaining({
         gen: { model: 'gpt-6-sol', effort: 'high' },
         heal: { model: 'gpt-6-sol', effort: 'high' },
-        scout: { model: 'gpt-6-luna', effort: 'max' },
+        scout: { model: 'gpt-6-luna', effort: 'high' },
         commit: { model: 'gpt-6-luna', effort: 'high' },
       }),
     } })
   })
 
-  it('offers GPT-6.1 Sol without replacing saved pins until reset, then saves the new recommendation', async () => {
+  it('offers Terra, Sol, and Luna recommendations while respecting saved pins until reset and save', async () => {
     vi.mocked(configApi.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
         ...CODEX_MODELS,
         { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
         { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+        { value: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' },
+        { value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
+        { value: 'gpt-6-luna', label: 'GPT-6-Luna' },
       ] }),
     })
     await mount({
@@ -264,16 +267,21 @@ describe('ModelMatrixDialog', () => {
     await act(async () => {
       [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all')!.click()
     })
-    expect(select('Repo scan model').value).toBe('gpt-6.1-sol')
-    expect(select('Auto-repair model').value).toBe('gpt-6.1-sol')
+    expect(select('Repo scan model').value).toBe('gpt-6.1-terra')
+    expect(select('Test authoring model').value).toBe('gpt-6.2-sol')
+    expect(select('Auto-repair model').value).toBe('gpt-6.2-sol')
+    expect(select('Coverage mapping model').value).toBe('gpt-6.2-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
+    expect(select('Commit message model').value).toBe('gpt-6-luna')
     expect(select('Commit message reasoning effort').value).toBe('high')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
     expect(configApi.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
-        heal: { model: 'gpt-6.1-sol', effort: 'high' },
-        commit: { model: 'gpt-6.1-sol', effort: 'high' },
+        scout: { model: 'gpt-6.1-terra', effort: 'high' },
+        heal: { model: 'gpt-6.2-sol', effort: 'high' },
+        mapping: { model: 'gpt-6.2-sol', effort: 'high' },
+        commit: { model: 'gpt-6-luna', effort: 'high' },
       }),
     } })
   })

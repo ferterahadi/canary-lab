@@ -22,6 +22,7 @@ import type { ResultsSelection, ServiceLogAnchor } from '../utils/results-fixes'
 import { ServiceLogInspector } from './ServiceLogInspector'
 import { useResultsFocus } from '../state/use-results-focus'
 import { ServiceTabButton } from './RunServicePanels'
+import { Tooltip } from '@/shared/ui/Tooltip'
 import { Tab } from '@/shared/ui/Tab'
 import { BootFailureDialog } from './BootFailureDialog'
 import { compilerErrors } from '@/shared/ui/BootEvidence'
@@ -256,7 +257,9 @@ export function RunDetailColumn({
   const staleService = serviceKey !== null && requestedService === -1 ? serviceKey : null
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
   // External heal keeps its own panel: the parked/claimed state is the answer there.
+  const reviewAvailable = view.waiting?.kind === 'test-review' && !!onOpenSpecReview
   const settledWithoutRepair = isTerminalRunStatus(m.status) && m.healCycles === 0 && m.healMode !== 'external'
+  const healCopy = healEmptyCopy(m.status, m.healCycles)
   // The dialog is the full compiler-error list, so only a card that shows such a
   // list can open it. A dependency blocker has its own panel and no dialog.
   const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
@@ -264,12 +267,28 @@ export function RunDetailColumn({
   // A verify run never repairs, so it never captures a fix to ship.
   const capturedRepos = isVerify ? 0 : m.fixCapture?.repos.length ?? 0
 
+  const verifyHint = 'Verify tests existing services without starting services or applying repairs.'
+  const modeBadge = (
+    <span
+      tabIndex={isVerify ? 0 : undefined}
+      aria-description={isVerify ? verifyHint : undefined}
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+      style={{
+        background: isVerify ? 'var(--accent-soft)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
+        color: isVerify ? 'var(--accent)' : isBootRun ? 'var(--boot)' : 'var(--text-muted)',
+        letterSpacing: '0.04em',
+      }}
+    >
+      {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
+    </span>
+  )
+
   return (
     <div className="cl-panel relative flex h-full flex-col">
       <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waiting={view.waiting} />
+            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waiting={view.waiting} agentTurn={view.agentTurn} />
           </span>
           <span
             className="min-w-0 flex-1 truncate text-sm font-medium"
@@ -285,19 +304,10 @@ export function RunDetailColumn({
           >
             {m.feature}
           </span>
-          <span
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-            style={{
-              background: isVerify ? 'var(--accent-soft)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
-              color: isVerify ? 'var(--accent)' : isBootRun ? 'var(--boot)' : 'var(--text-muted)',
-              letterSpacing: '0.04em',
-            }}
-          >
-            {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
-          </span>
+          {isVerify ? <Tooltip label={verifyHint}>{modeBadge}</Tooltip> : modeBadge}
         </div>
         {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
-        {view.waiting?.kind === 'test-review' && onOpenSpecReview && (
+        {reviewAvailable && (
           <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={() => onOpenSpecReview(m.feature, m.runId)} />
         )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
@@ -395,7 +405,7 @@ export function RunDetailColumn({
             TUI isn't replayed from scratch on tab return — replaying the raw
             stream re-executes every clear-screen redraw and collapses scrollback
             to the last frame. */}
-        {!isVerify && <div hidden={tab !== 'agent'} className="h-full min-h-0">
+        {!isVerify && <div hidden={tab !== 'agent'} className="cl-heal-tab h-full min-h-0">
           {/* One flex column, not a banner beside a `h-full` block: the pane's
               wrapper clips at its own height, so a `h-full` agent view under a
               banner overflowed by exactly the banner's height and cut that much
@@ -406,17 +416,21 @@ export function RunDetailColumn({
             // and vertical position — as the Changes and Journal empty states,
             // instead of a session read that can only come back empty.
             <RunPane padded>
-              <EmptyState testId="heal-empty" {...healEmptyCopy(m.status, m.healCycles)} />
+              <EmptyState compact testId="heal-empty" reason={healCopy.reason} title={healCopy.title} />
             </RunPane>
           ) : (
           <RunPane scroll={false}>
-            <div className="flex h-full min-h-0 flex-col overflow-hidden">
+            <div className="cl-heal-stack">
               {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
-                <div className="shrink-0">
-                  <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
-                </div>
+                <ManualHealBanner
+                  runId={m.runId}
+                  signalPaths={m.signalPaths}
+                  primaryAgent={reviewAvailable ? null : m.healAgent}
+                  cycle={m.healCycles}
+                  summary={m.bootFailure || m.serviceFailure ? undefined : detail.summary}
+                />
               )}
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="cl-heal-output">
               {m.healMode === 'external' ? (
                 // External heal: there is no local PTY to attach. The agent
                 // transcript lives in the user's Claude / Codex window once a
@@ -429,7 +443,7 @@ export function RunDetailColumn({
               ) : showAgentSession ? (
                 <AgentSessionView
                   source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }}
-                  empty={healEmptyCopy(m.status, m.healCycles)}
+                  empty={healCopy}
                 />
               ) : (
                 <PaneTerminal

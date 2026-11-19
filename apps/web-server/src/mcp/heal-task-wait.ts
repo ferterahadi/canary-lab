@@ -290,7 +290,7 @@ export async function waitForHealTask(
   const bootDetail = deps.store.get(runId)
   if (bootDetail && isActiveBootRun(bootDetail)) return { ok: true, value: bootSessionValue(bootDetail) }
   ensureExternalClaimForMcpCall(deps, runId, sessionId, clientKind)
-  return waitForRunCondition({
+  const result = await waitForRunCondition<WaitForHealTaskResult>({
     store: deps.store,
     runId,
     read: () => classifyWaitForHealTask(deps, runId, sessionId),
@@ -307,4 +307,9 @@ export async function waitForHealTask(
       deps.broker.heartbeat(runId, sessionId, 'waiting')
     } },
   })
+  // Handing over the task makes the agent the one working: the claim reads
+  // `healing` (not `waiting`) until its next call, so the run reads as the
+  // agent's turn rather than an idle or vanished session.
+  if (result.ok && result.value.type === 'needs_heal') deps.broker.heartbeat(runId, sessionId, 'healing')
+  return result
 }

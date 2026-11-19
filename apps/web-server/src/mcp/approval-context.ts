@@ -7,6 +7,7 @@ interface ApprovalContext {
   store: ApprovalStore
   command: string
   feature?: string
+  runId?: string
   uiUrl: string
   resume: (id: string, answer: Record<string, unknown>) => ReturnType<CanaryLabToolHandler>
 }
@@ -24,8 +25,9 @@ export function withApprovals(command: string, handler: CanaryLabToolHandler, de
     const feature = typeof args.feature === 'string' ? args.feature
       : typeof args.runId === 'string' ? deps.store.get(args.runId)?.manifest.feature
       : typeof args.workflowId === 'string' ? deps.getPortify?.(args.workflowId)?.feature : undefined
+    const runId = typeof args.runId === 'string' ? args.runId : undefined
     const run = (context: ServerContext): ReturnType<CanaryLabToolHandler> => approvalContext.run({
-      store: deps.approvals!, command, feature, uiUrl,
+      store: deps.approvals!, command, feature, ...(runId ? { runId } : {}), uiUrl,
       resume: (id, answer) => run({ ...request, mcpReq: { ...request.mcpReq,
         requestState: () => id, inputResponses: { answer: { action: 'accept', content: answer } },
       } } as ServerContext),

@@ -8,7 +8,7 @@ import type { CanaryLabMcpDeps } from '../tool-schemas'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'
 import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../client-surface'
-import { registerRunLifecycleTools } from './run-lifecycle'
+import { closeStopQuestionsForEndedRun, registerRunLifecycleTools } from './run-lifecycle'
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { withApprovals } from '../approval-context'
 import { ApprovalStore } from '../approval-store'
@@ -452,6 +452,68 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
     )
     expect(out).toMatchObject({ restarted: true, claimed: false, claim: null, claimSuppressed: true })
     expect(claims).toEqual([])
+  })
+})
+
+// Regression (2026-11-14): "rerun now" after this conversation's own failed run
+// made a second run ID and asked the human a start question that looked like it
+// belonged to the old run. A fresh start from that session now stops first.
+describe('start_run: a fresh start right after this session\'s own ended run', () => {
+  const driven = (status: string, sessionId = 'sess-1', over: Record<string, unknown> = {}) => runDetail({
+    status, executionType: 'run', externalHealSession: { sessionId, clientKind: 'claude', status: 'disconnected' }, ...over,
+  })
+  const harnessWith = (details: RunDetail[]) => {
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
+    const read = coverageRequest()
+    const tools = harness({ store: storeOf(details, { logsDir: '/logs' }), startRun, coverageRequest: read })
+    return { ...tools, startRun, read }
+  }
+
+  it('starts nothing and asks no start question, naming the run to rerun with run_ref', async () => {
+    const { call, startRun, read } = harnessWith([driven('failed')])
+
+    expect(await call('start_run', START)).toMatchObject({
+      type: 'rerun_available',
+      runStarted: false,
+      runId: 'run-1',
+      status: 'failed',
+      nextSteps: ['rerun: start_run with run_ref "run-1" (the default when the user said rerun)', 'new run: start_run with force_new:true'],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('offers an aborted run the same way', async () => {
+    const { call } = harnessWith([driven('aborted')])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'rerun_available', runId: 'run-1', status: 'aborted' })
+  })
+
+  it('goes on to a new run when the caller says force_new', async () => {
+    const { call, read } = harnessWith([driven('failed')])
+
+    expect(await call('start_run', { ...START, force_new: true })).toMatchObject({ type: 'coverage_update_requires_choice' })
+    expect(read).toHaveBeenCalled()
+  })
+
+  it('does not stop a session that never drove the run', async () => {
+    const { call } = harnessWith([driven('failed', 'someone-else')])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
+  })
+
+  it('only looks at the latest run, and a passed run is not rerun', async () => {
+    const older = driven('failed', 'sess-1', { runId: 'run-0', startedAt: '2026-05-25T07:00:00.000Z' })
+    const passed = { ...driven('passed'), runId: 'run-2', manifest: { ...driven('passed').manifest, runId: 'run-2', startedAt: '2026-05-25T09:00:00.000Z' } } as RunDetail
+    const { call } = harnessWith([older, passed])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
+  })
+
+  it('ignores a verify run, which has no repair to rerun', async () => {
+    const { call } = harnessWith([driven('failed', 'sess-1', { executionType: 'verify' })])
+
+    expect(await call('start_run', START)).toMatchObject({ type: 'coverage_update_requires_choice' })
   })
 })
 
@@ -1127,11 +1189,113 @@ describe('cancel_heal', () => {
     expect(await text('cancel_heal', { runId: 'run-1' })).toBe('could not cancel: no heal cycle in flight')
   })
 
-  it('cancels the in-flight cycle', async () => {
-    const orch = { cancelHeal: async () => ({ ok: true }) }
-    const { call } = harness({ store: storeOf([], { registry: { get: () => orch } }) })
+  it('cancels the in-flight cycle and reports the status the run settled on', async () => {
+    const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+    const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z', healEnd: { reason: 'cancelled', cycle: 1, message: 'stopped', at: 'x' } })
+    const { call } = harness({ store: storeOf([settled], { registry: { get: () => orch } }) })
 
-    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled' })
+    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled', runStatus: 'failed', healEnd: settled.manifest.healEnd })
+    expect(orch.cancelHeal).toHaveBeenCalledWith(undefined)
+  })
+
+  // The reply used to return while the run still read `healing`, so the
+  // coverageUpdate riding on it reported latestRunStatus "healing".
+  it('waits for the run to settle before replying, so piggy-backed state is current', async () => {
+    const detail = runDetail({ status: 'healing' })
+    const listeners = new Set<(event: { kind: string; runId: string }) => void>()
+    const orch = {
+      cancelHeal: async () => {
+        setTimeout(() => {
+          Object.assign(detail.manifest, { status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+          for (const listener of listeners) listener({ kind: 'run-status', runId: 'run-1' })
+        }, 5)
+        return { ok: true }
+      },
+    }
+    const store = storeOf([detail], {
+      registry: { get: () => orch },
+      onEvent: (fn: (event: { kind: string; runId: string }) => void) => listeners.add(fn),
+      offEvent: (fn: (event: { kind: string; runId: string }) => void) => listeners.delete(fn),
+    })
+    const { call } = harness({ store })
+
+    expect(await call('cancel_heal', { runId: 'run-1' })).toMatchObject({ status: 'cancelled', runStatus: 'failed' })
+    expect(listeners.size).toBe(0)
+  })
+
+  it('treats a terminal run whose runner has let go as settled even before endedAt is written', async () => {
+    let live = true
+    const orch = { cancelHeal: async () => { live = false; return { ok: true } } }
+    const { call } = harness({ store: storeOf([runDetail({ status: 'failed' })], { registry: { get: () => live ? orch : undefined } }) })
+    expect(await call('cancel_heal', { runId: 'run-1' })).toEqual({ status: 'cancelled', runStatus: 'failed' })
+  })
+
+  it('replies with whatever the run reads once the settle window runs out', async () => {
+    vi.useFakeTimers()
+    try {
+      const orch = { cancelHeal: async () => ({ ok: true }) }
+      const listeners = new Set<() => void>()
+      const events = { onEvent: (fn: () => void) => listeners.add(fn), offEvent: (fn: () => void) => listeners.delete(fn) }
+      const stuck = harness({ store: storeOf([runDetail({ status: 'healing' })], { registry: { get: () => orch }, ...events }) })
+      const reply = stuck.call('cancel_heal', { runId: 'run-1' })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await reply).toEqual({ status: 'cancelled', runStatus: 'healing' })
+
+      const gone = harness({ store: storeOf([], { registry: { get: () => orch }, ...events }) })
+      const goneReply = gone.call('cancel_heal', { runId: 'run-1' })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(await goneReply).toEqual({ status: 'cancelled' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  describe('agent-ended heal (reason)', () => {
+    const owner = (sessionId = 'sess-1') => ({
+      assertOwnership: (_runId: string, id: string | undefined) => id === sessionId ? { ok: true } : { ok: false, reason: 'session-mismatch', currentSession: { sessionId } },
+      getSession: () => ({ sessionId, clientKind: 'claude' }),
+      recordHealEnded: vi.fn(),
+    })
+
+    it('records the agent conclusion as an agent-ended heal, not a user stop', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const broker = owner()
+      const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+      const { call } = harness({ broker, store: storeOf([settled], { registry: { get: () => orch } }) })
+
+      const reason = 'Real staging latency (1104 ms > 1000 ms); no editable repo, and a rerun cannot send again.'
+      expect(await call('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason })).toMatchObject({ status: 'agent-ended', runStatus: 'failed' })
+      expect(orch.cancelHeal).toHaveBeenCalledWith({ kind: 'agent-ended', reason, client: 'Claude' })
+      expect(broker.recordHealEnded).toHaveBeenCalledWith('run-1', 'sess-1', reason)
+    })
+
+    it('needs the claim holder session for a reason', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const { text } = harness({ broker: owner(), store: storeOf([runDetail({ status: 'healing' })], { registry: { get: () => orch } }) })
+
+      expect(await text('cancel_heal', { runId: 'run-1', reason: 'nothing to fix' })).toContain('session_id')
+      expect(await text('cancel_heal', { runId: 'run-1', session_id: 'other', reason: 'nothing to fix' })).toContain('session-mismatch')
+      expect(orch.cancelHeal).not.toHaveBeenCalled()
+    })
+
+    it('refuses a reason on a run nobody has claimed', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const broker = { ...owner(), assertOwnership: () => ({ ok: false, reason: 'no-claim' }) }
+      const { text } = harness({ broker, store: storeOf([], { registry: { get: () => orch } }) })
+      expect(await text('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason: 'x' })).toBe('no external heal claim for run: run-1')
+      expect(orch.cancelHeal).not.toHaveBeenCalled()
+    })
+
+    it('labels an unidentified or vanished claim holder as the repair agent', async () => {
+      const orch = { cancelHeal: vi.fn(async () => ({ ok: true })) }
+      const settled = runDetail({ status: 'failed', endedAt: '2026-05-25T08:05:00.000Z' })
+      for (const session of [{ sessionId: 'sess-1', clientKind: 'other' }, null]) {
+        const broker = { ...owner(), getSession: () => session }
+        const { call } = harness({ broker, store: storeOf([settled], { registry: { get: () => orch } }) })
+        await call('cancel_heal', { runId: 'run-1', session_id: 'sess-1', reason: 'x' })
+        expect(orch.cancelHeal).toHaveBeenLastCalledWith({ kind: 'agent-ended', reason: 'x', client: 'The repair agent' })
+      }
+    })
   })
 })
 
@@ -1188,6 +1352,44 @@ describe('abort_run', () => {
     const { call } = harness({ store: storeOf([runDetail()], { abort }) })
     expect(await call('abort_run', { runId: 'run-1', confirm: true })).toMatchObject({ type: 'abort_requires_confirmation' })
     expect(abort).not.toHaveBeenCalled()
+  })
+
+  it('answers a stop decision that lands after the run ended with that ending, and closes the question', async () => {
+    const detail = runDetail({ status: 'healing', healCycles: 2 })
+    const abort = vi.fn()
+    const { raw } = harness({ store: storeOf([detail], { abort }) }, eliciting)
+    const approvals = new ApprovalStore(approvalTemp())
+    const invoke = withApprovals('abort_run', (args, ctx) => raw('abort_run', args, ctx),
+      { approvals, getUiUrl: () => 'http://localhost:1234', store: storeOf([detail]) } as unknown as CanaryLabMcpDeps)
+    const question = await invoke({ runId: 'run-1', confirm: true }, context()) as InputRequiredResult
+    const id = String(question.requestState)
+    expect(approvals.get(id)).toMatchObject({ runId: 'run-1', status: 'pending' })
+    // Stop Heal ended it as failed before the human's Stop reached the server.
+    detail.manifest.status = 'failed'
+    const waiting = approvals.wait(id, 30_000)
+    await approvals.answer(id, { action: 'abort' })
+    expect(JSON.parse(toolResultText(await waiting))).toMatchObject({ aborted: false, runId: 'run-1', status: 'failed', reason: 'run-already-ended' })
+    expect(approvals.get(id)?.status).not.toBe('pending')
+    expect(abort).not.toHaveBeenCalled()
+    // A call that is not an answer still reports the plain refusal.
+    expect(toolResultText(await raw('abort_run', { runId: 'run-1', confirm: true }, context()))).toBe('run not active: run-1')
+  })
+
+  it('closes stop questions only for runs that have ended or are gone', async () => {
+    const detail = runDetail({ status: 'healing' })
+    const approvals = { closeForRun: vi.fn(() => 1) } as unknown as ApprovalStore
+    const store = { get: (id: string) => id === 'run-1' ? detail : null }
+    expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(0)
+    for (const status of ['queued', 'running']) {
+      detail.manifest.status = status as never
+      expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(0)
+    }
+    expect(approvals.closeForRun).not.toHaveBeenCalled()
+    detail.manifest.status = 'passed'
+    expect(closeStopQuestionsForEndedRun(approvals, store, 'run-1')).toBe(1)
+    expect(approvals.closeForRun).toHaveBeenLastCalledWith('abort_run', 'run-1', expect.stringContaining('already ended (passed)'), expect.anything())
+    closeStopQuestionsForEndedRun(approvals, store, 'gone')
+    expect(approvals.closeForRun).toHaveBeenLastCalledWith('abort_run', 'gone', expect.stringContaining('already ended (deleted)'), expect.anything())
   })
 
   it.each(['decline', 'cancel', 'keep', 'forged', 'stale'])('does not stop a run after %s input', async (choice) => {

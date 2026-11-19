@@ -34,12 +34,14 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
   if (healEnd.message) return healEnd.message
   switch (healEnd.reason) {
     case 'no-signal': {
+      if (healEnd.agentWait === 'agent-disconnected') return 'Auto-repair stopped — the repair agent disconnected without a fix.'
       const cause = HEAL_CAUSE_PHRASE[healEnd.agentCause ?? 'unknown']
       return `Auto-repair stopped — the agent went quiet without a fix${cause ? ` (${cause})` : ''}.`
     }
     case 'max-cycles': return 'Auto-repair stopped — it hit the cycle limit without passing.'
     case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
     case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
+    case 'agent-ended': return 'The repair agent ended the heal without a fix.'
     case 'foreign-abort': return 'Auto-repair stopped — another Canary window took over this run.'
     case 'new-run-required': return 'Verification needs a fresh approved run.'
     default: return null
@@ -52,12 +54,14 @@ export function healEndShort(healEnd: HealEnd | undefined): string | null {
   if (!healEnd) return null
   switch (healEnd.reason) {
     case 'no-signal':
+      if (healEnd.agentWait === 'agent-disconnected') return 'stopped — agent disconnected'
       return healEnd.agentCause && healEnd.agentCause !== 'unknown'
         ? `stopped — ${HEAL_CAUSE_PHRASE[healEnd.agentCause]}`
         : 'stopped — agent went quiet'
     case 'max-cycles': return 'stopped — cycle limit'
     case 'no-progress': return 'stopped — no progress'
     case 'cancelled': return 'stopped by you'
+    case 'agent-ended': return 'ended by agent — no fix'
     case 'foreign-abort': return 'stopped — record taken over'
     case 'new-run-required': return 'new run required'
     default: return null

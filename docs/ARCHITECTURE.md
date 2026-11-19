@@ -1326,6 +1326,18 @@ while it waits; a client doing longer local work must refresh its claim before
 the window expires. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
+A heal parked on an external agent has three ends besides a passing rerun:
+the user's Stop heal (`healEnd.reason = 'cancelled'`), the claim holder's
+`cancel_heal` with a `reason` when it concludes there is nothing to heal in
+this run (`'agent-ended'`, audited as `end-heal`), and the agent-gone sweep —
+a claim silent for `EXTERNAL_AGENT_GONE_MS` (**40 minutes**: the 10-minute
+stale window plus a 30-minute reconnect grace) ends the heal as `'no-signal'`
+with `agentWait: 'agent-disconnected'`
+(`apps/web-server/src/features/runs/logic/heal/agent-gone-sweep.ts`). All three
+go through `cancelHeal` with a distinct record. Delivering a `needs_heal` task
+marks the claim `healing`, which is what lets the run list say "Agent
+repairing" instead of reading as stuck.
+
 ### Heal-claim policy (block runner PTYs)
 
 Every **interactive** client kind may *own* a heal claim: `claude`, `codex` (Desktop

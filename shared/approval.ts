@@ -24,6 +24,9 @@ export interface Approval {
   reviewUrl: string
   command: string
   feature?: string
+  /** The run this question is about, when it names one. A run that ends
+   *  closes its open stop question; nothing is left to decide. */
+  runId?: string
   message: string
   display?: ApprovalDisplay
   schema: { properties?: Record<string, ApprovalField>; required?: string[] }

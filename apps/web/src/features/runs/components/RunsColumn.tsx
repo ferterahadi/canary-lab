@@ -181,7 +181,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           </span>
                           <ExecutionTypeBadge type={executionType} />
                         </div>
-                        <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} />
+                        <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} agentTurn={view.agentTurn} />
                       </div>
                       <div
                         className="flex w-full min-w-0 items-center justify-between gap-2"
@@ -278,7 +278,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} />
+                              <RunStatusIndicator status={displayStatus} executionType={executionType} waiting={view.waiting} agentTurn={view.agentTurn} />
                             </span>
                           </>
                         )}

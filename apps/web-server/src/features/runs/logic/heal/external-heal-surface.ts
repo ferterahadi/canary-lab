@@ -237,6 +237,14 @@ const FAILURE_DETAIL_INLINE_MAX_BYTES = 8 * 1024
 const RUNNER_VERIFICATION_RULE =
   'The signal requests runner verification; it is not a claim that the fix already passes. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. Canary Lab owns affected-service restart, health checks, and targeted Playwright verification after the signal. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.'
 
+// The honest exit. Without it the procedure named only fix → signal, so an
+// agent facing a genuine product result (a real latency miss on a suite with no
+// editable repo, a one-attempt suite already spent) had no documented way to
+// stop, and the run sat in healing. Rides every cycle's result: cycle 1 in
+// nextSteps, later cycles in the repeat breadcrumb.
+export const HEAL_HONEST_EXIT_RULE =
+  'If you conclude there is nothing to heal in this run — the failure is a genuine product result, or the fix cannot be made or verified here (no editable repo, a one-attempt suite already spent) — end the heal: call cancel_heal with runId, your session_id and a one-sentence reason. The run ends failed with your reason recorded; report that to the user. Never edit or weaken a test to avoid it.'
+
 // The needs-heal procedure, surfaced on the context (wait_for_heal_task →
 // needs_heal and get_heal_context) so skill-less clients read it exactly when a
 // heal is needed — keeping it OUT of the always-on MCP profile instructions.
@@ -257,6 +265,7 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'Apply every fix YOURSELF, serially — if two edits touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — whatever the diagnosis policy, applying and signalling stay single-threaded.',
   RUNNER_VERIFICATION_RULE,
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
+  HEAL_HONEST_EXIT_RULE,
   // Same reasoning as the repair rule above: this invariant lives at offset ~3549
   // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
   // result is the only channel that delivers it.
@@ -318,6 +327,7 @@ const REPEAT_HEAL_GUIDANCE = [
   'Repeat heal cycle — the heal procedure and resource map were sent on cycle 1. Investigate the failures below, apply the fixes yourself, then signal_run ONCE (rerun for test/app-code fixes, restart when services must restart) with hypothesis + fixDescription.',
   RUNNER_VERIFICATION_RULE,
   'Wait for heal again with wait_for_heal_task. Call get_heal_context if you need the full healPrompt resource map back.',
+  HEAL_HONEST_EXIT_RULE,
 ].join(' ')
 
 // Strip the static guidance (nextSteps + healPrompt map) from a context for a

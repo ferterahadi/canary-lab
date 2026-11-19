@@ -7,7 +7,10 @@ import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/
 import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../../../../shared/run-counts'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
-import { isActiveRunStatus } from '../../../../../shared/run-state'
+import { isActiveRunStatus, isTerminalRunStatus } from '../../../../../shared/run-state'
+import { clientKindLabel } from '../../../../../shared/run-mode'
+import type { HealEnding } from '../../features/runs/logic/run-control-results'
+import { waitForRunCondition } from '../wait-for-run-condition'
 import {
   type ToolGroupContext,
   CLAIM_SUPPRESSED_MESSAGE,
@@ -18,6 +21,7 @@ import {
   gettingStartedBusyResult,
   repoCollisionResult,
   findContinuingRunForFeature,
+  findSessionRerunCandidate,
   resolveRunRef,
   runCandidate,
   serverExitedGuidance,
@@ -32,6 +36,8 @@ import { findFeature } from '../../shared/feature-loader'
 import { remoteOnlyTargets } from '../../features/coverage/logic/verification'
 import { REPOSITORY_ISOLATION_DISPLAY, repositoryIsolationMessage } from '../../shared/approval-messages'
 import type { ApprovalDisplay } from '../../../../../shared/approval'
+import type { ApprovalStore } from '../approval-store'
+import type { RunStore } from '../../features/runs/logic/run-store'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -59,12 +65,15 @@ const coverageChangeResponse = z.object({
 type CoverageChange = z.infer<typeof coverageChangeResponse>['change']
 type RemoteTarget = { env: string; targetOrigins: Record<string, string> }
 
+// The heal loop unwinds within a second of cancelHeal (it only kills ptys and
+// tears down); the cap keeps a wedged teardown from holding the reply open.
+const CANCEL_HEAL_SETTLE_MS = 10_000
 const VERIFY_CHOICE = 'Verify the deployed target'
 const RUN_CHOICE = 'Run with repair anyway'
 const UPDATE_COVERAGE_CHOICE = 'Update coverage first'
 const STALE_COVERAGE_CHOICE = 'Run now with stale coverage'
 const COVERAGE_DISPLAY: ApprovalDisplay = {
-  title: 'Coverage out of date',
+  title: 'New run: coverage out of date',
   choices: {
     // This answer returns the recovery owner without starting a run.
     [UPDATE_COVERAGE_CHOICE]: { label: 'Update first', detail: "Doesn't start the run yet. Coverage gets refreshed first." },
@@ -72,11 +81,26 @@ const COVERAGE_DISPLAY: ApprovalDisplay = {
   },
 }
 const REMOTE_TARGET_DISPLAY: ApprovalDisplay = {
-  title: 'Suite targets a deployed app',
+  title: 'New run: suite targets a deployed app',
   choices: {
     [VERIFY_CHOICE]: { label: 'Verify deployed', detail: 'Checks the deployed hosts. No services start and nothing is repaired.' },
     [RUN_CHOICE]: { label: 'Run with repair', detail: "Runs with local repairs. The deployed app won't change." },
   },
+}
+/** start_run without run_ref, from the session whose run just ended. Nothing
+ *  starts: the agent re-calls with run_ref to rerun, or force_new for a new run. */
+function rerunAvailable(runId: string, status: string) {
+  return {
+    type: 'rerun_available',
+    runStarted: false,
+    runId,
+    status,
+    message: `Run not started. Your last run of this suite, ${runId}, ended ${status} and can be rerun in place. If the user asked to rerun, retry or run again, rerun it: same run ID, its recorded suite and journal, and no start question. Start a new run only when the user asked for a new run, or a result told you to start fresh (Accept & commit on an ended run).`,
+    nextSteps: [
+      `rerun: start_run with run_ref "${runId}" (the default when the user said rerun)`,
+      'new run: start_run with force_new:true',
+    ],
+  }
 }
 const ABORT_DISPLAY: ApprovalDisplay = {
   title: 'Stop this run?',
@@ -85,6 +109,31 @@ const ABORT_DISPLAY: ApprovalDisplay = {
     abort: { label: 'Stop', detail: 'Stops the run and shuts down its services.' },
   },
 }
+/** A stop decision that arrives after its run ended some other way has nothing
+ *  left to stop. That is the command's real outcome, not an error, so a waiting
+ *  agent receives it instead of asking the human again. `aborted` follows the
+ *  run's real ending, so a Stop from the Run panel reads the same to the agent
+ *  as Stop on this question. */
+function runAlreadyEnded(runId: string, status: string): CallToolResult {
+  const aborted = status === 'aborted'
+  return asJsonResult({
+    aborted, runId, status, reason: 'run-already-ended',
+    message: aborted ? `Run ${runId} was already stopped.` : `Run ${runId} had already ended (${status}), so nothing was stopped.`,
+    next: 'Do not ask the human to stop this run again. Read its result, or start a new run if one is needed.',
+  })
+}
+
+/** Close the open "Stop this run?" questions of a run that has ended. Without
+ *  this the inbox kept asking, and wait_for_approval answered still_waiting
+ *  until the question expired. A run still active or queued keeps its question. */
+export function closeStopQuestionsForEndedRun(approvals: ApprovalStore, store: Pick<RunStore, 'get'>, runId: string): number {
+  const status = store.get(runId)?.manifest.status
+  if (status !== undefined && !isTerminalRunStatus(status)) return 0
+  const ending = status ?? 'deleted'
+  return approvals.closeForRun('abort_run', runId, `This run already ended (${ending}). There is nothing left to stop.`,
+    runAlreadyEnded(runId, ending))
+}
+
 type CoverageDecision =
   | { revision: string; allowStale: false; change?: CoverageChange }
   | { revision: string; allowStale: true; change: CoverageChange }
@@ -96,7 +145,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Start or continue a run. A run boots this suite\'s services from its repos and repairs that code; for a deployed, staging or live target with nothing to boot, use execute_verification instead — a repair cycle cannot change a remote deployment, so a fresh start whose suite boots nothing and targets deployed hosts asks the user to choose first. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
+      'Start or continue a run. A run boots this suite\'s services from its repos and repairs that code; for a deployed, staging or live target with nothing to boot, use execute_verification instead — a repair cycle cannot change a remote deployment, so a fresh start whose suite boots nothing and targets deployed hosts asks the user to choose first. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref (with force_new:true), and only the new run can produce a verdict. A fresh start from the session that drove the suite\'s latest failed/aborted run starts nothing and returns rerun_available: re-call with run_ref to rerun that run (the default when the user said rerun), or force_new:true for a new run. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       request_id: z.string().optional().describe('Resume the exact blocked request returned by test_review_required. Reuse its original session_id; approval in another surface never transfers this request to that client.'),
@@ -108,7 +157,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
-      force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
+      force_new: z.boolean().default(false).describe('Start a new run instead of rerunning this session\'s last failed/aborted run (see rerun_available). Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
       remote_target: z.enum(['run']).optional().describe('Only after start_run returns remote_target_requires_choice AND the user chose to run with repair anyway against those deployed hosts. Never set it on your own; the default is Verify.'),
       update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
@@ -199,7 +248,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       const spec = {
         ...remoteQuestion(target),
         display: REMOTE_TARGET_DISPLAY,
-        message: `${feature} targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
+        message: `Starts a new run of ${feature}. It targets ${hosts} (${target.env}). Verify the deployed app, or run with local repairs? Local repairs will not change the deployed app.`,
         fallback: () => asJsonResult({
           type: 'remote_target_requires_choice',
           runStarted: false,
@@ -227,7 +276,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     const askCoverage = (change: CoverageChange): CallToolResult | InputRequiredResult => {
       const spec = {
         ...coverageQuestion(change),
-        message: 'The coverage report may not match the current tests. Update it first, or run the tests anyway?',
+        message: `Starts a new run of ${feature}. The coverage report may not match the current tests. Update it first, or run the tests anyway?`,
         display: COVERAGE_DISPLAY,
         fallback: () => asJsonResult({
           type: 'coverage_update_requires_choice',
@@ -367,6 +416,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
+        // A fresh start right after this conversation's own failed/aborted run
+        // is usually a rerun. Say so before any start question, so the human
+        // is never asked to start a new run they did not mean to start.
+        const rerunnable = force_new ? null : findSessionRerunCandidate(deps, feature, env, session_id)
+        if (rerunnable) return asJsonResult(rerunAvailable(rerunnable.manifest.runId, rerunnable.manifest.status))
         if (!remoteDecided) {
           const remote = readRemoteTarget()
           if (remote) return askRemote(remote)
@@ -572,9 +626,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('cancel_heal', {
-    description: 'Cancel an in-flight heal cycle. Run transitions to failed.',
-    inputSchema: { runId: z.string() },
-  }, async ({ runId }) => {
+    description: 'End an in-flight heal cycle; the run transitions to failed. Two uses. (1) The user asked to stop repair: call with runId only. (2) You hold the heal claim and concluded there is nothing to heal in this run — the failure is a genuine product result, or the fix cannot be verified here (no editable repo, a one-attempt suite already spent): pass session_id and a one-sentence reason. The run ends failed with your reason recorded as "agent ended the heal", never as a pass and never as a user stop. Never weaken or edit a test to avoid this. Replies after the run has settled.',
+    inputSchema: {
+      runId: z.string(),
+      session_id: z.string().optional().describe('Your heal-claim session id. Required with reason.'),
+      reason: z.string().trim().min(1).max(1000).optional().describe('Why you are ending the heal without a fix, in one sentence the user will read on the run.'),
+    },
+  }, async ({ runId, session_id, reason }) => {
     const orch = deps.store.registry.get(runId)
     if (!orch) {
       // A heal whose server exited has already stopped; settling records it.
@@ -582,9 +640,42 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         ? asJsonResult({ status: 'aborted', reason: 'server-exited', runId, ...serverExitedGuidance(runId) })
         : errorResult(`run not active: ${runId}`)
     }
-    const result = await orch.cancelHeal()
+    let ending: Extract<HealEnding, { kind: 'agent-ended' }> | undefined
+    if (reason !== undefined) {
+      if (!session_id) return errorResult('reason needs session_id: only the heal claim holder can end the heal with a reason')
+      const ownership = deps.broker.assertOwnership(runId, session_id)
+      if (!ownership.ok) {
+        return errorResult(ownership.reason === 'session-mismatch'
+          ? `session-mismatch: run is held by ${ownership.currentSession?.sessionId}`
+          : `no external heal claim for run: ${runId}`)
+      }
+      const kind = deps.broker.getSession(runId)?.clientKind
+      ending = { kind: 'agent-ended', reason, client: kind ? clientKindLabel(kind, 'The repair agent') : 'The repair agent' }
+    }
+    const result = await orch.cancelHeal(ending)
     if (!result.ok) return errorResult(`could not cancel: ${result.reason}`)
-    return asJsonResult({ status: 'cancelled' })
+    if (ending && session_id) deps.broker.recordHealEnded(runId, session_id, ending.reason)
+    // Reply once the run has settled so this reply — and the coverageUpdate
+    // the catch-up wrapper appends to it — reads the final status, not the
+    // `healing` the loop is still unwinding from.
+    const settled = await waitForRunCondition({
+      store: deps.store,
+      runId,
+      read: () => {
+        const detail = deps.store.get(runId)
+        if (!detail) return null
+        const { status, endedAt } = detail.manifest
+        return isTerminalRunStatus(status) && (endedAt || !deps.store.registry.get(runId)) ? detail : null
+      },
+      timeoutMs: CANCEL_HEAL_SETTLE_MS,
+      maxWaitMs: CANCEL_HEAL_SETTLE_MS,
+      onTimeout: () => deps.store.get(runId) ?? null,
+    })
+    return asJsonResult({
+      status: ending ? 'agent-ended' : 'cancelled',
+      ...(settled ? { runStatus: settled.manifest.status } : {}),
+      ...(settled?.manifest.healEnd ? { healEnd: settled.manifest.healEnd } : {}),
+    })
   })
 
   registerTool('abort_run', {
@@ -606,7 +697,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     }
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    if (!isActiveRunStatus(detail.manifest.status)) return errorResult(`run not active: ${runId}`)
+    if (!isActiveRunStatus(detail.manifest.status)) {
+      // The human can answer after the run ended some other way. Answer with
+      // that ending: an error here left the question open and the agent waiting.
+      return matchesUserInput(request, scope) ? runAlreadyEnded(runId, detail.manifest.status) : errorResult(`run not active: ${runId}`)
+    }
     return requestUserInput(request, ctx.clientFacts(), {
       scope,
       revision: [detail.manifest.startedAt, detail.manifest.status, detail.manifest.healCycles],
@@ -620,7 +715,13 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         nextSteps: ['continue the existing run with signal_run, or let the human stop it in Canary Lab'],
       }),
     }, async ({ action }) => {
-      if (action === 'keep') return inputPending('The user kept the run. Nothing was stopped.')
+      if (action === 'keep') {
+        return asJsonResult({
+          aborted: false, kept: true, runId,
+          message: 'The human chose to keep this run. Nothing was stopped.',
+          next: 'Do not ask to stop this run again unless the human asks. Continue it with signal_run or wait_for_heal_task.',
+        })
+      }
       const result = await deps.store.abort(runId)
       return result.ok ? asJsonResult({ aborted: true, runId }) : errorResult(`could not abort: ${result.reason}`)
     })

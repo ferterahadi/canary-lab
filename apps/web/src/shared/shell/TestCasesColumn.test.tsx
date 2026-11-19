@@ -853,7 +853,7 @@ describe('TestCasesColumn', () => {
         />,
       )
     })
-    await waitFor(() => container.querySelector('[aria-label="Compare 1 changed tests"]') !== null)
+    await waitFor(() => container.querySelector('[aria-label^="Compare 1 changed tests"]') !== null)
 
     // The snapshot is the baseline, so only the test the run executed in a
     // different form is marked. Every classification still needs attention.
@@ -866,7 +866,7 @@ describe('TestCasesColumn', () => {
     // The drift mark IS the entrance to the comparison, and it sits in the column
     // header beside the tabs it qualifies. A ready comparison states its drift and
     // nothing else, so the unknown-comparison mark must be absent here.
-    const compare = container.querySelector<HTMLButtonElement>('[aria-label="Compare 1 changed tests"]')!
+    const compare = container.querySelector<HTMLButtonElement>('[aria-label^="Compare 1 changed tests"]')!
     expect(compare.closest('.cl-panel-header')).not.toBeNull()
     expect(container.querySelector('[data-testid="test-version-compare"]')).toBeNull()
     await act(async () => compare.click())

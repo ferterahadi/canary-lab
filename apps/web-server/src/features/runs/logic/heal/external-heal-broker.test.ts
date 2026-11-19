@@ -382,6 +382,24 @@ describe('ExternalHealBroker.markStaleClaims', () => {
   })
 })
 
+describe('ExternalHealBroker.recordHealEnded', () => {
+  it('audits the agent ending the heal with its reason and client kind', () => {
+    const { deps, captured } = makeDeps()
+    const broker = new ExternalHealBroker(deps)
+    broker.claim('run-1', { sessionId: 'sess-A', clientKind: 'codex' })
+    broker.recordHealEnded('run-1', 'sess-A', 'Genuine product result.')
+    expect(captured.audit.at(-1)).toEqual({ runId: 'run-1', entry: {
+      ts: '2026-05-18T10:00:00.000Z', sessionId: 'sess-A', clientKind: 'codex', action: 'end-heal', args: { reason: 'Genuine product result.' },
+    } })
+  })
+
+  it('still audits when the claim is already gone, without inventing a client kind', () => {
+    const { deps, captured } = makeDeps()
+    new ExternalHealBroker(deps).recordHealEnded('run-1', 'sess-A', 'nothing to fix')
+    expect(captured.audit.at(-1)?.entry).toMatchObject({ clientKind: null, action: 'end-heal' })
+  })
+})
+
 describe('ExternalHealBroker.bumpCycle', () => {
   it('increments the cycleCount on the active session', () => {
     const { deps } = makeDeps()

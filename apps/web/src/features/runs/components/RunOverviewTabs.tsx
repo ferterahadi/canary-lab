@@ -1,7 +1,7 @@
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { RecordedTestChanges } from './RecordedTestChanges'
 import { pinnedPlanSummary } from '@shared/agent-models'
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { RepoBranchSnapshot, ServiceManifestEntry, RunManifest } from '@shared/run-manifest'
 import type { RunSummary } from '@shared/run-detail'
 import { useExternalAudit } from '../state/use-external-audit'
@@ -82,7 +82,6 @@ export function RunOverviewTab({
   onOpenEvaluationReport,
   onOpenBootFailure = () => {},
 }: RunOverviewTabProps) {
-  const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const serviceOwnsBootFailure = Boolean(
     manifest.bootFailure
     && manifest.bootFailure.reason !== 'dependency-incompatible'
@@ -104,37 +103,18 @@ export function RunOverviewTab({
   ]
   return (
     <RunPane padded>
-      {/* The run's facts as one titled card of tiles — the same card anatomy
-          (title strip, then body) as the service cards below it and the test
-          cards on the Playwright tab. No Suite tile: the run header names the
-          suite a few pixels above. No `State` tile either: the verdict is the
-          header's status badge, and anything it cannot say (a held boot
-          session, a recovery note) arrives as the alert below or in Run Logs.
-          The deliverable sits on the strip's right: it is the one thing you
-          *do* from this pane, and on the strip it never squeezes the tab row. */}
-      <section className="cl-card overflow-hidden" data-testid="run-facts">
-        <div className="cl-card-head">
-          <h2 className="cl-rubric min-w-0 flex-1 truncate">At a glance</h2>
-          {isAssertionExportable(manifest.status) && (
-            <div className="-my-1 shrink-0">
-              <ReviewEvaluationMenu
-                runId={manifest.runId}
-                onExportStarted={(task) => onOpenEvaluationReport?.(task.feature)}
-              />
-            </div>
-          )}
-        </div>
-        {/* A label column beside a value column, one fact per row — the same
-            reading order as a service card's cmd/cwd/url fields below. */}
-        <dl className="cl-card-body grid grid-cols-[92px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-xs">
-          {runFacts(manifest, duration).map((fact) => <RunFactRow key={fact.label} fact={fact} />)}
-        </dl>
-      </section>
+      <RunFactsCard manifest={manifest}>
+        {isAssertionExportable(manifest.status) && (
+          <div className="-my-1 shrink-0">
+            <ReviewEvaluationMenu
+              runId={manifest.runId}
+              onExportStarted={(task) => onOpenEvaluationReport?.(task.feature)}
+            />
+          </div>
+        )}
+      </RunFactsCard>
       <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
-      {/* For a boot-only session the held-state message is the point of the
-          screen, so surface it on the overview (normal runs keep it in the
-          Run Logs timeline only). */}
-      {manifest.executionType === 'boot' && view.primaryAlert && (
+      {manifest.executionType === 'boot' && manifest.status !== 'running' && view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}
         </div>
@@ -151,7 +131,9 @@ export function RunOverviewTab({
           <SectionHeader>Open to exercise</SectionHeader>
         )}
         {services.length === 0 ? (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
+          manifest.executionType !== 'boot' && (
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
+          )
         ) : (
           <ul className="space-y-3">
             {displayedServices.map((s) => (
@@ -188,22 +170,42 @@ export interface RunFact {
 
 const NO_VALUE = '—'
 
-/** The run's facts, in a fixed order. Envset, duration and start always show —
- *  a run without an envset reads as a dash; the end time, heal and models rows
- *  appear once the run has recorded them. A timestamp splits into the time
- *  (what you compare between runs) and the date, with the exact ISO value on
- *  hover. The heal agent and its cycle count are one fact — who healed, and
- *  how many times. */
+function RunFactsCard({ manifest, children }: { manifest: RunManifest; children?: ReactNode }) {
+  const facts = runFacts(manifest, durationBetween(manifest.startedAt, manifest.endedAt))
+  return (
+    <section className="cl-card overflow-hidden" data-testid="run-facts">
+      <div className="cl-card-head">
+        <h2 className="cl-rubric min-w-0 flex-1 truncate">At a glance</h2>
+        {children}
+      </div>
+      <dl className="cl-card-body grid grid-cols-[118px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-xs">
+        {facts.map((fact) => <RunFactRow key={fact.label} fact={fact} />)}
+      </dl>
+    </section>
+  )
+}
+
 export function runFacts(manifest: RunManifest, duration: number | null): RunFact[] {
+  const timing = [
+    { label: 'Duration', value: manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration) },
+    timestampFact(manifest.status === 'queued' ? 'Queued at' : 'Started', manifest.startedAt),
+    ...(manifest.endedAt ? [timestampFact('Ended', manifest.endedAt)] : []),
+  ]
+  if (manifest.executionType === 'verify') {
+    const env = manifest.verification?.playwrightEnvsetId ?? manifest.env
+    return [
+      { label: 'Configuration', value: manifest.verification?.configName ?? 'Unsaved' },
+      { label: 'Playwright envset', value: env ?? NO_VALUE, mono: true, empty: !env },
+      ...timing,
+    ]
+  }
   const agent = healAgentOverviewLabel(manifest)
   const cycles = manifest.healCycles > 0 ? plural(manifest.healCycles, 'cycle') : null
   const heal = agent ?? cycles
   const models = pinnedPlanSummary(manifest.models)
   return [
     { label: 'Envset', value: manifest.env ?? NO_VALUE, mono: true, ...(manifest.env ? {} : { empty: true }) },
-    { label: 'Duration', value: manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration) },
-    timestampFact(manifest.status === 'queued' ? 'Queued at' : 'Started', manifest.startedAt),
-    ...(manifest.endedAt ? [timestampFact('Ended', manifest.endedAt)] : []),
+    ...timing,
     ...(heal ? [{ label: 'Heal', value: heal, ...(agent && cycles ? { sub: cycles } : {}) }] : []),
     ...(models ? [{ label: 'Models', value: models, title: models }] : []),
   ]
@@ -303,43 +305,19 @@ export function VerifyOverviewTab({
   view: RunViewModel
   onCompareTests?: () => void
 }) {
-  const duration = durationBetween(manifest.startedAt, manifest.endedAt)
-  const verification = manifest.verification
-  const targets = verification?.targets ?? []
+  const targets = manifest.verification?.targets ?? []
   return (
     <RunPane padded>
-      <dl className="grid grid-cols-[118px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
-        <dt className="cl-rubric self-center">Suite</dt>
-        <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
-        <dt className="cl-rubric self-center">Configuration</dt>
-        <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={verification?.configName ?? 'Unsaved'}>{verification?.configName ?? 'Unsaved'}</dd>
-        <dt className="cl-rubric self-center">Playwright envset</dt>
-        <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={verification?.playwrightEnvsetId ?? manifest.env ?? ''}>{verification?.playwrightEnvsetId ?? manifest.env ?? '-'}</dd>
-        <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
-        <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
-        {manifest.endedAt && (
-          <>
-            <dt className="cl-rubric self-center">Ended</dt>
-            <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
-          </>
-        )}
-      </dl>
+      <RunFactsCard manifest={manifest} />
       <RecordedTestChanges manifest={manifest} onCompare={onCompareTests} />
       {view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}
         </div>
       )}
-      <div className="mt-4 rounded-md border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}>
-        Verify is observational only. Canary Lab did not start local services or heal code.
-      </div>
-      <div className="mt-4">
-        <SectionHeader>Services</SectionHeader>
-        {targets.length === 0 ? (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No target services recorded.</div>
-        ) : (
+      {targets.length > 0 && (
+        <div className="mt-4">
+          <SectionHeader>Services</SectionHeader>
           <div className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
             <div className="grid grid-cols-[180px_minmax(0,1fr)] border-b px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
               <div className="cl-rubric">Service</div>
@@ -352,8 +330,8 @@ export function VerifyOverviewTab({
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </RunPane>
   )
 }
