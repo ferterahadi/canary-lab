@@ -1,3 +1,5 @@
+import type { GraphOrigin } from '../../../../../../../shared/test-view/flow-graph'
+import { suiteHelperResolver } from '../../../../shared/readable-tests/suite-helpers'
 import { resolveImport } from '../../../../shared/relative-import'
 import { playbackSourceNodes } from '../../../../shared/playback-source-declarations'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
@@ -16,15 +18,16 @@ import type { HelperDefinition, ImportedHelper, SourceTest, TestReviewAssertion 
 /** Every declared test in the suite with its body, helpers and checks, plus
  * the same extracted test the Tests column renders, so the report numbers its
  * English and code rows exactly as the web does. */
-export function loadSourceTests(featureDir: string | undefined, semanticRules?: ReadableSemanticRuleConfig): Map<string, SourceTest> {
+export function loadSourceTests(featureDir: string | undefined, semanticRules?: ReadableSemanticRuleConfig, origin: GraphOrigin = { kind: 'working-tree' }): Map<string, SourceTest> {
   const out = new Map<string, SourceTest>()
   if (!featureDir || !fs.existsSync(featureDir)) return out
+  const resolveHelper = suiteHelperResolver(featureDir)
   const withCodeDisplay = codeDisplayAttacher()
   for (const file of scanSpecFiles(featureDir)) {
     const source = safeRead(file)
     if (source === null) continue
     const src = parseSource(file, source).sourceFile
-    const extracted = new Map(extractTestsFromSource(file, source, semanticRules).tests.map((test) => [test.line, test]))
+    const extracted = new Map(extractTestsFromSource(file, source, semanticRules, resolveHelper, origin).tests.map((test) => [test.line, test]))
     const imports = readRelativeImports(file, src)
     const externalImports = readExternalImports(src)
     const helpers = new Map<string, HelperDefinition>()

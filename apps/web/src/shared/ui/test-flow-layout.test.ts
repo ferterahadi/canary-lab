@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import type { ReadableNode } from '@shared/readable-tests/types'
-import { foldedTopology, completedStepCounts, layoutTestFlow, stepVisitKey } from './test-flow-layout'
+import { layoutTestFlow } from '@shared/test-view/flow-layout'
+import { foldedTopology, completedStepCounts, stepVisitKey } from './test-flow-layout'
 
 const base = { text: '', fidelity: 'exact' as const, source: { file: 'suite.ts', startLine: 2, endLine: 2, snippet: 'return' } }
 const exit: ReadableNode = { ...base, kind: 'leaf', role: 'action', id: 'exit', flow: { kind: 'return', label: 'Return' } }

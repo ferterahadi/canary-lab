@@ -1,3 +1,4 @@
+import type { FlowVisit } from '../../../../../../../shared/test-view/flow-execution'
 import type { HealAgent } from '../../../agent-sessions/logic/agent-binary'
 import type { StageModelChoice } from '../../../../../../../shared/agent-models'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
@@ -17,7 +18,14 @@ export interface TestReviewAssertion {
   nested?: TestReviewAssertion[]
 }
 
+export interface HistoricalFlow {
+  attempt: number
+  incomplete: boolean
+  visits: Record<string, Record<string, FlowVisit>>
+}
+
 export interface TestReviewCase {
+  historicalFlow?: HistoricalFlow
   name: string
   title: string
   status: string

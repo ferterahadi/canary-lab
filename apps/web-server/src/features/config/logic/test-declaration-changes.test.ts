@@ -1,5 +1,6 @@
+import { pairTestDeclarations } from '../../../shared/test-declaration-pairs'
 import { expect, it } from 'vitest'
-import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from './test-declaration-changes'
+import { compareTestDeclarations, meaningfulChangeLines } from './test-declaration-changes'
 import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
 
 const compare = (before: string, after: string) => {

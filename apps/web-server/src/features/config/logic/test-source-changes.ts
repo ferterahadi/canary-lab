@@ -4,7 +4,7 @@ import { extractTestMetadataFromSource } from '../../../shared/ast-extractor'
 import type { ExtractedTest } from '../../../../../../shared/extracted-test'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { diffChangedLines, diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
-import { pairTestDeclarations } from './test-declaration-changes'
+import { pairTestDeclarations } from '../../../shared/test-declaration-pairs'
 
 /** The current source and its markers travel together. Before-side English and
  * assessments are only needed when the reader actually opens Review. */

@@ -1,3 +1,4 @@
+import { flowAttempts, projectFlowAttempt, type FlowAttempt } from '../../../../../../../shared/test-view/flow-execution'
 import { reconcilePlaybackCases, latestPlaybackAttempt, type PlaybackIdentity } from '../../../../../../../shared/playback-identity'
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../../../../../shared/run-detail'
 import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
@@ -25,16 +26,37 @@ export function legacyCaseOrder(detail: RunDetail): string[] {
 export function buildTestReviewPacket(detail: RunDetail, semanticRules?: ReadableSemanticRuleConfig): TestReviewPacket {
   // Source comes from the copy the verdict executed while it exists (D9), not
   // the live dir an agent may have edited since — the report must show what ran.
-  const sourceTests = loadSourceTests(suiteDirForReading(detail.manifest), semanticRules)
+  const suite = suiteDirForReading(detail.manifest)
+  const snapshot = detail.manifest.suiteSnapshot
+  const recorded = snapshot?.kind === 'taken' && suite === snapshot.dir
+  const sourceTests = loadSourceTests(suite, semanticRules, recorded ? { kind: 'recorded-run', runId: detail.runId } : { kind: 'working-tree' })
+  const byEnd = new Map<PlaywrightPlaybackEvent, FlowAttempt>()
+  for (const attempts of flowAttempts(detail.runId, detail.playbackEvents ?? []).values()) {
+    for (const attempt of attempts) {
+      const end = attempt.events.at(-1)
+      if (end?.type === 'test-end') byEnd.set(end, attempt)
+    }
+  }
   const verdicts = runVerdicts(detail)
-  const tests = declaredRoster(detail, playbackTests(detail.playbackEvents ?? [], detail.playbackIdentity), sourceTests).map(({ entry, attempt }) => {
+  const roster = declaredRoster(detail, playbackTests(detail.playbackEvents ?? [], detail.playbackIdentity), sourceTests)
+  const nameCounts = new Map<string, number>()
+  for (const { entry } of roster) nameCounts.set(entry.name, (nameCounts.get(entry.name) ?? 0) + 1)
+  const errorsById = new Map(detail.summary?.failed.flatMap(test => test.id && test.error ? [[test.id, test.error] as const] : []))
+  const tests = roster.map(({ entry, attempt }) => {
     // The last attempt's position is the freshest one the run saw; the declared
     // one can predate a heal edit that moved the test.
     const location = attempt?.location ?? entry.location
     const source = location ? sourceFor({ ...entry, location }, sourceTests) : undefined
-    const status = attempt?.status ?? summaryStatusFor(entry, verdicts)
-    const error = verdicts.errorByName.get(entry.name) ?? attempt?.error
+    const observed = attempt && byEnd.get(attempt.end)
+    const overlay = observed && projectFlowAttempt(source?.extracted?.readable.graph, observed, false)
+    const status = attempt?.status ?? summaryStatusFor(entry, verdicts, nameCounts.get(entry.name) === 1)
+    const error = (entry.id ? errorsById.get(entry.id) : undefined)
+      ?? (nameCounts.get(entry.name) === 1 ? verdicts.errorByName.get(entry.name) : undefined) ?? attempt?.error
     return {
+      ...(observed && overlay && !overlay.reason && { historicalFlow: {
+        attempt: observed.retry + 1, incomplete: overlay.incomplete || overlay.unavailable > 0,
+        visits: Object.fromEntries([...overlay.sections].map(([section, visits]) => [section, Object.fromEntries(visits)])),
+      } }),
       name: entry.name,
       title: entry.title,
       status,
@@ -139,7 +161,7 @@ function declaresTitle(display: string, title: string): boolean {
  *  test declared in a loop, whose template — matches; with several, none. */
 function sourceFor(entry: RosterEntry & { location: string }, sourceTests: Map<string, SourceTest>): SourceTest | undefined {
   const exact = sourceTests.get(sourceKey(entry.location))
-  if (exact) return exact
+  if (exact && (declaresTitle(exact.title, entry.title) || summaryEntryName(exact.title) === entry.name)) return exact
   const byTitle = sourceDeclarations(entry, specFileOf(entry.location), sourceTests)
   return byTitle.length === 1 ? byTitle[0] : undefined
 }
@@ -168,10 +190,10 @@ export function runVerdicts(detail: RunDetail): RunVerdicts {
 /** Status for a roster entry with no playback event of its own. Failed and
  *  skipped are checked before passed so a name that somehow lands in two lists
  *  resolves downward — the report never rounds a test up into a pass. */
-export function summaryStatusFor(entry: RosterEntry, verdicts: RunVerdicts): string {
-  if ((entry.id && verdicts.failedIds.has(entry.id)) || verdicts.failedNames.has(entry.name)) return 'failed'
-  if ((entry.id && verdicts.skippedIds.has(entry.id)) || verdicts.skippedNames.has(entry.name)) return 'skipped'
-  if ((entry.id && verdicts.passedIds.has(entry.id)) || verdicts.passedNames.has(entry.name)) return 'passed'
+export function summaryStatusFor(entry: RosterEntry, verdicts: RunVerdicts, uniqueName = true): string {
+  if ((entry.id && verdicts.failedIds.has(entry.id)) || (uniqueName && verdicts.failedNames.has(entry.name))) return 'failed'
+  if ((entry.id && verdicts.skippedIds.has(entry.id)) || (uniqueName && verdicts.skippedNames.has(entry.name))) return 'skipped'
+  if ((entry.id && verdicts.passedIds.has(entry.id)) || (uniqueName && verdicts.passedNames.has(entry.name))) return 'passed'
   return NOT_RUN_STATUS
 }
 
@@ -196,6 +218,7 @@ export function statusBucket(status: string): keyof TestStatusCounts {
 
 /** The last recorded attempt at a test at one `file:line`. */
 export interface PlaybackAttempt {
+  end: Extract<PlaywrightPlaybackEvent, { type: 'test-end' }>
   caseKey?: string
   name: string
   title: string
@@ -221,6 +244,7 @@ export function playbackTests(events: PlaywrightPlaybackEvent[], identity?: Play
     const caseKey = identity?.eventKeys.length === events.length ? identity.eventKeys[index]?.caseKey : undefined
     const key = caseKey ?? `${event.test.name}@${event.test.location}`
     const attempt: PlaybackAttempt = {
+      end: event,
       ...(caseKey ? { caseKey } : {}),
       name: event.test.name,
       title: event.test.title,

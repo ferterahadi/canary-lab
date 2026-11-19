@@ -1,6 +1,8 @@
+import { alignedSideLabels } from '@shared/test-view/render-model'
+import { ReviewFlows, type ReviewInspection } from './ReviewFlows'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { TestFileReview, VersionTest } from '@shared/test-review'
+import { reviewCaseKey, type TestFileReview, type VersionTest } from '@shared/test-review'
 import * as featuresApi from '@/shared/api/features'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { TestLanguageSwitch } from '@/shared/ui/TestLanguageSwitch'
@@ -10,7 +12,7 @@ import { englishLines, englishSourceRange } from '@shared/readable-tests/source-
 import { sourceRows, rowsForTest, type ContextRow } from '@shared/test-source-diff'
 import type { TestViewSelection } from '@shared/test-view/render-model'
 import { noTestAssessmentCopy, testAssessmentFinding, testAssessmentReason } from '@/shared/lib/test-assessment-copy'
-import type { CardInspection, ReviewFocus } from '@/shared/lib/workspace-view-state'
+import type { ReviewFocus } from '@/shared/lib/workspace-view-state'
 import { displayError } from '@/shared/api/error-message'
 interface EnglishReturnPoint {
   selection: TestViewSelection
@@ -117,17 +119,15 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     setCursor(next)
     updateFocus(rows.find((row) => row.change === changes[next] && row.afterLine != null)?.afterLine, mode, next)
   }
-  const graphSide = focus?.side ?? testSide
-  const graphTests = data?.[graphSide].tests ?? []
-  const caseKey = (test: { line: number; name: string }) => test.line + ':' + test.name
-  const graphTest = focus?.flow ? graphTests.find(t => caseKey(t) === focus.flow?.card)
-    : graphTests.find(t => t.name === (selectedTest?.name ?? focus?.test)) ?? graphTests.find(t => t.line === focus?.line) ?? graphTests[0]
-  const definition = graphTest?.readable.graph?.sections[0]?.definition
   const graphOpen = !!focus?.flow || focus?.mode === 'visual'
-  const openGraph = (side: 'before' | 'after', flow?: CardInspection) => {
-    const first = data?.[side].tests.find(t => t.name === graphTest?.name) ?? data?.[side].tests[0]
-    onFocus?.({ ...focus, file, side, cursor: index, comparisonMode: mode, mode: flow?.mode ?? 'visual',
-      flow: flow ?? (first && { card: caseKey(first), mode: 'visual' }) })
+  const inspect = ({ side, flow }: ReviewInspection) => onFocus?.({
+    ...focus, file, side, cursor: index, comparisonMode: mode, mode: flow.mode, flow,
+  })
+  const openGraph = () => {
+    const side = testSide
+    const target = selectedTest ?? data?.[side].tests.find(test => test.line <= sourceLine && test.endLine >= sourceLine)
+    if (target) inspect({ side, flow: { card: reviewCaseKey(target), mode: 'visual' } })
+    else onFocus?.({ ...focus, file, mode: 'visual', comparisonMode: mode, cursor: index })
   }
   const leaveGraph = () => onFocus?.({ ...focus, file, mode, comparisonMode: undefined, side: undefined, flow: undefined, cursor: index })
   const header = <>
@@ -146,28 +146,12 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
       </div>, navigationTarget)}
     {error ? <div role="alert" className="flex-1 p-4 text-sm">{error}<button className="cl-button ml-3 px-3 py-1" onClick={() => setRetry(retry + 1)}>Retry</button></div>
       : !ready ? <div role="status" className="flex-1 p-4 text-sm text-secondary">Loading complete test source…</div>
-      : graphOpen ? <div className="min-h-0 overflow-auto p-2">
-        <div className="cl-flow-picker">
-          <label>Review side <select value={graphSide} onChange={event => openGraph(event.target.value === 'before' ? 'before' : 'after')}>
-            <option value="before">Before</option><option value="after">After</option>
-          </select></label>
-          {graphTests.length > 0 && <label>Test <select value={graphTest ? caseKey(graphTest) : ''}
-            onChange={event => openGraph(graphSide, { card: event.target.value, mode: 'visual' })}>
-            {!graphTest && <option value="">Unavailable</option>}
-            {graphTests.map(t => <option key={caseKey(t)} value={caseKey(t)}>{t.name}</option>)}
-          </select></label>}
-          <button type="button" onClick={leaveGraph}>File comparison</button>
-        </div>
-        {definition && graphTest && definition.startOffset !== undefined && definition.endOffset !== undefined
-          ? <TestPresentation view="single" key={graphSide + caseKey(graphTest)} sourceFile={definition.file}
-            inspection={focus?.flow ?? { mode: 'visual' }}
-            onInspection={value => openGraph(graphSide, { ...value, card: caseKey(graphTest) })}
-            test={{ ...graphTest, steps: [], bodyLine: definition.startLine,
-              bodySource: data[graphSide].source.slice(definition.startOffset, definition.endOffset) }} />
-          : <p role="status">No source-backed graph for this test on the selected side.</p>}
-      </div>
+      : graphOpen && !data.supportingFile ? <ReviewFlows sources={data} labels={alignedSideLabels(data)}
+        selectedCase={selectedTest && { side: testSide, card: reviewCaseKey(selectedTest) }}
+        inspection={focus?.flow && { side: focus.side ?? testSide, flow: focus.flow }}
+        onInspect={inspect} onReturn={leaveGraph} toolbar={header} />
       : <TestPresentation view="aligned" onVisual={!data.supportingFile && onFocus && (data.before.tests.length || data.after.tests.length)
-        ? () => openGraph(graphTests.length ? graphSide : graphSide === 'before' ? 'after' : 'before', graphTest && { card: caseKey(graphTest), mode: 'visual' }) : undefined} review={data} rows={rows} mode={mode} onModeChange={changeMode} header={header} change={change} scrollRef={scroll}
+        ? openGraph : undefined} review={data} rows={rows} mode={mode} onModeChange={changeMode} header={header} change={change} scrollRef={scroll}
         emptySide={selectedTest && focus?.change === 'removed' ? 'after' : selectedTest && focus?.change === 'added' ? 'before' : undefined}
         returnSelection={englishReturn?.selection} onReturnToEnglish={() => changeMode('english')}
         selection={selection} onSelectSource={(next) => {

@@ -6,7 +6,7 @@ import { formatCodeForDisplay } from '../../../../../../../shared/code-display-f
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../../shared/coverage/types'
 import { qualitySummaryForAudience } from './assertions'
 import { displayCaseTitle, specFileLabel } from './audience'
-import { createFlowcharts } from './flowchart'
+import { renderVisualFlow } from './visual-flow'
 import { renderEnglishSource, renderTestEnglish } from './english'
 import { statusBucket, testStatusCounts } from './packet'
 import { ASSERTION_HTML_SCRIPT } from './report-script'
@@ -40,7 +40,6 @@ export async function renderHtml(
 ): Promise<string> {
   const displayFeature = rewrite.featureTitle?.trim() || titleCaseFeatureName(packet.feature)
   const testIds = uniqueSectionIds(packet.tests.map((test, idx) => `${idx + 1}-${test.title}`))
-  const flowchartByTestName = new Map(flowcharts.map((flowchart) => [flowchart.testName, flowchart]))
   // Coverage strength is keyed by the source test title (== ledger test name).
   const coverageByTitle = new Map<string, TestCoverage>()
   if (options.coverage) for (const t of options.coverage.tests) coverageByTitle.set(t.name, t)
@@ -52,9 +51,8 @@ export async function renderHtml(
 
   const caseCards = await Promise.all(packet.tests.map(async (test, idx) => {
     const videoLinks = options.videoLinksByTestName?.[test.name] ?? []
-    // Always present: `createFlowcharts` emits one entry per packet test keyed
-    // by `test.name`, and it is the only thing renderHtml is ever called with.
-    const flowchart = flowchartByTestName.get(test.name)!
+    const flowchart = flowcharts[idx]
+    const visual = test.extracted && renderVisualFlow(test.extracted.test.readable, idx, test.historicalFlow)
     const audienceCase = rewrite.cases[idx]
     const cov = coverageByTitle.get(test.title)
     const bucket = statusBucket(test.status)
@@ -92,7 +90,9 @@ export async function renderHtml(
           <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
           ${bucket === 'notRun' ? NEVER_RAN_CALLOUT : ''}
           ${renderFailureDetail(test)}
-          ${renderFlowchartSection(flowchart, audienceCase.title)}
+          ${visual ?? '<p>Visual flow unavailable for this source. Historical step evidence unavailable.</p>'}
+          ${visual ? `<details class="drawer"><summary>Step summary</summary>${renderFlowchartSection(flowchart, audienceCase.title)}</details>`
+            : renderFlowchartSection(flowchart, audienceCase.title)}
           <div class="drawers">
             <details class="drawer english-details" open>
               <summary>English explanation</summary>

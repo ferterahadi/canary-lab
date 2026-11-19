@@ -15,7 +15,8 @@ import { suiteReviewFiles } from '../../runs/logic/runtime/suite-review'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
-import { compareTestDeclarations, meaningfulChangeLines, pairTestDeclarations } from '../logic/test-declaration-changes'
+import { pairTestDeclarations, reviewDeclarationPairs } from '../../../shared/test-declaration-pairs'
+import { compareTestDeclarations, meaningfulChangeLines } from '../logic/test-declaration-changes'
 import { notFound } from '../../../shared/http-error'
 
 function readSource(file: string): string {
@@ -145,7 +146,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
       before: extract(beforeSource, 'before'), after: extract(afterSource, 'after'),
       patch: await diffSourceText(beforeSource, afterSource, Math.max(beforeSource.split('\n').length, afterSource.split('\n').length)),
       assessment: diffSpecPredicates(pairedBefore, afterPredicates),
-      meaningfulChanges, comparisonAlignment: alignment,
+      meaningfulChanges, comparisonAlignment: alignment, declarationPairs: reviewDeclarationPairs(pairs),
     }
     return result
   })

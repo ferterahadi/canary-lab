@@ -215,7 +215,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const selectedTest = tests[testIndex]
   const selectTest = (kind: TestChangeKind, test: VersionTest): void => {
     setPicked({ feature: selected!.name, file: test.file })
-    updateFocus({ file: test.file, line: test.line, mode: focus?.mode, baseline: 'run', change: kind, test: test.name })
+    updateFocus({ file: test.file, line: test.line, mode: focus?.flow ? 'visual' : focus?.mode, comparisonMode: focus?.comparisonMode, baseline: 'run', change: kind, test: test.name })
   }
   const reviewFocus = selectedTest ? { ...focus, file: selectedTest.file, line: selectedTest.line, change: category, test: selectedTest.name } : focus
 

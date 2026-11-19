@@ -3,7 +3,7 @@
 // header gives and the lines it leaves out are counted as gaps, never guessed.
 // Recovering the full files is the server's job; nothing here reads a repo.
 import { hunkRange, unifiedDiffLines, type PatchHunk } from '../lib/unified-diff'
-import type { ReviewSource } from '../test-review'
+import type { ReviewDeclarationPair, ReviewSource } from '../test-review'
 import type { ContextRow } from '../test-source-diff'
 import type { AlignedReview, TestViewSideLabels } from './render-model'
 
@@ -59,7 +59,7 @@ export interface CycleReviewFile {
   recovery: CycleFileRecovery
   /** Both full versions, and their full-context diff, unless the file is
    * shown from the diff alone. */
-  sources?: { before: ReviewSource; after: ReviewSource; patch: string }
+  sources?: { declarationPairs?: ReviewDeclarationPair[]; before: ReviewSource; after: ReviewSource; patch: string }
   /** Suite files only. */
   executed?: CycleFileExecution
 }

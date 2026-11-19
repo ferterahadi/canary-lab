@@ -332,4 +332,10 @@ figcaption { margin-top: 6px; font-size: 12px; color: var(--ink-2); }
   .drawer-body { display: block !important; }
   .is-hidden { display: block !important; }
 }
+
+.visual-diagram{overflow:auto;max-height:70vh}
+.visual-diagram text{font:12px var(--font-sans);fill:var(--flow-neutral-text)}
+.visual-diagram a:focus-visible{outline:2px solid currentColor}
+.visual-flow pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.visual-flow :target{outline:2px solid currentColor}
 `

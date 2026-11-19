@@ -8,6 +8,8 @@ import type { CycleFileExecution, CycleFileRole, CycleReviewFile, RunCycleReview
 import { findFeature } from '../../../../shared/feature-loader'
 import { gitBlobSha1, isZeroBlob, matchesBlob } from '../../../../shared/git-blob'
 import { confinedFile } from '../../../../shared/path-containment'
+import { extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
+import { pairTestDeclarations, reviewDeclarationPairs } from '../../../../shared/test-declaration-pairs'
 import { reviewSourceFor } from '../../../../shared/readable-tests/review-source'
 import { diffSourceText } from '../dirty-specs/text-diff'
 import { detectHealMode } from '../runtime/auto-heal'
@@ -70,6 +72,10 @@ export async function buildRunCycleReview(deps: CycleReviewDeps, runId: string, 
       ...wire, role, recovery,
       ...(before !== undefined && after !== undefined ? { sources: {
         before: side(before, 'before'), after: side(after, 'after'),
+        ...(rel && role === 'spec' && [before, after].every(text => text.split('\n').length <= MAX_ENGLISH_LINES) && {
+          declarationPairs: reviewDeclarationPairs(pairTestDeclarations(
+            extractTestMetadataFromSource(rel, before).tests, extractTestMetadataFromSource(rel, after).tests)),
+        }),
         patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
       } } : {}),
       ...(rel !== null && manifest ? { executed: execution(manifest, rel, file.blobs?.after, current) } : {}),

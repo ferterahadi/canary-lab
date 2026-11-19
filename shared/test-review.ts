@@ -133,7 +133,12 @@ export interface ReviewSource {
 }
 
 /** One read of each version supplies both context and advisory assessments. */
+export type ReviewDeclarationPair = { before: string; after?: string } | { before?: string; after: string }
+
+export const reviewCaseKey = (test: { line: number; name: string }) => test.line + ':' + test.name
+
 export interface TestFileReview {
+  declarationPairs?: ReviewDeclarationPair[]
   file: string
   /** Helpers/config belong to the approved snapshot but are not test declarations. */
   supportingFile?: boolean

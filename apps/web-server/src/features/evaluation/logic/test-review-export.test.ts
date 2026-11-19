@@ -352,7 +352,15 @@ test('A. WA metadata.url -> SMS', async () => {
     expect(html).toContain('call `postSendMessage`')
     expect(html).not.toContain('WhatsApp')
     expect(html).not.toContain('message link')
-    expect(html).not.toContain('Make ids')
-    expect(html).not.toContain('const ids =')
+    // The narrative preserves exact identifiers. The source-backed Visual view
+    // separately includes the shared graph's label and the literal declaration.
+    const visualStart = html.indexOf('<section class="subsection visual-flow">')
+    const visualEnd = html.indexOf('<details class="drawer"><summary>Step summary</summary>', visualStart)
+    expect(visualStart).toBeGreaterThan(-1)
+    expect(visualEnd).toBeGreaterThan(visualStart)
+    expect(html.slice(visualStart, visualEnd)).toContain("const ids = makeIds(")
+    const narrative = html.slice(0, visualStart) + html.slice(visualEnd)
+    expect(narrative).not.toContain('Make ids')
+    expect(narrative).not.toContain('const ids =')
   })
 })

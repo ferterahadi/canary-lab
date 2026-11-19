@@ -58,11 +58,11 @@ export function buildEvaluationLlmPrompt(input: EvaluationLlmPromptInput): strin
       // a completed one. `notRun` tests were declared but never executed.
       breakdown: testStatusCounts(input.packet.tests),
     },
-    tests: input.packet.tests.map((test) => ({
+    tests: input.packet.tests.map((test, idx) => ({
       title: test.title,
       status: test.status,
       checkStrength: qualitySummaryForAudience(test.assertions),
-      flowSteps: input.flowcharts.find((flowchart) => flowchart.testName === test.name)?.steps ?? [],
+      flowSteps: input.flowcharts[idx]?.testName === test.name ? input.flowcharts[idx].steps : [],
       failureMessages: test.status === 'passed' ? [] : test.assertions.map((assertion) => assertion.rationale),
     })),
   }

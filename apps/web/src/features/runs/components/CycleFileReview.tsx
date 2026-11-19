@@ -1,3 +1,4 @@
+import { ReviewFlows, type ReviewInspection } from './ReviewFlows'
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { sourceRows } from '@shared/test-source-diff'
 import { cycleFileAlignedInput, type CycleAlignedInput, type CyclePatchOnlyReason, type CycleReviewFile } from '@shared/test-view/cycle-review'
@@ -72,6 +73,8 @@ function CycleFileView({ file, cycle, span, mode, onModeChange, picker, bare }: 
   bare: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [visual, setVisual] = useState(false)
+  const [inspection, setInspection] = useState<ReviewInspection>()
   const [index, setIndex] = useState(0)
   const input = useMemo((): CycleAlignedInput => {
     const cyclePatch = cycleFileAlignedInput(file, cycle)
@@ -98,9 +101,9 @@ function CycleFileView({ file, cycle, span, mode, onModeChange, picker, bare }: 
     : file.role === 'app' ? APP_CODE : undefined
   const nav = changes.length > 0 && (
     <div className="cl-review-change-nav" role="group" aria-label="Edit blocks in this file" title="Each block is a consecutive group of edited lines in this file.">
-      <button type="button" className="cl-icon-button" aria-label="Previous change" disabled={index === 0} onClick={() => setIndex(index - 1)}>←</button>
+      <button type="button" className="cl-icon-button" aria-label="Previous change" disabled={index === 0} onClick={() => { setIndex(index - 1); setVisual(false) }}>←</button>
       <span aria-live="polite">Edit {index + 1} / {changes.length}</span>
-      <button type="button" className="cl-icon-button" aria-label="Next change" disabled={index >= changes.length - 1} onClick={() => setIndex(index + 1)}>→</button>
+      <button type="button" className="cl-icon-button" aria-label="Next change" disabled={index >= changes.length - 1} onClick={() => { setIndex(index + 1); setVisual(false) }}>→</button>
     </div>
   )
   const ending = file.noNewlineAtEnd && [file.noNewlineAtEnd.before && 'before', file.noNewlineAtEnd.after && 'after'].filter(Boolean).join(' and ')
@@ -116,11 +119,16 @@ function CycleFileView({ file, cycle, span, mode, onModeChange, picker, bare }: 
     </p>}
   </div>
   return <div className={`cl-cycle-review flex max-h-[420px] min-h-0 flex-col overflow-hidden${bare ? '' : ' rounded border'}`} style={{ borderColor: 'var(--border-default)' }}>
-    <TestPresentation view="aligned" {...input} mode={mode} onModeChange={onModeChange} marks="word" codeOnly={codeOnly} lang={file.language}
+    {visual && !codeOnly && file.sources && file.role === 'spec' ? <>
+      {notice}
+      <ReviewFlows sources={file.sources} labels={input.labels} inspection={inspection} onInspect={setInspection}
+        onReturn={() => setVisual(false)} toolbar={<>{picker}{nav}</>} />
+    </> : <TestPresentation view="aligned" onVisual={!codeOnly && file.role === 'spec' && file.sources && (file.sources.before.tests.length || file.sources.after.tests.length)
+      ? () => setVisual(true) : undefined} {...input} mode={mode} onModeChange={onModeChange} marks="word" codeOnly={codeOnly} lang={file.language}
       change={changes[index]} scrollRef={scrollRef} ariaLabel="Code changes before and after"
       emptySide={file.change === 'added' ? 'before' : file.change === 'deleted' ? 'after' : undefined}
       emptySideLabel={file.change === 'added' ? `New file in this ${SPAN_NOUN[span]} — nothing on the Before side` : `Deleted in this ${SPAN_NOUN[span]} — nothing on the After side`}
       header={<>{picker}{nav}<ComparisonLegend /></>}
-      notice={notice} />
+      notice={notice} />}
   </div>
 }

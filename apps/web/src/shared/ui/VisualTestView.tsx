@@ -3,7 +3,8 @@ import { useId, useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import type { ReadableTest } from '@shared/readable-tests/types'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import type { ReadableSourceSelection } from './ReadableTestView'
-import { foldedTopology, layoutTestFlow, type FlowSection } from './test-flow-layout'
+import { layoutTestFlow, type FlowSection } from '@shared/test-view/flow-layout'
+import { foldedTopology } from './test-flow-layout'
 import { Tooltip } from './Tooltip'
 
 interface ChartProps {
