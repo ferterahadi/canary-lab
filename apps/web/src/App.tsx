@@ -401,6 +401,7 @@ export function App() {
             />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage
+              runEvidence={selectedRunEvidence}
               feature={selectedFeature}
               /* R83: the ledger is a top-level VIEW, so a flight's drill-through
                  replaces the flight rather than stacking on it. Close returns to

@@ -186,7 +186,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
       if (action.type === 'snapshot' || action.type === 'list-changed') setIndexError(null)
       dispatchRef.current(action)
     },
-    onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
+    onConnection: (status) => {
+      detailLoadsRef.current.clear()
+      dispatchRef.current({ type: 'connection', status })
+    },
   })
   useEffect(() => {
     const reads = indexReadsRef.current
@@ -333,6 +336,8 @@ export function useRuns({ reconcile = false }: { reconcile?: boolean } = {}): Us
 }
 
 export interface UseRunResult {
+  /** A running detail must be confirmed on this connection before lighting a source line. */
+  stale?: boolean
   /** Server-known detail (manifest + summary). Undefined until the WS
    *  pushes the first `update` for this run, or the action layer does an
    *  HTTP fallback. */
@@ -368,7 +373,7 @@ export function useRun(runId: string | null | undefined): UseRunResult {
   const transient = ctx.state.transients[runId] ?? null
   const displayStatus = status ? deriveDisplayStatus(status, transient) : undefined
   const error = ctx.state.errors[runId] ?? null
-  return { detail, status, transient, displayStatus, error }
+  return { detail, status, transient, displayStatus, error, stale: status === 'running' && (ctx.state.connection !== 'live' || !ctx.state.confirmedDetails.has(runId)) }
 }
 
 export interface UseRunActionsResult {

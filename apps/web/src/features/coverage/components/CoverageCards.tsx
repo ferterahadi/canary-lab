@@ -11,6 +11,7 @@ import type {
   TestCoverage,
   TestStrength,
 } from '@shared/coverage/types'
+import type { FlowAttempt } from '@shared/test-view/flow-execution'
 import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { Tooltip } from '@/shared/ui/Tooltip'
@@ -684,7 +685,8 @@ function ReqTag({ id, testId, onReqClick }: { id: string; testId: string; onReqC
 // muted; the requirement id is the jump link) · a dot in the strength hue. No
 // decorative accent, no run-coupled "verified" dot (coverage is semantic). Click
 // the row to disclose the actual test source (lazily fetched by the parent).
-export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
+export function TestCard({ flow, test, testNumber, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
+  flow?: { attempts?: FlowAttempt[]; liveAttempt: boolean }
   test: TestCoverage
   testNumber?: number
   active: boolean
@@ -796,6 +798,7 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
           {source ? (
             <TestPresentation
               view="single"
+              attempts={flow ? flow.attempts ?? [] : undefined} liveAttempt={flow?.liveAttempt}
               test={source.test}
               sourceFile={source.absFile}
             />

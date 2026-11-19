@@ -8,13 +8,22 @@ export interface CoverageTestSource {
 }
 
 /** A generated declaration can own several discovered cases at the same line. */
-export function coverageTestSources(specs: FeatureTests, test: TestCoverage): CoverageTestSource[] {
+export function coverageTestSources(specs: FeatureTests, test: TestCoverage, recorded = false): CoverageTestSource[] {
   const entries = specs.flatMap((spec) => spec.tests.map((source) => ({
     test: source,
     absFile: source.sourceFile ?? spec.file,
   })))
   const normalize = (file: string) => file.replace(/\\/g, '/')
   const file = test.file && normalize(test.file)
+  // A ledger describes current source. Across revisions, a reused line can
+  // belong to an unrelated case. Require a unique title in the same file.
+  if (recorded) {
+    const matched = entries.filter(entry => file && entry.test.name === test.name
+      && (normalize(entry.absFile) === file || normalize(entry.absFile).endsWith(`/${file}`)))
+    if (matched.length < 2) return matched
+    const sameLine = matched.filter(entry => entry.test.line === test.line)
+    return sameLine.length === 1 ? sameLine : []
+  }
   const atLocation = file && test.line != null
     ? entries.filter((entry) => entry.test.line === test.line
       && (normalize(entry.absFile) === file || normalize(entry.absFile).endsWith(`/${file}`)))

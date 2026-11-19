@@ -209,8 +209,20 @@ describe('runsReducer', () => {
     expect(next.transients).toEqual({})
   })
 
+  it('retains observed detail offline and confirms each run again after reconnect', () => {
+    const loaded = runsReducer(initialRunsState, { type: 'snapshot', runs: [entry()], details: { r1: detail() } })
+    const offline = runsReducer(loaded, { type: 'connection', status: 'reconnecting' })
+    expect(offline.details.r1).toEqual(loaded.details.r1)
+    const opened = runsReducer(offline, { type: 'connection', status: 'live' })
+    const other = runsReducer(opened, { type: 'update', runId: 'r2', detail: detail({ runId: 'r2' }) })
+    expect([...other.confirmedDetails]).toEqual(['r2'])
+    const restored = runsReducer(other, { type: 'http-detail', runId: 'r1', detail: detail() })
+    expect(restored.confirmedDetails.has('r1')).toBe(true)
+  })
+
   it('removed drops the run from runs, details, transients, and errors', () => {
     const start: RunsState = {
+      ...initialRunsState,
       indexLoaded: true,
       runs: [entry({ runId: 'r1' }), entry({ runId: 'r2' })],
       details: { r1: detail(), r2: detail({ runId: 'r2' }) },

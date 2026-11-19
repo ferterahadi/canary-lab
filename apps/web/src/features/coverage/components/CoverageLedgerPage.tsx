@@ -1,3 +1,5 @@
+import { RunSyncNotice } from '@/shared/ui/RunSyncNotice'
+import { useRecordedTestFlow, type TestRunEvidence } from '@/shared/state/use-recorded-test-flow'
 import { useFeatureTestRoster } from '@/shared/state/use-feature-test-roster'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FullScreenPage } from '@/shared/ui/PageHeader'
@@ -40,6 +42,7 @@ import { usePersistedFlag } from '@/shared/state/browser-storage'
 const COVERAGE_MODEL_STAGES: readonly ModelStageKey[] = ['prd', 'mapping']
 
 interface Props {
+  runEvidence?: TestRunEvidence
   feature: string
   onClose: () => void
   // R14 (canary-first-flight): a flight's docs/prd-summary/specs-coverage stage
@@ -55,7 +58,7 @@ interface Props {
   coverageJobs?: CoverageJobIndexEntry[]
 }
 
-export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight, onOpenRecovery, onOpenGeneration, coverageJobs = [] }: Props) {
+export function CoverageLedgerPage({ runEvidence, feature, onClose, generatingFlight = null, onOpenFlight, onOpenRecovery, onOpenGeneration, coverageJobs = [] }: Props) {
   // Documents and results refresh when either an agent or another view writes
   // coverage evidence. Execution stays on Flight.
   const coverageRefreshKey = useInvalidationKey('coverage')
@@ -172,7 +175,10 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // front. One fetch, cached; cards read the result via the lookup below.
   const [specSourceRequested, setSpecSourceRequested] = useState(false)
   const ensureSpecSource = useCallback(() => setSpecSourceRequested(true), [])
-  const sourceRoster = useFeatureTestRoster({ feature, enabled: specSourceRequested,
+  const [recorded, setRecorded] = useState(false)
+  const evidence = recorded && runEvidence?.manifest ? runEvidence : undefined
+  const recordedFlow = useRecordedTestFlow(evidence)
+  const sourceRoster = useFeatureTestRoster({ feature, enabled: specSourceRequested, recover: true, runId: evidence?.manifest?.runId,
     refreshKey: JSON.stringify([testsRefreshKey, coverageRefreshKey, ledger?.freshness?.revision]),
   })
   const specSource = sourceRoster.source
@@ -185,12 +191,13 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     if (ledger?.tests.some((test) => test.name.includes('${'))) ensureSpecSource()
   }, [ledger, ensureSpecSource])
 
+  const recordedSource = Boolean(evidence)
   const testRows = useMemo(() => (ledger?.tests ?? []).flatMap<{ test: TestCoverage; source: CoverageTestSource | null }>((test) => {
-    const sources = coverageTestSources(specSource ?? [], test)
+    const sources = coverageTestSources(specSource ?? [], test, recordedSource)
     return sources.length
       ? sources.map((source) => ({ test, source }))
       : [{ test, source: null }]
-  }), [ledger, specSource])
+  }), [ledger, specSource, recordedSource])
 
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
@@ -258,6 +265,13 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // they resolve into the real cards in place once the new ledger lands.
   const testsPaneEl = ledger ? (
     <div className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
+      {runEvidence?.manifest && <label className="mb-2 flex items-center gap-2 text-xs">Test source
+        <select aria-label="Test source" value={recorded ? 'recorded' : 'current'} onChange={event => setRecorded(event.target.value === 'recorded')}>
+          <option value="current">Current source</option>
+          <option value="recorded">Recorded run · {runEvidence.manifest.runId}</option>
+        </select>
+      </label>}
+      {evidence?.stale && <RunSyncNotice />}
       {generating ? (
         <>
           <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'var(--running)' }}>
@@ -296,6 +310,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
               onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
               onExpand={ensureSpecSource}
+              flow={evidence && source?.test.readable.graph ? recordedFlow(source.test, source.absFile) : undefined}
               source={source}
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}

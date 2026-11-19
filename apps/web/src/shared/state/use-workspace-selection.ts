@@ -44,6 +44,7 @@ export function useWorkspaceSelection({
 
   const statusRunDetail = useRun(statusRunId)
   const selectedRunEvidence = {
+    stale: statusRunDetail.stale,
     manifest: statusRunDetail.detail?.manifest,
     summary: statusRunDetail.detail?.summary,
     playbackEvents: statusRunDetail.detail?.playbackEvents,

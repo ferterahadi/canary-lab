@@ -494,7 +494,7 @@ describe('CoverageLedgerPage', () => {
       container.querySelector<HTMLElement>('[data-testid="test-toggle-adds item"]')?.click()
       await Promise.resolve()
     })
-    expect(configApi.getFeatureTests).toHaveBeenCalledWith('checkout')
+    expect(configApi.getFeatureTests).toHaveBeenCalledWith('checkout', undefined, undefined)
     const src = container.querySelector('[data-testid="test-source-adds item"]')
     expect(src?.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(src?.textContent).toContain('Open “/cart”')

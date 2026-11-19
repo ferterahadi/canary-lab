@@ -16,6 +16,7 @@ export interface RunsState {
   details: Record<string, RunDetail>
   transients: Record<string, TransientAction>
   connection: ConnectionState
+  confirmedDetails: ReadonlySet<string>
   errors: Record<string, string>
 }
 
@@ -33,6 +34,7 @@ const runsIndex = createRecordIndex<RunIndexEntry, RunDetail, 'runs', 'runId'>({
 export const initialRunsState: RunsState = {
   ...runsIndex.initialState,
   indexLoaded: false,
+  confirmedDetails: new Set(),
   transients: {},
   errors: {},
 }
@@ -53,7 +55,7 @@ export type RunsAction =
 export function runsReducer(state: RunsState, action: RunsAction): RunsState {
   switch (action.type) {
     case 'snapshot':
-      return { ...state, ...runsIndex.reducer(state, action), indexLoaded: true }
+      return { ...state, ...runsIndex.reducer(state, action), confirmedDetails: new Set(Object.keys(action.details)), indexLoaded: true }
     case 'http-detail':
     case 'update': {
       const transients = isTerminalRunStatus(action.detail.manifest.status)
@@ -62,13 +64,18 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
       return {
         ...state,
         ...runsIndex.reducer(state, { type: 'update', runId: action.runId, manifest: action.detail }),
+        confirmedDetails: state.connection === 'live' && !state.confirmedDetails.has(action.runId)
+          ? new Set([...state.confirmedDetails, action.runId]) : state.confirmedDetails,
         transients,
       }
     }
     case 'removed': {
+      const confirmedDetails = new Set(state.confirmedDetails)
+      confirmedDetails.delete(action.runId)
       return {
         ...state,
         ...runsIndex.reducer(state, action),
+        confirmedDetails,
         transients: omitRun(state.transients, action.runId),
         errors: omitRun(state.errors, action.runId),
       }
@@ -76,7 +83,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
     case 'list-changed':
       return { ...state, runs: action.runs, indexLoaded: true, transients: pruneTerminalTransients(state.transients, action.runs) }
     case 'connection':
-      return { ...state, ...runsIndex.reducer(state, action) }
+      return { ...state, ...runsIndex.reducer(state, action), confirmedDetails: action.status === 'live' ? state.confirmedDetails : new Set() }
     case 'transient-set':
       return { ...state, transients: { ...state.transients, [action.runId]: action.action } }
     case 'transient-clear': {

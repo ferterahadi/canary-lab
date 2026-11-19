@@ -29,6 +29,15 @@ describe('coverageTestSources', () => {
     }).map(({ test }) => test.name)).toEqual(['second'])
   })
 
+  it('requires the same case and file when a ledger opens a recorded graph', () => {
+    const specs = [spec('/saved/e2e/conversations.spec.ts', ['different case']), spec('/saved/other.spec.ts', ['original'])]
+    const test = { ...declaration, name: 'original' }
+    expect(coverageTestSources(specs, test, true)).toEqual([])
+    specs[0].tests[0].name = 'original'
+    specs[0].tests[0].line = 42
+    expect(coverageTestSources(specs, test, true)[0]?.test.line).toBe(42)
+  })
+
   it('matches helper origins and normalizes Windows paths', () => {
     const wrapper = spec('/repo/e2e/wrapper.spec.ts', ['whatsapp: empty scope'])
     wrapper.tests[0].sourceFile = 'C:\\repo\\helpers\\conversations.ts'

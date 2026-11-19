@@ -1,6 +1,6 @@
 import type { CardInspection, FlowInspection } from '../lib/workspace-view-state'
-import { flowAttempts, type FlowAttempt } from '@shared/test-view/flow-execution'
-import type { PlaywrightPlaybackEvent } from '@shared/playback'
+import type { FlowAttempt } from '@shared/test-view/flow-execution'
+import { useRecordedTestFlow, summaryIdentityForWorkspaceTest, type TestRunEvidence } from '../state/use-recorded-test-flow'
 import { shortSourceLocation } from '@shared/lib/source-location'
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
@@ -10,35 +10,27 @@ import { useFeatureTestRoster } from '../state/use-feature-test-roster'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, FeatureSpecFile } from '../api/types'
 import type { ExtractedTest } from '@shared/extracted-test'
-import type { RunStatus } from '@shared/run-state'
-import { colorClassForStatus, executionLineHighlightForTest, runningTestForTest, sameSourceFile, statusForTest, type StepStatus, type TestExecutionLineHighlight, type TestStatusIdentity } from '@/features/runs/utils/test-step-status'
+import { colorClassForStatus, executionLineHighlightForTest, statusForTest, type StepStatus, type TestExecutionLineHighlight, type TestStatusIdentity } from '@/features/runs/utils/test-step-status'
 import { summaryEntryName } from '@shared/test-names'
 import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
-import type { RunManifest } from '@shared/run-manifest'
 import type { RunSummary, RunSummaryRunningStep } from '@shared/run-detail'
 import { StepStatusBadge } from '../ui/TestCodeBlock'
 import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
-import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
+import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { sourceFileInRun } from '@/features/runs/utils/run-source-file'
 import { StatusDot } from '@/shared/ui/atoms'
 import { DisclosureCaret } from '@/shared/ui/Icons'
 import { useTestVersions } from './use-test-versions'
 import type { TestChangeKind } from '@shared/test-review'
 import type { RunOpenTarget } from '../lib/workspace-view-state'
+import { RunSyncNotice } from '../ui/RunSyncNotice'
 import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { TestListUnavailableCard } from './TestListUnavailableCard'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
-
-type TestRunEvidence = {
-  playbackEvents?: PlaywrightPlaybackEvent[]
-  manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId' | 'playwrightExecutions'>
-  summary?: RunSummary
-  status?: RunStatus
-}
 
 interface Props {
   inspection?: CardInspection
@@ -70,8 +62,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
   const baselineRunSummary = comparisonBaseline?.summary
   const baselineRunStatus = comparisonBaseline?.status
   const activeRunManifest = currentTests ? undefined : runEvidence?.manifest
-  const events = currentTests ? undefined : runEvidence?.playbackEvents
-  const attempts = useMemo(() => flowAttempts(activeRunManifest?.runId ?? '', events ?? []), [activeRunManifest?.runId, events])
+  const recordedFlow = useRecordedTestFlow(currentTests ? undefined : runEvidence)
   const activeRunSummary = currentTests ? undefined : runEvidence?.summary
   const activeRunStatus = currentTests ? undefined : runEvidence?.status
   // The spec list refetches when a `tests-changed` event fires for the selected
@@ -153,7 +144,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
   // diagnosis on the card; the rest opens behind `Full error output`.
   const errorOutput = repairFailure || incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics || discoveryError || ''
   const retryDiscovery = (): void => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }
-  const isRunActivelyTesting = activeRunStatus === 'running'
+  const isRunActivelyTesting = activeRunStatus === 'running' && !runEvidence?.stale
   // Header and cards share the same identity/status rules, including skipped
   // and never-run tests that must not become passes.
   const testStatuses = statusesForSpecs(displaySpecs, activeRunManifest, activeRunSummary, isRunActivelyTesting)
@@ -167,6 +158,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
 
   return (
     <div className="cl-panel flex h-full flex-col">
+      {runId && runEvidence?.stale && <RunSyncNotice />}
       <TestsVersionHeader
         currentTests={currentTests}
         onCurrentTestsChange={onCurrentTestsChange}
@@ -175,7 +167,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
         passed={recordedSummary && recordedSpecs ? recordedStatuses.filter((status) => status === 'passed').length : undefined}
         failed={recordedStatuses.filter((status) => status === 'failed' || status === 'timedout').length}
         skipped={recordedStatuses.filter((status) => status === 'skipped').length}
-        running={recordedStatus === 'running'}
+        running={recordedStatus === 'running' && !(comparisonBaseline ?? runEvidence)?.stale}
         runId={baselineRunId}
         comparison={versions.comparisonForHeader}
         onReviewTest={onReviewTest}
@@ -290,20 +282,8 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
                 const sourceFile = t.sourceFile ?? spec.file
                 const key = workspaceTestKey(spec.file, t)
                 const isExpanded = (inspection?.card ?? expandedKey) === key
-                const testIdentity = summaryIdentityForWorkspaceTest(
-                  t.name,
-                  t.line,
-                  sourceFileInRun(sourceFile, activeRunManifest),
-                  activeRunSummary,
-                  Boolean(runId),
-                )
-                const runningTest = isRunActivelyTesting && activeRunSummary
-                  ? runningTestForTest(activeRunSummary, testIdentity)
-                  : undefined
+                const { identity: testIdentity, runningTest, attempts: caseAttempts, liveAttempt } = recordedFlow(t, sourceFile)
                 const isRunningTest = Boolean(runningTest)
-                const caseAttempts = testIdentity.id ? attempts.get(testIdentity.id) : undefined
-                const latestExecution = activeRunManifest?.playwrightExecutions
-                const liveAttempt = isRunningTest && (!latestExecution || caseAttempts?.at(-1)?.execution === latestExecution)
                 const bodyStartLine = t.bodyLine ?? t.line
                 const executionLine = executionLineHighlightForTest({
                   testName: t.name,
@@ -374,36 +354,6 @@ function statusesForSpecs(specs: FeatureSpecFile[] | null, manifest: TestRunEvid
 
 function workspaceTestKey(specFile: string, test: ExtractedTest): string {
   return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
-}
-
-function summaryIdentityForWorkspaceTest(
-  name: string,
-  line: number,
-  file: string,
-  summary: RunSummary | undefined,
-  recorded = false,
-): TestStatusIdentity {
-  const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
-    return known.title === name || known.name === summaryEntryName(name)
-  }
-  // The recorded line is a hint, not an identity: a heal edit moves a test to
-  // another line between cycles, and a targeted rerun only re-lists the tests it
-  // re-runs — so a test that already passed can sit ten lines below where the
-  // roster last saw it. The line decides only when one file declares the same
-  // title more than once.
-  const sameTest = (summary?.knownTests ?? []).filter((entry) => {
-    const parsed = parseLocation(entry.location)
-    return Boolean(parsed && sameSourceFile(parsed.file, file) && matchesName(entry))
-  })
-  const candidates = sameTest.length <= 1 ? sameTest : sameTest.filter(entry => parseLocation(entry.location)?.line === line)
-  const known = candidates.length === 1 ? candidates[0] : undefined
-  if (known?.id) return { name, id: known.id }
-  const hasExplicitLegacyResult = summary?.passedNames !== undefined
-    || summary?.skippedNames?.includes(summaryEntryName(name))
-    || summary?.failed.some((entry) => entry.name === summaryEntryName(name))
-  return summary?.knownTests?.length || (recorded && !hasExplicitLegacyResult)
-    ? { name, allowNameFallback: false }
-    : { name }
 }
 
 /** The placeholder is the card it becomes — R83's rule from the flight stage
