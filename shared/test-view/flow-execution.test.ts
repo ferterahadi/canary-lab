@@ -26,7 +26,9 @@ function event(seq: number, type: PlaywrightPlaybackEvent['type'], stepId?: numb
 
 describe('flow observations', () => {
   it('isolates parallel cases, retries and execution streams, including delayed step ends', () => {
-    const start = event(0, 'test-begin'), check = event(1, 'step-begin', 1), fail = event(2, 'step-end', 1, 4, { outcome: 'failed' })
+    const start = event(0, 'test-begin')
+    const check = event(1, 'step-begin', 1)
+    const fail = event(2, 'step-end', 1, 4, { outcome: 'failed' })
     const retry = [event(0, 'test-begin'), check].map(e => ({ ...e, flow: { ...e.flow!, retry: 1 } }))
     const parallel = [start, check].map(e => ({ ...e, test: { ...test, id: 'beta' } }))
     const rerun = { ...start, flow: { ...start.flow!, execution: 2, stream: 'later' } }
@@ -56,7 +58,8 @@ describe('flow observations', () => {
     expect(project([events[0], event(1, 'step-begin', 2)]).unavailable).toBe(1)
   })
   it('clears live state on interruption and withholds exact matches for legacy, changed or unrelated source', () => {
-    const start = event(0, 'test-begin'), step = event(1, 'step-begin', 1)
+    const start = event(0, 'test-begin')
+    const step = event(1, 'step-begin', 1)
     const attempt = flowAttempts('run', [start, step]).get('alpha')![0]
     expect(projectFlowAttempt(graph, { ...attempt, status: 'interrupted' }, true).active).toBeUndefined()
     expect(projectFlowAttempt({ ...graph, revisions: { ...graph.revisions, 'helper.ts': 'edited' } }, attempt, true).unavailable).toBe(1)
