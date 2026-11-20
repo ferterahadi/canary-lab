@@ -23,7 +23,7 @@ import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { deriveIntegrityHints } from './run-integrity-hints'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
 import { detectHealMode } from './auto-heal'
-import { buildSuiteReview, isRuntimeInputBackup, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
+import { buildSuiteReview, compareSuiteInventories, isRuntimeInputBackup, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
@@ -41,7 +41,7 @@ export function restoreReviewedSuiteFiles(
   expectedRevision: string,
   excludedPaths: Iterable<string> = [],
 ): RestoreReviewedSuiteResult {
-  const review = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
+  const review = compareSuiteInventories(snapshotDir, liveDir, excludedPaths)
   if (review.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
   if (review.files.length === 0) return { ok: false, reason: 'nothing-to-restore' }
   // Restoring an older declaration returns its runtime files to the producer.

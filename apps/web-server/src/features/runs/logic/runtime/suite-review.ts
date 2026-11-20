@@ -67,7 +67,7 @@ export function suiteExecutionRevision(snapshotDir: string, liveDir: string, exc
 /** Reuse bytes only within one gate evaluation. Acceptance and copying still
  * take fresh inventories at their existing revalidation boundaries. */
 export function suiteReviewAssessment(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
-  const { before, after, revision, files, policyChanged } = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
+  const { before, after, revision, files, policyChanged } = compareSuiteInventories(snapshotDir, liveDir, excludedPaths)
   const recordedInputs = executionInputs(before, policyChanged)
   const currentInputs = executionInputs(after, policyChanged)
   return {
@@ -106,8 +106,13 @@ function reviewInventories(snapshotDir: string, liveDir: string, excludedPaths: 
   return { before, after, policyChanged, recordedPatterns: recorded.patterns }
 }
 
-/** One inventory for approval, restoration and the human comparison viewer. */
-export function suiteReviewFiles(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
+export function compareSuiteInventories(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
   const inventory = reviewInventories(snapshotDir, liveDir, excludedPaths)
   return { ...compareReviewFiles(inventory.before, inventory.after), ...inventory }
+}
+
+/** Keep the public file comparison identical to a Git-backed review. */
+export function suiteReviewFiles(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
+  const { revision, files, before, after } = compareSuiteInventories(snapshotDir, liveDir, excludedPaths)
+  return { revision, files, before, after }
 }
