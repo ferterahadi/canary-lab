@@ -33,6 +33,14 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.4.0 — Visual Mode (unreleased)
+
+- **[Test Runner]** Open a test in **Visual** to follow its decisions, loops and checks. Select a box to read its source, inspect a helper, and return to the diagram where you left off.
+- **[Test Runner]** Choose **Recorded run** to see steps that Playwright observed for a specific attempt. Retries have separate counts. An unmarked box has no matching observation. Ordinary JavaScript conditions can have an unknown outcome even when the test passes.
+- **[Coverage]** Open the same diagram from a coverage test card. Choose current source for today's test or recorded source to inspect a matching run.
+- **[General]** Compare before and after diagrams for changes with recoverable test source. Added and removed tests appear on their respective sides.
+- **[Export evaluation]** Saved HTML reports include diagrams with offline links to source excerpts. Reports keep the original test outcomes and identify unavailable historical step evidence.
+
 ## 2.3.7 — 2026-11-19
 
 > After upgrading, run `npx canary-lab upgrade` in your workspace and restart connected agent apps to pick up the updated repair instructions.
