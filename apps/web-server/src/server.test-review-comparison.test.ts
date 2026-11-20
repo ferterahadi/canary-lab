@@ -25,7 +25,7 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   const runId = 'recorded-review'
   const snapshot = path.join(runDirFor(logsDir, runId), 'suite')
   fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
-  fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "exports.config = { name: 'shop', description: 'Review fixture', featureDir: __dirname, repos: [] }")
+  fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "exports.config = { name: 'shop', description: 'Review fixture', featureDir: __dirname, repos: [], generatedFiles: ['logs/receiver-*.jsonl'] }")
   const file = path.join(featureDir, 'e2e/contract.spec.ts')
   fs.writeFileSync(file, "test('contract', () => expect(1).toBe(1))\n")
   initGitRepo(featureDir)
@@ -72,6 +72,12 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   expect(runStore.get(runId)?.manifest.specEdits?.reviewDecisions).toBeUndefined()
   const current = await call(client, 'get_test_review', { runId })
   expect(current.review_revision).not.toBe(initial.review_revision)
+  const output = path.join(featureDir, 'logs/receiver-today.jsonl')
+  fs.mkdirSync(path.dirname(output))
+  fs.writeFileSync(output, 'runtime evidence')
+  expect((await call(client, 'get_test_review', { runId })).review_revision).toBe(current.review_revision)
+  const comparison = await app.inject(`/api/features/shop/test-source-comparison?runId=${runId}`)
+  expect(comparison.json().files).not.toContain('logs/receiver-today.jsonl')
   const beforeListeners = runStore.listenerCount('event')
   const waiting = call(client, 'review_test_changes', {
     runId, review_revision: current.review_revision, browser_wait_token: current.browser_wait_token,
@@ -85,6 +91,7 @@ it('preserves exact review identity, refusal, persisted acceptance and agent cat
   expect(await waiting).toMatchObject({ result: { status: 'approved-for-continuation', review_revision: current.review_revision } })
   expect(pendingRunReview(runStore, 'shop', featureDir)).toBeUndefined()
   expect(git(featureDir, 'show', 'HEAD:e2e/contract.spec.ts')).toContain('second candidate')
+  expect(git(featureDir, 'ls-files', 'logs/receiver-today.jsonl')).toBe('')
   const saved = JSON.parse(fs.readFileSync(path.join(runDirFor(logsDir, runId), 'manifest.json'), 'utf8'))
   expect(saved.specEdits.reviewDecisions).toContainEqual(expect.objectContaining({ revision: current.review_revision, receipt: accepted.json() }))
   await expect.poll(() => notifications().filter((item) => !item.resolvedAt)).toEqual([])

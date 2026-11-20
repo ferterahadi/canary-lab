@@ -27,6 +27,7 @@ Useful only when needed:
 Rules:
 - {{testSpecRule}}
 - In service/app repair mode, edit only the effective repo paths listed by `heal-index.md`. The authored feature suite and each original source checkout are read-only; worktree paths are the repair target.
+- If a review shows only rotating logs or metadata, identify the writer and tell the user which files are generated. The suite author can declare those paths with `generatedFiles` in `feature.config.cjs`. Leave the pending decision to the human. Never widen an exclusion to clear a repair or hide a fixture, helper, or assertion.
 - Prefer exact slice paths from `heal-index.md` before broad repo search.
 {{diagnosisPolicyGuidance}}
 - The signal is not a claim that the fix already passes. For an ordinary run it requests Canary Lab restart, health checks, and Playwright verification. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.

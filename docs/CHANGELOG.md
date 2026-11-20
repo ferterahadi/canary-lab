@@ -41,6 +41,11 @@ Each entry is tagged with the area it touches:
 - **[General]** Compare before and after diagrams for changes with recoverable test source. Added and removed tests appear on their respective sides.
 - **[Export evaluation]** Saved HTML reports include diagrams with offline links to source excerpts. Reports keep the original test outcomes and identify unavailable historical step evidence.
 
+## 2.3.8 — Unreleased
+
+- **[Test Runner]** Suites can declare service-generated logs and metadata with `generatedFiles`. Rotating those files preserves approval for a rerun. Changes to the declaration, test helpers, and assertions stay visible for review.
+- **[Test Generation]** Authoring and repair agents get guidance on identifying generated files and keeping authored fixtures under review.
+
 ## 2.3.7 — 2026-11-19
 
 > After upgrading, run `npx canary-lab upgrade` in your workspace and restart connected agent apps to pick up the updated repair instructions.

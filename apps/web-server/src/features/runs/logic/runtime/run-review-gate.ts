@@ -1,3 +1,4 @@
+import { readGeneratedFiles, sameGeneratedFiles } from '../../../../shared/generated-files'
 import type { RunStore } from '../run-store'
 import { suiteReviewAssessment } from './suite-review'
 import { suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
@@ -11,8 +12,9 @@ function runReviewGate(store: Pick<RunStore, 'list' | 'get'>, feature: string, l
   const detail = store.get(latest.runId)
   const manifest = detail?.manifest
   if (!manifest || manifest.suiteSnapshot?.kind !== 'taken') return
-  if (manifest.status === 'passed' && !manifest.specEdits?.pending.length && !manifest.specEdits?.reviewDecisions?.length) return
   const snapshot = manifest.suiteSnapshot.dir
+  if (manifest.status === 'passed' && !manifest.specEdits?.pending.length && !manifest.specEdits?.reviewDecisions?.length
+    && sameGeneratedFiles(readGeneratedFiles(snapshot).patterns, readGeneratedFiles(liveDir).patterns)) return
   const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot)
   const { executionChanged, revision, files } = suiteReviewAssessment(snapshot, liveDir, runtimeInputs)
   if (!executionChanged) return undefined

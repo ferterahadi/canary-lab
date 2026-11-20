@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { matchesGeneratedFile, readGeneratedFiles, sameGeneratedFiles } from '../../../../shared/generated-files'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
 import { diffSourceText } from '../dirty-specs/text-diff'
 import { SUITE_TEST_ROSTER_FILE } from '../suite-test-roster'
@@ -23,7 +24,7 @@ export function isRuntimeInputBackup(relativePath: string, runtimeInputs: Readon
   return match !== null && runtimeInputs.has(match[1])
 }
 
-function readSuite(root: string, excludedPaths: Iterable<string> = []): Map<string, Buffer> {
+function readSuite(root: string, excludedPaths: Iterable<string>, config: ReturnType<typeof readGeneratedFiles>, patterns: string[]): Map<string, Buffer> {
   const excluded = new Set([...excludedPaths].map((file) => file.split(path.sep).join('/')))
   const files = new Map<string, Buffer>()
   const visit = (dir: string, prefix: string) => {
@@ -32,7 +33,9 @@ function readSuite(root: string, excludedPaths: Iterable<string> = []): Map<stri
       if (skipSuiteSnapshotPath(rel) || excluded.has(rel) || isRuntimeInputBackup(rel, excluded)) continue
       const file = path.join(dir, entry.name)
       if (entry.isDirectory()) visit(file, rel)
-      else if (entry.isFile()) files.set(rel, fs.readFileSync(file))
+      else if (entry.isFile() && !matchesGeneratedFile(rel, patterns)) {
+        files.set(rel, rel === config.name ? config.bytes! : fs.readFileSync(file))
+      }
     }
   }
   visit(root, '')
@@ -42,12 +45,13 @@ function readSuite(root: string, excludedPaths: Iterable<string> = []): Map<stri
 /** Covers every reviewable copied byte, including helpers/config and unchanged
  * specs. Engine-owned runtime metadata follows the snapshot skip contract. */
 export function suiteReviewRevision(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []): string {
-  return reviewRevision(readSuite(snapshotDir, excludedPaths), readSuite(liveDir, excludedPaths))
+  const { before, after } = reviewInventories(snapshotDir, liveDir, excludedPaths)
+  return reviewRevision(before, after)
 }
 
-function executionInputs(files: ReadonlyMap<string, Buffer>): Map<string, Buffer> {
+function executionInputs(files: ReadonlyMap<string, Buffer>, policyChanged: boolean): Map<string, Buffer> {
   return new Map([...files].filter(([file]) =>
-    !file.startsWith('docs/') && file !== 'feature.config.cjs' &&
+    !file.startsWith('docs/') && (policyChanged || file !== 'feature.config.cjs') &&
     (file.startsWith('e2e/') || /\.(?:[cm]?[jt]sx?|json)$/.test(file)),
   ))
 }
@@ -56,15 +60,16 @@ function executionInputs(files: ReadonlyMap<string, Buffer>): Map<string, Buffer
  * fresh-start gate watches test inputs, while human adoption still reviews
  * the complete copied suite. */
 export function suiteExecutionRevision(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []): string {
-  return reviewRevision(executionInputs(readSuite(snapshotDir, excludedPaths)), executionInputs(readSuite(liveDir, excludedPaths)))
+  const { before, after, policyChanged } = reviewInventories(snapshotDir, liveDir, excludedPaths)
+  return reviewRevision(executionInputs(before, policyChanged), executionInputs(after, policyChanged))
 }
 
 /** Reuse bytes only within one gate evaluation. Acceptance and copying still
  * take fresh inventories at their existing revalidation boundaries. */
 export function suiteReviewAssessment(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
-  const { before, after, revision, files } = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
-  const recordedInputs = executionInputs(before)
-  const currentInputs = executionInputs(after)
+  const { before, after, revision, files, policyChanged } = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
+  const recordedInputs = executionInputs(before, policyChanged)
+  const currentInputs = executionInputs(after, policyChanged)
   return {
     revision, files,
     executionChanged: reviewRevision(recordedInputs, currentInputs) !== reviewRevision(recordedInputs, recordedInputs),
@@ -90,9 +95,19 @@ export async function buildSuiteReview(snapshotDir: string, liveDir: string, exc
   return { revision: reviewedRevision, files, patch: patches.join('\n') }
 }
 
+function reviewInventories(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string>) {
+  const recorded = readGeneratedFiles(snapshotDir)
+  const current = readGeneratedFiles(liveDir)
+  const policyChanged = !sameGeneratedFiles(recorded.patterns, current.patterns)
+  // A proposed declaration is itself reviewed. Newly declared output must
+  // neither enter its Git commit nor appear as a deletion from an older run.
+  const before = readSuite(snapshotDir, excludedPaths, recorded, policyChanged ? [...recorded.patterns, ...current.patterns] : recorded.patterns)
+  const after = readSuite(liveDir, excludedPaths, current, current.patterns)
+  return { before, after, policyChanged, recordedPatterns: recorded.patterns }
+}
+
 /** One inventory for approval, restoration and the human comparison viewer. */
 export function suiteReviewFiles(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
-  const before = readSuite(snapshotDir, excludedPaths)
-  const after = readSuite(liveDir, excludedPaths)
-  return { ...compareReviewFiles(before, after), before, after }
+  const inventory = reviewInventories(snapshotDir, liveDir, excludedPaths)
+  return { ...compareReviewFiles(inventory.before, inventory.after), ...inventory }
 }

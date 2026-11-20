@@ -714,6 +714,12 @@ patch generation, acceptance, and snapshot copying keep their fresh revalidation
 reads after asynchronous work or mutations. These reads do not provide an atomic
 filesystem snapshot.
 
+Suite snapshots and run comparisons omit service output declared by literal
+`generatedFiles` paths in the feature config. An edit to those rules appears in
+the exact revision and requires review even when it is the only execution change.
+Acceptance commits the declaration and any other reviewed source. The live
+output stays with its producer when a reviewer accepts or restores a declaration.
+
 English and Code share source-based change navigation across the whole
 file, including imports and shared setup; the selected change's assessment appears
 below the source. File review uses `translateReadableSource` to include imports,
