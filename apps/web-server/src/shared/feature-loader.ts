@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../shared/launcher/types'
 import { normalizeStartCommand, validateHealthCheck } from './launcher-startup'
+import { generatedFilePatterns, readGeneratedFiles, sameGeneratedFiles } from './generated-files'
 import { validateSingleAttempt } from './single-attempt'
 import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
 
@@ -32,6 +33,12 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
         // any explicit N; only an absent value picks up the default.
         cfg.healOnFailureThreshold = cfg.healOnFailureThreshold ?? DEFAULT_HEAL_ON_FAILURE_THRESHOLD
         validateSingleAttempt(cfg.singleAttempt)
+        if (cfg.generatedFiles !== undefined) {
+          const declared = generatedFilePatterns(cfg.generatedFiles)
+          if (!sameGeneratedFiles(declared, readGeneratedFiles(cfg.featureDir ?? path.dirname(candidate)).patterns)) {
+            throw new Error('generatedFiles must be a literal array on the config object in the executed suite directory')
+          }
+        }
         // Validate every healthCheck shape — surface invalid configs at
         // load time with a descriptive error rather than at run time
         // when the orchestrator hits an unknown probe shape.
@@ -50,7 +57,7 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
       // (the same place the user launched the UI) and skip just that feature,
       // so it is visibly unavailable rather than crashing the server. Truly
       // malformed configs (syntax errors, etc.) are skipped quietly as before.
-      if (err instanceof Error && /healthCheck|singleAttempt/.test(err.message)) {
+      if (err instanceof Error && /healthCheck|singleAttempt|generatedFiles/.test(err.message)) {
         console.error(`[canary-lab] Skipping feature "${dir}" — invalid feature.config: ${err.message}`)
       }
       /* skip malformed config */

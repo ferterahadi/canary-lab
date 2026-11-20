@@ -6,6 +6,10 @@ type: skill
 
 # Canary Lab — Feature Authoring
 
+## Generated service output
+
+When a service writes logs or current-state metadata inside the suite, trace the writer and reader. In the config object in `feature.config.cjs`, declare only its generated outputs, for example `generatedFiles: ['logs/receiver/current.json', 'logs/receiver/receiver-*.jsonl']`. The tests must still read the live service output when executed from the run snapshot. Keep fixtures, expected results, helpers and config under review. Changing the declaration is itself a reviewable edit.
+
 ## MCP Invocation
 
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually

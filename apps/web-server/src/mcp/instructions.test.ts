@@ -47,6 +47,12 @@ describe('MCP initialize instructions fit the delivered window', () => {
   })
 })
 
+it('teaches generated output declarations at authoring and preserves human approval during repair', () => {
+  expect(INSTRUCTIONS_BY_PROFILE.author).toContain('generated files')
+  expect(WORKFLOW_GUIDES.author).toContain("generatedFiles: ['logs/receiver/current.json', 'logs/receiver/receiver-*.jsonl']")
+  expect(WORKFLOW_GUIDES.repair).toContain('Leave the pending decision to the human')
+})
+
 describe('envset ownership guidance', () => {
   it('delivers the envset guide entry point before the initialize cut', () => {
     expect(INSTRUCTIONS_BY_PROFILE.author).toContain('Before changing envsets')

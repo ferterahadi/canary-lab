@@ -28,7 +28,7 @@ export function copyDirRecursive(
   sourceDir: string,
   targetDir: string,
   renameEntry?: (name: string) => string,
-  skipEntry?: (relPath: string) => boolean,
+  skipEntry?: (relPath: string, entry: fs.Dirent) => boolean,
 ): void {
   copyDirInto(sourceDir, targetDir, '', renameEntry, skipEntry)
 }
@@ -38,12 +38,12 @@ function copyDirInto(
   targetDir: string,
   relDir: string,
   renameEntry: ((name: string) => string) | undefined,
-  skipEntry: ((relPath: string) => boolean) | undefined,
+  skipEntry: ((relPath: string, entry: fs.Dirent) => boolean) | undefined,
 ): void {
   fs.mkdirSync(targetDir, { recursive: true })
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const rel = relDir ? `${relDir}/${entry.name}` : entry.name
-    if (skipEntry?.(rel)) continue
+    if (skipEntry?.(rel, entry)) continue
     const source = path.join(sourceDir, entry.name)
     const target = path.join(targetDir, renameEntry?.(entry.name) ?? entry.name)
     if (entry.isDirectory()) copyDirInto(source, target, rel, renameEntry, skipEntry)

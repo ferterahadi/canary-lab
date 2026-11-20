@@ -6,6 +6,10 @@ type: skill
 
 # Canary Lab — Run + Heal Loop
 
+## Generated service output
+
+If a review shows only rotating logs or metadata, identify the writer and tell the user which files are generated. The suite author can declare those paths with `generatedFiles` in `feature.config.cjs`. Leave the pending decision to the human. Never widen an exclusion to clear a repair or hide a fixture, helper, or assertion.
+
 ## User input through MCP 2.0
 
 Use the native Canary connector in the requesting chat so SDK 2.0 elicitation

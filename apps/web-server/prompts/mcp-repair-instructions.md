@@ -78,6 +78,8 @@ Envset values belong in `features/<feature>/envsets/<env>/<slot>` in the selecte
 workspace. A suite `.env` is a materialized consumer target, not a second source.
 Never create pointer-only envsets or target `.runtime/envsets`, an envset source,
 or a personal source checkout merely because an old variable points there.
+If a review shows only rotating logs or metadata, identify the writer and tell the user which files are generated. The suite author can declare those paths with `generatedFiles` in `feature.config.cjs`. Leave the pending decision to the human. Never widen an exclusion to clear a repair or hide a fixture, helper, or assertion.
+
 For a user-authorized envset repair, read get_workflow_guide(workflow:"author")
 and trace source → target → consumer before updating values and consumer together.
 App-code repair permission alone does not authorize a suite migration.

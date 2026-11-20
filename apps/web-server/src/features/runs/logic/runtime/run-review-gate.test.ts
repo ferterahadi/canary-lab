@@ -96,6 +96,19 @@ describe('fresh-run review boundary', () => {
     manifest.specEdits = { checkedAt: 'now', pending: [{ file: 'e2e/contract.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] }
     expect(() => assertNoPendingRunReview(store, 'example', live)).toThrow()
   })
+  it('requires review of a new exclusion after a clean pass and preserves approval across rotation', () => {
+    const { live, snapshot, store, manifest } = setup('passed')
+    fs.mkdirSync(path.join(live, 'logs'))
+    const config = 'module.exports.config = { generatedFiles: ["logs/receiver-*.jsonl"] }'
+    fs.writeFileSync(path.join(live, 'feature.config.cjs'), config)
+    fs.writeFileSync(path.join(live, 'logs/receiver-first.jsonl'), 'event')
+    const revision = suiteReviewRevision(snapshot, live)
+    expect(pendingRunReview(store, 'example', live)).toMatchObject({ review_revision: revision, changedFileCount: 1 })
+    manifest.specEdits = { checkedAt: 'now', adopted: [], pending: [], reviewDecisions: [{ at: 'now', revision, decision: 'approved-for-new-run' }] }
+    fs.writeFileSync(path.join(live, 'logs/receiver-second.jsonl'), 'rotated')
+    expect(assertNoPendingRunReview(store, 'example', live)).toMatchObject({ revision })
+  })
+
   it('allows first runs and legacy runs that have no snapshot', () => {
     const { store, live, manifest } = setup()
     delete manifest.suiteSnapshot
