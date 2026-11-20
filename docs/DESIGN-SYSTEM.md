@@ -379,8 +379,17 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`ConfigLoadGuard`** (`features/config/components/`) | What a config tab shows before its document is usable: the read error in `--danger`, else a muted "Loading…". Each tab keeps its own conditions so TypeScript still narrows the document past them. |
 | **`CapsLabel`** | The 10.5px sans caps block label of the benchmark and portify screens (`as="span"` inside phrasing content); spacing comes from `style`. The mono kicker is `.cl-rubric`. |
 | **`FullScreenPage`** (`PageHeader.tsx`) | The `z-[60]` full-screen shell (Benchmark, Cleanup, Coverage ledger). Closes on Escape through the shared layer stack; `closeOnEscape={false}` while the page is mid-decision. Never `portal` a `ConfirmModal` rendered inside it. |
-| **`TestLanguageSwitch`** | Shared Aa / </> English/Code tabs for test cards and source review, with accessible English and Code labels. |
+| **`TestLanguageSwitch`** | Shared format tabs for test cards and source review. Aa, </>, and the eye have the accessible labels English, Code, and Visual. The caller supplies Visual when it can display a test flow. |
 | **`Tooltip`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
+
+In Visual mode the diamond, check mark, labeled arrow and boundary shape convey
+meaning in both themes. Text badges identify running, completed, failed and
+skipped observations. Inspecting a box opens its exact Code range and preserves
+the return selection. Structural boxes without a unique source have no source
+action. Keep helpers and folded groups keyboard accessible. At narrow widths
+the diagram scrolls within its sheet or scales with **Fit to width**. Visual
+comparisons label each source separately and stack the two diagrams when space
+is limited. Change colors in the file comparison retain their edit meaning.
 
 In comparison tables, red and green mean removed and added, respectively. They
 describe edits, not pass/fail results or the strength of an assertion. Keep any
@@ -413,7 +422,7 @@ A fixed assessment area explains the selected test or source change only after s
 loading or unavailable source never implies no changes. The dialog is up to
 2560px wide (94vw maximum) and 96vh high, with a compact 184px suite/file rail,
 one toolbar, and a suite-scoped footer. The toolbar contains the explicit baseline
-selector, shared English/Code tabs, and selected test name. Navigation lives in the
+selector, shared format tabs, and selected test name. Navigation lives in the
 footer; each file's editor action lives in the rail. On narrow screens the rail moves above
 the review and the source table scrolls horizontally. Edited test cards stay neutral;
 amber denotes an advisory weakening hint.

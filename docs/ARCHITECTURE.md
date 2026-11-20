@@ -737,6 +737,30 @@ review and Results & Fixes → Code changes — one table, one scroller, rows
 paired across the two sides from `shared/test-view/render-model.ts`, sharing
 `ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization) and the
 `TestLanguageSwitch` in its header with the ordinary test cards.
+Visual mode reads the versioned topology in `shared/test-view/flow-graph.ts`.
+Each section represents a test or helper invocation. Boxes carry source ranges,
+edges carry control-flow kinds, and the graph records its origin and the hashes
+of the files used to build it. Repeated helper calls can therefore share a
+definition while retaining distinct invocation boxes. Working-source invalidation
+also covers helper edits. Recorded graphs use the retained suite. Before and
+after review graphs use their own source and declaration pair.
+
+`shared/test-view/flow-layout.ts` supplies geometry for the web and offline SVG
+renderers. Small sections use Dagre. Above 32 boxes, a source-ordered column
+routes long edges along side rails and shares rails by destination. This avoids
+ranking every intervening statement once per possible exception edge. Folding
+redirects existing edges at a group boundary. Expanded graphs retain all boxes
+and edges, including backward jumps and error exits.
+
+`shared/test-view/flow-execution.ts` groups reporter events by run, stream,
+execution, case instance and retry. Projection requires the recorded case and
+matching source revision. Source ranges, columns and parent step IDs can resolve
+a helper invocation. Ambiguity leaves the step unmapped. A branch can acquire an
+observation when its source was observed and its observed destination has a
+single incoming edge. Sequence gaps clear open steps. After disconnection the
+client reconciles authoritative run detail before resuming a live highlight.
+A terminal attempt retains recorded outcomes and has no running box.
+
 The evaluation report cannot mount React, so it renders the same model as HTML
 strings: `buildTestReviewPacket` attaches each case's `ExtractedTest` (read from
 the suite copy the run executed, with the suite's semantic rules), the English
@@ -1721,7 +1745,9 @@ The active pipeline is:
    `ReadableTestView` provide English-by-default and exact-source navigation in both
    ledgers. Evaluation flowcharts reuse the same translator rather than inventing a
    second parser. Exports also include the full English explanation, without the
-   diagram's step limit.
+   compact summary diagram's step limit. The separate Visual section renders the
+   complete shared topology, links to local source anchors, and discloses the
+   source origin and available attempt observations.
 
 The development-only `tools/check-english.ts` selects the local workspace and
 audits its current source without executing it. `tools/english-audit.ts` builds

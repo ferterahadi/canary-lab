@@ -48,3 +48,19 @@ it('folds nested groups without losing an early return or the normal successor',
   expect(foldedTopology(section, []).topology).toEqual(full.topology)
   expect(layoutTestFlow(section.nodes, full.topology).nodes[0].id).toBe('start')
 })
+
+it('keeps large sections in source order with every normal, error and backward edge', () => {
+  const body: ReadableNode[] = Array.from({ length: 50 }, (_, i) => ({
+    ...base, kind: 'leaf', role: 'action', id: 'call-' + i, flow: { kind: 'action', label: 'Call', mayThrow: true },
+  }))
+  const loop: ReadableNode = { ...base, id: 'loop', kind: 'loop', loopKind: 'while', children: body }
+  const topology = foldedTopology({ id: 'test', label: 'Overview', nodes: [loop] }).topology
+  const chart = layoutTestFlow([loop], topology)
+  expect(chart.nodes.map(box => box.id).slice(0, 52)).toEqual(['start', 'loop', ...body.map(node => node.id)])
+  expect(chart.edges.map(({ from, to, label }) => [from, to, label])).toEqual(topology.edges.map(e => [e.from, e.to, e.label]))
+  const rail = chart.edges.filter(e => e.to === 'error-end' && e.points.length > 2).map(e => e.points[2].x)
+  expect(rail.length).toBeGreaterThan(45)
+  expect(new Set(rail).size).toBe(1)
+  expect(chart.edges.find(e => e.from === 'call-0' && e.to === 'call-1')?.points).toHaveLength(2)
+  expect(chart.edges.find(e => e.from === 'call-49' && e.to === 'loop')?.label).toBe('Repeat')
+})

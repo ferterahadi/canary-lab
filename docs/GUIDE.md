@@ -56,9 +56,15 @@ it to Git. The MCP env-capture tools return redacted key previews, not values.
 
 ## Reading a test flow
 
-In the Tests column, expand a test and select **Visual**. Follow the arrows from Start. A diamond asks a question, a parallelogram represents a recognized request, and a loop points back to its condition. Choose a helper in **Flow**, or use the arrow on its call, to inspect its own diagram. Hover or focus a shape for its source snippet. Click it to open Code at that statement.
+Expand a test in **Tests** or **Coverage** and choose **Visual**. Start and End mark boundaries. Diamonds show decisions, arrows label possible paths, and a check mark identifies an assertion. Large diagrams keep the statements in source order. Several paths to the same destination can share a line. Use **Fit to width** to see the diagram or **Actual size** to read individual boxes.
 
-To follow execution, select the **Recorded run** tab above the Tests column. Visual follows a Playwright step when its reported source line identifies one box. Choosing a helper yourself holds that view until you select **Follow run**. Ordinary JavaScript conditions and loop arrows describe possible paths. A passing test alone cannot establish which ones executed.
+Focus or hover a box for its source excerpt. Select it to open **Code** at that statement. Select **Visual** to return to the box. A helper call can offer both **Call site** and **Definition** in Code. Use the arrow on a helper or the **Flow** selector for its diagram, then **Back to caller** to return. The numbered expand and collapse controls show how many steps are inside a group.
+
+**Current source** describes the workspace as it stands. Choose **Recorded run** for the source retained by that run, then choose an **Attempt** to inspect a retry separately. **Running now** marks a uniquely matched open step. **Observed ×N** counts completed observations. A named predicate’s **Checked ×N** counts evaluations. Its return value and the number of ordinary JavaScript loop iterations are unknown. An unmarked box has no mapped observation. The reporter supplies the test verdict.
+
+Choosing a helper pauses automatic following. **Follow run** resumes it. A disconnected view keeps confirmed observations and clears the active indicator until it reconciles. Older recordings or missing revisions may have no exact step overlay. Code remains available for source the run retained.
+
+In **Compare test versions** and **Results & Fixes**, Visual pairs the selected declarations where both versions have recoverable test source. An added or removed declaration appears on its existing side. Use **File comparison** for app code or a partial patch. A saved HTML evaluation includes diagram-to-source and return links that work offline. Its source label identifies the retained suite or the working tree at export. Tests without a recorded attempt have no step observations.
 
 ## Run output
 

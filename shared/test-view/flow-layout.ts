@@ -1,3 +1,4 @@
+import { layoutFlowColumn } from './flow-layout-column'
 import dagre from '@dagrejs/dagre'
 import type { ReadableGroupNode, ReadableNode } from '../readable-tests/types'
 
@@ -43,7 +44,7 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
   const graph = new dagre.graphlib.Graph({ multigraph: true })
   graph.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 23, marginx: 12, marginy: 12 })
   const sources = new Map(sectionNodes({ id: 'test', label: '', nodes }).map(node => [node.id, node]))
-  const boxes = new Map<string, Box>()
+  const boxes = new Map<string, Box & { width: number; height: number }>()
   for (const descriptor of topology.boxes) {
     const source = descriptor.sourceId ? sources.get(descriptor.sourceId) : undefined
     const box: Box = { ...descriptor, source }
@@ -53,11 +54,19 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
       const neighbor = adjacent.length === 1 ? topology.boxes.find(item => item.id === adjacent[0]) : undefined
       if (neighbor?.sourceId) box.context = sources.get(neighbor.sourceId)
     }
-    boxes.set(box.id, box)
     const lines = Math.ceil(box.label.length / (box.shape === 'decision' ? 14 : 21))
     const height = box.shape === 'terminal' ? 30 : Math.max(44, Math.min(5, lines) * 16 + 16) * (box.shape === 'decision' ? 1.45 : 1)
-    graph.setNode(box.id, { width: box.shape === 'terminal' ? 94 : 154, height })
+    const width = box.shape === 'terminal' ? 94 : 154
+    boxes.set(box.id, { ...box, width, height })
   }
+  // Dagre inserts intermediate ranks along each long edge. A shared error
+  // destination makes even a sequence of calls quadratic in size.
+  if (boxes.size > 32) {
+    const order = new Map([...sources.keys()].map((id, i) => [id, i]))
+    const rank = (box: Box) => box.id === topology.entry ? -1 : order.get(box.sourceId ?? '') ?? sources.size
+    return layoutFlowColumn([...boxes.values()].sort((a, b) => rank(a) - rank(b)), topology.edges)
+  }
+  for (const { id, width, height } of boxes.values()) graph.setNode(id, { width, height })
   topology.edges.forEach(({ from, to, label }, index) => {
     graph.setEdge(from, to, { label, width: label.length * 6, height: label ? 12 : 0, labelpos: 'c' }, String(index))
   })

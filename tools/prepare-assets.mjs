@@ -1,7 +1,23 @@
 import fs from 'fs'
 import path from 'path'
-import { build } from 'vite'
+import { build, minifySync } from 'vite'
 import { REPO as repoRoot } from './lib/fs.mjs'
+
+// Omit contributor comments from the packaged graph, source readers and
+// evaluation renderer. Keep the JavaScript readable, including symbol names
+// and legal notices. Public type declarations keep their documentation.
+for (const moduleDir of ['shared/test-view', 'apps/web-server/src/shared/readable-tests',
+  'apps/web-server/src/shared/controlled-english', 'apps/web-server/src/features/evaluation/logic/test-review']) {
+  const dir = path.join(repoRoot, 'dist', moduleDir)
+  for (const file of fs.readdirSync(dir, { recursive: true }).filter(name => name.endsWith('.js'))) {
+    const output = path.join(dir, file)
+    const result = minifySync(file, fs.readFileSync(output, 'utf8'), {
+      compress: false, mangle: false, codegen: { removeWhitespace: false, legalComments: 'inline' },
+    })
+    if (result.errors.length) throw new Error(result.errors[0].message)
+    fs.writeFileSync(output, result.code)
+  }
+}
 
 const sourceTemplates = path.join(repoRoot, 'templates')
 const distTemplates = path.join(repoRoot, 'dist', 'templates')
