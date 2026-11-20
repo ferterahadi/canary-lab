@@ -33,7 +33,9 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.3.8 — Unreleased
+## 2.3.8 — 2026-11-20
+
+> Run `npx canary-lab upgrade` in your workspace to refresh the installed agent guidance.
 
 - **[Test Runner]** Suites can declare service-generated logs and metadata with `generatedFiles`. Rotating those files preserves approval for a rerun. Changes to the declaration, test helpers, and assertions stay visible for review.
 - **[Test Generation]** Authoring and repair agents get guidance on identifying generated files and keeping authored fixtures under review.
