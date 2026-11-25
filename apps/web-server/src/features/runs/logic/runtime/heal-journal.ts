@@ -223,6 +223,8 @@ export function readJournalTail(journalPath: string, limit = 3): JournalEntry[] 
 // runner-side no-signal timeout or exit.
 
 export interface JournalAppendInput {
+  /** Administrative decisions are settled facts, never pending test verdicts. */
+  decision?: 'accepted-awaiting-execution' | 'continuation-requested' | 'cancelled' | 'agent-ended' | 'agent-disconnected'
   signal: '.restart' | '.rerun' | 'none'
   hypothesis?: string
   filesChanged?: string[]
@@ -365,7 +367,9 @@ export function updateLatestPendingJournalOutcome(input: JournalOutcomeUpdateInp
       continue
     }
     const outcomeOffset = section.findIndex((line) => /^\s*-\s+outcome:\s*(pending|null)?\s*$/.test(line))
-    if (outcomeOffset === -1) continue
+    // A settled decision is a boundary between executions. Never walk back
+    // through acceptance/continuation to attribute a new result to an old fix.
+    if (outcomeOffset === -1) return false
     lines[start + outcomeOffset] = `- outcome: ${input.outcome}`
     atomicWrite(input.journalPath, lines.join('\n'))
     return true
@@ -452,7 +456,7 @@ export function appendJournalIteration(input: JournalAppendInput): void {
     section.push(`- fix.description: ${truncateOneLine(input.fixDescription, 400)}`)
   }
   section.push(`- signal: ${input.signal}`)
-  section.push('- outcome: pending')
+  section.push(`- outcome: ${input.decision ?? 'pending'}`)
   section.push('')
 
   // Diff content lives in its own subsection — a `- fix.diff:` field line

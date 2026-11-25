@@ -350,6 +350,14 @@ describe('classifyJournalOutcome', () => {
 })
 
 describe('updateLatestPendingJournalOutcome', () => {
+  it.each(['cancelled', 'agent-ended', 'agent-disconnected', 'accepted-awaiting-execution', 'continuation-requested'])('does not attribute a later execution to an older pending entry across %s', (decision) => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    const original = `## Iteration 1 — t1\n\n- run: run-a\n- outcome: pending\n\n## Iteration 2 — t2\n\n- run: run-a\n- outcome: ${decision}\n`
+    fs.writeFileSync(journalPath, original)
+    expect(updateLatestPendingJournalOutcome({ journalPath, runId: 'run-a', outcome: 'all_tests_passed' })).toBe(false)
+    expect(fs.readFileSync(journalPath, 'utf8')).toBe(original)
+  })
+
   it('updates the newest pending section for the selected run', () => {
     const journalPath = path.join(tmpDir, 'j.md')
     fs.writeFileSync(journalPath, `# Diagnosis Journal

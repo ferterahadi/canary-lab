@@ -33,6 +33,24 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.8 — 2026-11-20
+
+> Run `npx canary-lab upgrade` in your workspace to refresh the installed agent guidance.
+
+- **[Test Runner]** Suites can declare service-generated logs and metadata with `generatedFiles`. Rotating those files preserves approval for a rerun. Changes to the declaration, test helpers, and assertions stay visible for review.
+- **[Test Generation]** Authoring and repair agents get guidance on identifying generated files and keeping authored fixtures under review.
+
+## 2.3.7 — 2026-11-19
+
+> After upgrading, run `npx canary-lab upgrade` in your workspace and restart connected agent apps to pick up the updated repair instructions.
+
+- **[Test Runner]** **Continue an eligible failed or aborted run.** Accepting test changes records your approval. Choose Continue run when you are ready to execute them under the same run ID. Retrying from the same agent session also reuses that ID.
+- **[Test Runner]** **See what ran on each repair attempt.** Results & Fixes keeps the source version, selected tests, output, and results for each recorded execution. Earlier failures and cancellations keep their original outcomes.
+- **[General]** **Browsers and agents catch up on run changes.** Open run views recover missed updates automatically. Connected agents receive the latest run state when they wait for changes or make a relevant tool call.
+- **[General]** **Review approval choices in Notifications.** Hover over or focus a choice to see what it does. Pending approvals appear in Notifications without a second banner.
+
+---
+
 ## 2.3.6 — 2026-11-18
 
 - **[Test Runner]** **Stop a run while it waits for a repair.** The Run panel now offers Stop while a run is healing, not only Stop Heal. Stop ends the run as aborted. Stop Heal still ends it as failed.

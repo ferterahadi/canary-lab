@@ -137,6 +137,7 @@ export interface CanaryLabMcpDeps {
     /** Fast-forward the repo checkouts to their upstream tips before booting;
      *  unset defers to each repo's `track: 'upstream'` config. */
     updateRepos?: boolean,
+    continuationOf?: string,
   ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,

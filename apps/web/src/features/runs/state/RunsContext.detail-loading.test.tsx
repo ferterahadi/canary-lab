@@ -247,7 +247,7 @@ describe('RunsProvider', () => {
     expect(captured.active?.entry).toBeNull()
     expect(container.textContent).toBe('No active services')
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(2)
+    expect(runsApi.getRunDetail).toHaveBeenCalledTimes(3)
     expect(runsApi.listRuns).not.toHaveBeenCalled()
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
@@ -485,7 +485,7 @@ it('reconciles completed subscribed runs and recovers on focus, online, visibili
   })
   expect(runsApi.getRunDetail).toHaveBeenCalledTimes(1)
   vi.mocked(runsApi.getRunDetail).mockResolvedValue(detail({ status: 'failed' }))
-  await act(async () => vi.advanceTimersByTimeAsync(14_999))
+  await act(async () => vi.advanceTimersByTimeAsync(4_999))
   expect(captured.run?.status).toBe('passed')
   await act(async () => vi.advanceTimersByTimeAsync(1))
   expect(captured.run?.status).toBe('failed')
@@ -522,9 +522,39 @@ it('updates an open recovery timeline after a missed stream event without replac
   const scroll = container.querySelector<HTMLElement>('[data-testid="scroller"]')!
   scroll.scrollTop = 40
   vi.mocked(runsApi.getRunDetail).mockResolvedValue({ ...initial, lifecycleEvents: [first, { ...first, id: 'second', headline: 'External recovery evidence', updatedAt: '2026-01-01T00:01:00Z' }] })
-  await act(async () => vi.advanceTimersByTimeAsync(15_000))
+  await act(async () => vi.advanceTimersByTimeAsync(5_000))
   expect(container.textContent).toContain('External recovery evidence')
   expect(container.querySelector('time')).toBe(time)
   expect(container.querySelector('[data-testid="scroller"]')).toBe(scroll)
   expect(scroll.scrollTop).toBe(40)
+})
+
+
+it('keeps two already-open consumers in sync after approval even when events are dropped', async () => {
+  vi.useFakeTimers()
+  const pending: RunDetail = { ...detail({ status: 'failed' }), collaboration: {
+    runId: 'r1', revision: 'pending', status: 'failed', execution: 1,
+    review: { state: 'pending', changedFiles: 1 },
+    continuation: { available: false, reason: 'test-review-required', requiresNewRun: false },
+  } }
+  vi.mocked(runsApi.listRuns).mockResolvedValue([entry({ status: 'failed' })])
+  vi.mocked(runsApi.getRunDetail).mockResolvedValue(pending)
+  function ReviewConsumer() {
+    const run = useRun('r1').detail
+    return <div><input defaultValue="unsaved diagnosis" /><span>{run?.collaboration?.review.state}</span><b>{run?.collaboration?.review.changedFiles} historical differences</b></div>
+  }
+  await act(async () => root.render(<>
+    <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><ReviewConsumer /></RunsProvider>
+    <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><ReviewConsumer /></RunsProvider>
+  </>))
+  await act(async () => { for (const socket of FakeWebSocket.instances) socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry({ status: 'failed' })], details: {} }) }) })
+  expect([...container.querySelectorAll('span')].map((e) => e.textContent)).toEqual(['pending', 'pending'])
+  const inputs = [...container.querySelectorAll('input')]
+  inputs[0].value = 'my unfinished fix'
+  vi.mocked(runsApi.getRunDetail).mockResolvedValue({ ...pending, collaboration: { ...pending.collaboration!, revision: 'accepted', review: { state: 'accepted', changedFiles: 1 }, continuation: { available: true, requiresNewRun: false } } })
+  await act(async () => vi.advanceTimersByTimeAsync(5000))
+  expect([...container.querySelectorAll('span')].map((e) => e.textContent)).toEqual(['accepted', 'accepted'])
+  expect([...container.querySelectorAll('b')].every((e) => e.textContent === '1 historical differences')).toBe(true)
+  expect(container.querySelector('input')).toBe(inputs[0])
+  expect(inputs[0].value).toBe('my unfinished fix')
 })

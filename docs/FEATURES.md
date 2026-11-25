@@ -12,6 +12,28 @@ established `feature` name for compatibility. Literal names such as
 See the [README](../README.md) for workspace setup and the [Guide](GUIDE.md) for
 running, repairing, and exporting a suite.
 
+## Generated service files
+
+If a service rotates logs or writes a pointer to its current log, declare those
+outputs on the feature config object in the executed suite directory. For example:
+
+```js
+generatedFiles: [
+  'logs/receiver/current.json',
+  'logs/receiver/receiver-*.jsonl',
+],
+```
+
+Use literal suite-relative paths with a fixed directory and at most one
+`*` in the filename. Supported extensions are `.json`, `.jsonl`, `.ndjson`,
+`.log`, and `.txt`. Test, fixture and envset directories are reserved.
+Keep authored inputs and expected results under review. Confirm the service
+writes these files and the suite reads the live path from its run snapshot.
+
+Matched files stay in the live workspace. Canary omits them from run
+snapshots, review commits, and restoration. When adding this to an existing
+run, review the config change once. Later rotations leave that approval valid.
+
 ## Create a suite
 
 Create a deterministic starter from the UI or CLI:

@@ -1,13 +1,17 @@
-Canary Lab — authoring profile. Create or extend features and write specs; Canary Lab is the control plane, this client writes the test content.
+Canary Lab authoring profile. Create or extend features and write specs. Canary Lab manages the workflow and this client writes the tests.
 
 - Existing feature (the request names one — e.g. "author tests for <feature>", the Getting Started demo): do NOT create_feature and never invent a variant name. Author the new specs straight into features/<feature>/e2e. To choose WHAT to test, get_feature_coverage(feature) names the untested/path-incomplete requirements (list_feature_docs points at the source docs); tag the new test with the requirement it covers — test('…', { tag: ['@req-R2'] }, …) — so the gap actually closes in the ledger. Running the new test needs start_run: hand off to the repair loop (reconnect with the compact profile if this connection lacks it).
 - New feature: create_feature returns the skeleton + nextSteps. Choose a unique slug and call create_feature directly; do not call list_features just to avoid collisions (retry with a different name ONLY for a name you invented — never rename away from a feature the user asked for; that is the existing-feature flow above). Author specs under features/<feature>/e2e importing from 'canary-lab/feature-support/log-marker-fixture'. capture_feature_env_files preserves repo env/config (secret values are never returned).
 - Test titles (both paths): write each as a plain-English sentence naming the user-visible behavior — `user can reset their password after requesting a reset link`, not `POST /reset-token returns 200`; keep a technical term only when it is the requirement's own vocabulary. Reviewers read titles directly in the ledger and exported reports.
 - Draft flow: start_external_draft → update_external_draft_stage (scaffolding → authoring-tests → validating → ready → applied) → apply_external_draft. start_external_draft only creates a visible task (no server-side agent is spawned); this client writes the specs and calls apply_external_draft when they are ready.
 
-Before changing envsets or spec selection: get_workflow_guide(workflow:"author").
+Before changing envsets, generated files or spec selection: get_workflow_guide(workflow:"author").
 
 <!-- initialize-cut -->
+
+## Generated service output
+
+When a service writes logs or current-state metadata inside the suite, trace the writer and reader. In the config object in `feature.config.cjs`, declare only its generated outputs, for example `generatedFiles: ['logs/receiver/current.json', 'logs/receiver/receiver-*.jsonl']`. The tests must still read the live service output when executed from the run snapshot. Keep fixtures, expected results, helpers and config under review. Changing the declaration is itself a reviewable edit.
 
 ## Envset source and target
 
@@ -83,7 +87,7 @@ answer a form yourself, or recreate the question in chat. Existing explicit
 instructions and autopilot choices still apply without another ask.
 
 Form decisions have one shared record. The native form links to the same approval
-in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+in Canary Notifications. On `needs-input`
 with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
 the ID; repeat on `still_waiting`. The human answers once in either surface.
 A browser answer resolves the server decision; some clients keep their native

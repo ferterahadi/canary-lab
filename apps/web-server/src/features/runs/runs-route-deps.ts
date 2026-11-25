@@ -1,3 +1,5 @@
+import { continueRun, validateContinuation } from './logic/run-lifecycle-service'
+import { withRunLifecycleLock } from './logic/run-lifecycle-lock'
 import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createRestartedOrchestrator } from './logic/restart-orchestrator'
@@ -98,7 +100,8 @@ export function buildRunsRouteDeps(
       executionType: ExecutionType = 'run',
       modelsOverride?: unknown,
       options?: StartRunOptions,
-    ): Promise<StartRunOutcome> => {
+    ): Promise<StartRunOutcome> => withRunLifecycleLock(logsDir, featureName, async () => {
+      validateContinuation(runStore, options?.continuationOf, featureName, env, options?.runId)
       const isBoot = executionType === 'boot'
       const feature = findFeature(featuresDir, featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
@@ -284,6 +287,7 @@ export function buildRunsRouteDeps(
           runnerLog,
           executionType,
           testReviewApproval,
+          continuationOf: options?.continuationOf,
           // A boot-only session never runs tests, so it never heals.
           autoHeal: isBoot ? undefined : autoHeal,
           ...(models ? { models } : {}),
@@ -340,6 +344,7 @@ export function buildRunsRouteDeps(
       // Collision declined worktree → queue until the conflicting repo frees.
       if (collision && isolation === 'queue') {
         writeQueuedManifest(runId, feature, env, 'repo-collision', executionType)
+        if (options?.continuationOf) runStore.patchManifest(runId, { continuationOf: options.continuationOf })
         scheduler.enqueue({ runId, feature: feature.name, repoPaths: sourceRepoPaths, cost, reason: 'repo-collision', launch: async () => { await launch() } })
         return { kind: 'queued', runId, reason: 'repo-collision' }
       }
@@ -353,15 +358,16 @@ export function buildRunsRouteDeps(
       const fit = scheduler.fits({ repoPaths: schedRepoPaths, cost })
       if (!fit.ok) {
         writeQueuedManifest(runId, feature, env, fit.reason, executionType)
+        if (options?.continuationOf) runStore.patchManifest(runId, { continuationOf: options.continuationOf })
         scheduler.enqueue({ runId, feature: feature.name, repoPaths: schedRepoPaths, cost, reason: fit.reason, launch: async () => { await launch() } })
         return { kind: 'queued', runId, reason: fit.reason }
       }
       const orch = await launch()
       return { kind: 'started', orch }
-    },
+    }),
     cancelQueuedRun,
     queueDiagnostics: (runId) => scheduler.diagnostics(runId),
-    restartRun: async (runId: string) => {
+    restartRun: async (runId: string) => continueRun(runStore, runId, async () => {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
@@ -417,7 +423,7 @@ export function buildRunsRouteDeps(
         }
       }
 
-      const restarted = createRestartedOrchestrator({
+      const restarted = await createRestartedOrchestrator({
         feature, env, runId, runDir,
         initialHealCycles: manifest.healCycles,
         resources: prepared,
@@ -442,7 +448,8 @@ export function buildRunsRouteDeps(
       registry.set(runId, orch)
       void settleOrchestratorRun(orch.restartTerminalRun(), { orch, registry, broker, runnerLog })
       return { ok: true as const, mode: 'remaining' as const }
-    },
+    }, () => ({ ok: true as const, mode: 'remaining' as const }), (reason) => ({ ok: false as const, reason })),
+    restartExternalRun,
     restartHeal: restartLocalHeal,
   }
 }

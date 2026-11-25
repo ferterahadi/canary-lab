@@ -33,6 +33,8 @@ export function registerRunStartRequests(app: FastifyInstance, deps: RunsRouteDe
     for (const request of requests.list()) {
       if (request.owner.kind !== 'internal' || !['awaiting-review', 'ready'].includes(request.status)) continue
       const current = requests.get(request.requestId)
+      const receipt = current && deps.store.get(current.review.runId)?.manifest.specEdits?.reviewDecisions?.find((d) => d.revision === current.review.revision)?.receipt
+      if (receipt?.execution.status === 'continuation-ready') continue
       if (current?.status === 'ready') void requests.resume(current.requestId, dispatch).catch((error) => app.log.error(error))
     }
   }

@@ -1,3 +1,4 @@
+import { checkRestartEligibility } from '../logic/restart-eligibility'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
@@ -35,7 +36,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
         runId: manifest.runId, feature: manifest.feature, baseline: 'run-start',
         review_revision: review.revision, files: review.files,
         canAdopt: active,
-        ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0),
+        ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0, checkRestartEligibility(manifest, runDirFor(deps.store.logsDir, manifest.runId), 'run').ok),
       } satisfies RunTestReview
     }
     const review = await buildSuiteReview(snapshot.dir, manifest.featureDir, runtimeInputs)
@@ -52,7 +53,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
       review_revision: review.revision, files: review.files, patchPath,
       ...(Buffer.byteLength(review.patch) <= 8000 ? { patch: review.patch } : {}),
       canAdopt: active,
-      ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0),
+      ...deriveRunReviewCapabilities(active, terminal, decision, review.files.length > 0, checkRestartEligibility(manifest, runDirFor(deps.store.logsDir, manifest.runId), 'run').ok),
     } satisfies RunTestReview
   })
 }

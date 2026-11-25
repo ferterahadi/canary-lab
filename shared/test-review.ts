@@ -65,8 +65,8 @@ export interface RunTestReview {
   files: Array<{ file: string; change: 'added' | 'deleted' | 'modified' }>
   canAdopt: boolean
   reviewState: 'pending-active' | 'pending-terminal' | 'settled' | 'locked'
-  allowedActions: Array<'adopt-and-rerun' | 'approve-new-run' | 'restore' | 'leave-pending'>
-  nextAction: 'rerun-current' | 'start-new-run' | 'restore-or-leave' | 'none'
+  allowedActions: Array<'adopt-and-rerun' | 'approve-continuation' | 'approve-new-run' | 'restore' | 'leave-pending'>
+  nextAction: 'continue-current' | 'rerun-current' | 'start-new-run' | 'restore-or-leave' | 'none'
   patchPath?: string
   patch?: string
   receipt?: TestReviewReceipt
@@ -79,6 +79,7 @@ export interface TestReviewGitReceipt {
 
 export type TestReviewExecutionReceipt =
   | { status: 'rerun-requested'; runId: string }
+  | { status: 'continuation-ready'; runId: string }
   | { status: 'new-run-required'; runId: string }
   | { status: 'none' }
 
@@ -97,7 +98,7 @@ export interface TestReviewReceipt {
 export interface TestReviewDecision {
   at: string
   revision: string
-  decision: 'adopted' | 'approved-for-new-run' | 'restored'
+  decision: 'adopted' | 'approved-for-new-run' | 'approved-for-continuation' | 'restored'
   receipt?: TestReviewReceipt
 }
 
@@ -147,11 +148,11 @@ export interface TestFileReview {
   comparisonAlignment?: Array<{ before?: { line: number; endLine: number }; after?: { line: number; endLine: number } }>
 }
 
-export function deriveRunReviewCapabilities(active: boolean, terminal: boolean, decision: TestReviewDecision | undefined, hasFiles: boolean): Pick<RunTestReview, 'reviewState' | 'allowedActions' | 'nextAction' | 'receipt'> {
+export function deriveRunReviewCapabilities(active: boolean, terminal: boolean, decision: TestReviewDecision | undefined, hasFiles: boolean, continuationEligible = false): Pick<RunTestReview, 'reviewState' | 'allowedActions' | 'nextAction' | 'receipt'> {
   if (decision) return {
     reviewState: 'settled' as const,
     allowedActions: [],
-    nextAction: decision.decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
+    nextAction: decision.decision === 'approved-for-continuation' ? 'continue-current' as const : decision.decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
     ...(decision.receipt ? { receipt: decision.receipt } : {}),
   }
   if (!hasFiles) return { reviewState: 'settled' as const, allowedActions: [], nextAction: 'none' as const }
@@ -162,7 +163,7 @@ export function deriveRunReviewCapabilities(active: boolean, terminal: boolean, 
   }
   if (terminal) return {
     reviewState: 'pending-terminal' as const,
-    allowedActions: ['approve-new-run', 'restore', 'leave-pending'] as const,
+    allowedActions: [continuationEligible ? 'approve-continuation' : 'approve-new-run', 'restore', 'leave-pending'],
     nextAction: 'restore-or-leave' as const,
   }
   return { reviewState: 'locked' as const, allowedActions: [], nextAction: 'none' as const }

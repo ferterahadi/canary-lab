@@ -152,6 +152,8 @@ export interface FeatureConfig {
   tunnels?: NgrokTunnel[]              // used by the tunnel env — one ngrok tab per entry
   startScript?: Record<string, string> // optional override: env name → absolute path to tsx script
   featureDir: string                   // absolute path to feature folder
+  /** Suite-relative paths to service-generated log and metadata files. */
+  generatedFiles?: string[]
   /** Optional deterministic semantic knowledge for the controlled-English
    *  renderer. Values are module specifiers, not guessed method names. */
   semanticRules?: ReadableSemanticRuleConfig

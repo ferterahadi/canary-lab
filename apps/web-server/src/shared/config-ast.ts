@@ -245,11 +245,19 @@ function locateFeatureConfigObject(ast: ReturnType<typeof recast.parse>): Config
 
   // Pass 2 — walk module.exports / exports.config patterns.
   for (const stmt of program.body) {
+    if (stmt.type === 'ExportDefaultDeclaration' && stmt.declaration.type === 'ObjectExpression') {
+      return { node: stmt.declaration }
+    }
     if (stmt.type !== 'ExpressionStatement') continue
     const expr = stmt.expression
     if (expr.type !== 'AssignmentExpression') continue
     const left = expr.left
     const right = expr.right
+
+    if (left.type === 'MemberExpression' && left.object.type === 'Identifier' && left.object.name === 'exports'
+      && left.property.type === 'Identifier' && left.property.name === 'config' && right.type === 'ObjectExpression') {
+      return { node: right }
+    }
 
     // module.exports.config = {...}
     if (

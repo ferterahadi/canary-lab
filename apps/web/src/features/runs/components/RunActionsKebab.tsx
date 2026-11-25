@@ -250,17 +250,19 @@ function RunIconAction({ disabled, label, onClick, className, children }: {
 // double-clicks; the WS update flips the row's status badge to running/
 // healing within a beat or two, which removes the icon entirely.
 export function RetestIconButton({
+  accepted = false,
   disabled,
   spinning,
   onClick,
 }: {
   disabled: boolean
   spinning: boolean
+  accepted?: boolean
   onClick: (e: React.MouseEvent) => void
 }) {
   const label = spinning
     ? 'Retesting remaining tests…'
-    : 'Retest remaining: reruns failed, skipped, and pending tests'
+    : accepted ? 'Continue run: execute the full suite with the accepted source' : 'Retest remaining: reruns failed, skipped, and pending tests'
   return (
     <RunIconAction disabled={disabled} label={label} onClick={onClick}
       className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${

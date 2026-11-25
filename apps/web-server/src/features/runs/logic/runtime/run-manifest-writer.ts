@@ -102,6 +102,7 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
   for (const handle of ctx.worktreeHandles) worktreeMap[handle.repoName] = handle.worktreeRoot
   const manifest: RunManifest = {
     runId: ctx.runId,
+    ...(ctx.continuationOf ? { continuationOf: ctx.continuationOf } : {}),
     executionType: ctx.executionType,
     ...(previous || ctx.autoHeal?.diagnosisPolicy
       ? { diagnosisPolicy: diagnosisPolicy(previous ? previous.diagnosisPolicy : ctx.autoHeal?.diagnosisPolicy) } : {}),
@@ -122,6 +123,7 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
       integrity: previous.integrity,
       healCycleHistory: previous.healCycleHistory,
       playwrightExecutions: previous.playwrightExecutions,
+      continuationOf: previous.continuationOf,
     } : {}),
     services,
     // Reflect the actual paths this run occupies: worktree-isolated repos

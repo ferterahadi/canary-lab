@@ -1,3 +1,4 @@
+import { RunTroubleshootingHistory } from './RunTroubleshootingHistory'
 import { useEffect, useMemo, useRef } from 'react'
 import { buildRunEvidence, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
 import type { PlaywrightArtifact, RunDetail } from '@shared/run-detail'
@@ -97,6 +98,7 @@ export function ResultsFixesTab({
       )}
       {view === 'tests' && (
         <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)', scrollbarGutter: 'stable' }} data-testid="results-tests">
+          <RunTroubleshootingHistory detail={detail} />
           {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
           {unmatchedTest && (
             <p className="mx-4 mb-0 mt-4 text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid="stale-test-link">

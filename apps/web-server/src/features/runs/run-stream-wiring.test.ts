@@ -47,6 +47,7 @@ vi.mock('./logic/runtime/orchestrator', async (importOriginal) => {
   const { EventEmitter: Emitter } = await import('events')
   class FakeRunOrchestrator extends Emitter {
     readonly runId: string
+    async prepareContinuation(): Promise<void> {}
     constructor(opts: Record<string, unknown>) {
       super()
       if (orchHarness.constructFails) throw new Error('posix_spawnp failed')
@@ -120,7 +121,8 @@ function makeCtx(): ServerContext {
     // broker was handed exactly this client identity. What the real broker then
     // does with it is `external-heal-broker.test.ts`'s subject.
     externalHealBroker: {
-      claim: (runId: string, input: Record<string, unknown>) => { claims.push({ runId, input }) },
+      getSession: () => null,
+      claim: (runId: string, input: Record<string, unknown>) => { claims.push({ runId, input }); return { accepted: true } },
     },
     brokers,
     activeEnvsets,
@@ -567,6 +569,8 @@ describe('makeRestartExternalRun — restart', () => {
   })
 
   it('re-enters external mode without a session when the caller may not own the heal loop', async () => {
+    let finish!: (status: string) => void
+    orchHarness.restart = () => new Promise((resolve) => { finish = resolve })
     writeFeature('foo', { envs: ['staging'] })
     writeRunManifest({ runId: 'r-1' })
 
@@ -585,6 +589,7 @@ describe('makeRestartExternalRun — restart', () => {
       { type: 'data', chunk: '\n[orchestrator] Restarting external heal\n' },
     ])
     expect(registry.get('r-1')).toBe(orch)
+    finish('passed')
     await until(() => registry.get('r-1') === undefined)
   })
 

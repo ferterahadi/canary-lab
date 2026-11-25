@@ -17,10 +17,12 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
     status: decision.decision, runId, review_revision: revision,
     next: decision.decision === 'adopted'
       ? 'The human accepted these test changes. Continue with wait_for_heal_task for the runner result; acceptance is not a pass.'
+      : decision.decision === 'approved-for-continuation'
+        ? 'Accepted — awaiting execution. When continuation is requested, call start_run with run_ref for this same run. Approval itself starts no tests.'
       : decision.decision === 'approved-for-new-run'
         ? 'The human approved these exact candidate bytes for a new run. Call start_run with force_new:true and without run_ref; the approval is not a pass and the old result stays immutable.'
       : 'The human restored the recorded tests. Continue with wait_for_heal_task and fix the app against those tests. Do not reapply the rejected test edits.',
-    nextSteps: decision.decision === 'approved-for-new-run' ? ['start_run'] : ['wait_for_heal_task'],
+    nextSteps: decision.decision === 'approved-for-new-run' || decision.decision === 'approved-for-continuation' ? ['start_run'] : ['wait_for_heal_task'],
   }
   if (decision) return null
   if (isTerminalRunStatus(detail.manifest.status)) {

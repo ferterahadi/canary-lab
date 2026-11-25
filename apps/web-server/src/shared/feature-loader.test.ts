@@ -57,6 +57,18 @@ describe('loadFeatures', () => {
     expect(features[0].featureDir).toBe(fdir)
   })
 
+  it('accepts literal generated file paths and diagnoses invalid or computed rules', () => {
+    writeFeature('safe', "module.exports.config = { name: 'safe', generatedFiles: ['logs/current.json', 'logs/receiver-*.jsonl'] }")
+    for (const [index, pattern] of ['../elsewhere.log', '/tmp/log.txt', 'e2e/raw.json', 'data/fixtures/item.json', 'logs/*.ts', 'logs/**/*.json', 'logs/*foo*.log'].entries()) {
+      writeFeature('bad-' + index, `module.exports.config = { name: 'bad', generatedFiles: [${JSON.stringify(pattern)}] }`)
+    }
+    writeFeature('dynamic', "const outputs = ['logs/file.log']; module.exports.config = { name: 'dynamic', generatedFiles: outputs }")
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(loadFeatures(path.join(tmpDir, 'features')).map((feature) => feature.name)).toEqual(['safe'])
+    expect(log).toHaveBeenCalledTimes(8)
+    log.mockRestore()
+  })
+
   it('loads a run-relative single-attempt receipt and rejects traversal', () => {
     writeFeature('safe', `module.exports = { config: { name: 'safe', singleAttempt: { receipt: 'runtime/attempt.json' } } }`)
     writeFeature('unsafe', `module.exports = { config: { name: 'unsafe', singleAttempt: { receipt: '../outside.json' } } }`)

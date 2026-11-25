@@ -62,6 +62,7 @@ describe('create_feature', () => {
 
     expect(out.ok).toBe(true)
     expect(fs.existsSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'))).toBe(true)
+    expect(out.testFileRules).toMatchObject({ generatedFiles: expect.stringContaining('receiver-*.jsonl') })
     // Nothing was captured, so no envset fields ride along.
     expect(out).not.toHaveProperty('captured')
   })

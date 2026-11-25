@@ -40,7 +40,7 @@ interface Props {
   activeRunDetail: RunDetail | null
   notificationControl?: React.ReactNode
   recordSyncControl?: React.ReactNode
-  onRunLatestTests?: (feature: string) => void
+  onRunLatestTests?: (feature: string, continuationOf?: string, env?: string) => void
   runStartPending?: boolean
   onOpenCleanup?: () => void
   /** The Flights picker's routed open-state; its data and destinations come
@@ -85,7 +85,7 @@ export function GlobalStatusBar({
   // Flight at Parallel setup. Absent actions keep both inert.
   const { navigateToRun, openPortifyStage } = useWorkspaceActions()
   const work = useWorkState()
-  const [acceptedReview, setAcceptedReview] = useState<{ feature: string; revision: string; detail?: RunDetail | null } | null>(null)
+  const [acceptedReview, setAcceptedReview] = useState<{ feature: string; revision: string; continueRunId?: string; continuationOf?: string; detail?: RunDetail | null } | null>(null)
   const runInProgress = runStartPending || isUnsettledRunStatus(activeRunDetail?.manifest.status)
     || runs.some((run) => isUnsettledRunStatus(run.status))
   const runInProgressRef = useRef(runInProgress)
@@ -318,8 +318,8 @@ export function GlobalStatusBar({
           pendingRuns={pendingRuns}
           onClose={() => setReviewOpen(false)}
           onAccepted={(feature, receipt, detail) => {
-            if (receipt.decision === 'accepted' && receipt.execution.status === 'new-run-required' && !runInProgressRef.current) {
-              setAcceptedReview({ feature, revision: receipt.review_revision, detail })
+            if (receipt.decision === 'accepted' && (receipt.execution.status === 'new-run-required' || receipt.execution.status === 'continuation-ready') && !runInProgressRef.current) {
+              setAcceptedReview({ feature, revision: receipt.review_revision, detail, ...(receipt.execution.status === 'continuation-ready' ? { continueRunId: receipt.execution.runId } : { continuationOf: receipt.execution.runId }) })
             }
           }}
         />

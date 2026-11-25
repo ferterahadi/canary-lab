@@ -235,21 +235,22 @@ describe('workspace selection through navigation, data, and run streams', () => 
     expect(selection.selectedRunEvidence.manifest?.runId).toBe('new')
     expect(selection.selectedRunEvidence.status).toBe('passed')
   })
-  it('keeps callbacks and workspace socket stable across run updates without additional polling', async () => {
+  it('keeps callbacks and workspace socket stable across pushed updates and scheduled run recovery', async () => {
     vi.useFakeTimers()
     await mount()
     const callbacks = [selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]
     const entry = run('first')
     await index([entry], { first: detail(entry) })
-    // Opening a run takes the observer's one recovery read; the pushed update
-    // and the following five seconds must add none.
+    // A push must not add a read or create a second recovery timer.
     expect(api.getRunDetail.mock.calls).toEqual([['first']])
     await frame({ type: 'update', runId: entry.runId, detail: detail({ ...entry, status: 'failed' }) })
-    await act(async () => vi.advanceTimersByTimeAsync(5000))
+    await act(async () => vi.advanceTimersByTimeAsync(4999))
+    expect(api.getRunDetail.mock.calls).toEqual([['first']])
+    await act(async () => vi.advanceTimersByTimeAsync(1))
     expect([selection.onInitialFeatures, selection.onFeaturesRefreshed, selection.selectFeature, selection.selectFeatureForReview]).toEqual(callbacks)
     expect(workspace.connect).toHaveBeenCalledTimes(1)
     expect(workspace.close).not.toHaveBeenCalled()
-    expect(api.getRunDetail.mock.calls).toEqual([['first']])
+    expect(api.getRunDetail.mock.calls).toEqual([['first'], ['first']])
     expect(api.listFeatures).toHaveBeenCalledTimes(1)
     expect(selection.selectedRunEvidence.status).toBe('failed')
     expect(JSON.parse(container.textContent!)).toMatchObject({ run: 'first', evidence: 'first', status: 'failed' })

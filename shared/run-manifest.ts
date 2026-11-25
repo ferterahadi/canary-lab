@@ -167,6 +167,8 @@ export interface RunHeartbeatOwner {
 }
 
 export interface RunManifest {
+  /** Explicit troubleshooting predecessor; never inferred from chronology. */
+  continuationOf?: string
   /** Frozen explicit policy; absent means the production default (`DEFAULT_DIAGNOSIS_POLICY`). */
   diagnosisPolicy?: DiagnosisPolicy
   runId: string

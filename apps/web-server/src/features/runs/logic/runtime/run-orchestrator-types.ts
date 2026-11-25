@@ -53,6 +53,7 @@ export interface DirtySpecHooks {
 }
 
 export interface OrchestratorOptions {
+  continuationOf?: string
   feature: FeatureConfig
   runId: string
   runDir: string

@@ -304,6 +304,7 @@ export function externalTestFileRules(): Record<string, unknown> {
     specs: 'Place Playwright .spec or .test JavaScript/TypeScript files under e2e/; nested folders are supported.',
     requiredImport: 'canary-lab/feature-support/log-marker-fixture',
     specSelection: SPEC_SELECTION_RULE,
+    generatedFiles: loadPromptTemplate(promptPath('generated-files.md')),
     readability: loadPromptTemplate(promptPath('test-readability.md')),
     noInternalAgentSpawn: true,
   }

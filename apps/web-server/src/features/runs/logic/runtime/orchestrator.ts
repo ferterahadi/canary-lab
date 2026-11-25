@@ -118,6 +118,12 @@ export class RunOrchestrator extends EventEmitter {
     refreshSpecEdits(this.ctx, feature)
   }
 
+  /** Await source installation while the caller still owns the suite lock. */
+  async prepareContinuation(serviceStatus: 'starting' | 'stopped' = 'starting'): Promise<void> {
+    await prepareRunForExecution(this.ctx, serviceStatus, true)
+    this.ctx.executionPrepared = true
+  }
+
   async restartHealFromFailure(guidance = ''): ReturnType<typeof restartHealFromFailure> {
     return restartHealFromFailure(this.ctx, this, guidance)
   }
@@ -378,7 +384,7 @@ export class RunOrchestrator extends EventEmitter {
       selection = undefined
     }
     setStatus(this.ctx, 'running')
-    const exitCode = await runPlaywright(this.ctx, selection)
+    const exitCode = await runPlaywright(this.ctx, this.ctx.approvedContinuation ? undefined : selection)
     if (this.ctx.stopped) return this.ctx.status
     const finalStatus = this.ctx.serviceFailure
       ? 'failed'

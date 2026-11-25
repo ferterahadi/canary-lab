@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildSuiteReview, suiteExecutionRevision, suiteReviewAssessment, suiteReviewRevision } from './suite-review'
-import { adoptSpecEdits, snapshotSuite } from './run-suite-snapshot'
+import { adoptSpecEdits, restoreReviewedSuiteFiles, snapshotSuite } from './run-suite-snapshot'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import { trackTempDirs } from '../../../../../../../tools/test-helpers/temp-dir'
 
@@ -25,6 +25,58 @@ function fixture(opts: Parameters<typeof makeHealLoopContext>[0]['opts'] = {}) {
 }
 
 describe('exact suite review', () => {
+  it('adopts an output declaration from a pre-existing run and keeps later rotations out of review and restore', async () => {
+    const { ctx, before, live } = fixture()
+    const config = 'feature.config.cjs'
+    const state = 'logs/receiver/current.json'
+    const rotated = 'logs/receiver/receiver-today.jsonl'
+    const authored = 'logs/receiver/example.json'
+    write(live, 'e2e/a.spec.ts', fs.readFileSync(path.join(before, 'e2e/a.spec.ts')))
+    write(before, state, 'previous run')
+    write(live, state, 'current run')
+    write(live, rotated, 'event')
+    write(live, config, "module.exports.config = { generatedFiles: ['logs/receiver/current.json', 'logs/receiver/receiver-*.jsonl'] }")
+    const proposal = suiteReviewAssessment(before, live)
+    expect(proposal).toMatchObject({ executionChanged: true, files: [{ file: config }] })
+    write(live, rotated, 'another event')
+    expect(suiteReviewRevision(before, live)).toBe(proposal.revision)
+    expect(await adoptSpecEdits(ctx, proposal.revision)).toMatchObject({ ok: true, adopted: [config] })
+    expect(fs.existsSync(path.join(before, state))).toBe(false)
+    expect(fs.existsSync(path.join(before, rotated))).toBe(false)
+    const settled = suiteReviewAssessment(before, live)
+    fs.unlinkSync(path.join(live, rotated))
+    write(live, 'logs/receiver/receiver-tomorrow.jsonl', 'new log')
+    write(live, state, 'next run')
+    expect(suiteReviewAssessment(before, live)).toEqual(settled)
+    expect(settled).toMatchObject({ executionChanged: false, files: [] })
+    write(live, authored, 'expected response')
+    write(live, 'helper.ts', 'modified assertion')
+    const review = suiteReviewAssessment(before, live)
+    expect(review.files.map((f) => f.file)).toEqual(['helper.ts', authored])
+    expect(restoreReviewedSuiteFiles(before, live, review.revision)).toMatchObject({ ok: true })
+    expect(fs.readFileSync(path.join(live, state), 'utf8')).toBe('next run')
+    write(live, config, 'module.exports.config = {}')
+    const removal = suiteReviewAssessment(before, live)
+    expect(removal.executionChanged).toBe(true)
+    expect(removal.files.map((f) => f.file)).toContain(state)
+    expect(restoreReviewedSuiteFiles(before, live, removal.revision)).toMatchObject({ ok: true, restored: [config] })
+    expect(fs.readFileSync(path.join(live, state), 'utf8')).toBe('next run')
+    expect(suiteReviewAssessment(before, live)).toEqual(settled)
+  })
+
+  it('uses the declared file policy on a first snapshot, never on directories with matching names', () => {
+    const { ctx } = makeHealLoopContext({ root })
+    const live = ctx.feature.featureDir
+    write(live, 'feature.config.cjs', "module.exports.config = { generatedFiles: ['logs/out-*.json'] }")
+    write(live, 'logs/out-state.json', 'output')
+    write(live, 'logs/out-dir.json/helper.ts', 'authored')
+    snapshotSuite(ctx)
+    expect(ctx.suiteDir).not.toBe(live)
+    expect(fs.existsSync(path.join(ctx.suiteDir, 'logs/out-state.json'))).toBe(false)
+    expect(fs.existsSync(path.join(ctx.suiteDir, 'logs/out-dir.json/helper.ts'))).toBe(true)
+    expect(suiteReviewAssessment(ctx.suiteDir, live).files).toEqual([])
+  })
+
   it('derives full review and execution changes from the same inventories with runtime exclusions', () => {
     const { before, live } = fixture()
     write(live, 'e2e/a.spec.ts', fs.readFileSync(path.join(before, 'e2e/a.spec.ts')))

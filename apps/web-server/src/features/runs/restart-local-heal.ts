@@ -1,3 +1,4 @@
+import { continueRun } from './logic/run-lifecycle-service'
 import { checkRestartEligibility } from './logic/restart-eligibility'
 import { prepareRestartResources } from './logic/restart-preparation'
 import { createRestartedOrchestrator } from './logic/restart-orchestrator'
@@ -97,7 +98,7 @@ export function makeRestartLocalHeal(
         runnerLog.warn(`Heal restart failed: ${(err as Error).message}`)
         return { ok: false, reason: 'spawn-failed' as const }
       }
-      const restarted = createRestartedOrchestrator({
+      const restarted = await createRestartedOrchestrator({
         feature, env, runId, runDir,
         initialHealCycles: manifest.healCycles,
         resources: prepared,
@@ -106,6 +107,7 @@ export function makeRestartLocalHeal(
         dirtySpecHooks: dirtySpecStore,
         attachRunStreams,
         failureLogPrefix: 'Heal restart failed',
+        serviceStatus: 'stopped',
         modeOptions: { autoHeal, models },
       })
       if (!restarted.ok) return restarted
@@ -122,5 +124,5 @@ export function makeRestartLocalHeal(
       return { ok: true as const }
   }
 
-  return restartLocalHealClosure
+  return (runId: string, text: string) => continueRun(runStore, runId, () => restartLocalHealClosure(runId, text), () => ({ ok: true as const }), (reason) => ({ ok: false as const, reason: reason === 'already-active' ? 'not-restartable' as const : reason }))
 }

@@ -41,7 +41,7 @@ answer a form yourself, or recreate the question in chat. Existing explicit
 instructions and autopilot choices still apply without another ask.
 
 Form decisions have one shared record. The native form links to the same approval
-in Canary Notifications, also surfaced above the Flight page. On `needs-input`
+in Canary Notifications. On `needs-input`
 with `approvalId` and `reviewUrl`, show that link and call `wait_for_approval` with
 the ID; repeat on `still_waiting`. The human answers once in either surface.
 A browser answer resolves the server decision; some clients keep their native

@@ -137,6 +137,7 @@ function healEndRecord(ctx: RunContext, ending: HealEnding | undefined): HealEnd
       // intent explicit for downstream readers (heal-index, future agent
       // contexts).
       journal: {
+        decision: 'cancelled',
         signal: '.rerun',
         hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
         fixDescription: 'Cancelled by user — no changes were made.',
@@ -147,7 +148,7 @@ function healEndRecord(ctx: RunContext, ending: HealEnding | undefined): HealEnd
     return {
       stoppedEarly: 'agent-ended-heal',
       healEnd: { reason: 'agent-ended', message: `${ending.client} ended the heal without a fix: ${ending.reason}` },
-      journal: { signal: 'none', hypothesis: ending.reason, fixDescription: 'Agent ended the heal — no fix applied.' },
+      journal: { decision: 'agent-ended', signal: 'none', hypothesis: ending.reason, fixDescription: 'Agent ended the heal — no fix applied.' },
       lifecycle: { headline: 'Agent ended the heal — no fix', detail: ending.reason },
     }
   }
@@ -155,7 +156,7 @@ function healEndRecord(ctx: RunContext, ending: HealEnding | undefined): HealEnd
   return {
     stoppedEarly: 'agent-disconnected',
     healEnd: { reason: 'no-signal', agentWait: 'agent-disconnected', message },
-    journal: { signal: 'none', hypothesis: `The repair agent disconnected in cycle ${ctx.healCycles} and never signalled.`, fixDescription: 'No fix verified — the agent went away.' },
+    journal: { decision: 'agent-disconnected', signal: 'none', hypothesis: `The repair agent disconnected in cycle ${ctx.healCycles} and never signalled.`, fixDescription: 'No fix verified — the agent went away.' },
     lifecycle: { headline: 'Repair agent disconnected — heal ended', detail: message },
   }
 }
