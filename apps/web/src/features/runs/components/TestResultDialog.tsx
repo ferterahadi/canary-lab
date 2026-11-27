@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { journalForCycle, type CaseCycle, type CaseEvidence, type EvidenceAttempt, type RunEvidence } from '@shared/run-evidence'
 import type { RunDetail } from '@shared/run-detail'
 import type { RunCycleReview } from '@shared/test-view/cycle-review'
-import { shortSourceLocation } from '@shared/lib/source-location'
+import { parseSourceLocation, shortSourceLocation } from '@shared/lib/source-location'
 import { formatLocalDateTime } from '@/shared/lib/format'
 import { SourceModal } from '@/shared/ui/ActivityLogModal'
 import { EmptyState, type EmptyReason } from '@/shared/ui/EmptyState'
@@ -10,7 +10,12 @@ import { CODE_DIALOG_SIZE, Modal } from '@/shared/ui/Overlays'
 import { Tab } from '@/shared/ui/Tab'
 import { HintIcon } from '@/shared/ui/Icons'
 import type { LiveResource } from '@/shared/state/use-live-resource'
-import { ShikiCode, StepStatusBadge } from '@/shared/ui/TestCodeBlock'
+import { SourceExcerptEditor } from '@/shared/ui/SourceExcerptEditor'
+import { TestPresentation } from '@/shared/ui/TestPresentation'
+import { useFeatureTestRoster } from '@/shared/state/use-feature-test-roster'
+import { bodyLineForSourceLine } from '@shared/test-view/render-model'
+import { sourceFileInRun } from '../utils/run-source-file'
+import { StepStatusBadge } from '@/shared/ui/TestCodeBlock'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 import { useRunJournal } from '../state/use-run-journal'
 import { useCycleReview } from '../state/use-cycle-review'
@@ -189,7 +194,7 @@ function Summary({ detail, evidence, caseEvidence, entry, journal, onJournalChan
         )}
         {attempt && (entry.status === 'failed' || entry.status === 'timedout') ? (
           <>
-            <ErrorSection attempt={attempt} title={title} file={file} />
+            <ErrorSection attempt={attempt} title={title} file={file} detail={detail} />
             {detail.manifest.services.length > 0 && (
               <ServiceLogsSection runId={detail.runId} evidence={evidence} attempt={attempt} label={entry.title} caseTitle={caseEvidence.title} onOpenFullLog={onOpenServiceLog} />
             )}
@@ -224,7 +229,7 @@ function Sentence({ children }: { children: ReactNode }) {
  *  wrong, then where. The message leads the Failure row with the mismatch
  *  under it; the code frame is a band in the same editor as the Tests column
  *  and the repair's Changes. Anything the split cannot place stays verbatim. */
-function ErrorSection({ attempt, title, file }: { attempt: EvidenceAttempt; title: string; file?: string }) {
+function ErrorSection({ attempt, title, file, detail }: { attempt: EvidenceAttempt; title: string; file?: string; detail: RunDetail }) {
   const message = attempt.error?.message
   const snippet = attempt.error?.snippet
   const parts = message ? parseAssertionError(message) : null
@@ -246,7 +251,7 @@ function ErrorSection({ attempt, title, file }: { attempt: EvidenceAttempt; titl
     <ResultSection title={title} context={snippet ? undefined : layout?.caption ?? undefined} testId="section-error">
       {failure}
       {layout?.rest && <FieldRow label="Details" first={false}><Block color="var(--text-secondary)">{layout.rest}</Block></FieldRow>}
-      {snippet && <CodeBand snippet={snippet} file={file} caption={layout?.caption ?? null} />}
+      {snippet && <CodeBand snippet={snippet} file={file} caption={layout?.caption ?? null} attempt={attempt} detail={detail} />}
     </ResultSection>
   )
 }
@@ -274,22 +279,42 @@ function Block({ color, children }: { color: string; children: string }) {
 /** Playwright's code frame in the Tests column's editor: highlighted, each
  *  row numbered by its source line, the failing line marked as the Tests
  *  column marks it. A snippet in any other shape shows verbatim. */
-function CodeBand({ snippet, file, caption }: { snippet: string; file?: string; caption: string | null }) {
-  const frame = parseCodeFrame(snippet)
-  const failing = frame?.findIndex((line) => line.failing) ?? -1
-  const at = frame && failing >= 0 ? `${file ?? 'line'}:${frame[failing].line}` : file
+function CodeBand({ snippet, file, caption, attempt, detail }: {
+  snippet: string; file?: string; caption: string | null; attempt: EvidenceAttempt; detail: RunDetail
+}) {
+  const frame = useMemo(() => parseCodeFrame(snippet), [snippet])
+  const numbers = useMemo(() => frame?.map(line => line.line), [frame])
+  const failing = frame?.find(line => line.failing)
+  const at = failing ? `${file ?? 'line'}:${failing.line}` : file
+  const { manifest, runId } = detail
+  const snapshot = manifest.suiteSnapshot
+  const location = attempt.location && parseSourceLocation(attempt.location)
+  const started = Date.parse(attempt.startedAt ?? '')
+  const retained = snapshot?.kind === 'taken' && Date.parse(snapshot.takenAt) <= started
+    && (manifest.specEdits?.adopted ?? []).every(edit => Date.parse(edit.at) <= started)
+  const roster = useFeatureTestRoster({ feature: manifest.feature, runId, enabled: Boolean(retained && location && failing) })
+  const recorded = retained && location && failing && frame ? roster.specs?.flatMap(spec => spec.tests.flatMap(test => {
+    const graph = test.readable.graph
+    if (graph?.origin.kind !== 'recorded-run' || graph.origin.runId !== runId || graph.case.title !== attempt.title
+      || graph.case.file !== sourceFileInRun(location.file, manifest) || graph.case.line !== Number(location.line)) return []
+    // An error frame can also point into a helper or a dependency. Attribute
+    // it to this body only when its retained text matches at those lines.
+    const lines = test.bodySource.split(/\r?\n/)
+    const bodyLine = bodyLineForSourceLine(test, failing.line)
+    if (lines[bodyLine - 1]?.trim() !== failing.text.trim() || !failing.text.trim()) return []
+    const matches = frame.every(line => {
+      const index = bodyLineForSourceLine(test, line.line) - 1
+      return index < 0 || index >= lines.length || lines[index].trim() === line.text.trim()
+    })
+    return matches ? [{ test, file: test.sourceFile ?? spec.file, bodyLine }] : []
+  })) : undefined
+  const match = recorded?.length === 1 ? recorded[0] : undefined
   return (
     <Band label="Code" title={at && <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{at}</span>} aside={caption}>
-      {frame
-        ? <div className="cl-band-code" data-testid="error-code-frame">
-            <ShikiCode
-              source={frame.map((line) => line.text).join('\n')}
-              sourceLineMap={frame.map((line) => ({ sourceLine: line.line, sourceLines: [line.line] }))}
-              numberBySource
-              lineHighlight={failing >= 0 ? { kind: 'failed', lines: new Set([failing + 1]) } : undefined}
-              showOpenButton={false}
-            />
-          </div>
+      {match ? <TestPresentation view="single" sourceFile={match.file} test={match.test}
+        executionHighlight={{ kind: 'failed', bodyLine: match.bodyLine }} />
+        : frame ? <div className="cl-band-code" data-testid="error-code-frame"><SourceExcerptEditor source={frame.map(line => line.text).join('\n')} numbers={numbers} failedLine={failing?.line}
+          label="Recorded source excerpt" visualUnavailable="Only the recorded source excerpt is available for this attempt." /></div>
         : <div className="p-3"><Block color="var(--text-secondary)">{snippet}</Block></div>}
     </Band>
   )

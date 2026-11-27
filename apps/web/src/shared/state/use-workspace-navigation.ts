@@ -237,7 +237,9 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   useEffect(() => { selectedFeatureRef.current = selectedFeature }, [selectedFeature])
   useEffect(() => { selectedRunIdRef.current = selectedRunId }, [selectedRunId])
   const currentTests = !recordedSelection || recordedSelection.run !== selectedRunId || recordedSelection.feature !== selectedFeature
-  const scope = JSON.stringify([selectedFeature, selectedRunId, currentTests])
+  // Cold loading selects the latest run after the suite arrives. A reader of
+  // current source belongs to the suite and must survive that selection.
+  const scope = JSON.stringify([selectedFeature, currentTests ? null : selectedRunId, currentTests])
   const [cardRoute, setCardRoute] = useState(() => ({ scope, value: PERSISTED.inspection }))
   const inspection = cardRoute.scope === scope ? cardRoute.value : undefined
   const setInspection = useCallback((value?: CardInspection) => {

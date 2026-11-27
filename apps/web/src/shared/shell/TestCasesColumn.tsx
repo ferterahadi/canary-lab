@@ -328,7 +328,7 @@ export function TestCasesColumn({ inspection, onInspection, feature, isAuthoring
                     modifiedLabel={baselineRunId ? 'Changed since this run' : 'Modified since the committed test'}
                     changedLines={changedLines}
                     onToggle={() => {
-                      onInspection?.(isExpanded ? undefined : { card: key, mode: 'english' })
+                      onInspection?.(isExpanded ? undefined : { card: key, mode: t.readable.graph?.schemaVersion === 1 ? 'visual' : 'english' })
                       setExpandedBySource((current) => new Map(current).set(sourceKey, isExpanded ? null : key))
                     }}
                     {...(resultTarget && runId ? { onOpenResult: () => onOpenResult?.(runId, resultTarget) } : {})}

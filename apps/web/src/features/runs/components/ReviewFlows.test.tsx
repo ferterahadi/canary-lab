@@ -32,7 +32,8 @@ it('pairs renamed declarations and drills into the chosen side of the review', a
     const panes = host.querySelectorAll('section')
     expect(panes[0].textContent).toContain(sources.before.tests[0].readable.graph!.revisions[file].slice(0, 12))
     expect(panes[1].textContent).toContain(sources.after.tests[0].readable.graph!.revisions[file].slice(0, 12))
-    await act(async () => panes[1].querySelector<HTMLButtonElement>('button[data-source]:not([data-box="start"]):not([data-box="end"])')!.click())
+    await act(async () => panes[1].querySelector<HTMLElement>('[data-outline-box] .outline-label')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, metaKey: true })))
     expect(panes[1].querySelector('[role="tab"][aria-label="Code"]')?.getAttribute('aria-selected')).toBe('true')
     expect(panes[0].querySelector('[role="tab"][aria-label="Visual"]')?.getAttribute('aria-selected')).toBe('true')
   } finally {
@@ -58,7 +59,7 @@ it('keeps added and removed declarations on their own sides', async () => {
       const [pair] = sources.declarationPairs.filter(item => item[side])
       await act(async () => root.render(<ReviewFlows sources={sources} labels={{ before: 'Before', after: 'After' }}
         inspection={{ side, flow: { card: pair[side]!, mode: 'visual' } }} onInspect={() => {}} onReturn={() => {}} />))
-      expect(host.querySelectorAll('[aria-label="Test flow"]')).toHaveLength(1)
+      expect(host.querySelectorAll('[aria-label="Visual outline"]')).toHaveLength(1)
       expect(host.textContent).toContain(side === 'before' ? 'Removed test · absent after' : 'Added test · absent before')
     }
   } finally { act(() => root.unmount()) }
@@ -79,11 +80,60 @@ it('opens a recovered repair from Results & Fixes and returns to its file edits'
         after: reviewSourceFor(file, next, undefined, { withTests: true, side: 'after' }),
         declarationPairs: [{ before: '1:order', after: '1:order' }], patch: '@@ -1 +1 @@\n-' + old + '\n+' + next },
     }]} />))
-    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Visual"]')!.click())
-    expect(host.querySelector('section[aria-label="Before repair 2"] [aria-label="Test flow"]')).toBeTruthy()
-    expect(host.querySelector('section[aria-label="After repair 2"] [aria-label="Test flow"]')).toBeTruthy()
+    const select = host.querySelector<HTMLSelectElement>('.cl-revision-head select')!
+    await act(async () => { select.value = '1:order'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(host.querySelector('section[aria-label="Before repair 2"] [aria-label="Test source"]')).toBeTruthy()
+    expect(host.querySelector('section[aria-label="After repair 2"] [aria-label="Visual outline"]')).toBeTruthy()
     await act(async () => button('File comparison').click())
     expect(host.textContent).toContain('Edit 1 / 1')
     expect(host.querySelector('[aria-label="Code changes before and after"]')).toBeTruthy()
   } finally { act(() => root.unmount()) }
+})
+
+it('marks only a reported live line in the source editor and clears it in place when execution ends', async () => {
+  const { TestPresentation } = await import('@/shared/ui/TestPresentation')
+  const file = 'e2e/simple.spec.ts'
+  const source = "test('case', async () => {\n  await first()\n\n  await second()\n})"
+  const review = reviewSourceFor(file, source, undefined, { withTests: true, side: 'after' })
+  const test = { ...review.tests[0], steps: [], bodySource: source.slice(source.indexOf('{')), bodyLine: 1 }
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    const show = (line?: number) => act(async () => root.render(<TestPresentation view="single" sourceFile={file}
+      inspection={{ mode: 'code', line: 2 }} onInspection={() => {}} test={test}
+      executionHighlight={line ? { kind: 'running', bodyLine: line } : undefined} />))
+    const marked = () => [...host.querySelectorAll<HTMLElement>('[data-evidence="Running now"]')].map(row => row.dataset.sourceLine)
+    await show()
+    expect(host.querySelectorAll('.cm-line').length).toBeGreaterThan(2)
+    expect(marked()).toEqual([])
+    await show(4)
+    expect(marked()).toEqual(['4'])
+    await show()
+    expect(marked()).toEqual([])
+  } finally { act(() => root.unmount()); host.remove() }
+})
+
+it('expands inside the full-screen Coverage layer and returns to its open card on Escape', async () => {
+  const { TestPresentation } = await import('@/shared/ui/TestPresentation')
+  const { FullScreenPage } = await import('@/shared/ui/PageHeader')
+  const file = 'e2e/example.spec.ts'
+  const source = "test('release the number', () => { releaseNumber() })"
+  const review = reviewSourceFor(file, source, undefined, { withTests: true, side: 'after' })
+  const test = { ...review.tests[0], steps: [], bodySource: '{ releaseNumber() }' }
+  const host = document.body.appendChild(document.createElement('div'))
+  const root = createRoot(host)
+  let pageClosed = false
+  try {
+    await act(async () => root.render(<FullScreenPage onClose={() => { pageClosed = true }} testId="coverage">
+      <TestPresentation view="single" sourceFile={file} test={test} />
+    </FullScreenPage>))
+    const page = host.querySelector('[data-testid="coverage"]')!
+    await act(async () => page.querySelector<HTMLButtonElement>('.location-action')!.click())
+    expect(page.querySelector('[data-testid="expanded-test-reader"] svg[aria-label$="flowchart"]')).toBeTruthy()
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(pageClosed).toBe(false)
+    expect(page.querySelector('[data-testid="expanded-test-reader"]')).toBeNull()
+    expect(page.querySelector('[aria-label="Visual outline"]')).toBeTruthy()
+  } finally { act(() => root.unmount()); host.remove() }
 })

@@ -50,7 +50,7 @@ describe('readable Activity', () => {
     // The prompt reads as the source the agent received: numbered markdown.
     const code = host.querySelector('[data-testid="activity-log-code"]')!
     expect(code.getAttribute('data-lang')).toBe('markdown')
-    expect([...code.querySelectorAll('.agentts-ln')].map((n) => n.textContent)).toEqual(['1', '2'])
+    expect([...code.querySelectorAll('.cm-line')].map((n) => n.getAttribute('data-source-line'))).toEqual(['1', '2'])
     expect(host.querySelector('[data-testid="activity-log-modal"] .agentts-md')).toBeNull()
     expect(prompt.getAttribute('data-selected')).toBe('true')
   })

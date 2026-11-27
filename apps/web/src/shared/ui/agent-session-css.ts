@@ -89,11 +89,6 @@ export const TIMELINE_CSS = `
 .agentts-plain{margin:0;padding:10px 12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-base);font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word}
 /* One grid across every line, so the gutter takes the widest number once and a
    wrapped line hangs under its text rather than under its number. */
-.agentts-code{display:grid;grid-template-columns:max-content minmax(0,1fr);padding:10px 0;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-base);font-family:var(--font-mono);font-size:11.5px;line-height:1.65;color:var(--text-secondary);overflow-x:auto}
-.agentts-codeline{display:contents}
-.agentts-ln{padding:0 12px 0 14px;border-right:1px solid var(--border-default);color:var(--text-muted);opacity:.75;text-align:right;font-variant-numeric:tabular-nums;user-select:none}
-.agentts-lc{padding:0 14px;white-space:pre-wrap;word-break:break-word}
-.agentts-codeline:hover>*{background:color-mix(in srgb,var(--bg-elevated) 70%,transparent)}
 .agentts-extdetail{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
 .agentts-extnote{margin:0;color:var(--text-muted);font-size:12px;line-height:1.55}
 .agentts-nestrail{padding:0}

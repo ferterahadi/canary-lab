@@ -1,13 +1,10 @@
-import { useMemo } from 'react'
-import { comparisonPatchRows } from '@shared/comparison-patch'
-import { ComparisonLegend, ComparisonTable } from './ComparisonTable'
+import { ComparisonLegend } from './ComparisonTable'
+import { CapturedPatchEditor } from './FileComparisonEditor'
+import { TestLanguageSwitch } from './TestLanguageSwitch'
 
 /** Captured patches use the same before/after presentation as semantic changes.
  * File and hunk metadata remain visible so the comparison keeps its context. */
 export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in editor' }: { diff: string; onOpenInEditor?: () => void; openTitle?: string }) {
-  const rows = useMemo(() => comparisonPatchRows(diff).map((row, index) => row.kind === 'section'
-    ? { id: String(index), kind: 'section' as const, label: row.text }
-    : { id: String(index), before: row.before, after: row.after }), [diff])
   if (!diff.trim()) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no diff captured)</div>
   return (
     <div style={{ position: 'relative' }}>
@@ -28,9 +25,10 @@ export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in ed
           ↗
         </button>
       )}
-      <div className="mb-2 pr-10"><ComparisonLegend /></div>
-      <div className="max-h-[360px] overflow-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
-        <ComparisonTable rows={rows} code ariaLabel="Patch before and after" />
+      <div className="cl-context-toolbar pr-10"><TestLanguageSwitch reader="compact" mode="code" onVisual={() => {}} onChange={() => {}}
+        disabled={{ reason: 'This patch contains changed lines. A flowchart needs the complete file.' }} /><ComparisonLegend /></div>
+      <div className="flex max-h-[360px] flex-col overflow-hidden">
+        <CapturedPatchEditor diff={diff} />
       </div>
     </div>
   )

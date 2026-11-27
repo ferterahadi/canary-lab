@@ -13,7 +13,7 @@ export type CycleFileChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'bi
 export type CycleFileLanguage = 'typescript' | 'tsx' | 'json' | 'markdown' | 'yaml'
 
 /** Which tree the file lives in, decided from the run's own records, never
- * from the diff text. App code is shown as code only: English is for tests. */
+ * from the diff text. Only suite files receive test execution attribution. */
 export type CycleFileRole = 'spec' | 'support' | 'app'
 
 /** How the file's full before and after were obtained. */

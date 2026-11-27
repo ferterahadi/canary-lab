@@ -121,7 +121,8 @@ describe('ChangesTab', () => {
     expect(mocks.getRunFixPatch).toHaveBeenCalledTimes(1)
     expect(mocks.getRunFixPatch).toHaveBeenCalledWith('r1', 'mighty-cns')
     const patch = container.querySelector('[data-testid="changes-patch-mighty-cns"]')!
-    expect([...patch.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before this run', 'After this run'])
+    expect([...patch.querySelectorAll('.cl-revision-head h3')].map((heading) => heading.textContent)).toEqual(['Before this run', 'After this run'])
+    expect(patch.querySelectorAll('.cm-editor')).toHaveLength(2)
     expect(patch.textContent).toContain('broken()')
     expect(patch.textContent).toContain('fixed()')
     expect(patch.textContent).toContain('− Removed+ Added')

@@ -82,3 +82,55 @@ export function flowLabel(s: ts.Statement, node: ReadableNode): ReadableFlowLabe
   }
   return { kind, label: node.english?.text ?? node.text }
 }
+
+/** Keep the compact reading label independent of the execution label used by
+ * saved reports and step counters. Units and comparisons come from the AST. */
+export function readerCaption(s: ts.Statement, flow: ReadableFlowLabel): string | undefined {
+  const call = callFromStatement(s)
+  const callee = call?.expression
+  if (flow.kind === 'check' && call && callee && ts.isPropertyAccessExpression(callee) && ts.isCallExpression(callee.expression)) {
+    const left = callee.expression.arguments[0], right = call.arguments[0]
+    if (!left || !right) return
+    const actual = ts.isPropertyAccessExpression(left) && left.name.text === 'length'
+      ? subject(left.expression) + ' length' : subject(left)
+    const matcher = callee.name.text
+    if (actual === 'elapsed ms' && ts.isNumericLiteral(right) && matcher === 'toBeLessThan') {
+      const ms = Number(right.text)
+      const duration = ms < 1000 ? ms + ' ms' : ms / 1000 + (ms === 1000 ? ' second' : ' seconds')
+      return 'Check response time is under ' + duration
+    }
+    const http = actual === 'status' && /\b(GET|POST|PUT|PATCH|DELETE|HTTP)\b/.test(callee.expression.arguments[1]?.getText() ?? '')
+    const label = http ? 'HTTP status' : actual
+    if (matcher === 'toBe' || matcher === 'toEqual') {
+      if (ts.isCallExpression(right) && right.expression.getText() === 'expect.any' && right.arguments.length === 1)
+        return 'Check ' + label + ' is a ' + subject(right.arguments[0])
+      return 'Check ' + label + ' is ' + subject(right)
+    }
+    const comparison: Record<string,string> = { toBeGreaterThan:'is greater than',toBeGreaterThanOrEqual:'is at least',
+      toBeLessThan:'is under',toBeLessThanOrEqual:'is at most' }
+    if (comparison[matcher]) return 'Check ' + label + ' ' + comparison[matcher] + ' ' + subject(right)
+  }
+  if (ts.isIfStatement(s)) {
+    if (ts.isPropertyAccessExpression(s.expression)) return 'Check whether ' + subject(s.expression) + ' is set'
+    return 'Check whether ' + question(s.expression).replace(/\?$/, '').replace(/^./, c=>c.toLowerCase())
+  }
+  if (call && callee && ts.isIdentifier(callee) && callee.text === 'call' && call.arguments[0]) return 'Call ' + subject(call.arguments[0])
+  if (ts.isExpressionStatement(s) && ts.isBinaryExpression(s.expression) && s.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const {left,right} = s.expression
+    const time = right.getText().match(/^new Date\(Date\.now\(\)\s*-\s*(\d+)\)\.toISOString\(\)$/)
+    if (time) {
+      const ms = Number(time[1])
+      const duration = ms < 1000 ? ms + ' ms' : ms / 1000 + (ms === 1000 ? ' second' : ' seconds')
+      return 'Set ' + subject(left).replace(/ iso$/, ' time') + ' to ' + duration + ' ago'
+    }
+    if (ts.isPropertyAccessExpression(right) || ts.isIdentifier(right)) {
+      const destination = ts.isPropertyAccessExpression(left) ? left.expression.getText() : undefined
+      return subject(left) === subject(right) && destination ? 'Save ' + subject(right) + ' to ' + destination :
+        'Save ' + subject(right) + ' to ' + subject(left)
+    }
+  }
+  if (ts.isVariableStatement(s) && s.declarationList.declarations.length === 1) {
+    const {name,initializer} = s.declarationList.declarations[0]
+    if (initializer && ts.isPropertyAccessExpression(initializer)) return 'Read ' + words(name.getText())
+  }
+}

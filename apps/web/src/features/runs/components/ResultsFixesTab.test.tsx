@@ -11,6 +11,8 @@ import { cycleReviewFromPatch, type CycleReviewFile } from '@shared/test-view/cy
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import type { InvalidationTopic } from '@/shared/state/invalidation-bus'
 import type { ResultsSelection } from '../utils/results-fixes'
+import { reviewSourceFor } from '../../../../../web-server/src/shared/readable-tests/review-source'
+import { extractTestsFromSource } from '../../../../../web-server/src/shared/ast-extractor'
 import { ResultsFixesTab, type ResultsView } from './ResultsFixesTab'
 
 vi.mock(import('@/shared/api/runs'), async (importOriginal) => ({
@@ -353,10 +355,35 @@ describe('a failed run’s error', () => {
     expect(error.querySelector('header')?.textContent).toBe('Initial run: test result')
     const band = error.querySelector('[data-testid="error-code-frame"]')!.parentElement!.parentElement!
     expect(band.firstElementChild?.textContent).toBe('Codecheckout.spec.ts:12toBe · Object.is equality')
-    const lines = [...error.querySelectorAll('[data-testid="error-code-frame"] .line')]
-    expect(lines.map((line) => line.getAttribute('data-code-sequence-label'))).toEqual(['11', '12'])
+    const lines = [...error.querySelectorAll('[data-testid="error-code-frame"] .cm-line')]
+    expect(lines.map((line) => line.getAttribute('data-source-line'))).toEqual(['11', '12'])
     expect(lines.map((line) => line.getAttribute('data-execution-highlight'))).toEqual([null, 'failed'])
-    expect(lines[1].textContent).toBe('  await expect(total).toBe(90)FAILED HERE')
+    expect(lines[1].textContent).toBe('  await expect(total).toBe(90)')
+    expect(lines[1].getAttribute('aria-label')).toBe('Failed here, line 12')
+    expect(error.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Visual"]')?.disabled).toBe(true)
+  })
+
+  it('opens the recorded test flow from a failure and falls back to the exact frame for a different revision', async () => {
+    const config = await import('@/shared/api/config')
+    const file = 'checkout.spec.ts'
+    const source = "test('passed checkout', () => {\n  expect(total).toBe(90)\n})"
+    const playbackEvents = failedWith('Total changed', '> 2 |   expect(total).toBe(90)')
+    const detail = detailOf({ playbackEvents, manifest: { suiteSnapshot: { kind: 'taken', dir: '/suite',
+      digest: 'snapshot', takenAt: '2025-12-31T23:59:59.000Z' } } })
+    const tests = extractTestsFromSource(file, source, undefined, undefined, { kind: 'recorded-run', runId: detail.runId }).tests
+    const read = vi.spyOn(config, 'getFeatureTests').mockResolvedValue([{ file, tests }])
+    try {
+      const caseKey = buildRunEvidence({ events: playbackEvents }).cases[0].caseKey
+      const { rerender } = await mountLive(detail, { selection: { caseKey } })
+      expect(read).toHaveBeenCalledWith('storefront', undefined, detail.runId)
+      const expand = section('section-error')!.querySelector<HTMLButtonElement>('.location-action')
+      expect(expand).toBeTruthy()
+      await act(async () => expand!.click())
+      expect(document.querySelector('[data-testid="expanded-test-reader"] svg[aria-label$="flowchart"]')).toBeTruthy()
+      await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      await rerender({ ...detail, playbackEvents: failedWith('A different source line', '> 2 |   expect(total).toBe(95)') })
+      expect(section('section-error')?.querySelector('[aria-label="Recorded source excerpt"]')?.textContent).toContain('toBe(95)')
+    } finally { read.mockRestore() }
   })
 
   it('keeps a snippet that is not a code frame verbatim', async () => {
@@ -611,12 +638,12 @@ describe('repair notes and code changes', () => {
     await mountStory({ journal: journalSections() })
     expect(runsApi.getRunCycleReview).toHaveBeenCalledWith(expect.any(String), 2)
     const changes = section('section-changes')!
-    const table = changes.querySelector('table[aria-label="Code changes before and after"]')!
-    expect([...table.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Before repair 2', 'After repair 2'])
-    expect([...table.querySelectorAll('[data-side="after"]')].map((line) => line.getAttribute('data-source-line'))).toEqual(['12'])
-    expect([...table.querySelectorAll('.cl-context-line')].map((cell) => cell.textContent)).toEqual(['12', '12'])
+    const table = changes.querySelector('[role="group"][aria-label="Code changes before and after"]')!
+    expect([...table.querySelectorAll('.cl-comparison-reader-head h3')].map((cell) => cell.textContent)).toEqual(['Before repair 2', 'After repair 2'])
+    expect([...table.querySelectorAll('[data-side="after"][data-source-line]')].map((line) => line.getAttribute('data-source-line'))).toEqual(['12'])
+    expect([...table.querySelectorAll('.cm-line[data-source-line]')].map((cell) => cell.getAttribute('data-ref'))).toEqual(['12', '12'])
     expect([...table.querySelectorAll('[data-side="after"] mark.cl-review-word')].map((mark) => mark.textContent)).toEqual(['9'])
-    expect(table.querySelector('.cl-comparison-section')?.textContent).toBe('11 unchanged lines not in this patch')
+    expect(table.querySelector('[data-gap]')?.textContent).toBe('11 unchanged lines not in this patch')
     expect(changes.textContent).not.toContain('Empty value')
     expect(changes.querySelector('.cl-lang-switch')?.getAttribute('aria-disabled')).toBe('true')
 
@@ -714,7 +741,7 @@ describe('repair notes and code changes', () => {
     expect(lines()).toEqual(['1', '2', '3', '4', '5'])
     expect(changes.querySelector('.cl-comparison-section')).toBeNull()
     expect(changes.querySelector('.cl-lang-switch')?.getAttribute('aria-disabled')).toBeNull()
-    const selected = () => [...changes.querySelectorAll('[data-selected="true"] [data-side="after"]')].map((line) => line.getAttribute('data-source-line'))
+    const selected = () => [...changes.querySelectorAll('[data-selected="true"][data-side="after"]')].map((line) => line.getAttribute('data-source-line'))
     expect(changes.querySelector('[aria-label="Edit blocks in this file"]')?.textContent).toContain('Edit 1 / 2')
     expect(selected()).toEqual(['2'])
     act(() => { changes.querySelector<HTMLButtonElement>('[aria-label="Next change"]')!.click() })
@@ -723,7 +750,7 @@ describe('repair notes and code changes', () => {
     // Switching to English re-centres on the same edit, which English folds differently.
     const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView')
     try {
-      act(() => { changes.querySelector<HTMLButtonElement>('[data-testid="test-presentation-english-tab"]')!.click() })
+      act(() => { changes.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Visual"]')!.click() })
       expect(scrolled).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
       expect(scrolled.mock.contexts.at(-1)).toBe(changes.querySelector('[data-selected="true"]'))
       // A row taller than the panel opens at its top.
@@ -738,13 +765,20 @@ describe('repair notes and code changes', () => {
     }
   })
 
-  it('shows app code as code, and says when the run did not execute a suite edit', async () => {
+  it('enables Visual for recovered app source, and says when the run did not execute a suite edit', async () => {
     const runsApi = await import('@/shared/api/runs')
     const app = recoveredFile({ path: 'src/server.ts', role: 'app', blobs: { before: 'aaaaaaa', after: 'bbbbbbb' }, recovery: { kind: 'exact', from: 'after-blob', repo: '/repos/app' } })
+    const recovered = app.sources!
+    for (const side of ['before', 'after'] as const) {
+      recovered[side] = reviewSourceFor(app.path, recovered[side].source, undefined, { withTests: false, side })
+    }
     vi.mocked(runsApi.getRunCycleReview).mockResolvedValue({ iteration: 2, source: 'patch', patchPath: '/p', truncated: false, healMode: 'service', files: [app, recoveredFile({ executed: { kind: 'inert' } })] })
     await mountStory({ journal: journalSections() })
     const changes = section('section-changes')!
-    expect(changes.querySelector('.cl-lang-switch')?.getAttribute('title')).toBe('App code is shown as code; English is for the suite\'s own files')
+    const visual = changes.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Visual"]')!
+    expect(visual.disabled).toBe(false)
+    act(() => visual.click())
+    expect(changes.querySelector('[data-format="visual"]')).toBeTruthy()
     expect(changes.querySelector('[data-testid="cycle-file-inert"]')).toBeNull()
     await choose(changes, 'e2e/cart.spec.ts')
     expect(changes.querySelector('[data-testid="cycle-file-inert"]')?.textContent).toContain('Not executed by this run')

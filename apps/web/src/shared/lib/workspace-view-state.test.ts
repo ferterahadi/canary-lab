@@ -750,7 +750,7 @@ describe('benchmarkSurfaceRequested', () => {
 it('round-trips independent test and review selections without sharing inspection across tabs', () => {
   const inspection = { mode: 'visual' as const, card: 'spec:12:case', section: 'helper', box: 'wait', node: 'wait', fit: true, collapsed: ['branch'] }
   const reviewFocus = { file: 'example.spec.ts', side: 'before' as const, mode: 'code' as const, baseline: 'run' as const,
-    flow: { ...inspection, mode: 'code' as const, definition: true }, comparisonMode: 'english' as const, cursor: 2 }
+    flow: { ...inspection, mode: 'code' as const, definition: true, expanded: true, combined: true as const, returnToFile: true as const }, comparisonMode: 'english' as const, cursor: 2 }
   persistView(view({ feature: 'sample', run: 'one', currentTests: false, dialog: 'tests-review', inspection, reviewFocus }), true)
   const read = readPersistedView()
   expect(read.inspection).toEqual(inspection)

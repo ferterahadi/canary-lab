@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { useEscapeToClose } from './Overlays'
+import { useState, type ReactNode } from 'react'
+import { ModalPortalHost, useEscapeToClose } from './Overlays'
 
 /**
  * The header a full-screen view opens with.
@@ -53,7 +53,7 @@ export function PageHeader({ rubric, title, children, onClose, closeLabel }: {
  * The shell a full-screen view sits in: fixed over the whole app at z-60 on
  * `--bg-base`, a column for `PageHeader` plus the view's panes, and Escape on
  * the shared layered stack so a dialog open over the page closes alone. A
- * dialog inside renders in place — never portalled — so it stays above this
+ * dialog inside uses the page as its portal host so it stays above this
  * stacking context.
  */
 export function FullScreenPage({ onClose, closeOnEscape = true, className, testId, children }: {
@@ -65,14 +65,16 @@ export function FullScreenPage({ onClose, closeOnEscape = true, className, testI
   testId?: string
   children: ReactNode
 }) {
+  const [host, setHost] = useState<HTMLDivElement | null>(null)
   useEscapeToClose(onClose, closeOnEscape)
   return (
     <div
+      ref={setHost}
       className={['fixed inset-0 z-[60] flex flex-col', className].filter(Boolean).join(' ')}
       style={{ background: 'var(--bg-base)' }}
       data-testid={testId}
     >
-      {children}
+      <ModalPortalHost.Provider value={host}>{children}</ModalPortalHost.Provider>
     </div>
   )
 }

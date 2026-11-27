@@ -449,7 +449,7 @@ export function App() {
                  opens — one dialog, routed once (?dialog=tests-review). */
               onOpenSpecReview={openPendingReview}
             />
-          : <ResizablePanels panels={WORKSPACE_PANELS} contentByPanel={contentByPanel} />}
+          : <ResizablePanels readerFeature={selectedFeature} panels={WORKSPACE_PANELS} contentByPanel={contentByPanel} />}
         </Suspense>
       </div>
       <DemoDialog

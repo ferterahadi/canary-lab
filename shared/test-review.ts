@@ -124,11 +124,17 @@ export interface ReviewTestSource {
   readable: ReadableTest
 }
 
+/** File scope has its own identity outside the test declaration roster. */
+export const REVIEW_FILE_SCOPE = 'file'
+
 export interface ReviewSource {
+  fileFlow?: ReadableTest
   source: string
   tests: ReviewTestSource[]
   /** Whole-file English, including module setup and test registration. */
   story?: ReadableTestStory
+  /** File-level visual steps, with individually addressable configuration fields. */
+  outline?: ReadableTestStory
   parseError?: string
 }
 

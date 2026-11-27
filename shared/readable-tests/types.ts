@@ -139,6 +139,7 @@ export interface ReadableTestStory {
 }
 
 export interface ReadableFlowLabel {
+  caption?: string
   reason?: string
   boundary?: 'declaration' | 'callback'
   mayThrow?: boolean
@@ -202,7 +203,30 @@ export type ReadableNode =
   | ReadableBranchNode
   | ReadableLoopNode
 
+export interface ReaderCall {
+  name: string
+  line: number
+  column: number
+  direct?: boolean
+  contentColumn?: number
+  target: string
+}
+
+export interface ReaderDefinition {
+  /** Revision-independent identity for comparing definitions from different suite roots. */
+  suiteFile?: string
+  id: string
+  name: string
+  source: ReadableSource
+  bodyOffset: number
+  calls: ReaderCall[]
+  /** Supplied only when the execution graph does not already retain this body. */
+  nodes?: ReadableNode[]
+  story?: ReadableTestStory
+}
+
 export interface ReadableTest {
+  navigation?: { calls: ReaderCall[]; definitions: ReaderDefinition[] }
   graph?: TestFlowGraph
   version: typeof READABLE_TEST_VERSION
   title: string

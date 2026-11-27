@@ -35,6 +35,10 @@ import { ReadableStoryText, ReadableTestView, type ReadableSourceSelection } fro
 import { ShikiCode, ShikiMarkedLine, ShikiSourceLine, SourceOpenShell } from './TestCodeBlock'
 import { flowSections, sectionNodes, type FlowSection } from '@shared/test-view/flow-layout'
 import { stepVisitKey } from './test-flow-layout'
+import { FileComparisonEditor } from './FileComparisonEditor'
+import type { ComparisonJump } from '../lib/workspace-view-state'
+import { SidebarTestReader } from './SidebarTestReader'
+import { readerSections } from './test-reader-model'
 import { VisualTestView } from './VisualTestView'
 import { TestLanguageSwitch } from './TestLanguageSwitch'
 import type { CodeLanguage } from './code-highlighter'
@@ -54,6 +58,7 @@ export interface TestPresentationSingleProps extends TestPresentationShellProps<
   inspection?: FlowInspection
   onInspection?: (state: FlowInspection) => void
   view: 'single'
+  overviewLabel?: string
   attempts?: FlowAttempt[]
   liveAttempt?: boolean
   stepCounts?: ReadonlyMap<string, number>
@@ -72,6 +77,10 @@ export interface TestPresentationSingleProps extends TestPresentationShellProps<
  * each side's English folding, and the review's edit navigation. */
 export interface TestPresentationAlignedProps extends TestPresentationShellProps {
   view: 'aligned'
+  scopedCase?: Partial<Record<TestViewSide, string>>
+  inspection?: ComparisonJump
+  onInspect?: (jump: ComparisonJump) => void
+  anchor?: { side: TestViewSide; line: number }
   onVisual?: () => void
   review: AlignedReview
   rows: ContextRow[]
@@ -123,6 +132,9 @@ function usePresentationMode<M extends SingleTestViewMode>(props: TestPresentati
 }
 
 export function TestPresentation(props: TestPresentationProps) {
+  if (props.view === 'single' && !props.test.readable.graph && !props.test.readable.nodes.length && !props.test.bodySource.trim()) {
+    return <p className="text-xs text-muted">Source was not retained for this test.</p>
+  }
   return props.view === 'single' ? <SinglePresentation key={JSON.stringify([props.sourceFile, props.test.line, props.test.name])} {...props} /> : <AlignedPresentation {...props} />
 }
 
@@ -131,8 +143,10 @@ function attemptLabel(attempt: FlowAttempt) {
 }
 
 function SinglePresentation(props: TestPresentationSingleProps) {
-  const [local, setLocal] = useState<FlowInspection>({ mode: 'english' })
-  const inspection = props.onInspection ? props.inspection ?? { mode: 'english' as const } : local
+  const reader = props.test.readable.graph?.schemaVersion === 1
+  const initial: FlowInspection = {mode: reader ? 'visual' : 'english'}
+  const [local, setLocal] = useState<FlowInspection>(initial)
+  const inspection = props.onInspection ? props.inspection ?? initial : local
   const picked = inspection.section
   function change(next: FlowInspection) {
     setLocal(next)
@@ -140,10 +154,11 @@ function SinglePresentation(props: TestPresentationSingleProps) {
     if (next.mode !== (props.mode ?? inspection.mode)) props.onModeChange?.(next.mode)
   }
   const mode = props.mode ?? inspection.mode
-  const setPicked = (id?: string) => change({ mode, section: id, fit: inspection.fit })
+  const setPicked = (id?: string) => change({ mode, section: id, fit: inspection.fit, expanded: inspection.expanded })
 
-  const sections = useMemo(() => flowSections(props.test.readable.nodes, props.test.readable.graph?.schemaVersion === 1 ? props.test.readable.graph : undefined), [props.test.readable])
-  const indexed = useMemo(() => sections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [sections])
+  const executionSections = useMemo(() => flowSections(props.test.readable.nodes, props.test.readable.graph?.schemaVersion === 1 ? props.test.readable.graph : undefined), [props.test.readable])
+  const sections = useMemo(() => reader ? readerSections(executionSections, props.test.readable) : executionSections, [reader, executionSections, props.test.readable])
+  const indexed = useMemo(() => executionSections.flatMap(section => sectionNodes(section).map(node => ({ section, node }))), [executionSections])
   const [pinnedAttempt, setPinnedAttempt] = useState('')
   const latest = props.attempts?.at(-1)
   const attempt = props.attempts?.find(a => a.key === pinnedAttempt) ?? latest
@@ -197,10 +212,10 @@ function SinglePresentation(props: TestPresentationSingleProps) {
     {mode === 'visual' && props.attempts && <span className="text-muted">{overlay?.reason ?? (!attempt ? 'No attempt recorded.' :
       ['Unmarked boxes have no mapped observation.', overlay?.incomplete && 'Incomplete event sequence.',
         overlay?.unavailable ? `${overlay.unavailable} steps without an exact box.` : null].filter(Boolean).join(' '))}</span>}
-    {sections.length > 1 && <label className="contents">Flow <select aria-label="Flow" value={section.id} onChange={event => setPicked(event.target.value)}>
+    {!reader && sections.length > 1 && <label className="contents">Flow <select aria-label="Flow" value={section.id} onChange={event => setPicked(event.target.value)}>
       {sections.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
     </select></label>}
-    {section.parent && <button type="button" onClick={() => setPicked(section.parent)}>Back to caller</button>}
+    {!reader && section.parent && <button type="button" onClick={() => setPicked(section.parent)}>Back to caller</button>}
     {props.runningLocation && <button type="button" onClick={() => {
       if (picked || pinnedAttempt) { setPinnedAttempt(''); setPicked(undefined) }
       else setPicked(section.id)
@@ -208,6 +223,12 @@ function SinglePresentation(props: TestPresentationSingleProps) {
   </div>
   const helper = section.id !== 'test'
   const latestFailure = attempt === latest && attempt?.status === 'failed' && !overlay?.reason && props.executionHighlight?.kind === 'failed'
+  if (reader) return <SidebarTestReader test={props.test} file={props.sourceFile} section={section} sections={sections}
+    overviewLabel={props.overviewLabel} inspection={inspection} change={change} controls={attempt || props.attempts || props.runningLocation ? picker : undefined}
+    checks={checks} visits={overlay?.sections.get(section.id)} active={active?.section === section ? active.node.id : undefined}
+    execution={!helper && (!props.attempts || latestFailure) && props.executionHighlight ? {kind:props.executionHighlight.kind,
+      line: sourceLineForBodyLine(props.test,props.executionHighlight.bodyLine)} : undefined}
+    location={location} changedLines={props.changedLines} />
   return <SingleTestView key={section.id} {...props} mode={mode} onModeChange={next => change({ ...inspection, mode: next })}
     inspection={inspection} updateInspection={change} test={test}
     sourceFile={sourceFile}
@@ -219,7 +240,18 @@ function SinglePresentation(props: TestPresentationSingleProps) {
 }
 
 function AlignedPresentation(props: TestPresentationAlignedProps) {
-  return <AlignedTestView {...props} {...usePresentationMode<TestViewMode>(props, 'english')} />
+  const format = usePresentationMode<TestViewMode>(props, 'english')
+  const canRead = !props.codeOnly && alignedEnglishAvailable(props.review)
+  const visual = canRead && format.mode !== 'code'
+  const toolbar = <div className="cl-context-toolbar">
+    <TestLanguageSwitch reader="compact" mode={visual ? 'visual' : 'code'}
+      onVisual={() => format.onModeChange('english')} disabled={canRead ? undefined : props.codeOnly ?? { reason: 'Only source is available for this file' }}
+      onChange={() => format.onModeChange('code')} />
+    {props.header}
+  </div>
+  return <>{toolbar}{props.notice}<FileComparisonEditor {...props} visual={visual}
+    onReturn={props.onReturnToEnglish} labels={props.labels ?? alignedSideLabels(props.review)}
+    ariaLabel={props.ariaLabel ?? 'Full test comparison'} /></>
 }
 
 function SingleTestView({
@@ -412,13 +444,18 @@ function SingleTestView({
   )
 }
 
+/** Reference rendering for the aligned comparison model. */
+export function DetailedTestComparison(props: TestPresentationAlignedProps & { toolbar?: ReactNode }) {
+  return <AlignedTestView {...props} {...usePresentationMode<TestViewMode>(props, 'english')} />
+}
+
 /** Diff rows stay source-aligned while sharing the single view's English
  * grammar, Shiki tokenization and format toggle. Neither baseline is ever
  * translated here: both sides arrive as the server reviewed them. */
 function AlignedTestView({
   review, rows, mode, onModeChange, header, change, emptySide, emptySideLabel, scrollRef, selection, onSelectSource, returnSelection, onReturnToEnglish, notice,
-  labels, marks, codeOnly, lang, onVisual, ariaLabel = 'Full test comparison',
-}: Resolved<TestPresentationAlignedProps>) {
+  labels, marks, codeOnly, lang, onVisual, toolbar, ariaLabel = 'Full test comparison',
+}: Resolved<TestPresentationAlignedProps> & { toolbar?: ReactNode }) {
   const englishAvailable = !codeOnly && alignedEnglishAvailable(review)
   const shownMode = englishAvailable ? mode : 'code'
   const before = useCodeHighlight(review.before.source, lang)
@@ -473,14 +510,14 @@ function AlignedTestView({
   })
   const headings = labels ?? alignedSideLabels(review)
   return <>
-    <div className="cl-context-toolbar">
+    {toolbar ?? <div className="cl-context-toolbar">
       {codeOnly
         ? <TestLanguageSwitch mode="code" onChange={onModeChange} disabled={codeOnly} />
         : englishAvailable
           ? <TestLanguageSwitch mode={mode} onChange={onModeChange} onVisual={onVisual} />
           : <span className="text-xs text-secondary">Supporting file · Code</span>}
       {header}
-    </div>
+    </div>}
     {notice}
     <div className="cl-context-table min-h-0 flex-1">
       <div className="cl-review-source-canvas" style={{

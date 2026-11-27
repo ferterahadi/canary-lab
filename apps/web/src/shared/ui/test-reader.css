@@ -1,0 +1,426 @@
+
+.test-reader{container-type:inline-size}
+.test-reader .function-bar{display:flex;gap:4px;align-items:center;min-width:0;margin:0 0 8px;color:var(--text-secondary);font:12px/1.25 var(--font-sans)}
+.function-bar button,.location-picker select{cursor:pointer}
+.function-bar button,.location-picker{border-radius:var(--radius-md);height:27px}
+.function-bar .caller-back{display:grid;place-items:center;flex:none;width:27px;border:1px solid var(--border-subtle);background:var(--bg-surface)}
+.location-picker{position:relative;min-width:0;max-width:100%;display:flex;align-items:center}
+.location-caption{display:flex;align-items:center;gap:6px;min-width:0;padding:3px 5px;color:var(--text-primary)}
+.location-caption>svg{flex:none;color:var(--text-muted)}
+.location-caption>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.location-picker select{position:absolute;inset:0;width:100%;height:100%;opacity:0}
+.location-picker:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.symbol-name{font-family:var(--font-mono);font-size:.95em}
+.function-bar .location-action{display:flex;align-items:center;gap:5px;flex:none;margin-inline-start:auto;padding:0 5px;font-size:11px}
+.function-bar button:hover,.location-picker:hover{background:var(--bg-hover);color:var(--text-primary)}
+@media (prefers-reduced-motion:reduce){.test-reader *{scroll-behavior:auto}}
+.function-bar .caller-back{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;padding:0 6px;font-size:11px;color:var(--text-secondary)}
+@container(max-width:225px){.function-bar .caller-back span{display:none}.function-bar .caller-back{width:27px}}
+@container(max-width:275px){.function-bar[data-long-name=true] .caller-back span{display:none}.function-bar[data-long-name=true] .caller-back{width:27px}}
+@container(max-width:275px){
+ .caller-back + .location-picker .location-caption>svg:first-child{display:none}
+ .caller-back + .location-picker .location-caption{gap:4px;padding-inline:3px}
+}
+
+/* Native picker windows can choose their own surface. Keep their foreground
+   and background in the same system palette as the preview theme. */
+.location-picker{color-scheme:light}
+.dark .location-picker{color-scheme:dark}
+.location-picker :is(select,optgroup,option){color:CanvasText;background-color:Canvas}
+@supports (appearance:base-select) and selector(::picker(select)){
+ .location-picker select,.location-picker select::picker(select){appearance:base-select}
+ .location-picker select::picker(select){
+  color:var(--text-primary);background:var(--bg-surface);
+  border:1px solid var(--border-strong);border-radius:var(--radius-md);
+  box-shadow:var(--shadow-popover);padding:4px;
+  min-width:min(200px,calc(100vw - 16px));max-width:calc(100vw - 16px);max-height:min(320px,50dvh);
+  overflow:auto;font:12px/1.4 var(--font-sans)
+ }
+ .location-picker optgroup{color:var(--text-secondary);background:var(--bg-surface);font-weight:600}
+ .location-picker option{color:var(--text-primary);background:var(--bg-surface);font:400 12px/1.4 var(--font-sans);padding:6px 8px;border-radius:3px}
+ .location-picker option:checked{background:var(--bg-selected);color:var(--text-primary)}
+ .location-picker option:is(:hover,:focus-visible){background:var(--bg-hover);color:var(--text-primary);outline:1px solid var(--accent);outline-offset:-1px}
+}
+.text-editor{min-width:0;overflow:hidden;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md)}
+.text-editor .cm-editor{color:var(--text-primary);outline:none}
+.text-editor .cm-scroller{overscroll-behavior:contain;overflow:auto;align-items:stretch}
+.text-editor .cm-content{min-width:0;flex:1}
+.text-editor .cm-content:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.text-editor .cm-line [role=link]:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+.test-reader .text-editor .cm-editor,.test-reader .source-editor .cm-gutters{color:var(--source-fg,var(--text-primary));background:var(--source-bg,var(--bg-surface))}
+.text-editor .cm-scroller{font:11px/1.65 var(--font-mono)}
+.test-reader.slim .text-editor .cm-scroller{height:60vh;height:60dvh}
+.source-editor .cm-gutters{border:0;color:var(--text-muted)!important}
+.source-editor .cm-gutterElement{font-variant-numeric:tabular-nums}
+.source-editor .source-call{color:inherit;text-decoration:underline dotted var(--text-muted);text-underline-offset:2px;cursor:pointer}
+.source-editor .source-call:hover,.source-editor [data-current-call=true]{text-decoration:underline solid var(--accent)}
+.cl-reader-modal .full>.text-editor{display:flex;min-height:0;flex:1}
+.cl-reader-modal .text-editor>.cm-editor{flex:1;min-width:0}
+.cl-reader-modal .text-editor .cm-scroller{max-height:none;min-height:0}
+.cl-card:has(.test-reader) > button[aria-expanded=true] .truncate { white-space: normal; text-wrap: pretty; font: 550 13px/1.4 var(--font-sans); }
+.test-reader.slim .modebar {
+  margin-bottom: 3px;
+  padding-bottom: 6px;
+  border-bottom-color: color-mix(in srgb, var(--border-subtle) 52%, transparent) !important;
+}
+.test-reader.slim .function-bar { margin-bottom: 5px; gap: 5px; }
+.test-reader.slim .location-caption { padding-inline: 3px; font-weight: 500; }
+.test-reader.slim .location-action { padding-inline: 5px; }
+.test-reader.slim .text-editor { border-color: color-mix(in srgb, var(--border-subtle) 65%, transparent); }
+
+/* The gutters align with the first text baseline, including multi-line rows. */
+.test-reader.slim .outline-editor {
+  --syntax-weight: 72%;
+  --link: color-mix(in srgb, var(--code-function) var(--syntax-weight), var(--text-primary));
+}
+.dark .test-reader.slim .outline-editor { --syntax-weight: 100%; }
+.test-reader.slim .outline-editor .cm-editor {
+  /* Resolve theme colors here, where the shared highlighter supplies them. */
+  --label: color-mix(in srgb, var(--source-fg,var(--text-primary)) 64%, var(--text-primary));
+  --gutter: color-mix(in srgb, var(--source-fg,var(--text-secondary)) 84%, var(--source-bg,var(--bg-surface)));
+  --note: color-mix(in srgb, var(--source-comment,var(--text-muted)) 45%, var(--source-fg,var(--text-primary)));
+  --rule: color-mix(in srgb, var(--source-fg,var(--text-secondary)) 7%, transparent);
+}
+.test-reader.slim .outline-editor .cm-scroller { scrollbar-width: thin; }
+.test-reader.slim .outline-editor .cm-content { padding: 5px 0; }
+.test-reader.slim .outline-editor .cm-line {
+  --row-inset: calc(25px + var(--depth,0)*7px);
+  --row-top: 7px;
+  position: relative;
+  box-sizing: border-box;
+  padding: var(--row-top) 41px 7px var(--row-inset);
+  min-height: 32px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  font: 550 12.5px/18px var(--font-sans);
+  color: var(--label);
+}
+.test-reader.slim .outline-editor [data-outline-box] + [data-outline-box] { border-top: 1px solid var(--rule); }
+.test-reader.slim .outline-editor [data-outline-box]:hover:not([data-current=true]) {
+  background: color-mix(in srgb, var(--source-fg) 5%, transparent);
+}
+.test-reader.slim .outline-editor .cm-line::before,
+.test-reader.slim .outline-editor .cm-line::after,
+.test-reader.slim .outline-editor .cm-line[data-kind=helper] .outline-label::after {
+  position: absolute;
+  top: var(--row-top);
+  line-height: 18px;
+}
+.test-reader.slim .outline-editor .cm-line::before {
+  content: attr(data-icon);
+  left: calc(var(--row-inset) - 19px);
+  width: 15px;
+  text-align: center;
+  font: 400 12px/18px var(--font-mono);
+  color: var(--gutter);
+}
+.test-reader.slim .outline-editor .cm-line::after {
+  content: attr(data-ref);
+  right: 14px;
+  color: var(--gutter);
+  font: 400 10px/18px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.test-reader.slim .outline-editor .outline-verb,
+.test-reader.slim .outline-editor [data-kind=check]::before,
+.test-reader.slim .outline-editor [data-kind=helper]::before { color: var(--link); }
+.test-reader.slim .outline-editor [data-kind=decision] .outline-verb,
+.test-reader.slim .outline-editor [data-kind=decision]::before { color: var(--code-keyword); }
+.test-reader.slim .outline-editor .outline-measure { white-space: nowrap; }
+.test-reader.slim .outline-editor :is(.outline-number,.outline-string) {
+  font: 550 .94em/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.test-reader.slim .outline-editor .outline-number { color: color-mix(in srgb, var(--code-number) var(--syntax-weight), var(--text-primary)); }
+.test-reader.slim .outline-editor .outline-string { color: color-mix(in srgb, var(--code-string) var(--syntax-weight), var(--text-primary)); }
+.test-reader.slim .outline-editor [data-kind=helper] .outline-label {
+  text-decoration: underline dotted color-mix(in srgb, var(--link) 72%, transparent);
+  text-underline-offset: 3px;
+}
+.test-reader.slim .outline-editor [data-kind=helper]:is(:hover,:focus-within) .outline-label {
+  text-decoration: underline solid var(--link);
+  text-underline-offset: 3px;
+}
+.test-reader.slim .outline-editor [data-kind=helper] .outline-label::after {
+  content: '›';
+  right: 4px;
+  font: 500 13px/18px var(--font-sans);
+  color: var(--link);
+}
+.test-reader.slim .outline-editor .outline-label:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.test-reader.slim .outline-editor .cm-line[data-current=true] .outline-label { background: transparent; box-shadow: none; }
+
+/* Original comment lines read as one margin note above the step they explain. */
+.test-reader.slim .outline-editor .cm-line[data-kind=note] {
+  --row-top: 6px;
+  padding-bottom: 2px;
+  min-height: 0;
+  color: var(--note);
+  font: italic 400 11.75px/17px var(--font-sans);
+  cursor: text;
+}
+.test-reader.slim .outline-editor .cm-line[data-kind=note]::before {
+  content: '';
+  top: var(--row-top);
+  bottom: 0;
+  left: calc(var(--row-inset) - 11px);
+  width: 1px;
+  background: color-mix(in srgb, var(--note) 32%, transparent);
+}
+.test-reader.slim .outline-editor .cm-line[data-continuation=true] { --row-top: 0px; }
+.test-reader.slim .outline-editor [data-kind=note] + [data-outline-box] { --row-top: 4px; }
+
+.cl-reader-modal,.cl-reader-modal .test-reader.full {
+  --dialog-inset: clamp(10px, 1.5vw, 20px);
+  --dialog-rule: color-mix(in srgb, var(--text-secondary) 16%, transparent);
+  --diagram-paper: var(--diagram-bg, var(--bg-surface));
+  --diagram-text: var(--diagram-ink, var(--text-secondary));
+  --diagram-label: color-mix(in srgb, var(--diagram-text) 64%, var(--text-primary));
+  --diagram-syntax-weight: 72%;
+  --diagram-link: color-mix(in srgb, var(--code-function) var(--diagram-syntax-weight), var(--text-primary));
+}
+.dark .cl-reader-modal,.dark .cl-reader-modal .test-reader.full { --diagram-syntax-weight: 100%; }
+.cl-reader-modal .test-reader.full {
+  padding: 0 var(--dialog-inset) var(--dialog-inset);
+  gap: 0;
+}
+.dialog-toolbar { display: flex; gap: 12px; align-items: center; padding: 8px 0; flex: none; }
+.dialog-toolbar .cl-lang-switch { flex: none; }
+.dialog-toolbar .cl-lang-switch-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 26px; padding: 3px 9px; font: 550 12px/1.3 var(--font-sans);
+}
+.dialog-toolbar .cl-lang-switch-btn svg { margin: 0; }
+.cl-reader-modal .dialog-toolbar .function-bar {
+  flex: 1; gap: 5px; min-width: 0; margin: 0; padding-left: 12px;
+  border-left: 1px solid var(--dialog-rule);
+}
+.dialog-toolbar .location-caption { font-weight: 550; }
+.dialog-toolbar .location-action { color: var(--text-secondary); }
+.dialog-toolbar .location-action[aria-pressed=true] { background: var(--bg-selected); }
+.cl-reader-modal .test-reader.full > :is(.cl-test-flow,.source-editor) {
+  min-height: 0; flex: 1;
+}
+.cl-reader-modal :is(.cl-flow-sheet,.source-editor) {
+  border-color: var(--dialog-rule); border-radius: var(--radius-md);
+}
+.cl-reader-modal .cl-flow-sheet { background: var(--diagram-paper); }
+.cl-reader-modal .cl-flow-edge polyline { stroke: color-mix(in srgb,var(--diagram-text) 75%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-edge[data-error] polyline {
+  stroke: color-mix(in srgb,var(--diagram-text) 57%,var(--diagram-paper));
+  stroke-dasharray: 3.5 3;
+}
+.cl-reader-modal .cl-flow-edge text {
+  fill: var(--diagram-text); stroke: var(--diagram-paper); stroke-width: 4px;
+  font: 500 11px/1 var(--font-sans);
+}
+.cl-reader-modal .cl-flow-sheet marker path { fill: var(--diagram-text); }
+.cl-reader-modal .cl-flow-shape {
+  --fill: color-mix(in srgb,var(--diagram-paper) 92%,var(--diagram-text));
+  --stroke: color-mix(in srgb,var(--diagram-text) 46%,var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-shape[data-shape=check] { --stroke: color-mix(in srgb,var(--diagram-link) 68%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-shape[data-shape=terminal] { --fill: color-mix(in srgb,var(--code-number) 15%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-shape[data-shape=decision] { --fill: color-mix(in srgb,var(--code-keyword) 14%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-shape[data-shape=io] { --fill: color-mix(in srgb,var(--code-function) 12%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-shape:is(:hover,:focus-within,[data-selected=true]) { --stroke: var(--diagram-link); }
+.cl-reader-modal .cl-flow-shape[data-selected=true] {
+  --fill: color-mix(in srgb,var(--diagram-link) 13%,var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-node {
+  padding: 2px 8px;
+  color: var(--diagram-label); font: 550 12px/14px var(--font-sans);
+}
+.cl-reader-modal .cl-flow-node > .diagram-label { max-width: 100%; text-wrap: pretty; }
+.cl-reader-modal .diagram-label span { display: inline; overflow: visible; -webkit-line-clamp: unset; }
+.cl-reader-modal .diagram-verb,.cl-reader-modal .diagram-label small { color: var(--diagram-link); }
+.cl-reader-modal [data-shape=decision] .diagram-verb { color: var(--code-keyword); }
+.cl-reader-modal .diagram-measure { white-space: nowrap; }
+.cl-reader-modal :is(.diagram-number,.diagram-string) { font: 550 .96em/1 var(--font-mono); }
+.cl-reader-modal .diagram-number { color: color-mix(in srgb,var(--code-number) var(--diagram-syntax-weight),var(--text-primary)); }
+.cl-reader-modal .diagram-string { color: color-mix(in srgb,var(--code-string) var(--diagram-syntax-weight),var(--text-primary)); }
+.cl-reader-modal [data-helper=true] .diagram-label { text-decoration: underline dotted var(--diagram-link); text-underline-offset: 2px; }
+.cl-reader-modal [data-helper=true]:is(:focus-within,:hover) .diagram-label { text-decoration-style: solid; }
+.cl-reader-modal .cl-flow-shape[data-shape=decision] .cl-flow-node { padding-inline: 20%; }
+.cl-reader-modal .cl-flow-node b { font: 550 9px/11px var(--font-mono); }
+.cl-reader-modal .cl-flow-open { background: var(--diagram-paper); color: var(--diagram-link); font: 550 10.5px/1 var(--font-mono); }
+.cl-reader-modal .diagram-hint-location { font: 500 10.5px/1.5 var(--font-mono); color: var(--text-secondary); }
+.cl-reader-modal .diagram-hint-comment { max-width: 42ch; margin-top: 4px; font: 400 12px/1.45 var(--font-sans); }
+.cl-reader-modal .source-editor .cm-scroller { font: 12.5px/1.7 var(--font-mono); }
+.cl-reader-modal .source-editor .cm-content { padding-block: 10px; }
+.cl-reader-modal .source-editor .cm-gutters { border-right: 1px solid var(--dialog-rule); }
+.cl-reader-modal .source-editor .cm-lineNumbers .cm-gutterElement { min-width: 3.5ch; padding-inline: 6px 9px; }
+.cl-reader-modal .source-editor .cm-line { padding-inline: 12px; }
+.cl-reader-modal .source-editor .source-call { text-decoration-color: var(--diagram-link); text-underline-offset: 3px; }
+/* Rounded step cards, a continuous execution path and one shared failure rail. */
+.cl-reader-modal .test-reader.full {
+  --flow-wire: color-mix(in srgb, var(--diagram-text) 68%, var(--diagram-paper));
+  --flow-side: color-mix(in srgb, var(--diagram-text) 52%, var(--diagram-paper));
+  border-radius: calc(var(--radius-xl) + 3px);
+}
+.cl-reader-modal :is(.cl-flow-sheet,.source-editor) { border-radius: var(--radius-xl); }
+.cl-reader-modal .dialog-toolbar .cl-lang-switch { border-radius: var(--radius-lg); }
+.cl-reader-modal .cl-flow-sheet {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--diagram-text) 10%, transparent) .65px, transparent .85px);
+  background-size: 16px 16px;
+}
+.cl-reader-modal .cl-flow-edge > path,.cl-reader-modal .flow-error-rail > path {
+  fill: none; stroke: var(--flow-wire); stroke-width: 1.2; stroke-linejoin: round; stroke-linecap: round;
+}
+.cl-reader-modal .cl-flow-edge[data-error] :is(path,polyline),.cl-reader-modal .flow-error-rail > path {
+  fill: none; stroke: var(--flow-side); stroke-width: 1; stroke-dasharray: 2 3.5; stroke-linecap: round;
+}
+.cl-reader-modal .cl-flow-edge[data-observed=true] :is(polyline,path) { stroke: var(--running); stroke-width: 2; }
+.cl-reader-modal .cl-flow-edge circle { fill: var(--flow-side); }
+.cl-reader-modal .cl-flow-sheet marker .flow-arrowhead {
+  fill: none; stroke: var(--flow-wire); stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round;
+}
+.cl-reader-modal .flow-error-rail text {
+  fill: var(--diagram-text); font: 500 10.5px/1 var(--font-mono);
+}
+.cl-reader-modal .cl-flow-shape {
+  --fill: color-mix(in srgb, var(--diagram-text) 6.5%, var(--diagram-paper));
+  --stroke: color-mix(in srgb, var(--diagram-text) 35%, var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-shape[data-shape=check] {
+  --stroke: color-mix(in srgb, var(--diagram-link) 45%, var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-shape[data-shape=terminal] {
+  --fill: color-mix(in srgb, var(--diagram-text) 8%, var(--diagram-paper));
+  --stroke: color-mix(in srgb, var(--diagram-text) 38%, var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-shape[data-error-end=true] {
+  --fill: color-mix(in srgb, var(--danger) 7%, var(--diagram-paper));
+  --stroke: color-mix(in srgb, var(--danger) 40%, var(--diagram-paper));
+}
+.cl-reader-modal .cl-flow-shape[data-shape=terminal] .cl-flow-node {
+  font: 550 11px/14px var(--font-mono);
+}
+.cl-reader-modal .cl-flow-shape:is(:focus-within,:hover,[data-selected=true]) { --stroke: var(--diagram-link); }
+.cl-reader-modal .cl-flow-shape[data-selected=true] { --fill: color-mix(in srgb,var(--diagram-link) 14%,var(--diagram-paper)); }
+.cl-reader-modal .cl-flow-node { border-radius: var(--radius-xl); }
+.cl-reader-modal .cl-flow-node .selection-caption { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
+.cl-reader-modal [data-compact] :is([data-shape=action],[data-shape=check]) .cl-flow-node {
+  position: relative; align-items: start; text-align: left; padding: 3px 10px 3px 31px;
+  font: 540 12px/15px var(--font-sans);
+}
+.cl-reader-modal [data-compact] [data-helper=true] .cl-flow-node { padding-right: 37px; }
+.cl-reader-modal [data-compact] .diagram-label { text-wrap: wrap; }
+.cl-reader-modal [data-compact] .diagram-verb { color: inherit; font-weight: 640; }
+.cl-reader-modal [data-compact] [data-helper] .diagram-label {
+  text-decoration-color: color-mix(in srgb, var(--diagram-link) 74%, transparent);
+  text-underline-offset: 3px;
+}
+.cl-reader-modal .flow-step-mark {
+  position: absolute; top: 50%; left: 9px; width: 15px; height: 15px; transform: translateY(-50%);
+  color: var(--diagram-text); pointer-events: none;
+}
+.cl-reader-modal .flow-step-mark:is([data-mark=helper],[data-mark=check]) { color: var(--diagram-link); }
+.cl-reader-modal .flow-step-mark svg { width: 14px; height: 14px; }
+.cl-reader-modal .flow-step-mark rect { fill: none; stroke: currentColor; }
+.cl-reader-modal .helper-entry { display: flex; }
+.cl-reader-modal [data-compact] .helper-entry .cl-flow-open {
+  width: 32px; height: 24px; border-radius: var(--radius-lg);
+  border: 0; color: var(--diagram-link); background: transparent;
+  font: 550 10px/24px var(--font-mono);
+}
+.cl-reader-modal [data-compact] .helper-entry .cl-flow-open:is(:hover,:focus-visible) {
+  background: color-mix(in srgb, var(--diagram-link) 13%, var(--diagram-paper));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cl-reader-modal .cl-flow-shape > :is(rect,polygon) { transition: fill .12s, stroke .12s; }
+}
+.cl-reader-modal [data-shape=terminal] .cl-flow-node { padding-inline: 4px; white-space: nowrap; }
+.cl-reader-modal [data-shape=terminal] .diagram-label { display: block; white-space: nowrap; text-wrap: nowrap; }
+.cl-reader-modal { --test-reader-height: min(95dvh, calc(clamp(170px, 61dvh, 740px) + 198px)); }
+.cl-reader-modal .cl-dialog-header { margin: 0 var(--dialog-inset); padding: 14px 0 10px; border-color: var(--dialog-rule); align-items: start; }
+.cl-reader-modal .cl-dialog-header h2 { font: 600 16px/1.38 var(--font-sans); text-wrap: pretty; }
+.cl-reader-modal .cl-dialog-header p { font: 400 11px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.cl-reader-modal .test-reader.full { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cl-reader-modal .test-reader.full :is(.cl-flow-sheet,.source-editor,.source-editor .cm-editor) { height: 100%; max-height: none; min-height: 0; }
+.cl-reader-modal .test-reader.full .cl-test-flow { display: flex; flex-direction: column; min-height: 0; }
+.cl-reader-modal .cl-test-flow > .cl-flow-size { display: none; }
+.cl-reader-modal .test-reader.full > .space-y-1 { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.cl-reader-modal .test-reader.full > .space-y-1 > .relative { flex: 1; min-height: 0; }
+.test-reader .cl-lang-switch[data-mode=visual] .cl-lang-switch-thumb { transform: translateX(0); }
+.test-reader .cm-line[data-current=true] { background: color-mix(in srgb,var(--accent) 13%,transparent); box-shadow: inset 2px 0 var(--accent); }
+.test-reader [data-evidence]::after { content: attr(data-evidence); color:var(--text-primary); font: 600 10px var(--font-mono); }
+.test-reader .cm-line[data-changed=true] { border-inline-start: 2px solid var(--warning); }
+.test-reader .cl-flow-picker:empty { display:none; }
+.test-reader > .space-y-1 button[title="Open in editor"] { opacity:0; }
+.test-reader > .space-y-1:is(:hover,:focus-within) button[title="Open in editor"] { opacity:1; }
+@media(max-width:650px) {
+  .cl-reader-modal { --test-reader-height: min(95dvh,calc(58dvh + 206px)); max-width:calc(100vw - 8px)!important; }
+  .cl-modal-backdrop:has(>.cl-reader-modal) { padding-inline:4px; }
+  .cl-reader-modal .cl-dialog-header h2 {font-size:14px;}
+}
+@container(max-width:560px) {
+  .cl-reader-modal .dialog-toolbar { flex-wrap:wrap; gap:4px 8px; padding-block:6px; }
+  .cl-reader-modal .dialog-toolbar .function-bar {flex-basis:100%;min-height:27px;padding:0;border:0;}
+}
+
+/* Both revisions share one vertical scroll position and one physical row per
+   diff pair. Long source lines can be scrolled horizontally on either side. */
+.cl-file-comparison {
+  --review-row-height: 22px;
+  overflow-anchor: none; flex: 1; min-height: 0; min-width: 0; overflow: auto;
+  scrollbar-gutter: stable; background: var(--bg-surface);
+}
+.cl-file-comparison[data-format=visual] { --review-row-height: 34px; }
+.cl-comparison-reader-head,.cl-comparison-reader-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.cl-comparison-reader-head { position: sticky; top: 0; z-index: 2; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); }
+.cl-revision-head { padding: 7px 9px 2px; }
+.cl-revision-head h3 { margin: 0 0 3px; font: 550 12px/1.4 var(--font-sans); }
+.cl-comparison-reader-columns .cl-comparison-reader-pane { min-width: 0; border: 0; border-radius: 0; background: var(--source-bg,var(--bg-surface)); }
+.cl-comparison-reader-columns .cl-comparison-reader-pane + .cl-comparison-reader-pane,.cl-revision-head + .cl-revision-head { border-left: 1px solid var(--border-subtle); }
+.cl-file-comparison .test-reader.slim .text-editor .cm-scroller { height: auto; overflow: visible; }
+.cl-file-comparison .cl-comparison-reader-pane { overflow-x: auto; }
+.cl-file-comparison .text-editor .cm-content { padding: 4px 0; min-width: 100%; }
+.cl-file-comparison .test-reader.slim .text-editor .cm-line {
+  box-sizing: border-box; height: var(--review-row-height); min-height: var(--review-row-height);
+  white-space: pre; overflow-wrap: normal;
+}
+.cl-comparison-reader-pane.source-editor .cm-line { position: relative; padding: 0 12px 0 6.5ch; font: 12px/22px var(--font-mono); }
+.cl-comparison-reader-pane.source-editor .cm-line::before { position: absolute; left: 6px; width: 5ch; color: var(--text-muted); text-align: right; font: 10.5px/22px var(--font-mono); content: attr(data-ref); }
+.cl-comparison-reader-pane [data-change=added] { background: color-mix(in srgb,var(--success) 14%,transparent); }
+.cl-comparison-reader-pane [data-change=removed] { background: color-mix(in srgb,var(--danger) 13%,transparent); }
+.cl-comparison-reader-pane.source-editor [data-change=added]::before { content: '+ ' attr(data-ref); color: var(--success); }
+.cl-comparison-reader-pane.source-editor [data-change=removed]::before { content: '− ' attr(data-ref); color: var(--danger); }
+.cl-file-comparison .outline-editor [data-change=added]::after { content: '+ ' attr(data-ref); color: var(--success); }
+.cl-file-comparison .outline-editor [data-change=removed]::after { content: '− ' attr(data-ref); color: var(--danger); }
+.cl-comparison-reader-pane .cm-line[data-selected],.cl-comparison-reader-pane .cm-line[data-source-selected] { box-shadow: inset 2px 0 var(--accent); }
+.cl-comparison-reader-pane mark { color: inherit; background: color-mix(in srgb,var(--danger) 30%,transparent); }
+.cl-comparison-reader-pane [data-side=after] mark { background: color-mix(in srgb,var(--success) 30%,transparent); }
+.cl-comparison-reader-pane [data-gap] { color: var(--text-muted); font-style: italic; }
+.cl-context-toolbar .cl-lang-switch[data-reader][data-mode=visual] .cl-lang-switch-thumb { transform: translateX(0); }
+
+.cl-source-excerpt .cl-lang-switch { margin: 6px 8px; }
+.cl-source-excerpt .cm-line[data-execution-highlight=failed] { box-shadow: inset 2px 0 var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.cl-source-excerpt .cm-line[data-evidence]::after { padding-inline-start: 8px; color: var(--danger); }
+
+.cl-combined-review { min-height: 0; flex: 1; overflow: auto; }
+.comparison-flow.slim { padding: 4px 10px 10px; }
+.comparison-toolbar,.comparison-edge-key { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.comparison-toolbar .function-bar { flex: 1; min-width: min(220px,100%); }
+.revision-pair,.comparison-edge-key { color: var(--text-secondary); font: 11px/1.4 var(--font-sans); }
+.comparison-edge-key { padding: 6px 8px; }
+.comparison-edge-key span::before { content: ''; display: inline-block; vertical-align: middle; width: 18px; margin-right: 5px; border-top: 2px solid var(--success); }
+.comparison-edge-key span + span::before { border-top: 2px dashed var(--danger); }
+.reader-change { display: inline-block; font: 600 10px/1.45 var(--font-sans); }
+[data-diff=added] { --review-ink: var(--success); }
+[data-diff=removed] { --review-ink: var(--danger); }
+[data-diff=modified] { --review-ink: var(--warning); }
+[data-diff=inside] { --review-ink: var(--accent); }
+.comparison-flow .reader-change { color: var(--review-ink); }
+.comparison-flow .cm-line[data-diff] { background: color-mix(in srgb,var(--review-ink) 7%,transparent); }
+.comparison-flow .cl-flow-shape[data-diff] > :is(rect,polygon) { stroke: var(--review-ink); fill: color-mix(in srgb,var(--review-ink) 9%,var(--diagram-bg,var(--bg-surface))); }
+.comparison-flow .cl-flow-shape[data-diff=removed] > :is(rect,polygon) { stroke-dasharray: 4 3; }
+.comparison-flow .cl-flow-shape[data-diff] .cl-flow-node { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+.comparison-flow .flow-change-detail { font: 10px/1.35 var(--font-mono); color:var(--review-ink); overflow-wrap:anywhere; overflow:hidden; }
+.comparison-flow .cl-flow-edge[data-revision=before] path { stroke:var(--danger); stroke-dasharray:4 4; }
+.comparison-flow .cl-flow-edge[data-revision=after] path { stroke:var(--success); }

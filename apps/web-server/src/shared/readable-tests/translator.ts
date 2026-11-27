@@ -1,6 +1,6 @@
 import { buildTestFlowGraph, type GraphOrigin } from '../../../../../shared/test-view/flow-graph'
 import { renderExpression } from './expression'
-import { flowLabel } from './flow-label'
+import { flowLabel, readerCaption } from './flow-label'
 import { unwrapExpression } from '../unwrap-expression'
 import type { ResolveSuiteHelper } from './suite-helpers'
 import { authoredStep, authoredStepLabel, callFromStatement } from './call-syntax'
@@ -9,6 +9,8 @@ import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import {
   READABLE_TEST_VERSION,
+  type ReaderCall,
+  type ReaderDefinition,
   type ReadableBranchPath,
   type ReadableEnglishBlock,
   type ReadableLeafNode,
@@ -42,6 +44,7 @@ import {
   composeSwitchPath,
   composeTryHeader,
 } from '../controlled-english/structured-english'
+import { reviewOutline } from './review-outline'
 import { storyCandidates } from './story'
 import { sourceRepresentationGaps } from './source-representation'
 
@@ -618,7 +621,11 @@ function translateStatement(
     const node = translateSupportedStatement(statement, path, context, source)
     if (context.resolveHelper) {
       node.flow ??= flowLabel(statement, node)
-      if (context.revisions) attachGraphFacts(statement, node)
+      if (context.revisions) {
+        const caption = readerCaption(statement, node.flow)
+        if (caption) node.flow.caption = caption
+        attachGraphFacts(statement, node)
+      }
     }
     return node
   } catch (error) {
@@ -692,7 +699,12 @@ function translateStory(
 
 /** File review includes declarations and registration, not just test callbacks. */
 export function translateReadableSource(file: string, source: string, semanticRules?: ReadableSemanticRuleConfig): ReadableTestStory {
-  const semanticContext = compileSemanticSource(file, source, { semanticRules })
+  return reviewStories(file, source, semanticRules).story
+}
+
+export function reviewStories(file: string, source: string, semanticRules?: ReadableSemanticRuleConfig,
+  revision?: { side: 'before' | 'after'; resolveHelper: ResolveSuiteHelper; moduleFile: string }) {
+  const semanticContext = compileSemanticSource(revision?.moduleFile ?? file, source, { semanticRules })
   const context: TranslationContext = {
     file, lineOffset: 1, sourceFile: semanticContext.sourceFile, semanticContext,
     helpers: new Map(), activeHelpers: new Set(),
@@ -704,7 +716,30 @@ export function translateReadableSource(file: string, source: string, semanticRu
     story.steps.unshift({ id: 'interpreter', role: 'setup', text, spans: [{ text }], fidelity: 'exact',
       source: { file, startLine: 1, endLine: 1, snippet: source.split('\n', 1)[0] } })
   }
-  return story
+  const outline = reviewOutline(story, context.sourceFile)
+  if (!revision || !source.trim()) return { story, outline }
+  const sf = context.sourceFile
+  const revisions = { [file]: sourceRevision(sf) }
+  const graphContext = { ...context, revisions, resolveHelper: revision.resolveHelper, budget: { remaining: 128 } }
+  const nodes = sf.statements.map((statement, index): ReadableNode => {
+    const node = translateStatement(statement, [index], graphContext)
+    const object = outline?.steps.find(step => step.source.startLine === node.source.startLine &&
+      step.kind === 'flow' && step.flowKind === 'scope' && step.text.startsWith('Define '))
+    if (object?.kind !== 'flow') return node
+    return { kind: 'group', id: node.id, fidelity: node.fidelity, text: object.text, source: node.source,
+      flow: { kind: 'action', label: object.text }, children: object.children.map(field => ({
+        kind: 'leaf', role: 'action', id: field.id, text: field.text, fidelity: field.fidelity, source: field.source,
+        flow: { kind: 'action', label: field.text },
+      })) }
+  })
+  const title = file.split(/[\\/]/).at(-1)!
+  const fileFlow = translatedTest(title, nodes, outline ?? story, undefined)
+  const end = sf.getLineAndCharacterOfPosition(source.length)
+  fileFlow.graph = buildTestFlowGraph(nodes, { origin: { kind: revision.side }, revisions, case: { file, title, line: 1 } },
+    { file, startLine: 1, startColumn: 1, startOffset: 0, endLine: end.line + 1, endColumn: end.character + 1,
+      endOffset: source.length, snippet: source })
+  fileFlow.navigation = readerNavigation(sf, graphContext, fileFlow)
+  return { story, outline, fileFlow }
 }
 
 function translatedTest(
@@ -798,7 +833,74 @@ export function translateReadableTestFromAst(input: ReadableTestAstInput, prepar
     result.graph = buildTestFlowGraph(nodes, { origin: input.graphOrigin, revisions: context.revisions,
       case: { file: input.file, title: input.title, line: input.caseLine ?? definition.startLine } }, definition)
   }
+  if (input.graphOrigin && input.resolveHelper) result.navigation = readerNavigation(body, context, result)
   return result
+}
+
+/** Resolve links on the same syntax tree and inside the same suite boundary as
+ * the execution graph. A call inside an argument is inspectable without becoming
+ * an independently observed step. Each definition is retained once per case. */
+function readerNavigation(body: ts.Block | ts.SourceFile, root: TranslationContext, test: ReadableTest) {
+  const definitions = new Map<string, ReaderDefinition>()
+  const retained = new Set(test.graph?.sections.slice(1).map(section =>
+    JSON.stringify([section.definition.file, section.definition.startOffset])))
+  const resolve = root.resolveHelper!
+  function collect(block: ts.ConciseBody | ts.SourceFile, context: TranslationContext, displayStart = block.getStart(context.sourceFile)): ReaderCall[] {
+    const calls: ReaderCall[] = []
+    function visit(node: ts.Node) {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const name = node.expression
+        const helper = resolve(name, context.semanticContext)
+        if (helper) {
+          const sf = helper.semanticContext.sourceFile
+          const file = sf === context.sourceFile ? context.file : helper.file
+          const pos = helper.body.getStart(sf)
+          const id = 'def-' + createHash('sha256').update(JSON.stringify([file, pos])).digest('hex').slice(0, 18)
+          if (!definitions.has(id) && definitions.size < 128) {
+            const fn = helper.body.parent
+            const declaration = ts.isVariableDeclaration(fn.parent) ? fn.parent : fn
+            const source = sourceFor(declaration, sf, file, 1, true)
+            source.snippet = declaration.getText(sf)
+            const def: ReaderDefinition = { id, name: name.text, source, bodyOffset: pos, calls: [] }
+            definitions.set(id, def)
+            const child = { ...context, file, sourceFile: sf, semanticContext: helper.semanticContext, lineOffset: 1 }
+            if (!retained.has(JSON.stringify([file, pos]))) {
+              // References inside expressions describe navigation only. Do not
+              // spend the execution compiler's recursion budget on these views.
+              const display = { ...child, resolveHelper: () => undefined }
+              if (ts.isBlock(helper.body)) {
+                def.nodes = helper.body.statements.map((s, i) => translateStatement(s, [i], display))
+                def.story = translateStory(helper.body.statements, display, true)
+              } else {
+                const value = sourceFor(helper.body, sf, file, 1, true)
+                def.nodes = [{ kind: 'leaf', role: 'action', id: stableNodeId(value, [0]), source: value,
+                  fidelity: 'exact', text: 'Return ' + value.snippet }]
+              }
+            }
+            def.calls = collect(helper.body, child, declaration.getStart(sf))
+          }
+          if (definitions.has(id)) {
+            const at = context.sourceFile.getLineAndCharacterOfPosition(name.getStart(context.sourceFile))
+            const start = Math.max(displayStart, context.sourceFile.getPositionOfLineAndCharacter(at.line, 0))
+            const prefix = context.sourceFile.text.slice(start, name.getStart(context.sourceFile)).trimStart()
+            let outer: ts.Node = node
+            while (ts.isParenthesizedExpression(outer.parent) || ts.isAwaitExpression(outer.parent) ||
+              ts.isAsExpression(outer.parent) || ts.isNonNullExpression(outer.parent)) outer = outer.parent
+            const parent = outer.parent
+            const direct = ts.isExpressionStatement(parent) || ts.isReturnStatement(parent) ||
+              (ts.isVariableDeclaration(parent) && parent.initializer === outer) ||
+              (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && parent.right === outer)
+            calls.push({ name: name.text, ...(direct && {direct}), line: at.line + 1, column: at.character + 1, contentColumn: prefix.length, target: id })
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(block)
+    return calls
+  }
+  const calls = collect(body, root)
+  return { calls, definitions: [...definitions.values()] }
 }
 
 function findMatchingBlock(sourceFile: ts.SourceFile, target: ts.Block): ts.Block {

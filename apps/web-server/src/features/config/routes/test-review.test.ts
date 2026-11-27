@@ -294,3 +294,22 @@ it('does not read outside a source tree through a linked e2e directory', async (
   expect(result.statusCode).toBe(400)
   expect(result.body).not.toContain('private')
 })
+
+it('opens imported helpers from the suite revision that supplied each side', async () => {
+  const dir = path.join(root, 'logs/runs/compare')
+  const recorded = path.join(dir, 'suite')
+  fs.mkdirSync(path.join(recorded, 'e2e'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+    feature: 'alpha', suiteSnapshot: { kind: 'taken', dir: recorded },
+  }))
+  const source = "import { result } from './result'\ntest('own version', async () => { result() })"
+  for (const [tree, value] of [[suite, 'current'], [recorded, 'recorded']]) {
+    fs.writeFileSync(path.join(tree, 'e2e/a.spec.ts'), source)
+    fs.writeFileSync(path.join(tree, 'e2e/result.ts'), "export function result() { return '" + value + "' }")
+  }
+  const result = (await get('file=e2e/a.spec.ts&runId=compare')).json<TestFileReview>()
+  for (const [side, value] of [['before', 'recorded'], ['after', 'current']] as const) {
+    const nav = result[side].tests[0].readable.navigation!
+    expect(nav.definitions.find(d => d.id === nav.calls[0].target)?.source.snippet).toContain(value)
+  }
+})

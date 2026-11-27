@@ -74,6 +74,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     }
     let afterSource: string
     let beforeSource: string
+    let recordedSuite: string | undefined
     let baseline: TestFileReview['baseline'] = 'head'
     if (req.query.runId) {
       const snapshot = runSnapshot(deps, feature.name, req.query.runId)
@@ -89,13 +90,15 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         const before = old?.toString('utf8') ?? ''
         const after = current?.toString('utf8') ?? ''
         if (req.query.summary === 'true') return { changed: before !== after, affectedTests: [], verdict: 'unclassifiable' }
-        const readableSource = (source: string): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: false })
+        const readableSource = (source: string, side: 'before' | 'after'): ReviewSource => reviewSourceFor(file, source,
+          feature.semanticRules, { withTests: false, side, suiteRoot: side === 'before' ? snapshot.dir : feature.featureDir })
         return { file, currentPath, baseline: 'run-start', supportingFile: true,
-          before: readableSource(before), after: readableSource(after),
+          before: readableSource(before, 'before'), after: readableSource(after, 'after'),
           patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
           assessment: { verdict: 'unclassifiable', tests: [] },
         } satisfies TestFileReview
       }
+      recordedSuite = snapshot.dir
       afterSource = readSource(currentPath)
       beforeSource = readSource(confinedFile(snapshot.dir, file))
       baseline = 'run-start'
@@ -130,7 +133,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         ).verdict,
       }
     }
-    const extract = (source: string, side: 'before' | 'after'): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true, side })
+    const extract = (source: string, side: 'before' | 'after'): ReviewSource => reviewSourceFor(file, source, feature.semanticRules, { withTests: true, side, suiteRoot: side === 'before' ? recordedSuite : feature.featureDir })
     const beforePredicates = extractTestPredicatesFromSource(file, beforeSource)
     const afterPredicates = extractTestPredicatesFromSource(file, afterSource)
     const pairs = pairTestDeclarations(extractTestMetadataFromSource(file, beforeSource).tests, extractTestMetadataFromSource(file, afterSource).tests)

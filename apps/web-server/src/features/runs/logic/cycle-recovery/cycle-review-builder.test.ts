@@ -27,7 +27,7 @@ async function twoTreeCycle(run: CycleRun) {
 }
 
 describe('buildRunCycleReview', () => {
-  it('serves each file with its role, its full versions, and English only for the suite\'s code', async () => {
+  it('serves each file with its role, its full versions, and a revision-specific flow for recovered JavaScript and TypeScript', async () => {
     const run = cycleRun(tempDir())
     run.takeSuite()
     await twoTreeCycle(run)
@@ -44,7 +44,9 @@ describe('buildRunCycleReview', () => {
     expect(byPath['seed.json']).toMatchObject({ role: 'support', language: 'json', change: 'added', sources: { before: { source: '', tests: [] }, after: { tests: [] } } })
     expect(byPath['seed.json'].sources!.after.story).toBeUndefined()
     expect(byPath['server.ts']).toMatchObject({ role: 'app', recovery: { kind: 'exact', from: 'before-blob', repo: run.appDir }, sources: { after: { tests: [] } } })
-    expect(byPath['server.ts'].sources!.after.story).toBeUndefined()
+    for (const side of ['before', 'after'] as const) {
+      expect(byPath['server.ts'].sources![side].fileFlow?.graph?.origin.kind).toBe(side)
+    }
     expect(byPath['server.ts'].executed).toBeUndefined()
     expect(review.files.every((file) => !('hunks' in file))).toBe(true)
   })

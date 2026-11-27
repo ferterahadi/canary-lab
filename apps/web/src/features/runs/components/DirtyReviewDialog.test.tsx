@@ -64,6 +64,7 @@ const button = (label: string) => buttons().find((item) => item.getAttribute('ar
 async function render(props: Partial<Parameters<typeof DirtyReviewDialog>[0]> = {}) {
   await act(async () => root.render(<DirtyReviewDialog features={[feature()]} onClose={vi.fn()} {...props} />))
 }
+const openCode = (row: Element) => row.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }))
 const click = async (label: string) => act(async () => button(label).click())
 it('shows a readable fixture in English and Code with visible edits, not an empty test comparison', async () => {
   const fixture = 'e2e/fixture.ts'
@@ -74,7 +75,7 @@ it('shows a readable fixture in English and Code with visible edits, not an empt
     patch: '@@ -1 +1 @@\n-export const ready = false\n+export const ready = true\n', assessment: { verdict: 'unclassifiable', tests: [] } })
   await render({ focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, focus: { file: fixture, baseline: 'run' } })
   expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', fixture, 'run-1')
-  expect(button('English')).not.toBeUndefined()
+  expect(button('Visual')).not.toBeUndefined()
   expect(button('Code')).not.toBeUndefined()
   expect(document.body.textContent).not.toContain('Supporting file · Code')
   expect(document.body.textContent).toContain('Export ready as false')
@@ -99,14 +100,14 @@ it('returns from a deep-linked import continuation to its English range and high
   vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   const onFocus = vi.fn()
   await render({ focus: { file: review.file, line: 10, mode: 'code' }, onFocus })
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(19)
-  await click('English')
+  expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(19)
+  await click('Visual')
   expect(onFocus).toHaveBeenLastCalledWith({ file: review.file, line: 2, mode: 'english' })
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="2"] button')!.click())
+  expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
+  await act(async () => openCode(document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="2"]')!))
   expect(document.querySelectorAll('[data-source-selected]')).toHaveLength(17)
-  await act(async () => document.querySelector<HTMLButtonElement>('button[data-side="after"][data-source-line="18"]')!.click())
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-return-to-visual][data-side="after"][data-source-line="18"]')!.click())
+  expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
   expect(document.activeElement?.closest('[data-source-line]')?.getAttribute('data-source-line')).toBe('2')
 })
 it('anchors the format toggle to the visible code line after scrolling into a multiline import', async () => {
@@ -117,9 +118,9 @@ it('anchors the format toggle to the visible code line after scrolling into a mu
   const visible = document.querySelector<HTMLElement>('[data-side="after"][data-source-line="12"]')!
   const rect = vi.spyOn(visible, 'getBoundingClientRect').mockReturnValue({ top: 20, bottom: 40, height: 20 } as DOMRect)
   try {
-    await click('English')
+    await click('Visual')
     expect(onFocus).toHaveBeenLastCalledWith({ file: review.file, line: 2, mode: 'english' })
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
+    expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
   } finally { rect.mockRestore() }
 })
 it('opens a clean suite against its selected historical run and lists files from both versions', async () => {
@@ -207,13 +208,13 @@ it('follows baseline navigation from the URL without moving the selected file', 
 it('shows a whole test with equal before/after columns, unchanged context and exact source edits', async () => {
   await render()
   await click('Code')
-  expect([...document.querySelectorAll('thead th')].map((item) => item.textContent)).toEqual(['Committed tests · Git HEAD', 'Current source'])
-  expect(document.querySelector('tbody')?.textContent).toContain('const context = x')
-  expect(document.querySelector('del')?.textContent).toBe('  expect(x).toBe(1)')
-  expect(document.querySelector('ins')?.textContent).toBe('  expect(x).toBe(2)')
+  expect([...document.querySelectorAll('.cl-comparison-reader-head h3')].map((item) => item.textContent)).toEqual(['Committed tests · Git HEAD', 'Current source'])
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).toContain('const context = x')
+  expect(document.querySelector('[data-change=removed]')?.textContent).toBe('  expect(x).toBe(1)')
+  expect(document.querySelector('[data-change=added]')?.textContent).toBe('  expect(x).toBe(2)')
   expect(document.body.textContent).toContain('Edit 1 / 2')
   expect(document.body.textContent).toContain('Different expected values are not ordered by strength')
-  expect(document.querySelector('tbody')?.textContent).toContain('import { test')
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).toContain('import { test')
   expect(document.querySelector('[aria-label="Test context"]')).toBeNull()
   expect(document.querySelector('.cl-comparison-legend')).toBeNull()
   expect(document.querySelector('[aria-label="Open workspace in editor"]')).toBeNull()
@@ -223,8 +224,8 @@ it('keeps the selected change when switching English and Code and exposes full-f
   await render()
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next change"]')!.click())
   await click('Code')
-  expect(document.querySelector('tbody')?.textContent).toContain('import { test')
-  await click('English')
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).toContain('import { test')
+  await click('Visual')
   expect(document.body.textContent).toContain('Edit 2 / 2')
 })
 it.each(['before', 'after'] as const)('opens the exact %s source range when an English sentence is clicked', async (side) => {
@@ -239,11 +240,11 @@ it.each(['before', 'after'] as const)('opens the exact %s source range when an E
   const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolled.push(this) })
   try {
     await render({ onFocus })
-    const target = document.querySelector<HTMLButtonElement>(`[data-side="${side}"][data-source-line="6"] button`)!
+    const target = document.querySelector<HTMLButtonElement>(`[data-side="${side}"][data-source-line="6"]`)!
     expect(target.title).toContain('code at line 6')
-    const pane = document.querySelector<HTMLElement>('.cl-comparison-wrap')!
+    const pane = document.querySelector<HTMLElement>('.cl-file-comparison')!
     pane.scrollTop = 317; pane.scrollLeft = 24
-    await act(async () => target.click())
+    await act(async () => openCode(target))
     expect(button('Code').getAttribute('aria-selected')).toBe('true')
     expect(onFocus).toHaveBeenLastCalledWith({ file: review.file, line: 6, mode: 'code' })
     await render({ onFocus, focus: { file: review.file, line: 6, mode: 'code' } })
@@ -253,12 +254,12 @@ it.each(['before', 'after'] as const)('opens the exact %s source range when an E
     expect(scrolled.at(-1)).toBe(document.activeElement)
     expect(document.activeElement?.textContent).toContain('const context = x')
     pane.scrollTop = 900; pane.scrollLeft = 80
-    await act(async () => document.querySelector<HTMLButtonElement>(`button[data-side="${side}"][data-source-line="7"]`)!.click())
-    expect(button('English').getAttribute('aria-selected')).toBe('true')
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-return-to-visual][data-side="${side}"][data-source-line="7"]`)!.click())
+    expect(button('Visual').getAttribute('aria-selected')).toBe('true')
     expect(scrolled.at(-1)?.getAttribute('data-source-line')).toBe('6')
     expect(pane.scrollTop).toBe(317)
     expect(pane.scrollLeft).toBe(24)
-    expect(document.activeElement).toBe(document.querySelector(`[data-side="${side}"][data-source-line="6"] button`))
+    expect(document.activeElement).toBe(document.querySelector(`[data-side="${side}"][data-source-line="6"]`))
     await click('Next change')
     expect(document.querySelector('[data-source-selected]')).toBeNull()
   } finally { scrollIntoView.mockRestore() }
@@ -267,31 +268,31 @@ it('returns from the original code line to the saved English place after browsin
   await render()
   expect(button('← Back to English')).toBeUndefined()
   // Even source retained literally in English mode has a return location.
-  const sentence = document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"] button')!
-  const pane = document.querySelector<HTMLElement>('.cl-comparison-wrap')!
+  const sentence = document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"]')!
+  const pane = document.querySelector<HTMLElement>('.cl-file-comparison')!
   pane.scrollTop = 413; pane.scrollLeft = 17
-  await act(async () => sentence.click())
+  await act(async () => openCode(sentence))
   expect(button('← Back to English')).toBeUndefined()
-  expect(document.querySelector('button[data-side="after"][data-source-line="1"]')).not.toBeNull()
+  expect(document.querySelector('[data-return-to-visual][data-side="after"][data-source-line="1"]')).not.toBeNull()
   await click('Next change')
   expect(document.body.textContent).toContain('Edit 2 / 2')
   pane.scrollTop = 1900; pane.scrollLeft = 60
-  await act(async () => document.querySelector<HTMLButtonElement>('button[data-side="after"][data-source-line="1"]')!.click())
-  expect(button('English').getAttribute('aria-selected')).toBe('true')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-return-to-visual][data-side="after"][data-source-line="1"]')!.click())
+  expect(button('Visual').getAttribute('aria-selected')).toBe('true')
   expect(pane.scrollTop).toBe(413)
   expect(pane.scrollLeft).toBe(17)
   expect(document.body.textContent).toContain('Edit 1 / 2')
-  expect(document.activeElement).toBe(document.querySelector('[data-side="after"][data-source-line="1"] button'))
+  expect(document.activeElement).toBe(document.querySelector('[data-side="after"][data-source-line="1"]'))
   expect(button('← Back to English')).toBeUndefined()
   // A later toggle saves the reader's new English scroll position.
   pane.scrollTop = 522; pane.scrollLeft = 30
   await click('Code')
-  await click('English')
+  await click('Visual')
   expect(pane.scrollTop).toBe(522)
   expect(pane.scrollLeft).toBe(30)
   await click('Next change')
   await click('Code')
-  expect(document.querySelector('button[data-source-line]')).toBeNull()
+  expect(document.querySelector('[data-return-to-visual]')).toBeNull()
 })
 it('opens the requested suite and source line and keeps file focus on live refresh', async () => {
   const onFocus = vi.fn()
@@ -452,7 +453,7 @@ it('locks a pending decision to the recorded-run scope it will settle', async ()
   vi.mocked(featuresApi.getTestFileReview).mockResolvedValue({ ...testFileReview(), baseline: 'run-start' })
   await render({ pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1' })
   expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
-  expect([...document.querySelectorAll('thead th')].map((item) => item.textContent)).toEqual(['Recorded tests', 'Current source'])
+  expect([...document.querySelectorAll('.cl-comparison-reader-head h3')].map((item) => item.textContent)).toEqual(['Recorded tests', 'Current source'])
   expect(document.querySelector<HTMLOptionElement>('option[value="head"]')?.disabled).toBe(true)
 })
 it('supports a committed file that differs from a completed run without showing live-run levers', async () => {
@@ -469,7 +470,7 @@ it('supports a committed file that differs from a completed run without showing 
   await click('a.spec.ts')
   expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/a.spec.ts', baseline: 'run', mode: undefined })
   await render({ ...props, focus: onFocus.mock.calls.at(-1)![0] })
-  expect(document.querySelector('table')).not.toBeNull()
+  expect(document.querySelector('.cl-file-comparison')).not.toBeNull()
   expect(document.body.textContent).not.toContain('Loading test files')
   expect(button('Accept & commit')).toBeUndefined()
   expect(button('Restore recorded files')).toBeUndefined()
@@ -485,12 +486,12 @@ it('discloses missing source and retries instead of presenting it as removed cod
   vi.mocked(featuresApi.getTestFileReview).mockRejectedValueOnce(new Error('Snapshot unavailable'))
   await render()
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Snapshot unavailable')
-  expect(document.querySelector('del')).toBeNull()
+  expect(document.querySelector('[data-change=removed]')).toBeNull()
   expect(document.body.textContent).not.toContain('This file matches')
   expect(document.body.textContent).not.toContain('No edits')
   expect(button('Next change').disabled).toBe(true)
   await click('Retry')
-  expect(document.querySelector('table')).not.toBeNull()
+  expect(document.querySelector('.cl-file-comparison')).not.toBeNull()
 })
 it('does not claim the baseline matches while source is still loading', async () => {
   vi.mocked(featuresApi.getTestFileReview).mockReturnValue(new Promise(() => {}))
@@ -611,10 +612,10 @@ it('leaves a tag-only comparison neutral in both languages and recovers a stale 
   vi.mocked(featuresApi.getTestFileReview).mockResolvedValue(review)
   vi.mocked(featuresApi.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [review.file], differences: [], changes: { added: [], changed: [], removed: [] } })
   await render({ ...props, focus: { file: review.file, line: 3, test: 'a', change: 'changed', baseline: 'run', mode: 'code' } })
-  for (const mode of ['Code', 'English']) {
+  for (const mode of ['Code', 'Visual']) {
     await click(mode)
     expect(changeMarks()).toEqual([])
-    expect(document.querySelector('ins, del, [data-source-changed], tr[data-selected]')).toBeNull()
+    expect(document.querySelector('[data-change], [data-selected]')).toBeNull()
     expect(document.querySelector('.cl-review-file')?.getAttribute('data-changed')).toBeNull()
     expect(document.querySelector('.cl-context-assessment')?.textContent).toContain('Tag and formatting edits are excluded')
   }
@@ -627,23 +628,23 @@ it('navigates the suite test counts across files and displays only the selected 
   expect(changeMarks()).toEqual(['Show 3 new tests (showing)', 'Show 1 changed test', 'Show 1 removed test'])
   expect(testNavigation().textContent).toContain('1 / 3')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('new first')
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
-  expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
-  expect(document.querySelector('tbody')?.textContent).not.toContain('new second')
-  expect(document.querySelector('tbody')?.textContent).not.toContain('import')
-  expect(document.querySelectorAll('ins')).toHaveLength(3)
-  expect(document.querySelector('del')).toBeNull()
-  expect(document.querySelector('tbody')?.textContent).toContain('Not present in recorded tests')
+  expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
+  expect(document.querySelectorAll('[data-selected="true"]')).toHaveLength(0)
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).not.toContain('new second')
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).not.toContain('import')
+  expect(document.querySelectorAll('[data-change=added]')).toHaveLength(3)
+  expect(document.querySelector('[data-change=removed]')).toBeNull()
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).toContain('Not present in recorded tests')
   expect(button('Previous test change').disabled).toBe(true)
-  const table = document.querySelector('table')
+  const table = document.querySelector('.cl-file-comparison')
   const reads = vi.mocked(featuresApi.getTestFileReview).mock.calls.length
   await click('Next test change')
-  expect(document.querySelector('table')).toBe(table)
+  expect(document.querySelector('.cl-file-comparison')).toBe(table)
   expect(featuresApi.getTestFileReview).toHaveBeenCalledTimes(reads)
   expect(testNavigation().textContent).toContain('2 / 3')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('new second')
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
-  expect(document.querySelector('tbody')?.textContent).not.toContain('new first')
+  expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
+  expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).not.toContain('new first')
   await click('Next test change')
   expect(testNavigation().textContent).toContain('3 / 3')
   expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/z.spec.ts', 'old-run')
@@ -669,10 +670,10 @@ it('counts a test with two separate code edits once and navigates removed tests 
     expect(featuresApi.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/deleted.spec.ts', 'old-run')
     expect(scrolled.at(-1)?.getAttribute('data-side')).toBe('before')
     expect(scrolled.at(-1)?.getAttribute('data-source-line')).toBe('3')
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(3)
-    expect(document.querySelectorAll('del')).toHaveLength(3)
-    expect(document.querySelector('ins')).toBeNull()
-    expect(document.querySelector('tbody')?.textContent).toContain('Removed from current source')
+    expect(document.querySelectorAll('.cl-comparison-reader-pane:first-child .cm-line')).toHaveLength(3)
+    expect(document.querySelectorAll('[data-change=removed]')).toHaveLength(3)
+    expect(document.querySelector('[data-change=added]')).toBeNull()
+    expect(document.querySelector('.cl-comparison-reader-columns')?.textContent).toContain('Removed from current source')
     expect(document.querySelector('.cl-context-assessment')?.textContent).toBe('This test was removed from the current source.')
     await click('Show 3 new tests')
     expect(testNavigation().textContent).toContain('1 / 3')
@@ -684,10 +685,10 @@ it('preserves the selected test and category while switching language or inspect
   const onFocus = vi.fn()
   await render({ ...props, onFocus, focus: { file: 'e2e/b.spec.ts', line: 7, change: 'added', baseline: 'run', mode: 'english' } })
   expect(testNavigation().textContent).toContain('2 / 3')
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="8"] button')!.click())
+  await act(async () => openCode(document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="8"]')!))
   expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/b.spec.ts', line: 7, change: 'added', test: 'new second', baseline: 'run', mode: 'code' })
   expect(testNavigation().textContent).toContain('2 / 3')
-  await click('English')
+  await click('Visual')
   expect(testNavigation().textContent).toContain('2 / 3')
 })
 
@@ -786,10 +787,10 @@ it('uses declaration targets even when a runtime roster expands them into more c
   const onFocus = vi.fn()
   await render({ ...props, onFocus, focus: { file: 'e2e/b.spec.ts', line: 3, change: 'added', test: 'new first', baseline: 'run' } })
   expect(configApi.getFeatureTests).not.toHaveBeenCalled()
-  const table = document.querySelector('table')
+  const table = document.querySelector('.cl-file-comparison')
   const reads = vi.mocked(featuresApi.getTestFileReview).mock.calls.length
   await click('Next test change')
-  expect(document.querySelector('table')).toBe(table)
+  expect(document.querySelector('.cl-file-comparison')).toBe(table)
   expect(featuresApi.getTestFileReview).toHaveBeenCalledTimes(reads)
   expect(testNavigation().textContent).toContain('2 / 3')
   expect(document.querySelector('[data-testid="review-selected-test"]')?.textContent).toBe('new second')
@@ -814,8 +815,8 @@ it('never highlights a different test if the source changes after the declaratio
   // Read before the listing it qualifies: right after the toolbar, ahead of the table.
   const notice = [...document.querySelectorAll('p[role="status"]')].find((p) => p.textContent?.includes('matching declaration is unavailable'))!
   expect(notice.previousElementSibling?.classList.contains('cl-context-toolbar')).toBe(true)
-  expect(notice.nextElementSibling?.classList.contains('cl-context-table')).toBe(true)
-  expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
+  expect(notice.nextElementSibling?.classList.contains('cl-file-comparison')).toBe(true)
+  expect(document.querySelectorAll('[data-selected="true"]')).toHaveLength(0)
 })
 
 it('reconciles comparison files without events and withdraws actions on transient failure', async () => {

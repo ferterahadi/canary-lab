@@ -30,8 +30,9 @@ function saveWidths(panels: readonly PanelConfig[], widths: number[]): void {
   writeStoredJson(STORAGE_KEY, obj)
 }
 
-export function ResizablePanels({ panels, contentByPanel }: {
+export function ResizablePanels({ panels, contentByPanel, readerFeature }: {
   panels: readonly PanelConfig[]
+  readerFeature?: string | null
   contentByPanel: Record<string, ReactNode>
 }) {
   const [widths, setWidths] = useState<number[]>(() => loadWidths(panels))
@@ -95,6 +96,14 @@ export function ResizablePanels({ panels, contentByPanel }: {
     }
   }, [])
 
+  const narrow = readerFeature !== undefined && containerWidth > 0 &&
+    containerWidth < panels.reduce((total, p) => total + p.minWidth, (panels.length - 1) * HANDLE_WIDTH)
+  useEffect(() => {
+    const el = containerRef.current
+    const tests = el?.querySelector<HTMLElement>('[data-panel="tests"]')
+    if (narrow && readerFeature && el && tests) el.scrollLeft += tests.getBoundingClientRect().left - el.getBoundingClientRect().left
+  }, [narrow, readerFeature])
+
   const onMouseDown = useCallback((handleIndex: number, e: React.MouseEvent) => {
     e.preventDefault()
     start({ index: handleIndex, startX: e.clientX, startWidths: [...displayWidths] })
@@ -111,7 +120,7 @@ export function ResizablePanels({ panels, contentByPanel }: {
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full overflow-hidden"
+      className={`flex h-full w-full ${narrow ? 'overflow-x-auto overflow-y-hidden' : 'overflow-hidden'}`}
       style={{ background: 'var(--bg-base)' }}
     >
       {panels.map((panel, i) => {
@@ -122,9 +131,10 @@ export function ResizablePanels({ panels, contentByPanel }: {
         return (
           <div key={panel.id} className="contents">
             <div
+              data-panel={panel.id}
               className={`shrink-0 overflow-hidden${dragging === null ? ' transition-[width] duration-200' : ''}`}
               style={{
-                width: isCollapsed ? 0 : `${panelWidth}px`,
+                width: isCollapsed ? 0 : narrow && panel.id === 'tests' ? '100%' : `${panelWidth}px`,
                 minWidth: isCollapsed ? 0 : undefined,
               }}
             >

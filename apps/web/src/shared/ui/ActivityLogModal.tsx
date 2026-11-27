@@ -20,7 +20,7 @@ import { ExternalOpenAction, LogRow, Markdown, eventGlyph } from './AgentSession
 import type { CodeLanguage } from './code-highlighter'
 import { clientLabel } from './external-client-branding'
 import { Modal } from './Overlays'
-import { useCodeHighlight } from './use-code-highlight'
+import { SourceExcerptEditor } from './SourceExcerptEditor'
 import { TIMELINE_CSS } from './agent-session-css'
 import { plural } from '@shared/lib/plural'
 
@@ -289,25 +289,9 @@ function PlainBlock({ text }: { text: string }) {
  *  tool reported them (a Read of lines 40–80 starts at 40), else 1..n. Lines
  *  wrap, and a wrapped line hangs under its text rather than its number. */
 export function CodeView({ source, lang, numbers }: { source: string; lang: CodeLanguage | null; numbers?: number[] }) {
-  const highlighted = useCodeHighlight(lang ? source : '', lang ?? 'typescript')
-  const plain = source.split('\n')
-  // Shiki emits one `.line` per source line; on any disagreement show plain text
-  // rather than shift colours onto the wrong lines.
-  const html = lang && highlighted && highlighted.lines.length === plain.length ? highlighted.lines : null
-  return (
-    <div className="agentts-code" data-lang={lang ?? 'text'} data-testid="activity-log-code">
-      {plain.map((text, at) => (
-        <div key={at} className="agentts-codeline">
-          <span className="agentts-ln" aria-hidden="true">{numbers?.[at] ?? at + 1}</span>
-          {html
-            // Shiki escaped the source it highlighted; this is its markup verbatim.
-            // eslint-disable-next-line no-restricted-syntax
-            ? <span className="agentts-lc" dangerouslySetInnerHTML={{ __html: html[at] || ' ' }} />
-            : <span className="agentts-lc">{text || ' '}</span>}
-        </div>
-      ))}
-    </div>
-  )
+  return <div data-lang={lang ?? 'text'} data-testid="activity-log-code">
+    <SourceExcerptEditor source={source} numbers={numbers} lang={lang} label="Recorded activity source" />
+  </div>
 }
 
 /** A document shown verbatim, in the Activity modal's chrome: the same header,

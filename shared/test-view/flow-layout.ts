@@ -40,7 +40,7 @@ export function sectionNodes(section: FlowSection): ReadableNode[] {
 
 /** Geometry consumes the same structural edges as source inspection. Old
  * rosters without a graph use the shared compiler on their retained nodes. */
-export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopology(nodes)) {
+export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopology(nodes), changeCaptions?: ReadonlyMap<string, string>) {
   const graph = new dagre.graphlib.Graph({ multigraph: true })
   graph.setGraph({ rankdir: 'TB', nodesep: 24, ranksep: 23, marginx: 12, marginy: 12 })
   const sources = new Map(sectionNodes({ id: 'test', label: '', nodes }).map(node => [node.id, node]))
@@ -56,8 +56,10 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
     }
     const lines = Math.ceil(box.label.length / (box.shape === 'decision' ? 14 : 21))
     const height = box.shape === 'terminal' ? 30 : Math.max(44, Math.min(5, lines) * 16 + 16) * (box.shape === 'decision' ? 1.45 : 1)
-    const width = box.shape === 'terminal' ? 94 : 154
-    boxes.set(box.id, { ...box, width, height })
+    const caption = changeCaptions?.get(box.id)
+    const width = box.shape === 'terminal' ? 94 : caption ? 204 : 154
+    const captionHeight = caption ? 18 + Math.min(3, Math.ceil(caption.length / 24)) * 14 : 0
+    boxes.set(box.id, { ...box, width, height: height + captionHeight })
   }
   // Dagre inserts intermediate ranks along each long edge. A shared error
   // destination makes even a sequence of calls quadratic in size.
@@ -91,7 +93,7 @@ export function layoutTestFlow(nodes: ReadableNode[], topology = buildFlowTopolo
     points[0] = perimeter(e.v, points[1], points[0])
     const last = points.length - 1
     points[last] = perimeter(e.w, points[last - 1], points[last])
-    return { ...line, points, from: e.v, to: e.w }
+    return { ...line, points, from: e.v, to: e.w, kind: topology.edges[Number(e.name)].kind }
   })
   return { nodes: placed, edges, width: graph.graph().width as number, height: graph.graph().height as number }
 }

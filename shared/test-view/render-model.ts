@@ -230,7 +230,7 @@ export interface TestViewSelection { side: TestViewSide; line: number; endLine: 
 /** What an aligned view reads from a review. A file reviewed against a
  * baseline supplies all of it; a repair cycle's patch supplies the sources it
  * holds and no baseline. */
-export type AlignedReview = Pick<TestFileReview, 'before' | 'after' | 'supportingFile' | 'meaningfulChanges'> & {
+export type AlignedReview = Pick<TestFileReview, 'before' | 'after' | 'supportingFile' | 'meaningfulChanges' | 'declarationPairs'> & {
   baseline?: TestFileReview['baseline']
 }
 

@@ -127,6 +127,9 @@ export interface RunOpenTarget {
 /** Node and section IDs resolve against the loaded case. A URL never supplies a file to open. */
 export interface FlowInspection {
   mode: 'english' | 'code' | 'visual'
+  expanded?: boolean
+  line?: number
+  column?: number
   section?: string
   node?: string
   box?: string
@@ -134,7 +137,8 @@ export interface FlowInspection {
   collapsed?: string[]
   fit?: boolean
 }
-export interface CardInspection extends FlowInspection { card: string }
+export interface CardInspection extends FlowInspection { card: string; combined?: true; returnToFile?: true }
+export interface ComparisonJump { side: 'before' | 'after'; flow: CardInspection }
 export interface ReviewFocus { file?: string; line?: number; mode?: FlowInspection['mode']; baseline?: 'run'; change?: 'added' | 'changed' | 'removed'; test?: string; side?: 'before' | 'after'; comparisonMode?: 'code' | 'english'; flow?: CardInspection; cursor?: number }
 
 function readInspection(params: URLSearchParams, prefix: string): CardInspection | undefined {
@@ -142,13 +146,14 @@ function readInspection(params: URLSearchParams, prefix: string): CardInspection
   const mode = params.get(prefix + 'Mode')
   if (!card || !['code', 'visual', 'english'].includes(mode ?? '')) return
   const id = (key: string) => params.get(prefix + key) || undefined
-  return { card, mode: mode as FlowInspection['mode'], section: id('Section'), node: id('Node'), box: id('Box'),
+  const position = (key: string) => { const n = Number(id(key)); return Number.isSafeInteger(n) && n > 0 ? n : undefined }
+  return { card, ...(id('Combined') === '1' && { combined: true as const }), ...(id('From') === 'file' && { returnToFile: true as const }), line: position('Line'), column: position('Column'), mode: mode as FlowInspection['mode'], section: id('Section'), expanded: params.get(prefix + 'Expanded') === '1' || undefined, node: id('Node'), box: id('Box'),
     collapsed: id('Fold')?.split(',').filter(Boolean), definition: params.get(prefix + 'Def') === '1' || undefined, fit: params.get(prefix + 'Fit') === '1' || undefined }
 }
 
 function writeInspection(params: URLSearchParams, prefix: string, state?: CardInspection) {
-  for (const [key, value] of Object.entries({ Case: state?.card, Mode: state?.mode, Section: state?.section,
-    Fold: state?.collapsed?.join(','), Node: state?.node, Box: state?.box, Def: state?.definition && '1', Fit: state?.fit && '1' })) {
+  for (const [key, value] of Object.entries({ Case: state?.card, Combined: state?.combined && '1', From: state?.returnToFile && 'file', Mode: state?.mode, Section: state?.section,
+    Fold: state?.collapsed?.join(','), Node: state?.node, Box: state?.box, Def: state?.definition && '1', Fit: state?.fit && '1', Expanded: state?.expanded && '1', Line: state?.line?.toString(), Column: state?.column?.toString() })) {
     setOrDelete(params, prefix + key, value || null)
   }
 }

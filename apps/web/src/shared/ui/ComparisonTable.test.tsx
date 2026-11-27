@@ -34,13 +34,14 @@ describe('comparison surfaces', () => {
     expect(container.querySelectorAll('tbody tr')[2].querySelector('ins, del')).toBeNull()
   })
 
-  it('renders a captured patch with preserved context and a working editor action', () => {
+  it('uses the shared code editor for captured patches, preserving context, change marks and the editor action', () => {
     const open = vi.fn()
     act(() => root.render(<DiffView diff={'# Service: api\n@@ -1 +1 @@\n-app.listen(3000)\n+app.listen(process.env.PORT)'} onOpenInEditor={open} />))
     expect(container.textContent).toContain('# Service: api')
     expect(container.textContent).toContain('@@ -1 +1 @@')
-    expect(container.querySelector('[data-side="before"]')?.textContent).toBe('was app.listen(3000)')
-    expect(container.querySelector('[data-side="after"]')?.textContent).toBe('now app.listen(process.env.PORT)')
+    expect(container.querySelector('.cm-line[data-change="removed"]')?.textContent).toBe('app.listen(3000)')
+    expect(container.querySelector('.cm-line[data-change="added"]')?.textContent).toBe('app.listen(process.env.PORT)')
+    expect(container.querySelector('.cm-line[data-change="added"] mark')?.textContent).toBeTruthy()
     act(() => container.querySelector('button')!.click())
     expect(open).toHaveBeenCalledOnce()
     act(() => root.render(<DiffView diff=" " />))

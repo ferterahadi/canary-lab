@@ -8,7 +8,7 @@
  * the rest of the app can compose the same chrome used by
  * `EvaluationExportTaskToast` — that toast is the reference design language.
  */
-import { useEffect, useRef } from 'react'
+import { createContext, useContext, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode, RefObject } from 'react'
 import { CloseIcon } from './Icons'
@@ -108,6 +108,9 @@ export function usePopoverDismiss(
   useEscapeToClose(onDismiss, open)
 }
 
+/** A dialog opened on a full-screen page must share that page’s stacking context. */
+export const ModalPortalHost = createContext<HTMLElement | null>(null)
+
 const focusLayers: HTMLElement[] = []
 let bodyOverflow = ''
 
@@ -182,6 +185,7 @@ export function Modal({
   stableScrollGutter,
   portal = false,
   position = 'fixed',
+  surfaceClassName,
   bodyClassName,
   children,
 }: {
@@ -240,11 +244,13 @@ export function Modal({
   /** Preserve a confirmation overlay anchored to its containing panel. */
   position?: 'fixed' | 'absolute'
   /** Pane layouts own their scroll regions instead of the default body. */
+  surfaceClassName?: string
   bodyClassName?: string
   children?: ReactNode
 }) {
   useEscapeToClose(onClose, open)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const portalHost = useContext(ModalPortalHost)
   useModalFocus(surfaceRef, open)
   if (!open) return null
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
@@ -261,7 +267,7 @@ export function Modal({
         aria-label={ariaLabel ?? title}
         aria-modal="true"
         data-testid={testId}
-        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg outline-none"
+        className={`cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg outline-none ${surfaceClassName ?? ''}`}
         style={{
           width,
           maxWidth: '94vw',
@@ -333,7 +339,7 @@ export function Modal({
       </div>
     </div>
   )
-  return portal ? createPortal(node, document.body) : node
+  return portal ? createPortal(node, portalHost ?? document.body) : node
 }
 
 export function ConfirmModal({

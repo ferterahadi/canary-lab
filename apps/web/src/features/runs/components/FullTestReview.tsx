@@ -43,11 +43,13 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     setSelection(null)
     setEnglishReturn(null)
   }, [selectedTest?.line, selectedTest?.name, focus?.change])
+  const loadedKey = useRef<string | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    const key = JSON.stringify([feature,file,runId])
+    setLoading(loadedKey.current !== key)
     setError(null)
-    featuresApi.getTestFileReview(feature, file, runId).then((result) => { if (!cancelled) { setData(result); setLoading(false) } })
+    featuresApi.getTestFileReview(feature, file, runId).then((result) => { if (!cancelled) { loadedKey.current=key; setData(result); setLoading(false) } })
       .catch((err: unknown) => { if (!cancelled) { setError(displayError(err, 'Could not load test source')); setLoading(false) } })
     return () => { cancelled = true }
   }, [feature, file, runId, refresh, revision, retry])
@@ -73,17 +75,18 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     if (mode === 'english' && englishReturn && pane) {
       pane.scrollTop = englishReturn.top
       pane.scrollLeft = englishReturn.left
-      pane.querySelector<HTMLButtonElement>(`[data-side="${englishReturn.selection.side}"][data-source-line="${englishReturn.selection.line}"] button`)?.focus({ preventScroll: true })
+      const row = pane.querySelector<HTMLElement>(`[data-side="${englishReturn.selection.side}"][data-source-line="${englishReturn.selection.line}"]`)
+      ;(row?.querySelector<HTMLElement>('button') ?? row)?.focus({ preventScroll: true })
       return
     }
     const target = selection ?? (selectedTest ? sourceTest ? { side: testSide, line: sourceTest.line } : undefined
       : focus?.line != null ? { side: testSide, line: focus.line } : undefined)
-    const targetLine = target && mode === 'english' && data ? englishSourceRange(englishLines(data[target.side]), target.line).line : target?.line
+    const targetLine = target && mode === 'english' && data ? englishSourceRange(englishLines({ ...data[target.side], story: data[target.side].outline ?? data[target.side].story }), target.line).line : target?.line
     const active = pane?.querySelector(target
       ? `[data-side="${target.side}"][data-source-line="${targetLine}"]` : '[data-selected="true"]')
     if (active instanceof HTMLElement) {
       active.scrollIntoView?.({ block: selectedTest && !selection ? 'start' : 'center', behavior: 'instant' })
-      if (selectedTest && !selection && pane) pane.scrollTop -= pane.querySelector('thead')?.getBoundingClientRect().height ?? 0
+      if (selectedTest && !selection && pane) pane.scrollTop -= pane.querySelector('thead,.cl-comparison-reader-head')?.getBoundingClientRect().height ?? 0
       if (selection && mode === 'code') active.focus({ preventScroll: true })
     }
   }, [change, mode, loading, selection, englishReturn, data, focus?.line, testSide, selectedTest, sourceTest])
@@ -102,12 +105,12 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
       // Compaction changes pixel positions. Anchor the toggle to the source at
       // the top of the viewport, including a code line inside an English range.
       const pane = scroll.current
-      const top = pane?.querySelector('thead')?.getBoundingClientRect().bottom ?? pane?.getBoundingClientRect().top ?? 0
+      const top = pane?.querySelector('thead,.cl-comparison-reader-head')?.getBoundingClientRect().bottom ?? pane?.getBoundingClientRect().top ?? 0
       const visible = [...pane?.querySelectorAll<HTMLElement>('[data-source-line]:not([data-source-continuation])') ?? []]
         .find((element) => { const rect = element.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top })
       const side = visible?.dataset.side === 'before' ? 'before' : 'after'
       const line = visible ? Number(visible.dataset.sourceLine) : focus?.line ?? sourceLine
-      const range = data ? englishSourceRange(englishLines(data[side]), line) : { line, endLine: line }
+      const range = data ? englishSourceRange(englishLines({ ...data[side], story: data[side].outline ?? data[side].story }), line) : { line, endLine: line }
       setSelection({ side, ...range })
       updateFocus(range.line, nextMode)
     }
@@ -119,16 +122,10 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     setCursor(next)
     updateFocus(rows.find((row) => row.change === changes[next] && row.afterLine != null)?.afterLine, mode, next)
   }
-  const graphOpen = !!focus?.flow || focus?.mode === 'visual'
+  const graphOpen = !!focus?.flow && !focus.flow.combined
   const inspect = ({ side, flow }: ReviewInspection) => onFocus?.({
     ...focus, file, side, cursor: index, comparisonMode: mode, mode: flow.mode, flow,
   })
-  const openGraph = () => {
-    const side = testSide
-    const target = selectedTest ?? data?.[side].tests.find(test => test.line <= sourceLine && test.endLine >= sourceLine)
-    if (target) inspect({ side, flow: { card: reviewCaseKey(target), mode: 'visual' } })
-    else onFocus?.({ ...focus, file, mode: 'visual', comparisonMode: mode, cursor: index })
-  }
   const leaveGraph = () => onFocus?.({ ...focus, file, mode, comparisonMode: undefined, side: undefined, flow: undefined, cursor: index })
   const header = <>
     {selectedTest && <><span className="text-xs text-secondary">{focus?.change === 'removed' ? 'Removed test' : focus?.change === 'added' ? 'Added test' : 'Changed test'}</span>
@@ -137,7 +134,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
   </>
   const ready = !loading && !error && data !== null
   return <>
-    {!ready && <div className="cl-context-toolbar"><TestLanguageSwitch mode={mode} onChange={changeMode} />{header}</div>}
+    {!ready && <div className="cl-context-toolbar"><TestLanguageSwitch reader="compact" mode={mode === 'code' ? 'code' : 'visual'} onVisual={() => changeMode('english')} onChange={changeMode} />{header}</div>}
     {navigationTarget && createPortal(
       <div className="cl-review-change-nav" role="group" aria-label="Edit blocks in this file" title="Each block is a consecutive group of edited lines in this file. A block may contain imports, setup, or several tests. This is not the suite's changed-test count.">
         <button className="cl-icon-button" aria-label="Previous change" disabled={index === 0 || loading || !!error} onClick={() => navigate(index - 1)}>←</button>
@@ -146,12 +143,11 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
       </div>, navigationTarget)}
     {error ? <div role="alert" className="flex-1 p-4 text-sm">{error}<button className="cl-button ml-3 px-3 py-1" onClick={() => setRetry(retry + 1)}>Retry</button></div>
       : !ready ? <div role="status" className="flex-1 p-4 text-sm text-secondary">Loading complete test source…</div>
-      : graphOpen && !data.supportingFile ? <ReviewFlows sources={data} labels={alignedSideLabels(data)}
-        selectedCase={selectedTest && { side: testSide, card: reviewCaseKey(selectedTest) }}
-        inspection={focus?.flow && { side: focus.side ?? testSide, flow: focus.flow }}
-        onInspect={inspect} onReturn={leaveGraph} toolbar={header} />
-      : <TestPresentation view="aligned" onVisual={!data.supportingFile && onFocus && (data.before.tests.length || data.after.tests.length)
-        ? openGraph : undefined} review={data} rows={rows} mode={mode} onModeChange={changeMode} header={header} change={change} scrollRef={scroll}
+      : graphOpen && !focus?.flow?.expanded ? null
+      : <TestPresentation view="aligned" inspection={focus?.flow?.combined ? {side:focus.side ?? testSide,flow:focus.flow} : undefined} onInspect={onFocus && inspect}
+        scopedCase={sourceTest && { [testSide]: reviewCaseKey(sourceTest),
+          ...data.declarationPairs?.find(pair => pair[testSide] === reviewCaseKey(sourceTest)) }} review={data} rows={rows} mode={mode} onModeChange={changeMode} header={header} change={change} scrollRef={scroll}
+        anchor={sourceTest || focus?.line ? { side: testSide, line: sourceTest?.line ?? focus!.line! } : undefined}
         emptySide={selectedTest && focus?.change === 'removed' ? 'after' : selectedTest && focus?.change === 'added' ? 'before' : undefined}
         returnSelection={englishReturn?.selection} onReturnToEnglish={() => changeMode('english')}
         selection={selection} onSelectSource={(next) => {
@@ -161,6 +157,9 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
           setCursor(index); setSelection(next); setMode('code'); updateFocus(next.line, 'code')
         }}
         notice={selectedTest && !sourceTest && <p role="status" className="px-3 py-2 text-xs text-warning">This test is in the {testSide === 'before' ? 'recorded' : 'current'} test list, but its matching declaration is unavailable in this source snapshot. Showing file context; no test is highlighted.</p>} />}
+    {ready && data && focus?.flow && !focus.flow.combined && <ReviewFlows sources={data} labels={alignedSideLabels(data)}
+      inspection={{ side: focus.side ?? testSide, flow: focus.flow }} onInspect={inspect} onReturn={leaveGraph}
+      selectedCase={selectedTest && { side: testSide, card: reviewCaseKey(selectedTest) }} toolbar={header} />}
     <div className="cl-context-assessment" aria-live="polite">
       {!loading && !error && data && <>
       {data.assessment.reasons?.map((reason) => <p key={reason} className="text-warning">{testAssessmentReason(reason)}</p>)}
